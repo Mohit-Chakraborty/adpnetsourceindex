@@ -1,0 +1,247 @@
+﻿<!DOCTYPE html>
+<html><head><title>ServiceBusSessionProcessor.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(238);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Messaging.ServiceBus/Processor/ServiceBusSessionProcessor.cs" target="_top">Processor\ServiceBusSessionProcessor.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Messaging.ServiceBus" target="_top">src\Azure.Messaging.ServiceBus.csproj</a> (Azure.Messaging.ServiceBus)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">ComponentModel</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>.<span class="i">CodeAnalysis</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Linq</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i">Amqp</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>.<span class="i n">Plugins</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">Azure</span>.<span class="i">Amqp</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">Azure</span>.<span class="i">Amqp</span>.<span class="i">Framing</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#d8f6e4038c04b7be" class="t t">ServiceBusSessionProcessor</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> provides an abstraction around a set of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Receiver/ServiceBusSessionReceiver.cs.html#bb715430551ca316" class="t t">ServiceBusSessionReceiver</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that</span>
+    <span class="c">///</span><span class="c"> allows using an event based model for processing received </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Primitives/ServiceBusReceivedMessage.cs.html#347e87fb652ef164" class="t t">ServiceBusReceivedMessage</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span>
+    <span class="c">///</span><span class="c"> It is constructed by calling </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Client/ServiceBusClient.cs.html#ad46ff0588c85077" class="t t">ServiceBusClient</a>.<a href="../Client/ServiceBusClient.cs.html#2465c6152360352c" class="i method">CreateSessionProcessor</a>(<b>string</b>, <a href="ServiceBusSessionProcessorOptions.cs.html#640f054fc49d4731" class="t t">ServiceBusSessionProcessorOptions</a>)<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+    <span class="c">///</span><span class="c"> The message handler is specified with the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#9285e08cfa51998b" class="i">ProcessMessageAsync</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+    <span class="c">///</span><span class="c"> property. The error handler is specified with the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#4a64542f38cf71d5" class="i">ProcessErrorAsync</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> property.</span>
+    <span class="c">///</span><span class="c"> To start processing after the handlers have been specified, call </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#1efea7a93ef99be3" class="i method">StartProcessingAsync</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>public class</b> <a id="d8f6e4038c04b7be" href="../R/d8f6e4038c04b7be.html" target="n" data-glyph="0,0" class="t t">ServiceBusSessionProcessor</a> : <span class="i">IAsyncDisposable</span>
+    {
+        <b>private readonly</b> <a href="ServiceBusProcessor.cs.html#53f32235bf319489" class="t t">ServiceBusProcessor</a> <a id="97d0d176b5f34d9a" href="../R/97d0d176b5f34d9a.html" target="n" data-glyph="46,1" class="i field">_innerProcessor</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusProcessor.cs.html#53f32235bf319489" class="t t">ServiceBusProcessor</a>.<a href="ServiceBusProcessor.cs.html#995621e1398d3f75" class="i property">EntityPath</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <b>public string</b> <a id="b8a68f2e1a764511" href="../R/b8a68f2e1a764511.html" target="n" data-glyph="102,1" class="i property">EntityPath</a> =&gt; <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#995621e1398d3f75" class="i property">EntityPath</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the ID to identify this processor. This can be used to correlate logs and exceptions.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">Every new processor has a unique ID.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>internal string</b> <a id="1c58f4b4ec130f92" href="../R/../../0000000000.html" target="n" data-glyph="104,1" class="i property">Identifier</a> =&gt; <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#d6c26a7bd351c628" class="i property">Identifier</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusProcessor.cs.html#53f32235bf319489" class="t t">ServiceBusProcessor</a>.<a href="ServiceBusProcessor.cs.html#ca838df7a94de6ad" class="i property">ReceiveMode</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <b>public</b> <a href="../Receiver/ServiceBusReceiveMode.cs.html#baa558d5ec869168" class="t t">ServiceBusReceiveMode</a> <a id="05c5217d4e99bfce" href="../R/05c5217d4e99bfce.html" target="n" data-glyph="102,1" class="i property">ReceiveMode</a> =&gt; <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#ca838df7a94de6ad" class="i property">ReceiveMode</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusProcessor.cs.html#53f32235bf319489" class="t t">ServiceBusProcessor</a>.<a href="ServiceBusProcessor.cs.html#b1a249b1cd43711d" class="i property">PrefetchCount</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <b>public int</b> <a id="96ce60c4194db680" href="../R/96ce60c4194db680.html" target="n" data-glyph="102,1" class="i property">PrefetchCount</a> =&gt; <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#b1a249b1cd43711d" class="i property">PrefetchCount</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusProcessor.cs.html#53f32235bf319489" class="t t">ServiceBusProcessor</a>.<a href="ServiceBusProcessor.cs.html#5e3e1b9e0add30b7" class="i property">IsProcessing</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <b>public bool</b> <a id="8b91c3cf794a098d" href="../R/8b91c3cf794a098d.html" target="n" data-glyph="102,1" class="i property">IsProcessing</a> =&gt; <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#5e3e1b9e0add30b7" class="i property">IsProcessing</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusProcessor.cs.html#53f32235bf319489" class="t t">ServiceBusProcessor</a>.<a href="ServiceBusProcessor.cs.html#5ecb5b213cfdc1d1" class="i property">AutoCompleteMessages</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <b>public bool</b> <a id="ccab4e51db29fda5" href="../R/ccab4e51db29fda5.html" target="n" data-glyph="102,1" class="i property">AutoCompleteMessages</a> =&gt; <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#5ecb5b213cfdc1d1" class="i property">AutoCompleteMessages</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Indicates whether or not this </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#d8f6e4038c04b7be" class="t t">ServiceBusSessionProcessor</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> has been closed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the processor is closed; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        <b>public bool</b> <a id="4e754a5ca40ca64e" href="../R/4e754a5ca40ca64e.html" target="n" data-glyph="102,1" class="i property">IsClosed</a> =&gt; <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#47e32fcb3f58701e" class="i property">IsClosed</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the maximum duration within which the session lock will be</span>
+        <span class="c">///</span><span class="c"> renewed automatically.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span><span class="c">The maximum duration during which session locks are automatically renewed.</span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">The session lock renewal can continue for sometime in the background</span>
+        <span class="c">///</span><span class="c"> after completion of message and result in a few false SessionLockLost exceptions temporarily.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public</b> <span class="i">TimeSpan</span> <a id="9fc59219c03778a4" href="../R/9fc59219c03778a4.html" target="n" data-glyph="102,1" class="i property">MaxAutoLockRenewalDuration</a> =&gt; <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#4f58c57c763e93b2" class="i property">MaxAutoLockRenewalDuration</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">Gets the maximum number of sessions that will be processed concurrently by the processor.</span>
+        <span class="c">///</span><span class="c"> The default value is 8.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public int</b> <a id="1ec005bdd101452b" href="../R/1ec005bdd101452b.html" target="n" data-glyph="102,1" class="i property">MaxConcurrentSessions</a> =&gt; <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#7407672d4f4e1005" class="i property">MaxConcurrentSessions</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the maximum number of calls to the callback the processor will initiate per session.</span>
+        <span class="c">///</span><span class="c"> Thus the total number of callbacks will be equal to MaxConcurrentSessions * MaxConcurrentCallsPerSession.</span>
+        <span class="c">///</span><span class="c"> The default value is 1.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public int</b> <a id="07c578cdf9745a81" href="../R/07c578cdf9745a81.html" target="n" data-glyph="102,1" class="i property">MaxConcurrentCallsPerSession</a> =&gt; <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#7e60a030877f1f38" class="i property">MaxConcurrentCallsPerSession</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusProcessor.cs.html#53f32235bf319489" class="t t">ServiceBusProcessor</a>.<a href="ServiceBusProcessor.cs.html#2b69541cea22b677" class="i property">FullyQualifiedNamespace</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <b>public string</b> <a id="db1442196035935e" href="../R/db1442196035935e.html" target="n" data-glyph="102,1" class="i property">FullyQualifiedNamespace</a> =&gt; <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#2b69541cea22b677" class="i property">FullyQualifiedNamespace</a>;
+ 
+        <b>internal</b> <a id="7539cbfea2d9ae59" href="../R/../../0000000000.html" target="n" data-glyph="74,1" class="t constructor">ServiceBusSessionProcessor</a>(
+            <a href="../Primitives/ServiceBusConnection.cs.html#5fc67fb7b5056bea" class="t t">ServiceBusConnection</a> <span id="r0 rd" class="r0 r">connection</span>,
+            <b>string</b> <span id="r1 rd" class="r1 r">entityPath</span>,
+            <span class="i">IList</span>&lt;<a href="../Plugins/ServiceBusPlugin.cs.html#5ee21a6788ad51aa" class="t t">ServiceBusPlugin</a>&gt; <span id="r2 rd" class="r2 r">plugins</span>,
+            <a href="ServiceBusSessionProcessorOptions.cs.html#640f054fc49d4731" class="t t">ServiceBusSessionProcessorOptions</a> <span id="r3 rd" class="r3 r">options</span>)
+        {
+            <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a> = <b>new</b> <span class="t">ServiceBusProcessor</span>(
+                <span class="r0 r">connection</span>,
+                <span class="r1 r">entityPath</span>,
+                <b>true</b>,
+                <span class="r2 r">plugins</span>,
+                <span class="r3 r">options</span>.<a href="ServiceBusSessionProcessorOptions.cs.html#49c683b56bb9ec37" class="i method">ToProcessorOptions</a>(),
+                <span class="r3 r">options</span>.<a href="ServiceBusSessionProcessorOptions.cs.html#fc1e1040af61c59f" class="i property">SessionIds</a>.<span class="i">ToArray</span>(),
+                <span class="r3 r">options</span>.<a href="ServiceBusSessionProcessorOptions.cs.html#a903e942a99df55c" class="i property">MaxConcurrentSessions</a>,
+                <span class="r3 r">options</span>.<a href="ServiceBusSessionProcessorOptions.cs.html#b51750822017e565" class="i property">MaxConcurrentCallsPerSession</a>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#d8f6e4038c04b7be" class="t t">ServiceBusSessionProcessor</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class for mocking.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>protected</b> <a id="081cbc4334a109b5" href="../R/../../0000000000.html" target="n" data-glyph="75,1" class="t constructor">ServiceBusSessionProcessor</a>()
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The handler responsible for processing messages received from the Queue or Subscription. Implementation is mandatory.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        [<span class="i">SuppressMessage</span>(<span class="s">&quot;Usage&quot;</span>, <span class="s">&quot;AZC0002:Ensure all service methods take an optional CancellationToken parameter.&quot;</span>, <span class="i">Justification</span> = <span class="s">&quot;Guidance does not apply; this is an event.&quot;</span>)]
+        [<span class="i">SuppressMessage</span>(<span class="s">&quot;Usage&quot;</span>, <span class="s">&quot;AZC0003:DO make service methods virtual.&quot;</span>, <span class="i">Justification</span> = <span class="s">&quot;This member follows the standard .NET event pattern; override via the associated On&lt;&lt;EVENT&gt;&gt; method.&quot;</span>)]
+        <b>public event</b> <span class="i">Func</span>&lt;<a href="ProcessSessionMessageEventArgs.cs.html#7ed608712705605f" class="t t">ProcessSessionMessageEventArgs</a>, <span class="i">Task</span>&gt; <a id="9285e08cfa51998b" href="../R/9285e08cfa51998b.html" target="n" data-glyph="30,1" class="i">ProcessMessageAsync</a>
+        {
+            <b>add</b>
+            {
+                <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#304af37e3a267515" class="i">ProcessSessionMessageAsync</a> += <b>value</b>;
+            }
+ 
+            <b>remove</b>
+            {
+                <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#304af37e3a267515" class="i">ProcessSessionMessageAsync</a> -= <b>value</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The handler responsible for processing unhandled exceptions thrown while this processor is running.</span>
+        <span class="c">///</span><span class="c"> Implementation is mandatory.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        [<span class="i">SuppressMessage</span>(<span class="s">&quot;Usage&quot;</span>, <span class="s">&quot;AZC0002:Ensure all service methods take an optional CancellationToken parameter.&quot;</span>, <span class="i">Justification</span> = <span class="s">&quot;Guidance does not apply; this is an event.&quot;</span>)]
+        [<span class="i">SuppressMessage</span>(<span class="s">&quot;Usage&quot;</span>, <span class="s">&quot;AZC0003:DO make service methods virtual.&quot;</span>, <span class="i">Justification</span> = <span class="s">&quot;This member follows the standard .NET event pattern; override via the associated On&lt;&lt;EVENT&gt;&gt; method.&quot;</span>)]
+        <b>public event</b> <span class="i">Func</span>&lt;<a href="ProcessErrorEventArgs.cs.html#6d0ae56c469cb1ba" class="t t">ProcessErrorEventArgs</a>, <span class="i">Task</span>&gt; <a id="4a64542f38cf71d5" href="../R/4a64542f38cf71d5.html" target="n" data-glyph="30,1" class="i">ProcessErrorAsync</a>
+        {
+            <b>add</b>
+            {
+                <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#3c7d5830cb3c7e5a" class="i">ProcessErrorAsync</a> += <b>value</b>;
+            }
+ 
+            <b>remove</b>
+            {
+                <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#3c7d5830cb3c7e5a" class="i">ProcessErrorAsync</a> -= <b>value</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Optional handler that can be set to be notified when a new session is about to be processed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        [<span class="i">SuppressMessage</span>(<span class="s">&quot;Usage&quot;</span>, <span class="s">&quot;AZC0002:Ensure all service methods take an optional CancellationToken parameter.&quot;</span>, <span class="i">Justification</span> = <span class="s">&quot;Guidance does not apply; this is an event.&quot;</span>)]
+        [<span class="i">SuppressMessage</span>(<span class="s">&quot;Usage&quot;</span>, <span class="s">&quot;AZC0003:DO make service methods virtual.&quot;</span>, <span class="i">Justification</span> = <span class="s">&quot;This member follows the standard .NET event pattern; override via the associated On&lt;&lt;EVENT&gt;&gt; method.&quot;</span>)]
+        <b>public event</b> <span class="i">Func</span>&lt;<a href="ProcessSessionEventArgs.cs.html#833b7a9c2dde6645" class="t t">ProcessSessionEventArgs</a>, <span class="i">Task</span>&gt; <a id="c08ddc6e3104f4ec" href="../R/c08ddc6e3104f4ec.html" target="n" data-glyph="30,1" class="i">SessionInitializingAsync</a>
+        {
+            <b>add</b>
+            {
+                <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#9627bec6c0d95a48" class="i">SessionInitializingAsync</a> += <b>value</b>;
+            }
+ 
+            <b>remove</b>
+            {
+                <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#9627bec6c0d95a48" class="i">SessionInitializingAsync</a> -= <b>value</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Optional handler that can be set to be notified when a session is about to be closed for processing.</span>
+        <span class="c">///</span><span class="c"> This means that the most recent </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Receiver/ServiceBusReceiver.cs.html#2224f17dabcb26c3" class="t t">ServiceBusReceiver</a>.<a href="../Receiver/ServiceBusReceiver.cs.html#19d33b51af2ff547" class="i method">ReceiveMessageAsync</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> call timed out,</span>
+        <span class="c">///</span><span class="c"> so there are currently no messages available to be received for the session.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        [<span class="i">SuppressMessage</span>(<span class="s">&quot;Usage&quot;</span>, <span class="s">&quot;AZC0002:Ensure all service methods take an optional CancellationToken parameter.&quot;</span>, <span class="i">Justification</span> = <span class="s">&quot;Guidance does not apply; this is an event.&quot;</span>)]
+        [<span class="i">SuppressMessage</span>(<span class="s">&quot;Usage&quot;</span>, <span class="s">&quot;AZC0003:DO make service methods virtual.&quot;</span>, <span class="i">Justification</span> = <span class="s">&quot;This member follows the standard .NET event pattern; override via the associated On&lt;&lt;EVENT&gt;&gt; method.&quot;</span>)]
+        <b>public event</b> <span class="i">Func</span>&lt;<a href="ProcessSessionEventArgs.cs.html#833b7a9c2dde6645" class="t t">ProcessSessionEventArgs</a>, <span class="i">Task</span>&gt; <a id="fcb766478402eaf2" href="../R/fcb766478402eaf2.html" target="n" data-glyph="30,1" class="i">SessionClosingAsync</a>
+        {
+            <b>add</b>
+            {
+                <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#99f9fbf9dbf2e712" class="i">SessionClosingAsync</a> += <b>value</b>;
+            }
+ 
+            <b>remove</b>
+            {
+                <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#99f9fbf9dbf2e712" class="i">SessionClosingAsync</a> -= <b>value</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusProcessor.cs.html#53f32235bf319489" class="t t">ServiceBusProcessor</a>.<a href="ServiceBusProcessor.cs.html#20feb1e36486f404" class="i method">StartProcessingAsync</a>(<span class="i">CancellationToken</span>)<span class="c">&quot;</span><span class="c">/&gt;</span>
+        <b>public virtual async</b> <span class="i">Task</span> <a id="1efea7a93ef99be3" href="../R/1efea7a93ef99be3.html" target="n" data-glyph="72,1" class="i method">StartProcessingAsync</a>(<span class="i">CancellationToken</span> <span id="r4 rd" class="r4 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <b>await</b> <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#20feb1e36486f404" class="i method">StartProcessingAsync</a>(<span class="r4 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusProcessor.cs.html#53f32235bf319489" class="t t">ServiceBusProcessor</a>.<a href="ServiceBusProcessor.cs.html#c5a128ec58d61561" class="i method">StopProcessingAsync</a>(<span class="i">CancellationToken</span>)<span class="c">&quot;</span><span class="c">/&gt;</span>
+        <b>public virtual async</b> <span class="i">Task</span> <a id="817174668e2f8f68" href="../R/817174668e2f8f68.html" target="n" data-glyph="72,1" class="i method">StopProcessingAsync</a>(<span class="i">CancellationToken</span> <span id="r5 rd" class="r5 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <b>await</b> <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#c5a128ec58d61561" class="i method">StopProcessingAsync</a>(<span class="r5 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Determines whether the specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">System</span>.<span class="i">Object</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> is equal to this instance.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">obj</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">System</span>.<span class="i">Object</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> to compare with this instance.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">System</span>.<span class="i">Object</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> is equal to this instance; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        [<span class="i">EditorBrowsable</span>(<span class="i">EditorBrowsableState</span>.<span class="i">Never</span>)]
+        <b>public override bool</b> <a id="74579c7072094339" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Equals</a>(<b>object</b> <span id="r6 rd" class="r6 r">obj</span>) =&gt; <b>base</b>.<span class="i">Equals</span>(<span class="r6 r">obj</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Returns a hash code for this instance.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A hash code for this instance, suitable for use in hashing algorithms and data structures like a hash table.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="i">EditorBrowsable</span>(<span class="i">EditorBrowsableState</span>.<span class="i">Never</span>)]
+        <b>public override int</b> <a id="a6144af6977eb9cc" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetHashCode</a>() =&gt; <b>base</b>.<span class="i">GetHashCode</span>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Converts the instance to string representation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">System</span>.<span class="i">String</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> that represents this instance.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="i">EditorBrowsable</span>(<span class="i">EditorBrowsableState</span>.<span class="i">Never</span>)]
+        <b>public override string</b> <a id="d124fd42cc317c17" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ToString</a>() =&gt; <b>base</b>.<span class="i">ToString</span>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Performs the task needed to clean up resources used by the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#d8f6e4038c04b7be" class="t t">ServiceBusSessionProcessor</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c"> An optional</span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the</span>
+        <span class="c">///</span><span class="c"> request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public virtual async</b> <span class="i">Task</span> <a id="bec3fae848d148d6" href="../R/bec3fae848d148d6.html" target="n" data-glyph="72,1" class="i method">CloseAsync</a>(
+            <span class="i">CancellationToken</span> <span id="r7 rd" class="r7 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <b>await</b> <a href="#97d0d176b5f34d9a" class="i field">_innerProcessor</a>.<a href="ServiceBusProcessor.cs.html#ffdfdf657d1e5c3d" class="i method">CloseAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Performs the task needed to clean up resources used by the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#d8f6e4038c04b7be" class="t t">ServiceBusSessionProcessor</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c">   This is equivalent to calling </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#bec3fae848d148d6" class="i method">CloseAsync</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> with the default </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Primitives/LinkCloseMode.cs.html#f8c9ace71ea8e421" class="t t">LinkCloseMode</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public async</b> <span class="i">ValueTask</span> <a id="e654a4bd619464b5" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">DisposeAsync</a>() =&gt;
+            <b>await</b> <a href="#bec3fae848d148d6" class="i method">CloseAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+    }
+}
+</pre></td></tr></table></div></body></html>

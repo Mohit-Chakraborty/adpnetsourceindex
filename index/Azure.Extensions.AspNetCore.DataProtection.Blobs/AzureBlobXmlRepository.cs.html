@@ -1,0 +1,277 @@
+﻿<!DOCTYPE html>
+<html><head><title>AzureBlobXmlRepository.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(268);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Extensions.AspNetCore.DataProtection.Blobs/AzureBlobXmlRepository.cs" target="_top">AzureBlobXmlRepository.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Extensions.AspNetCore.DataProtection.Blobs" target="_top">Azure.Extensions.AspNetCore.DataProtection.Blobs\src\Azure.Extensions.AspNetCore.DataProtection.Blobs.csproj</a> (Azure.Extensions.AspNetCore.DataProtection.Blobs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">ObjectModel</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">IO</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Linq</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Runtime</span>.<span class="i">ExceptionServices</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Xml</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Xml</span>.<span class="i">Linq</span>;
+<b>using</b> <span class="i n">Azure</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i">Storage</span>.<span class="i">Blobs</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i">Storage</span>.<span class="i">Blobs</span>.<span class="i">Models</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">AspNetCore</span>.<span class="i n">DataProtection</span>.<span class="i">Repositories</span>;
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">AZC0001</span> <span class="c">//</span>
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Extensions</span>.<span class="i n">AspNetCore</span>.<span class="i n">DataProtection</span>.<span class="i n">Blobs</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> An </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">IXmlRepository</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> which is backed by Azure Blob Storage.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Instances of this type are thread-safe.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+    <b>internal sealed class</b> <a id="8d5749da738c5f0d" href="R/8d5749da738c5f0d.html" target="n" data-glyph="2,0" class="t t">AzureBlobXmlRepository</a> : <span class="i">IXmlRepository</span>
+    {
+        <b>private const int</b> <a id="d1aadd34e17b8545" href="R/d1aadd34e17b8545.html" target="n" data-glyph="10,1" class="i field">ConflictMaxRetries</a> = 5;
+        <b>private static readonly</b> <span class="i">TimeSpan</span> <a id="0e811d5ef0f655fa" href="R/0e811d5ef0f655fa.html" target="n" data-glyph="46,1" class="i field">ConflictBackoffPeriod</a> = <span class="i">TimeSpan</span>.<span class="i">FromMilliseconds</span>(200);
+        <b>private static readonly</b> <span class="i">XName</span> <a id="f6a8edf67afb731a" href="R/f6a8edf67afb731a.html" target="n" data-glyph="46,1" class="i field">RepositoryElementName</a> = <span class="s">&quot;repository&quot;</span>;
+        <b>private static</b> <span class="i">BlobHttpHeaders</span> <a id="19a0b6e60e241326" href="R/19a0b6e60e241326.html" target="n" data-glyph="46,1" class="i field">_blobHttpHeaders</a> = <b>new</b> <span class="i">BlobHttpHeaders</span>() { <span class="i">ContentType</span> = <span class="s">&quot;application/xml; charset=utf-8&quot;</span> };
+ 
+        <b>private readonly</b> <span class="i">Random</span> <a id="0266536155724a9c" href="R/0266536155724a9c.html" target="n" data-glyph="46,1" class="i field">_random</a>;
+        <b>private</b> <a href="#df31ebe42094092f" class="t t">BlobData</a> <a id="23801a23e4c7b837" href="R/23801a23e4c7b837.html" target="n" data-glyph="46,1" class="i field">_cachedBlobData</a>;
+        <b>private readonly</b> <span class="i">BlobClient</span> <a id="880512ec2456ecae" href="R/880512ec2456ecae.html" target="n" data-glyph="46,1" class="i field">_blobClient</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#8d5749da738c5f0d" class="t t">AzureBlobXmlRepository</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">blobClient</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">BlobClient</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that is connected to the blob we are reading from and writing to.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="1bdd79485946e6b5" href="R/1bdd79485946e6b5.html" target="n" data-glyph="72,1" class="t constructor">AzureBlobXmlRepository</a>(<span class="i">BlobClient</span> <span id="r0 rd" class="r0 r">blobClient</span>)
+        {
+            <a href="#0266536155724a9c" class="i field">_random</a> = <b>new</b> <span class="i">Random</span>();
+            <a href="#880512ec2456ecae" class="i field">_blobClient</a> = <span class="r0 r">blobClient</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span> <span class="c">/&gt;</span>
+        <b>public</b> <span class="i">IReadOnlyCollection</span>&lt;<span class="i">XElement</span>&gt; <a id="36a62bd0087030b9" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetAllElements</a>()
+        {
+            <span class="c">// Shunt the work onto a ThreadPool thread so that it&#39;s independent of any</span>
+            <span class="c">// existing sync context or other potentially deadlock-causing items.</span>
+ 
+            <b>var</b> <span id="r1 rd" class="r1 r">elements</span> = <span class="i">Task</span>.<span class="i">Run</span>(() =&gt; <a href="#7a90933ffa844abe" class="i method">GetAllElementsAsync</a>()).<span class="i">GetAwaiter</span>().<span class="i">GetResult</span>();
+            <b>return</b> <b>new</b> <span class="i">ReadOnlyCollection</span>&lt;<span class="i">XElement</span>&gt;(<span class="r1 r">elements</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span> <span class="c">/&gt;</span>
+        <b>public void</b> <a id="7038c69b8afee857" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">StoreElement</a>(<span class="i">XElement</span> <span id="r2 rd" class="r2 r">element</span>, <b>string</b> <span id="r3 rd" class="r3 r">friendlyName</span>)
+        {
+            <b>if</b> (<span class="r2 r">element</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r2 r">element</span>));
+            }
+ 
+            <span class="c">// Shunt the work onto a ThreadPool thread so that it&#39;s independent of any</span>
+            <span class="c">// existing sync context or other potentially deadlock-causing items.</span>
+ 
+            <span class="i">Task</span>.<span class="i">Run</span>(() =&gt; <a href="#ae97222b6243615e" class="i method">StoreElementAsync</a>(<span class="r2 r">element</span>)).<span class="i">GetAwaiter</span>().<span class="i">GetResult</span>();
+        }
+ 
+        <b>private static</b> <span class="i">XDocument</span> <a id="8314443ee4534dee" href="R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">CreateDocumentFromBlob</a>(<b>byte</b>[] <span id="r4 rd" class="r4 r">blob</span>)
+        {
+            <b>using</b> (<b>var</b> <span id="r5 rd" class="r5 r">memoryStream</span> = <b>new</b> <span class="i">MemoryStream</span>(<span class="r4 r">blob</span>))
+            {
+                <b>var</b> <span id="r6 rd" class="r6 r">xmlReaderSettings</span> = <b>new</b> <span class="i">XmlReaderSettings</span>()
+                {
+                    <span class="i">DtdProcessing</span> = <span class="i">DtdProcessing</span>.<span class="i">Prohibit</span>, <span class="i">IgnoreProcessingInstructions</span> = <b>true</b>
+                };
+ 
+                <b>using</b> (<b>var</b> <span id="r7 rd" class="r7 r">xmlReader</span> = <span class="i">XmlReader</span>.<span class="i">Create</span>(<span class="r5 r">memoryStream</span>, <span class="r6 r">xmlReaderSettings</span>))
+                {
+                    <b>return</b> <span class="i">XDocument</span>.<span class="i">Load</span>(<span class="r7 r">xmlReader</span>);
+                }
+            }
+        }
+ 
+        <b>private async</b> <span class="i">Task</span>&lt;<span class="i">IList</span>&lt;<span class="i">XElement</span>&gt;&gt; <a id="7a90933ffa844abe" href="R/7a90933ffa844abe.html" target="n" data-glyph="76,1" class="i method">GetAllElementsAsync</a>()
+        {
+            <b>var</b> <span id="r8 rd" class="r8 r">data</span> = <b>await</b> <a href="#1d4135ec034f5dce" class="i method">GetLatestDataAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+            <b>if</b> (<span class="r8 r">data</span> == <b>null</b> || <span class="r8 r">data</span>.<span class="i">BlobContents</span>.<span class="i">Length</span> == 0)
+            {
+                <span class="c">// no data in blob storage</span>
+                <b>return</b> <span class="i">Array</span>.<span class="i">Empty</span>&lt;<span class="i">XElement</span>&gt;();
+            }
+ 
+            <span class="c">// The document will look like this:</span>
+            <span class="c">//</span>
+            <span class="c">// &lt;root&gt;</span>
+            <span class="c">//   &lt;child /&gt;</span>
+            <span class="c">//   &lt;child /&gt;</span>
+            <span class="c">//   ...</span>
+            <span class="c">// &lt;/root&gt;</span>
+            <span class="c">//</span>
+            <span class="c">// We want to return the first-level child elements to our caller.</span>
+ 
+            <b>var</b> <span id="r9 rd" class="r9 r">doc</span> = <span class="i">CreateDocumentFromBlob</span>(<span class="r8 r">data</span>.<span class="i">BlobContents</span>);
+            <b>return</b> <span class="r9 r">doc</span>.<span class="i">Root</span>.<span class="i">Elements</span>().<span class="i">ToList</span>();
+        }
+ 
+        <b>private async</b> <span class="i">Task</span>&lt;<a href="#df31ebe42094092f" class="t t">BlobData</a>&gt; <a id="1d4135ec034f5dce" href="R/1d4135ec034f5dce.html" target="n" data-glyph="76,1" class="i method">GetLatestDataAsync</a>()
+        {
+            <span class="c">// Set the appropriate AccessCondition based on what we believe the latest</span>
+            <span class="c">// file contents to be, then make the request.</span>
+ 
+            <b>var</b> <span id="r10 rd" class="r10 r">latestCachedData</span> = <span class="i">Volatile</span>.<span class="i">Read</span>(<b>ref</b> <a href="#23801a23e4c7b837" class="i field">_cachedBlobData</a>); <span class="c">// local ref so field isn&#39;t mutated under our feet</span>
+            <b>var</b> <span id="r11 rd" class="r11 r">requestCondition</span> = (<span class="r10 r">latestCachedData</span> != <b>null</b>)
+                ? <b>new</b> <span class="i">BlobRequestConditions</span>() { <span class="i">IfNoneMatch</span> = <span class="r10 r">latestCachedData</span>.<span class="i">ETag</span> }
+                : <b>null</b>;
+ 
+            <b>try</b>
+            {
+                <b>using</b> (<b>var</b> <span id="r12 rd" class="r12 r">memoryStream</span> = <b>new</b> <span class="i">MemoryStream</span>())
+                {
+                    <b>var</b> <span id="r13 rd" class="r13 r">response</span> = <b>await</b> <a href="#880512ec2456ecae" class="i field">_blobClient</a>.<span class="i">DownloadToAsync</span>(
+                        <span class="i">destination</span>: <span class="r12 r">memoryStream</span>,
+                        <span class="i">conditions</span>: <span class="r11 r">requestCondition</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                    <b>if</b> (<span class="r13 r">response</span>.<span class="i">Status</span> == 304)
+                    {
+                        <span class="c">// 304 Not Modified</span>
+                        <span class="c">// Thrown when we already have the latest cached data.</span>
+                        <span class="c">// This isn&#39;t an error; we&#39;ll return our cached copy of the data.</span>
+                        <b>return</b> <span class="r10 r">latestCachedData</span>;
+                    }
+ 
+                    <span class="c">// At this point, our original cache either didn&#39;t exist or was outdated.</span>
+                    <span class="c">// We&#39;ll update it now and return the updated value</span>
+                    <span class="r10 r">latestCachedData</span> = <b>new</b> <span class="t">BlobData</span>()
+                    {
+                        <a href="#13e6ce152d8c9062" class="i field">BlobContents</a> = <span class="r12 r">memoryStream</span>.<span class="i">ToArray</span>(),
+                        <a href="#4d870bcbe9a9f9d0" class="i field">ETag</a> = <span class="r13 r">response</span>.<span class="i">Headers</span>.<span class="i">ETag</span>
+                    };
+                }
+                <span class="i">Volatile</span>.<span class="i">Write</span>(<b>ref</b> <a href="#23801a23e4c7b837" class="i field">_cachedBlobData</a>, <span class="r10 r">latestCachedData</span>);
+            }
+            <b>catch</b> (<span class="i">RequestFailedException</span> <span id="r14 rd" class="r14 r">ex</span>) <b>when</b> (<span class="r14 r">ex</span>.<span class="i">Status</span> == 404)
+            {
+                <span class="c">// 404 Not Found</span>
+                <span class="c">// Thrown when no file exists in storage.</span>
+                <span class="c">// This isn&#39;t an error; we&#39;ll delete our cached copy of data.</span>
+ 
+                <span class="r10 r">latestCachedData</span> = <b>null</b>;
+                <span class="i">Volatile</span>.<span class="i">Write</span>(<b>ref</b> <a href="#23801a23e4c7b837" class="i field">_cachedBlobData</a>, <span class="r10 r">latestCachedData</span>);
+            }
+ 
+            <b>return</b> <span class="r10 r">latestCachedData</span>;
+        }
+ 
+        <b>private int</b> <a id="ce40f322354ad101" href="R/ce40f322354ad101.html" target="n" data-glyph="76,1" class="i method">GetRandomizedBackoffPeriod</a>()
+        {
+            <span class="c">// returns a TimeSpan in the range [0.8, 1.0) * ConflictBackoffPeriod</span>
+            <span class="c">// not used for crypto purposes</span>
+            <b>var</b> <span id="r15 rd" class="r15 r">multiplier</span> = 0.8 + (<a href="#0266536155724a9c" class="i field">_random</a>.<span class="i">NextDouble</span>() * 0.2);
+            <b>return</b> (<b>int</b>) (<span class="r15 r">multiplier</span> * <a href="#0e811d5ef0f655fa" class="i field">ConflictBackoffPeriod</a>.<span class="i">Ticks</span>);
+        }
+ 
+        <b>private async</b> <span class="i">Task</span> <a id="ae97222b6243615e" href="R/ae97222b6243615e.html" target="n" data-glyph="76,1" class="i method">StoreElementAsync</a>(<span class="i">XElement</span> <span id="r16 rd" class="r16 r">element</span>)
+        {
+            <span class="c">// holds the last error in case we need to rethrow it</span>
+            <span class="i">ExceptionDispatchInfo</span> <span id="r17 rd" class="r17 r">lastError</span> = <b>null</b>;
+ 
+            <b>for</b> (<b>var</b> <span id="r18 rd" class="r18 r">i</span> = 0; <span class="r18 r">i</span> &lt; <a href="#d1aadd34e17b8545" class="i field">ConflictMaxRetries</a>; <span class="r18 r">i</span>++)
+            {
+                <b>if</b> (<span class="r18 r">i</span> &gt; 1)
+                {
+                    <span class="c">// If multiple conflicts occurred, wait a small period of time before retrying</span>
+                    <span class="c">// the operation so that other writers can make forward progress.</span>
+                    <b>await</b> <span class="i">Task</span>.<span class="i">Delay</span>(<a href="#ce40f322354ad101" class="i method">GetRandomizedBackoffPeriod</a>()).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+ 
+                <b>if</b> (<span class="r18 r">i</span> &gt; 0)
+                {
+                    <span class="c">// If at least one conflict occurred, make sure we have an up-to-date</span>
+                    <span class="c">// view of the blob contents.</span>
+                    <b>await</b> <a href="#1d4135ec034f5dce" class="i method">GetLatestDataAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+ 
+                <span class="c">// Merge the new element into the document. If no document exists,</span>
+                <span class="c">// create a new default document and inject this element into it.</span>
+ 
+                <b>var</b> <span id="r19 rd" class="r19 r">latestData</span> = <span class="i">Volatile</span>.<span class="i">Read</span>(<b>ref</b> <a href="#23801a23e4c7b837" class="i field">_cachedBlobData</a>);
+                <b>var</b> <span id="r20 rd" class="r20 r">doc</span> = (<span class="r19 r">latestData</span> != <b>null</b>)
+                    ? <span class="i">CreateDocumentFromBlob</span>(<span class="r19 r">latestData</span>.<span class="i">BlobContents</span>)
+                    : <b>new</b> <span class="i">XDocument</span>(<b>new</b> <span class="i">XElement</span>(<a href="#f6a8edf67afb731a" class="i field">RepositoryElementName</a>));
+                <span class="r20 r">doc</span>.<span class="i">Root</span>.<span class="i">Add</span>(<span class="r16 r">element</span>);
+ 
+                <span class="c">// Turn this document back into a byte[].</span>
+ 
+                <b>var</b> <span id="r21 rd" class="r21 r">serializedDoc</span> = <b>new</b> <span class="i">MemoryStream</span>();
+                <span class="r20 r">doc</span>.<span class="i">Save</span>(<span class="r21 r">serializedDoc</span>, <span class="i">SaveOptions</span>.<span class="i">DisableFormatting</span>);
+                <span class="r21 r">serializedDoc</span>.<span class="i">Position</span> = 0;
+ 
+                <span class="c">// Generate the appropriate precondition header based on whether or not</span>
+                <span class="c">// we believe data already exists in storage.</span>
+ 
+                <span class="i">BlobRequestConditions</span> <span id="r22 rd" class="r22 r">requestConditions</span>;
+                <b>if</b> (<span class="r19 r">latestData</span> != <b>null</b>)
+                {
+                    <span class="r22 r">requestConditions</span> = <b>new</b> <span class="i">BlobRequestConditions</span>() { <span class="i">IfMatch</span> = <span class="r19 r">latestData</span>.<span class="i">ETag</span> };
+                }
+                <b>else</b>
+                {
+                    <span class="r22 r">requestConditions</span> = <b>new</b> <span class="i">BlobRequestConditions</span>() { <span class="i">IfNoneMatch</span> = <span class="i">ETag</span>.<span class="i">All</span> };
+                }
+ 
+                <b>try</b>
+                {
+                    <span class="c">// Send the request up to the server.</span>
+                    <b>var</b> <span id="r23 rd" class="r23 r">response</span> = <b>await</b> <a href="#880512ec2456ecae" class="i field">_blobClient</a>.<span class="i">UploadAsync</span>(
+                        <span class="r21 r">serializedDoc</span>,
+                        <span class="i">httpHeaders</span>: <a href="#19a0b6e60e241326" class="i field">_blobHttpHeaders</a>,
+                        <span class="i">conditions</span>: <span class="r22 r">requestConditions</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                    <span class="c">// If we got this far, success!</span>
+                    <span class="c">// We can update the cached view of the remote contents.</span>
+ 
+                    <span class="i">Volatile</span>.<span class="i">Write</span>(<b>ref</b> <a href="#23801a23e4c7b837" class="i field">_cachedBlobData</a>, <b>new</b> <span class="t">BlobData</span>()
+                    {
+                        <a href="#13e6ce152d8c9062" class="i field">BlobContents</a> = <span class="r21 r">serializedDoc</span>.<span class="i">ToArray</span>(),
+                        <a href="#4d870bcbe9a9f9d0" class="i field">ETag</a> = <span class="r23 r">response</span>.<span class="i">Value</span>.<span class="i">ETag</span> <span class="c">// was updated by Upload routine</span>
+                    });
+ 
+                    <b>return</b>;
+                }
+                <b>catch</b> (<span class="i">RequestFailedException</span> <span id="r24 rd" class="r24 r">ex</span>)
+                    <b>when</b> (<span class="r24 r">ex</span>.<span class="i">Status</span> == 409 || <span class="r24 r">ex</span>.<span class="i">Status</span> == 412)
+                {
+                    <span class="c">// 409 Conflict</span>
+                    <span class="c">// This error is rare but can be thrown in very special circumstances,</span>
+                    <span class="c">// such as if the blob in the process of being created. We treat it</span>
+                    <span class="c">// as equivalent to 412 for the purposes of retry logic.</span>
+ 
+                    <span class="c">// 412 Precondition Failed</span>
+                    <span class="c">// We&#39;ll get this error if another writer updated the repository and we</span>
+                    <span class="c">// have an outdated view of its contents. If this occurs, we&#39;ll just</span>
+                    <span class="c">// refresh our view of the remote contents and try again up to the max</span>
+                    <span class="c">// retry limit.</span>
+ 
+                    <span class="r17 r">lastError</span> = <span class="i">ExceptionDispatchInfo</span>.<span class="i">Capture</span>(<span class="r24 r">ex</span>);
+                }
+            }
+ 
+            <span class="c">// if we got this far, something went awry</span>
+            <span class="r17 r">lastError</span>.<span class="i">Throw</span>();
+        }
+ 
+        <b>private sealed class</b> <a id="df31ebe42094092f" href="R/df31ebe42094092f.html" target="n" data-glyph="4,1" class="t t"><span id="164e7e45f675153c">BlobData</span></a>
+        {
+            <b>internal byte</b>[] <a id="13e6ce152d8c9062" href="R/13e6ce152d8c9062.html" target="n" data-glyph="44,2" class="i field">BlobContents</a>;
+            <b>internal</b> <span class="i">ETag</span>? <a id="4d870bcbe9a9f9d0" href="R/4d870bcbe9a9f9d0.html" target="n" data-glyph="44,2" class="i field">ETag</a>;
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

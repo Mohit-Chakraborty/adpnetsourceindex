@@ -1,0 +1,568 @@
+﻿<!DOCTYPE html>
+<html><head><title>Publisher.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(559);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Search.Documents/Batching/Publisher.cs" target="_top">Batching\Publisher.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Search.Documents" target="_top">Azure.Search.Documents\src\Azure.Search.Documents.csproj</a> (Azure.Search.Documents)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Channels</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>;
+<b>using</b> <span class="t">SharedTaskExtensions</span> = <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>.<a href="../Shared/TaskExtensions.cs.html#b697c2964116e255" class="t t">TaskExtensions</a>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Search</span>.<span class="i n">Documents</span>.<span class="i n">Batching</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Implement a Producer/Consumer pattern where we (potentially) have</span>
+    <span class="c">///</span><span class="c"> multiple document producers and a single consumer that submits those</span>
+    <span class="c">///</span><span class="c"> events to a service.  This class is mostly focused on synchronizing</span>
+    <span class="c">///</span><span class="c"> behavior between document producers and relies on abstract methods to</span>
+    <span class="c">///</span><span class="c"> implement service specific semantics.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r t">T</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The type of document being published.</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+    <b>internal abstract</b> <a href="../P/ee2aeb9bda7ffc00.html" target="s" class="k">partial</a> <b>class</b> <a id="ee2aeb9bda7ffc00" href="../R/ee2aeb9bda7ffc00.html" target="n" data-glyph="2,0" class="t t">Publisher</a>&lt;<span id="r0 rd t" class="r0 r t">T</span>&gt; : <a href="@1@netstandard/A.html#1f55292c3174123d" class="t t">IDisposable</a>, <span class="t t">IAsyncDisposable</span>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Flag indicating whether the publisher has been disposed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private volatile int</b> <a id="f46669939553799b" href="../R/f46669939553799b.html" target="n" data-glyph="46,1" class="i field">_disposed</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Channel used to communicate between the sender and publisher.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private</b> <span class="t t">Channel</span>&lt;<a href="Publisher.Message.cs.html#4ef0df2b5c43ac0a" class="t t">Message</a>&gt; <a id="0e78f48cbd4a14dc" href="../R/0e78f48cbd4a14dc.html" target="n" data-glyph="46,1" class="i field">_channel</a> = <span class="t t">Channel</span>.<span class="i method">CreateUnbounded</span>&lt;<a href="Publisher.Message.cs.html#4ef0df2b5c43ac0a" class="t t">Message</a>&gt;(
+            <b>new</b> <span class="t constructor">UnboundedChannelOptions</span> { <span class="i property">SingleReader</span> = <b>true</b> });
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> &quot;Blocking&quot; semaphore used to wait for flushing to complete.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private</b> <a href="@1@netstandard/A.html#94bf04047d6bd325" class="t t">TaskCompletionSource</a>&lt;<b>object</b>&gt; <a id="a2a3947e89be2a03" href="../R/a2a3947e89be2a03.html" target="n" data-glyph="46,1" class="i field">_flushCompletionSource</a> =
+            <b>new</b> <a href="@1@netstandard/A.html#c4984003e7683ee0" class="t constructor">TaskCompletionSource</a>&lt;<b>object</b>&gt;(<a href="@1@netstandard/A.html#17b17e17ae1468b0" class="t t">TaskCreationOptions</a>.<a href="@1@netstandard/A.html#8a4ba0b9ea2b26f8" class="i field">RunContinuationsAsynchronously</a>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Task that&#39;s acting as our channel&#39;s event loop to read publishing</span>
+        <span class="c">///</span><span class="c"> actions.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="5c639bba9309f8e3" href="../R/5c639bba9309f8e3.html" target="n" data-glyph="46,1" class="i field">_readerLoop</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A timer that we can use to automatically flush after a period of</span>
+        <span class="c">///</span><span class="c"> inactivity.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private</b> <a href="@1@netstandard/A.html#051a39d380760b26" class="t t">Timer</a> <a id="deec9b64c20dcebb" href="../R/deec9b64c20dcebb.html" target="n" data-glyph="46,1" class="i field">_timer</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets a value indicating whether the timer is currently paused (i.e.</span>
+        <span class="c">///</span><span class="c"> has an infinite dueTime).</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private bool</b> <a id="7cee6c5863612566" href="../R/7cee6c5863612566.html" target="n" data-glyph="46,1" class="i field">_timerPaused</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Queue of pending actions.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private</b> <a href="@1@netstandard/A.html#aa3beab99b2e0db2" class="t t">Queue</a>&lt;<a href="PublisherAction.cs.html#5c57ae3dfec1d4cf" class="t t">PublisherAction</a>&lt;<span class="r0 r t">T</span>&gt;&gt; <a id="4cdd38da2d7817b5" href="../R/4cdd38da2d7817b5.html" target="n" data-glyph="46,1" class="i field">_pending</a> = <b>new</b> <a href="@1@netstandard/A.html#a09109def640b7b1" class="t constructor">Queue</a>&lt;<a href="PublisherAction.cs.html#5c57ae3dfec1d4cf" class="t t">PublisherAction</a>&lt;<span class="r0 r t">T</span>&gt;&gt;();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Queue of actions that need to be retried.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private</b> <a href="@1@netstandard/A.html#aa3beab99b2e0db2" class="t t">Queue</a>&lt;<a href="PublisherAction.cs.html#5c57ae3dfec1d4cf" class="t t">PublisherAction</a>&lt;<span class="r0 r t">T</span>&gt;&gt; <a id="d06f0007dd54a633" href="../R/d06f0007dd54a633.html" target="n" data-glyph="46,1" class="i field">_retry</a> = <b>new</b> <a href="@1@netstandard/A.html#a09109def640b7b1" class="t constructor">Queue</a>&lt;<a href="PublisherAction.cs.html#5c57ae3dfec1d4cf" class="t t">PublisherAction</a>&lt;<span class="r0 r t">T</span>&gt;&gt;();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Manual retry policy to add exponential back-off after throttled</span>
+        <span class="c">///</span><span class="c"> requests.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private</b> <a href="ManualRetryDelay.cs.html#dcb962cdd772b5e3" class="t t">ManualRetryDelay</a> <a id="3c827448c62eec61" href="../R/3c827448c62eec61.html" target="n" data-glyph="46,1" class="i field">_manualRetries</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the number of indexing actions currently awaiting submission.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public int</b> <a id="e905c0de8aa55041" href="../R/e905c0de8aa55041.html" target="n" data-glyph="102,1" class="i property">IndexingActionsCount</a>
+        {
+            <b>get</b> =&gt; <a href="#4cdd38da2d7817b5" class="i field">_pending</a>.<a href="@1@netstandard/A.html#2d2504e4ca700843" class="i property">Count</a> + <a href="#d06f0007dd54a633" class="i field">_retry</a>.<a href="@1@netstandard/A.html#2d2504e4ca700843" class="i property">Count</a>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets a value indicating whether the publisher should automatically</span>
+        <span class="c">///</span><span class="c"> flush any indexing actions that have been added.  This will happen</span>
+        <span class="c">///</span><span class="c"> when the batch is full or when the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#38a7ab52f7cc4a16" class="i property">AutoFlushInterval</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <span class="c">///</span><span class="c"> has elapsed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public bool</b> <a id="635d0e1ff184bb9b" href="../R/635d0e1ff184bb9b.html" target="n" data-glyph="102,1" class="i property">AutoFlush</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets an optional amount of time to wait before automatically</span>
+        <span class="c">///</span><span class="c"> flushing any remaining indexing actions.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>? <a id="38a7ab52f7cc4a16" href="../R/38a7ab52f7cc4a16.html" target="n" data-glyph="102,1" class="i property">AutoFlushInterval</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to use when publishing.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>protected</b> <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <a id="885039625fba4bb4" href="../R/885039625fba4bb4.html" target="n" data-glyph="105,1" class="i property">PublisherCancellationToken</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets a value indicating the number of actions to group into a batch</span>
+        <span class="c">///</span><span class="c"> when tuning the behavior of the publisher.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>protected int</b> <a id="fb44845e990154fd" href="../R/fb44845e990154fd.html" target="n" data-glyph="105,1" class="i property">BatchActionCount</a> { <b>get</b>; }  <span class="c">// TODO: Not automatically tuning yet</span>
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets a value indicating the number of bytes to use when tuning the</span>
+        <span class="c">///</span><span class="c"> behavior of the publisher.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>protected int</b> <a id="3bc14f6c6379910d" href="../R/3bc14f6c6379910d.html" target="n" data-glyph="105,1" class="i property">BatchPayloadSize</a> { <b>get</b>; }  <span class="c">// TODO: Not used yet</span>
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the number of times to retry a failed document.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>protected int</b> <a id="d3144dd92392c64b" href="../R/d3144dd92392c64b.html" target="n" data-glyph="105,1" class="i property">MaxRetries</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new Publisher which immediately starts listening to</span>
+        <span class="c">///</span><span class="c"> process requests.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">autoFlush</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A value indicating whether the publisher should automatically flush.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">autoFlushInterval</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> An optional amount of time to wait before automatically flushing.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">batchActionSize</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The number of actions to group into a batch.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">batchPayloadSize</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The number of bytes to use when tuning the behavior of the</span>
+        <span class="c">///</span><span class="c"> publisher.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">maxRetries</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The number of times to retry a failed document.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">retryDelay</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The initial retry delay on which to base calculations for a</span>
+        <span class="c">///</span><span class="c"> backoff-based approach.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">maxRetryDelay</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The maximum permissible delay between retry attempts.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">publisherCancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to use when publishing.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="81ab39d12925091a" href="../R/81ab39d12925091a.html" target="n" data-glyph="72,1" class="t constructor">Publisher</a>(
+            <b>bool</b> <span id="r1 rd" class="r1 r">autoFlush</span>,
+            <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>? <span id="r2 rd" class="r2 r">autoFlushInterval</span>,
+            <b>int</b>? <span id="r3 rd" class="r3 r">batchActionSize</span>,
+            <b>int</b>? <span id="r4 rd" class="r4 r">batchPayloadSize</span>,
+            <b>int</b> <span id="r5 rd" class="r5 r">maxRetries</span>,
+            <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r6 rd" class="r6 r">retryDelay</span>,
+            <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r7 rd" class="r7 r">maxRetryDelay</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r8 rd" class="r8 r">publisherCancellationToken</span>)
+        {
+            <a href="#635d0e1ff184bb9b" class="i property">AutoFlush</a> = <span class="r1 r">autoFlush</span>;
+            <a href="#38a7ab52f7cc4a16" class="i property">AutoFlushInterval</a> = <span class="r2 r">autoFlushInterval</span> &lt;= <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@1@netstandard/A.html#225346b4cd3a8300" class="i field">Zero</a> ? <b>null</b> : <span class="r2 r">autoFlushInterval</span>;
+            <a href="#885039625fba4bb4" class="i property">PublisherCancellationToken</a> = <span class="r8 r">publisherCancellationToken</span>;
+            <a href="#fb44845e990154fd" class="i property">BatchActionCount</a> = <span class="r3 r">batchActionSize</span> ?? <a href="SearchIndexingBufferedSenderOptions.cs.html#f508777539c2f3a5" class="t t">SearchIndexingBufferedSenderOptions</a>&lt;<span class="r0 r t">T</span>&gt;.<a href="SearchIndexingBufferedSenderOptions.cs.html#33d13c74f065c5db" class="i field">DefaultInitialBatchActionCount</a>;
+            <a href="#3bc14f6c6379910d" class="i property">BatchPayloadSize</a> = <span class="r4 r">batchPayloadSize</span> ?? <a href="SearchIndexingBufferedSenderOptions.cs.html#f508777539c2f3a5" class="t t">SearchIndexingBufferedSenderOptions</a>&lt;<span class="r0 r t">T</span>&gt;.<a href="SearchIndexingBufferedSenderOptions.cs.html#44cdec7affb4b03b" class="i field">DefaultBatchPayloadSize</a>;
+            <a href="#d3144dd92392c64b" class="i property">MaxRetries</a> = <span class="r5 r">maxRetries</span>;
+ 
+            <span class="c">// Setup manual retries</span>
+            <a href="#3c827448c62eec61" class="i field">_manualRetries</a> = <b>new</b> <a href="ManualRetryDelay.cs.html#dcb962cdd772b5e3" class="t constructor">ManualRetryDelay</a> { <a href="ManualRetryDelay.cs.html#749b51439fa81e52" class="i property">Delay</a> = <span class="r6 r">retryDelay</span>, <a href="ManualRetryDelay.cs.html#71ca58115be290b0" class="i property">MaxDelay</a> = <span class="r7 r">maxRetryDelay</span> };
+ 
+            <span class="c">// Start the message loop</span>
+            <a href="#5c639bba9309f8e3" class="i field">_readerLoop</a> = <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@1@netstandard/A.html#0fb2b4d9262599b9" class="i method">Run</a>(<a href="#65b3cbb6314b7140" class="i method">ProcessMessagesAsync</a>, <span class="r8 r">publisherCancellationToken</span>);
+        }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Message Producers - only called externally and do not touch state
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Add documents to be published.  This should only be called outside</span>
+        <span class="c">///</span><span class="c"> of the Publisher itself.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">documents</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The documents to publish.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r10 r">async</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Whether to run sync or async.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r11 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Cancellation token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Task for adding the documents.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="0d281465f663f676" href="../R/0d281465f663f676.html" target="n" data-glyph="72,1" class="i method">AddDocumentsAsync</a>(<a href="@1@netstandard/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r9 rd" class="r9 r">documents</span>, <b>bool</b> <span id="r10 rd" class="r10 r">async</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r11 rd" class="r11 r">cancellationToken</span> = <b>default</b>)
+        {
+            <a href="#fe558af181facfca" class="i method">EnsureNotDisposed</a>();
+            <b>await</b> <a href="#0e78f48cbd4a14dc" class="i field">_channel</a>.<span class="i property">Writer</span>.<a href="ChannelExtensions.cs.html#207e615945bc3029" class="i method">WriteInternal</a>(
+                <a href="Publisher.Message.cs.html#4ef0df2b5c43ac0a" class="t t">Message</a>.<a href="Publisher.Message.cs.html#b1ba757e13852ef1" class="i method">Publish</a>(<span class="r9 r">documents</span>),
+                <span class="r10 r">async</span>,
+                <span class="r11 r">cancellationToken</span>)
+                .<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Flush any pending documents.  This should only be called outside of</span>
+        <span class="c">///</span><span class="c"> the Publisher itself.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">async</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Whether to run sync or async.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Cancellation token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Task for adding the documents.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="8cc1e8c523876a98" href="../R/8cc1e8c523876a98.html" target="n" data-glyph="72,1" class="i method">FlushAsync</a>(<b>bool</b> <span id="r12 rd" class="r12 r">async</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r13 rd" class="r13 r">cancellationToken</span> = <b>default</b>)
+        {
+            <a href="#fe558af181facfca" class="i method">EnsureNotDisposed</a>();
+            <b>await</b> <a href="#d0655a9401ecd240" class="i method">FlushInternal</a>(<span class="r12 r">async</span>, <span class="r13 r">cancellationToken</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Flush any pending documents.  This will not check for disposal.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r14 r">async</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Whether to run sync or async.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Cancellation token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Task for adding the documents.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="d0655a9401ecd240" href="../R/d0655a9401ecd240.html" target="n" data-glyph="76,1" class="i method">FlushInternal</a>(<b>bool</b> <span id="r14 rd" class="r14 r">async</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r15 rd" class="r15 r">cancellationToken</span> = <b>default</b>)
+        {
+            <span class="c">// Get an awaitable that will let us wait until flushing has been</span>
+            <span class="c">// completed</span>
+            <a href="../Shared/TaskExtensions.cs.html#b697c2964116e255" class="t t">SharedTaskExtensions</a>.<a href="../Shared/TaskExtensions.cs.html#a710ec326f285d3b" class="t t">WithCancellationTaskAwaitable</a>&lt;<b>object</b>&gt; <span id="r16 rd" class="r16 r">flushCompletion</span> =
+                <a href="#a2a3947e89be2a03" class="i field">_flushCompletionSource</a>.<a href="@1@netstandard/A.html#14fe3876fba4607a" class="i property">Task</a>.<a href="../Shared/TaskExtensions.cs.html#4368accee5eff0f0" class="i method">AwaitWithCancellation</a>(<span class="r15 r">cancellationToken</span>);
+ 
+            <span class="c">// Send a message to flush</span>
+            <b>await</b> <a href="#0e78f48cbd4a14dc" class="i field">_channel</a>.<span class="i property">Writer</span>.<a href="ChannelExtensions.cs.html#207e615945bc3029" class="i method">WriteInternal</a>(
+                <a href="Publisher.Message.cs.html#4ef0df2b5c43ac0a" class="t t">Message</a>.<a href="Publisher.Message.cs.html#285d2e9504521d26" class="i method">Flush</a>(),
+                <span class="r14 r">async</span>,
+                <span class="r15 r">cancellationToken</span>)
+                .<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <span class="c">// Wait for the flushing to complete</span>
+            <b>if</b> (<span class="r14 r">async</span>)
+            {
+                <span class="c">// AwaitWithCancellation calls ConfigureAwait(false) already</span>
+                <b>await</b> <span class="r16 r">flushCompletion</span>;
+            }
+            <b>else</b>
+            {
+                <span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">AZC0102</span> <span class="c">// Do not use GetAwaiter().GetResult().</span>
+                <span class="r16 r">flushCompletion</span>.<a href="../Shared/TaskExtensions.cs.html#82217a3b78754c22" class="i method">GetAwaiter</a>().<a href="../Shared/TaskExtensions.cs.html#520207a5012b3f7d" class="i method">GetResult</a>();
+                <span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">AZC0102</span> <span class="c">// Do not use GetAwaiter().GetResult().</span>
+            }
+        }
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Message Consumer
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Listen for and process messages.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A Task that will run for the lifetime of the publisher.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="65b3cbb6314b7140" href="../R/65b3cbb6314b7140.html" target="n" data-glyph="76,1" class="i method">ProcessMessagesAsync</a>()
+        {
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r17 rd" class="r17 r">cancellationToken</span> = <a href="#885039625fba4bb4" class="i property">PublisherCancellationToken</a>;
+            <b>while</b> (<b>await</b> <a href="#0e78f48cbd4a14dc" class="i field">_channel</a>.<span class="i property">Reader</span>.<span class="i method">WaitToReadAsync</span>(<span class="r17 r">cancellationToken</span>).<span class="i method">ConfigureAwait</span>(<b>false</b>))
+            {
+                <a href="Publisher.Message.cs.html#4ef0df2b5c43ac0a" class="t t">Message</a> <span id="r18 rd" class="r18 r">message</span> = <b>await</b> <a href="#0e78f48cbd4a14dc" class="i field">_channel</a>.<span class="i property">Reader</span>.<span class="i method">ReadAsync</span>(<span class="r17 r">cancellationToken</span>).<span class="i method">ConfigureAwait</span>(<b>false</b>);
+                <b>switch</b> (<span class="r18 r">message</span>.<a href="Publisher.Message.cs.html#d633eb3a3bf2eb0f" class="i property">Operation</a>)
+                {
+                    <b>case</b> <a href="Publisher.MessageOperation.cs.html#08ca460286632195" class="t t">MessageOperation</a>.<a href="Publisher.MessageOperation.cs.html#31a8ba8f42e5685e" class="i field">Publish</a>:
+                        <b>await</b> <a href="#a12bfda7ea17d8d4" class="i method">OnDocumentsAddedAsync</a>(<span class="r18 r">message</span>.<a href="Publisher.Message.cs.html#e39c2cae925e108f" class="i property">Documents</a>, <span class="r17 r">cancellationToken</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+                        <b>break</b>;
+                    <b>case</b> <a href="Publisher.MessageOperation.cs.html#08ca460286632195" class="t t">MessageOperation</a>.<a href="Publisher.MessageOperation.cs.html#52ddeb580667c5bd" class="i field">Flush</a>:
+                        <b>await</b> <a href="#a4ffd1e3af3d5b29" class="i method">OnFlushedAsync</a>(<span class="r17 r">cancellationToken</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+                        <b>break</b>;
+                    <b>default</b>:
+                        <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span><span class="s">Unexpected value </span>{<span class="r18 r">message</span>.<a href="Publisher.Message.cs.html#d633eb3a3bf2eb0f" class="i property">Operation</a>}<span class="s"> of type </span>{<b>nameof</b>(<a href="Publisher.MessageOperation.cs.html#08ca460286632195" class="t t">MessageOperation</a>)}<span class="s">.</span><span class="s">&quot;</span>);
+                }
+            }
+            <a href="#f3e62dee8018d8e1" class="i method">StopTimer</a>();
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Get a key used to identify a given document.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r19 r">document</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The document.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A key for that document.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>protected abstract string</b> <a id="01c518ba9d886b2f" href="../R/01c518ba9d886b2f.html" target="n" data-glyph="75,1" class="i method">GetDocumentKey</a>(<span class="r0 r t">T</span> <span id="r19 rd" class="r19 r">document</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Process any documents that have been added for publishing.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r20 r">documents</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The documents to publish.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r21 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Cancellation token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Task for processing the added documents.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>protected virtual async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="a12bfda7ea17d8d4" href="../R/a12bfda7ea17d8d4.html" target="n" data-glyph="75,1" class="i method">OnDocumentsAddedAsync</a>(<a href="@1@netstandard/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r20 rd" class="r20 r">documents</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r21 rd" class="r21 r">cancellationToken</span>)
+        {
+            <span class="c">// Add all of the documents to our queue</span>
+            <a href="@1@netstandard/A.html#632c6da37ce825df" class="t t">Debug</a>.<a href="@1@netstandard/A.html#74ae7c85c0e36e34" class="i method">Assert</a>(<span class="r20 r">documents</span> != <b>null</b>);
+            <b>foreach</b> (<span class="r0 r t">T</span> <span id="r22 rd" class="r22 r">document</span> <b>in</b> <span class="r20 r">documents</span>)
+            {
+                <a href="PublisherAction.cs.html#5c57ae3dfec1d4cf" class="t t">PublisherAction</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r23 rd" class="r23 r">action</span> = <b>new</b> <a href="PublisherAction.cs.html#0fc7ac9393b7f40c" class="t constructor">PublisherAction</a>&lt;<span class="r0 r t">T</span>&gt;(<span class="r22 r">document</span>, <a href="#01c518ba9d886b2f" class="i method">GetDocumentKey</a>(<span class="r22 r">document</span>));
+                <a href="#4cdd38da2d7817b5" class="i field">_pending</a>.<a href="@1@netstandard/A.html#14c3cc45ceaf1566" class="i method">Enqueue</a>(<span class="r23 r">action</span>);
+            }
+ 
+            <span class="c">// Automatically trigger a submission if enabled</span>
+            <b>if</b> (<a href="#635d0e1ff184bb9b" class="i property">AutoFlush</a>)
+            {
+                <span class="c">// Determine whether or not we crossed the threshold and we need</span>
+                <span class="c">// to automatically submit the next batch.</span>
+                <b>if</b> (<a href="#00cd25e90dcf755f" class="i method">HasBatch</a>())
+                {
+                    <b>await</b> <a href="#911a0e1f48be1e1b" class="i method">PublishAsync</a>(<span class="r24 r">flush</span>: <b>false</b>, <span class="r21 r">cancellationToken</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+                }
+ 
+                <span class="c">// Try starting a timer to flush whatever&#39;s ready when it fires</span>
+                <b>if</b> (<a href="#e905c0de8aa55041" class="i property">IndexingActionsCount</a> &gt; 0)
+                {
+                    <a href="#b1b9f8bb731e77e3" class="i method">StartTimer</a>();
+                }
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Process any requests to flush.  After submitting, this will unblock</span>
+        <span class="c">///</span><span class="c"> anyone waiting behind the Flush barrier.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r25 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Cancellation token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Task for flushing.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>protected virtual async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="a4ffd1e3af3d5b29" href="../R/a4ffd1e3af3d5b29.html" target="n" data-glyph="75,1" class="i method">OnFlushedAsync</a>(<a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r25 rd" class="r25 r">cancellationToken</span>)
+        {
+            <b>await</b> <a href="#911a0e1f48be1e1b" class="i method">PublishAsync</a>(<span class="r24 r">flush</span>: <b>true</b>, <span class="r25 r">cancellationToken</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <span class="c">// Wake up anyone who was blocked on a flush finishing</span>
+            <a href="@1@netstandard/A.html#94bf04047d6bd325" class="t t">TaskCompletionSource</a>&lt;<b>object</b>&gt; <span id="r26 rd" class="r26 r">previous</span> = <a href="#a2a3947e89be2a03" class="i field">_flushCompletionSource</a>;
+            <a href="#a2a3947e89be2a03" class="i field">_flushCompletionSource</a> = <b>new</b> <a href="@1@netstandard/A.html#c4984003e7683ee0" class="t constructor">TaskCompletionSource</a>&lt;<b>object</b>&gt;(<a href="@1@netstandard/A.html#17b17e17ae1468b0" class="t t">TaskCreationOptions</a>.<a href="@1@netstandard/A.html#8a4ba0b9ea2b26f8" class="i field">RunContinuationsAsynchronously</a>);
+            <span class="r26 r">previous</span>.<a href="@1@netstandard/A.html#810e0ddcb0511ff1" class="i method">SetResult</a>(<b>null</b>);
+        }
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span> Message Consumer
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Dispose
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Clean up any resources.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>async</b> <span class="t t">ValueTask</span> <span class="t t">IAsyncDisposable</span>.<span class="i method">DisposeAsync</span>() =&gt;
+            <b>await</b> <a href="#d13355bf5a0c6b4e" class="i method">DisposeAsync</a>(<span class="r27 r">async</span>: <b>true</b>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Clean up any resources.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>void</b> <a href="@1@netstandard/A.html#1f55292c3174123d" class="t t">IDisposable</a>.<a href="@1@netstandard/A.html#4e23fed29bd598fa" class="i method">Dispose</a>() =&gt;
+            <a href="#d13355bf5a0c6b4e" class="i method">DisposeAsync</a>(<span class="r27 r">async</span>: <b>false</b>).<a href="../Shared/TaskExtensions.cs.html#9a35b0afd931dc48" class="i method">EnsureCompleted</a>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Dispose the sender and flush any remaining indexing actions that</span>
+        <span class="c">///</span><span class="c"> haven&#39;t been sent yet.  This will block until everything&#39;s been</span>
+        <span class="c">///</span><span class="c"> sent.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r27 r">async</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Whether to call this sync or async.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A Task that will wait until we&#39;re disposed.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="d13355bf5a0c6b4e" href="../R/d13355bf5a0c6b4e.html" target="n" data-glyph="72,1" class="i method">DisposeAsync</a>(<b>bool</b> <span id="r27 rd" class="r27 r">async</span>)
+        {
+            <b>if</b> (<a href="@1@netstandard/A.html#8792520ddc6dadcb" class="t t">Interlocked</a>.<a href="@1@netstandard/A.html#1e337a3aaaf240e4" class="i method">CompareExchange</a>(<b>ref</b> <a href="#f46669939553799b" class="i field">_disposed</a>, 1, 0) == 0)
+            {
+                <b>await</b> <a href="#d0655a9401ecd240" class="i method">FlushInternal</a>(<span class="r27 r">async</span>, <a href="#885039625fba4bb4" class="i property">PublisherCancellationToken</a>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+                <a href="#deec9b64c20dcebb" class="i field">_timer</a>?.<a href="@1@netstandard/A.html#4a8e954275723902" class="i method">Dispose</a>();
+                <a href="#0e78f48cbd4a14dc" class="i field">_channel</a>?.<span class="i property">Writer</span>.<span class="i method">TryComplete</span>();
+                <b>if</b> (<span class="r27 r">async</span>)
+                {
+                    <b>await</b> <a href="#5c639bba9309f8e3" class="i field">_readerLoop</a>.<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+                }
+                <b>else</b>
+                {
+                    <span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">AZC0104</span> <span class="c">// Use EnsureCompleted() directly on asynchronous method return value.</span>
+                    <a href="#5c639bba9309f8e3" class="i field">_readerLoop</a>.<a href="../Shared/TaskExtensions.cs.html#9a35b0afd931dc48" class="i method">EnsureCompleted</a>();
+                    <span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">AZC0104</span> <span class="c">// Use EnsureCompleted() directly on asynchronous method return value.</span>
+                }
+                <a href="#a2a3947e89be2a03" class="i field">_flushCompletionSource</a>.<a href="@1@netstandard/A.html#32dd6288abd7ef1f" class="i method">SetCanceled</a>();
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Ensure nobody&#39;s trying to use this after it&#39;s been disposed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="fe558af181facfca" href="../R/fe558af181facfca.html" target="n" data-glyph="76,1" class="i method">EnsureNotDisposed</a>()
+        {
+            <b>if</b> (<a href="#f46669939553799b" class="i field">_disposed</a> &gt; 0)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#53515c848f859933" class="t constructor">ObjectDisposedException</a>(<b>nameof</b>(<a href="SearchIndexingBufferedSender.cs.html#4c603ee25963f349" class="t t">SearchIndexingBufferedSender</a>&lt;<span class="r0 r t">T</span>&gt;));
+            }
+        }
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span> Dispose
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Publishing
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Check if we have a full batch ready to send.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r28 r">flush</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Whether we&#39;re flushing.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">If we have a full batch ready to send.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private bool</b> <a id="00cd25e90dcf755f" href="../R/00cd25e90dcf755f.html" target="n" data-glyph="76,1" class="i method">HasBatch</a>(<b>bool</b> <span id="r28 rd" class="r28 r">flush</span> = <b>false</b>) =&gt;
+            <a href="#e905c0de8aa55041" class="i property">IndexingActionsCount</a> &gt; (<span class="r28 r">flush</span> ? 0 : <a href="#fb44845e990154fd" class="i property">BatchActionCount</a>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Publish as many batches are ready.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r24 r">flush</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Whether we&#39;re flushing.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r29 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A cancellation token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A task that represents the operation.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="911a0e1f48be1e1b" href="../R/911a0e1f48be1e1b.html" target="n" data-glyph="76,1" class="i method">PublishAsync</a>(<b>bool</b> <span id="r24 rd" class="r24 r">flush</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r29 rd" class="r29 r">cancellationToken</span>)
+        {
+            <span class="c">// There&#39;s no need to let the timer keep running since we&#39;re</span>
+            <span class="c">// already submitting</span>
+            <a href="#f3e62dee8018d8e1" class="i method">StopTimer</a>();
+ 
+            <b>do</b>
+            {
+                <a href="@1@netstandard/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="PublisherAction.cs.html#5c57ae3dfec1d4cf" class="t t">PublisherAction</a>&lt;<span class="r0 r t">T</span>&gt;&gt; <span id="r30 rd" class="r30 r">batch</span> = <b>new</b> <a href="@1@netstandard/A.html#b65c1a07c4e5b13a" class="t constructor">List</a>&lt;<a href="PublisherAction.cs.html#5c57ae3dfec1d4cf" class="t t">PublisherAction</a>&lt;<span class="r0 r t">T</span>&gt;&gt;(
+                    <span class="r31 r">capacity</span>: <a href="@1@netstandard/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@1@netstandard/A.html#f441d55c88d635ad" class="i method">Min</a>(<a href="#fb44845e990154fd" class="i property">BatchActionCount</a>, <a href="#e905c0de8aa55041" class="i property">IndexingActionsCount</a>));
+ 
+                <span class="c">// Prefer pulling from the _retry queue first</span>
+                <b>if</b> (!<a href="#f31857daa4db02f2" class="i method">FillBatchFromQueue</a>(<span class="r30 r">batch</span>, <a href="#d06f0007dd54a633" class="i field">_retry</a>))
+                {
+                    <a href="#f31857daa4db02f2" class="i method">FillBatchFromQueue</a>(<span class="r30 r">batch</span>, <a href="#4cdd38da2d7817b5" class="i field">_pending</a>);
+                }
+ 
+                <span class="c">// Submit the batch</span>
+                <b>await</b> <a href="#46041aa867cbba0d" class="i method">SubmitBatchAsync</a>(
+                    <span class="r30 r">batch</span>,
+                    <span class="r29 r">cancellationToken</span>)
+                    .<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <span class="c">// Keep going if we have more full batches ready to submit</span>
+            } <b>while</b> (<a href="#00cd25e90dcf755f" class="i method">HasBatch</a>(<span class="r24 r">flush</span>));
+ 
+            <span class="c">// Fill as much of the batch as possible from the given queue.</span>
+            <span class="c">// Returns whether the batch is now full.</span>
+            <b>bool</b> <a id="f31857daa4db02f2" href="../R/f31857daa4db02f2.html" target="n" data-glyph="76,2" class="i method">FillBatchFromQueue</a>(<a href="@1@netstandard/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="PublisherAction.cs.html#5c57ae3dfec1d4cf" class="t t">PublisherAction</a>&lt;<span class="r0 r t">T</span>&gt;&gt; <span id="r32 rd" class="r32 r">batch</span>, <a href="@1@netstandard/A.html#aa3beab99b2e0db2" class="t t">Queue</a>&lt; <a href="PublisherAction.cs.html#5c57ae3dfec1d4cf" class="t t">PublisherAction</a>&lt;<span class="r0 r t">T</span>&gt;&gt; <span id="r33 rd" class="r33 r">queue</span>)
+            {
+                <span class="c">// TODO: Consider tracking the keys in the batch and requiring</span>
+                <span class="c">// them to be unique to avoid error alignment problems</span>
+ 
+                <b>while</b> (<span class="r33 r">queue</span>.<a href="@1@netstandard/A.html#2d2504e4ca700843" class="i property">Count</a> &gt; 0)
+                {
+                    <b>if</b> (<span class="r32 r">batch</span>.<a href="@1@netstandard/A.html#78a69d857716bc68" class="i property">Count</a> &lt; <a href="#fb44845e990154fd" class="i property">BatchActionCount</a>)
+                    {
+                        <span class="r32 r">batch</span>.<a href="@1@netstandard/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r33 r">queue</span>.<a href="@1@netstandard/A.html#e68caf2d91344411" class="i method">Dequeue</a>());
+                    }
+                    <b>else</b>
+                    {
+                        <b>return</b> <b>true</b>;
+                    }
+                }
+                <b>return</b> <b>false</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Send indexing actions to be processed by the service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r34 r">batch</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The batch of actions to submit.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r35 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A cancellation token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Whether the submission was throttled.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>protected async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="46041aa867cbba0d" href="../R/46041aa867cbba0d.html" target="n" data-glyph="75,1" class="i method">SubmitBatchAsync</a>(<a href="@1@netstandard/A.html#b19f71a84062554b" class="t t">IList</a>&lt;<a href="PublisherAction.cs.html#5c57ae3dfec1d4cf" class="t t">PublisherAction</a>&lt;<span class="r0 r t">T</span>&gt;&gt; <span id="r34 rd" class="r34 r">batch</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r35 rd" class="r35 r">cancellationToken</span>)
+        {
+            <span class="c">// If Submit is called before our last retry delay elapsed, we&#39;ll</span>
+            <span class="c">// wait before sending the next request</span>
+            <b>await</b> <a href="#3c827448c62eec61" class="i field">_manualRetries</a>.<a href="ManualRetryDelay.cs.html#9d63b2b1347b9cab" class="i method">WaitIfNeededAsync</a>(<span class="r35 r">cancellationToken</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <span class="c">// Send the request</span>
+            <b>bool</b> <span id="r36 rd" class="r36 r">throttled</span> = <b>await</b> <a href="#2a56ecc95001cd8e" class="i method">OnSubmitBatchAsync</a>(<span class="r34 r">batch</span>, <span class="r35 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <span class="c">// Update whether or not the request was throttled to update our</span>
+            <span class="c">// retry delay</span>
+            <a href="#3c827448c62eec61" class="i field">_manualRetries</a>.<a href="ManualRetryDelay.cs.html#54295e6d13b64cd9" class="i method">Update</a>(<span class="r36 r">throttled</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Send indexing actions to be processed by the service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r37 r">batch</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The batch of actions to submit.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r38 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A cancellation token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Whether the submission was throttled.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>protected abstract</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>bool</b>&gt; <a id="2a56ecc95001cd8e" href="../R/2a56ecc95001cd8e.html" target="n" data-glyph="75,1" class="i method">OnSubmitBatchAsync</a>(<a href="@1@netstandard/A.html#b19f71a84062554b" class="t t">IList</a>&lt;<a href="PublisherAction.cs.html#5c57ae3dfec1d4cf" class="t t">PublisherAction</a>&lt;<span class="r0 r t">T</span>&gt;&gt; <span id="r37 rd" class="r37 r">batch</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r38 rd" class="r38 r">cancellationToken</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Enqueue an action to be retried.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r39 r">action</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The action to be retried.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r40 r">skipIncrement</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Whether we should skip incrementing the retry attempts because the</span>
+        <span class="c">///</span><span class="c"> failure wasn&#39;t related to the action.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A value indicating whether the action is retriable.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>protected bool</b> <a id="11e82e65cc4226f5" href="../R/11e82e65cc4226f5.html" target="n" data-glyph="75,1" class="i method">EnqueueRetry</a>(
+            <a href="PublisherAction.cs.html#5c57ae3dfec1d4cf" class="t t">PublisherAction</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r39 rd" class="r39 r">action</span>,
+            <b>bool</b> <span id="r40 rd" class="r40 r">skipIncrement</span> = <b>false</b>)
+        {
+            <b>bool</b> <span id="r41 rd" class="r41 r">retriable</span> = <span class="r40 r">skipIncrement</span> || <span class="r39 r">action</span>.<a href="PublisherAction.cs.html#37f6427c0fe62700" class="i property">RetryAttempts</a>++ &lt; <a href="#d3144dd92392c64b" class="i property">MaxRetries</a>;
+            <b>if</b> (<span class="r41 r">retriable</span>)
+            {
+                <a href="#d06f0007dd54a633" class="i field">_retry</a>.<a href="@1@netstandard/A.html#14c3cc45ceaf1566" class="i method">Enqueue</a>(<span class="r39 r">action</span>);
+            }
+            <b>return</b> <span class="r41 r">retriable</span>;
+        }
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span> Publishing
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Timer
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Start the timer if it&#39;s not already running.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="b1b9f8bb731e77e3" href="../R/b1b9f8bb731e77e3.html" target="n" data-glyph="76,1" class="i method">StartTimer</a>()
+        {
+            <b>if</b> (<a href="#635d0e1ff184bb9b" class="i property">AutoFlush</a> &amp;&amp; <a href="#38a7ab52f7cc4a16" class="i property">AutoFlushInterval</a> != <b>null</b>)
+            {
+                <b>int</b> <span id="r42 rd" class="r42 r">intervalInMs</span> = (<b>int</b>)<a href="#38a7ab52f7cc4a16" class="i property">AutoFlushInterval</a>.<a href="@1@netstandard/A.html#7b38d1fa76071c95" class="i property">Value</a>.<a href="@1@netstandard/A.html#0001a4a9e0a9b848" class="i property">TotalMilliseconds</a>;
+                <b>if</b> (<a href="#deec9b64c20dcebb" class="i field">_timer</a> == <b>null</b>)
+                {
+                    <a href="#deec9b64c20dcebb" class="i field">_timer</a> = <b>new</b> <a href="@1@netstandard/A.html#07930248be93641d" class="t constructor">Timer</a>(
+                        <a href="#76834a77aa975356" class="i method">OnTimerElapsed</a>,
+                        <span class="r43 r">state</span>: <b>null</b>,
+                        <span class="r44 r">dueTime</span>: <span class="r42 r">intervalInMs</span>,
+                        <span class="r45 r">period</span>: <a href="@1@netstandard/A.html#6b53654d3452a8df" class="t t">Timeout</a>.<a href="@1@netstandard/A.html#17ac04506b89ddd8" class="i field">Infinite</a>);
+                    <a href="#7cee6c5863612566" class="i field">_timerPaused</a> = <b>false</b>;
+                }
+                <b>else</b> <b>if</b> (<a href="#7cee6c5863612566" class="i field">_timerPaused</a>)
+                {
+                    <a href="#deec9b64c20dcebb" class="i field">_timer</a>.<a href="@1@netstandard/A.html#5ff2e05c1721980d" class="i method">Change</a>(
+                        <span class="r46 r">dueTime</span>: <span class="r42 r">intervalInMs</span>,
+                        <span class="r47 r">period</span>: <a href="@1@netstandard/A.html#6b53654d3452a8df" class="t t">Timeout</a>.<a href="@1@netstandard/A.html#17ac04506b89ddd8" class="i field">Infinite</a>);
+                    <a href="#7cee6c5863612566" class="i field">_timerPaused</a> = <b>false</b>;
+                }
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Stop the timer.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="f3e62dee8018d8e1" href="../R/f3e62dee8018d8e1.html" target="n" data-glyph="76,1" class="i method">StopTimer</a>()
+        {
+            <b>if</b> (<a href="#deec9b64c20dcebb" class="i field">_timer</a> != <b>null</b> &amp;&amp; !<a href="#7cee6c5863612566" class="i field">_timerPaused</a>)
+            {
+                <a href="#deec9b64c20dcebb" class="i field">_timer</a>.<a href="@1@netstandard/A.html#5ff2e05c1721980d" class="i method">Change</a>(
+                    <span class="r46 r">dueTime</span>: <a href="@1@netstandard/A.html#6b53654d3452a8df" class="t t">Timeout</a>.<a href="@1@netstandard/A.html#17ac04506b89ddd8" class="i field">Infinite</a>,
+                    <span class="r47 r">period</span>: <a href="@1@netstandard/A.html#6b53654d3452a8df" class="t t">Timeout</a>.<a href="@1@netstandard/A.html#17ac04506b89ddd8" class="i field">Infinite</a>);
+                <a href="#7cee6c5863612566" class="i field">_timerPaused</a> = <b>true</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Trigger a flush when the timer elapses.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r48 r">timerState</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="76834a77aa975356" href="../R/76834a77aa975356.html" target="n" data-glyph="76,1" class="i method">OnTimerElapsed</a>(<b>object</b> <span id="r48 rd" class="r48 r">timerState</span>)
+        {
+            <b>try</b>
+            {
+                <a href="#0e78f48cbd4a14dc" class="i field">_channel</a>.<span class="i property">Writer</span>.<a href="ChannelExtensions.cs.html#207e615945bc3029" class="i method">WriteInternal</a>(
+                    <a href="Publisher.Message.cs.html#4ef0df2b5c43ac0a" class="t t">Message</a>.<a href="Publisher.Message.cs.html#285d2e9504521d26" class="i method">Flush</a>(),
+                    <span class="r49 r">async</span>: <b>false</b>)
+                    .<a href="../Shared/TaskExtensions.cs.html#9a35b0afd931dc48" class="i method">EnsureCompleted</a>();
+            }
+            <b>catch</b>
+            {
+                <span class="c">// We&#39;d rather not have the timer flush than tear down the</span>
+                <span class="c">// process because of an unhandled exception</span>
+            }
+        }
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span> Timer
+    }
+}
+</pre></td></tr></table></div></body></html>

@@ -1,0 +1,582 @@
+﻿<!DOCTYPE html>
+<html><head><title>QueueListener.cs</title><link rel="stylesheet" href="../../../styles.css"><script src="../../../scripts.js"></script></head>
+<body class="cB" onload="i(573);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs/Shared/Queues/QueueListener.cs" target="_top">Shared\Queues\QueueListener.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs" target="_top">Microsoft.Azure.WebJobs.Extensions.Storage.Blobs\src\Microsoft.Azure.WebJobs.Extensions.Storage.Blobs.csproj</a> (Microsoft.Azure.WebJobs.Extensions.Storage.Blobs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Globalization</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Linq</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Runtime</span>.<span class="i">ExceptionServices</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Queues</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Queues</span>.<span class="i n">Models</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Common</span>.<span class="i n">Timers</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Executors</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Listeners</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Protocols</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i n">Queues</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Scale</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Timers</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Logging</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Common</span>.<span class="i n">Listeners</span>
+{
+    <b>internal sealed</b> <a href="../../P/b7371ab585831a7b.html" target="s" class="k">partial</a> <b>class</b> <a id="b7371ab585831a7b" href="../../R/b7371ab585831a7b.html" target="n" data-glyph="2,0" class="t t">QueueListener</a> : <span class="i">IListener</span>, <a href="../Timers/ITaskSeriesCommand.cs.html#fce685cfaec301c6" class="t t">ITaskSeriesCommand</a>, <a href="../INotificationCommand.cs.html#e8b5cd8295db929d" class="t t">INotificationCommand</a>, <span class="i">IScaleMonitor</span>&lt;<a href="QueueTriggerMetrics.cs.html#659c407ec0e31509" class="t t">QueueTriggerMetrics</a>&gt;
+    {
+        <b>private const int</b> <a id="bd16081183af2455" href="../../R/bd16081183af2455.html" target="n" data-glyph="10,1" class="i field">NumberOfSamplesToConsider</a> = 5;
+ 
+        <b>private readonly</b> <a href="../Timers/ITaskSeriesTimer.cs.html#28fb637976eaf134" class="t t">ITaskSeriesTimer</a> <a id="72fdee73a7e58a80" href="../../R/72fdee73a7e58a80.html" target="n" data-glyph="46,1" class="i field">_timer</a>;
+        <b>private readonly</b> <a href="../Timers/IDelayStrategy.cs.html#53308a7cff0cdf4d" class="t t">IDelayStrategy</a> <a id="3e9ecd1947a47600" href="../../R/3e9ecd1947a47600.html" target="n" data-glyph="46,1" class="i field">_delayStrategy</a>;
+        <b>private readonly</b> <a href="/Azure.Storage.Queues/A.html#9deade59b6175965" class="t t">QueueClient</a> <a id="6e9a98b31b5a2191" href="../../R/6e9a98b31b5a2191.html" target="n" data-glyph="46,1" class="i field">_queue</a>;
+        <b>private readonly</b> <a href="/Azure.Storage.Queues/A.html#9deade59b6175965" class="t t">QueueClient</a> <a id="f5e298e4420f3322" href="../../R/f5e298e4420f3322.html" target="n" data-glyph="46,1" class="i field">_poisonQueue</a>;
+        <b>private readonly</b> <a href="../Listeners/ITriggerExecutor.cs.html#7371353e2f184692" class="t t">ITriggerExecutor</a>&lt;<a href="/Azure.Storage.Queues/A.html#eb02c418d8194406" class="t t">QueueMessage</a>&gt; <a id="3dc0abcc02e99acf" href="../../R/3dc0abcc02e99acf.html" target="n" data-glyph="46,1" class="i field">_triggerExecutor</a>;
+        <b>private readonly</b> <span class="i">IWebJobsExceptionHandler</span> <a id="07e682ac7a0d5c9e" href="../../R/07e682ac7a0d5c9e.html" target="n" data-glyph="46,1" class="i field">_exceptionHandler</a>;
+        <b>private readonly</b> <a href="../IMessageEnqueuedWatcher.cs.html#44bf86d2541a35e1" class="t t">IMessageEnqueuedWatcher</a> <a id="479254d60e0e15ff" href="../../R/479254d60e0e15ff.html" target="n" data-glyph="46,1" class="i field">_sharedWatcher</a>;
+        <b>private readonly</b> <span class="i">List</span>&lt;<span class="i">Task</span>&gt; <a id="da0c8df213ea4ac3" href="../../R/da0c8df213ea4ac3.html" target="n" data-glyph="46,1" class="i field">_processing</a> = <b>new</b> <span class="i">List</span>&lt;<span class="i">Task</span>&gt;();
+        <b>private readonly object</b> <a id="ba6216e0b06619ea" href="../../R/ba6216e0b06619ea.html" target="n" data-glyph="46,1" class="i field">_stopWaitingTaskSourceLock</a> = <b>new</b> <b>object</b>();
+        <b>private readonly</b> <a href="QueuesOptions.cs.html#10aa607ae6dd925f" class="t t">QueuesOptions</a> <a id="31f264aae021745a" href="../../R/31f264aae021745a.html" target="n" data-glyph="46,1" class="i field">_queueOptions</a>;
+        <b>private readonly</b> <a href="QueueProcessor.cs.html#0d92dbb32568bea4" class="t t">QueueProcessor</a> <a id="de4fc34eb6d15691" href="../../R/de4fc34eb6d15691.html" target="n" data-glyph="46,1" class="i field">_queueProcessor</a>;
+        <b>private readonly</b> <span class="i">TimeSpan</span> <a id="1393857eb4342c81" href="../../R/1393857eb4342c81.html" target="n" data-glyph="46,1" class="i field">_visibilityTimeout</a>;
+        <b>private readonly</b> <span class="i">ILogger</span>&lt;<a href="../../P/b7371ab585831a7b.html#b7371ab585831a7b" class="t t">QueueListener</a>&gt; <a id="e7bb1e4bbc4715c0" href="../../R/e7bb1e4bbc4715c0.html" target="n" data-glyph="46,1" class="i field">_logger</a>;
+        <b>private readonly</b> <span class="i">FunctionDescriptor</span> <a id="0876828b40520870" href="../../R/0876828b40520870.html" target="n" data-glyph="46,1" class="i field">_functionDescriptor</a>;
+        <b>private readonly string</b> <a id="ab57f31004ffe307" href="../../R/ab57f31004ffe307.html" target="n" data-glyph="46,1" class="i field">_functionId</a>;
+        <b>private readonly</b> <span class="i">ScaleMonitorDescriptor</span> <a id="4809eb6dfd033ca9" href="../../R/4809eb6dfd033ca9.html" target="n" data-glyph="46,1" class="i field">_scaleMonitorDescriptor</a>;
+        <b>private readonly</b> <span class="i">CancellationTokenSource</span> <a id="3634108e0e5ccdad" href="../../R/3634108e0e5ccdad.html" target="n" data-glyph="46,1" class="i field">_shutdownCancellationTokenSource</a>;
+ 
+        <b>private bool</b>? <a id="3afe6b89975f56ea" href="../../R/3afe6b89975f56ea.html" target="n" data-glyph="46,1" class="i field">_queueExists</a>;
+        <b>private bool</b> <a id="08926eb31292c904" href="../../R/08926eb31292c904.html" target="n" data-glyph="46,1" class="i field">_foundMessageSinceLastDelay</a>;
+        <b>private bool</b> <a id="c2b216eb404f3e2f" href="../../R/c2b216eb404f3e2f.html" target="n" data-glyph="46,1" class="i field">_disposed</a>;
+        <b>private</b> <span class="i">TaskCompletionSource</span>&lt;<b>object</b>&gt; <a id="991ebb61135d5249" href="../../R/991ebb61135d5249.html" target="n" data-glyph="46,1" class="i field">_stopWaitingTaskSource</a>;
+ 
+        <span class="c">// for mock testing only</span>
+        <b>internal</b> <a id="e251a12db41249c2" href="../../R/../../0000000000.html" target="n" data-glyph="74,1" class="t constructor">QueueListener</a>()
+        {
+        }
+ 
+        <b>public</b> <a id="4d34b6854e2bffd7" href="../../R/4d34b6854e2bffd7.html" target="n" data-glyph="72,1" class="t constructor">QueueListener</a>(<a href="/Azure.Storage.Queues/A.html#9deade59b6175965" class="t t">QueueClient</a> <span id="r0 rd" class="r0 r">queue</span>,
+            <a href="/Azure.Storage.Queues/A.html#9deade59b6175965" class="t t">QueueClient</a> <span id="r1 rd" class="r1 r">poisonQueue</span>,
+            <a href="../Listeners/ITriggerExecutor.cs.html#7371353e2f184692" class="t t">ITriggerExecutor</a>&lt;<a href="/Azure.Storage.Queues/A.html#eb02c418d8194406" class="t t">QueueMessage</a>&gt; <span id="r2 rd" class="r2 r">triggerExecutor</span>,
+            <span class="i">IWebJobsExceptionHandler</span> <span id="r3 rd" class="r3 r">exceptionHandler</span>,
+            <span class="i">ILoggerFactory</span> <span id="r4 rd" class="r4 r">loggerFactory</span>,
+            <a href="SharedQueueWatcher.cs.html#85491c179e24020e" class="t t">SharedQueueWatcher</a> <span id="r5 rd" class="r5 r">sharedWatcher</span>,
+            <a href="QueuesOptions.cs.html#10aa607ae6dd925f" class="t t">QueuesOptions</a> <span id="r6 rd" class="r6 r">queueOptions</span>,
+            <a href="QueueProcessor.cs.html#0d92dbb32568bea4" class="t t">QueueProcessor</a> <span id="r7 rd" class="r7 r">queueProcessor</span>,
+            <span class="i">FunctionDescriptor</span> <span id="r8 rd" class="r8 r">functionDescriptor</span>,
+            <b>string</b> <span id="r9 rd" class="r9 r">functionId</span> = <b>null</b>,
+            <span class="i">TimeSpan</span>? <span id="r10 rd" class="r10 r">maxPollingInterval</span> = <b>null</b>)
+        {
+            <b>if</b> (<span class="r6 r">queueOptions</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r6 r">queueOptions</span>));
+            }
+ 
+            <b>if</b> (<span class="r7 r">queueProcessor</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r7 r">queueProcessor</span>));
+            }
+ 
+            <b>if</b> (<span class="r4 r">loggerFactory</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r4 r">loggerFactory</span>));
+            }
+ 
+            <b>if</b> (<span class="r6 r">queueOptions</span>.<a href="QueuesOptions.cs.html#cff646d56d719788" class="i property">BatchSize</a> &lt;= 0)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentException</span>(<span class="s">&quot;BatchSize must be greater than zero.&quot;</span>);
+            }
+ 
+            <b>if</b> (<span class="r6 r">queueOptions</span>.<a href="QueuesOptions.cs.html#f232ede31d29f8a9" class="i property">MaxDequeueCount</a> &lt;= 0)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentException</span>(<span class="s">&quot;MaxDequeueCount must be greater than zero.&quot;</span>);
+            }
+ 
+            <a href="#72fdee73a7e58a80" class="i field">_timer</a> = <b>new</b> <span class="t">TaskSeriesTimer</span>(<a href="../../P/b7371ab585831a7b.html#b7371ab585831a7b" class="k">this</a>, <span class="r3 r">exceptionHandler</span>, <span class="i">Task</span>.<span class="i">Delay</span>(0));
+            <a href="#6e9a98b31b5a2191" class="i field">_queue</a> = <span class="r0 r">queue</span>;
+            <a href="#f5e298e4420f3322" class="i field">_poisonQueue</a> = <span class="r1 r">poisonQueue</span>;
+            <a href="#3dc0abcc02e99acf" class="i field">_triggerExecutor</a> = <span class="r2 r">triggerExecutor</span>;
+            <a href="#07e682ac7a0d5c9e" class="i field">_exceptionHandler</a> = <span class="r3 r">exceptionHandler</span>;
+            <a href="#31f264aae021745a" class="i field">_queueOptions</a> = <span class="r6 r">queueOptions</span>;
+            <a href="#e7bb1e4bbc4715c0" class="i field">_logger</a> = <span class="r4 r">loggerFactory</span>.<span class="i">CreateLogger</span>&lt;<a href="../../P/b7371ab585831a7b.html#b7371ab585831a7b" class="t t">QueueListener</a>&gt;();
+            <a href="#0876828b40520870" class="i field">_functionDescriptor</a> = <span class="r8 r">functionDescriptor</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r8 r">functionDescriptor</span>));
+            <a href="#ab57f31004ffe307" class="i field">_functionId</a> = <span class="r9 r">functionId</span> ?? <a href="#0876828b40520870" class="i field">_functionDescriptor</a>.<span class="i">Id</span>;
+ 
+            <span class="c">// if the function runs longer than this, the invisibility will be updated</span>
+            <span class="c">// on a timer periodically for the duration of the function execution</span>
+            <a href="#1393857eb4342c81" class="i field">_visibilityTimeout</a> = <span class="i">TimeSpan</span>.<span class="i">FromMinutes</span>(10);
+ 
+            <b>if</b> (<span class="r5 r">sharedWatcher</span> != <b>null</b>)
+            {
+                <span class="c">// Call Notify whenever a function adds a message to this queue.</span>
+                <span class="r5 r">sharedWatcher</span>.<a href="SharedQueueWatcher.cs.html#b451145c1e24c102" class="i method">Register</a>(<span class="r0 r">queue</span>.<a href="/Azure.Storage.Queues/A.html#d1847b1478db81e4" class="i property">Name</a>, <a href="../../P/b7371ab585831a7b.html#b7371ab585831a7b" class="k">this</a>);
+                <a href="#479254d60e0e15ff" class="i field">_sharedWatcher</a> = <span class="r5 r">sharedWatcher</span>;
+            }
+ 
+            <a href="#de4fc34eb6d15691" class="i field">_queueProcessor</a> = <span class="r7 r">queueProcessor</span>;
+ 
+            <span class="i">TimeSpan</span> <span id="r11 rd" class="r11 r">maximumInterval</span> = <a href="#de4fc34eb6d15691" class="i field">_queueProcessor</a>.<a href="QueueProcessor.cs.html#47d468c1d7f5a22a" class="i property">QueuesOptions</a>.<a href="QueuesOptions.cs.html#2e3b51f0a9b1856e" class="i property">MaxPollingInterval</a>;
+            <b>if</b> (<span class="r10 r">maxPollingInterval</span>.<span class="i">HasValue</span> &amp;&amp; <span class="r11 r">maximumInterval</span> &gt; <span class="r10 r">maxPollingInterval</span>.<span class="i">Value</span>)
+            {
+                <span class="c">// enforce the maximum polling interval if specified</span>
+                <span class="r11 r">maximumInterval</span> = <span class="r10 r">maxPollingInterval</span>.<span class="i">Value</span>;
+            }
+ 
+            <a href="#3e9ecd1947a47600" class="i field">_delayStrategy</a> = <b>new</b> <a href="../Timers/RandomizedExponentialBackoffStrategy.cs.html#84a745eb56f05a88" class="t constructor">RandomizedExponentialBackoffStrategy</a>(<a href="QueuePollingIntervals.cs.html#790f6baff96d05cf" class="t t">QueuePollingIntervals</a>.<a href="QueuePollingIntervals.cs.html#ea1808363d9222e0" class="i field">Minimum</a>, <span class="r11 r">maximumInterval</span>);
+ 
+            <a href="#4809eb6dfd033ca9" class="i field">_scaleMonitorDescriptor</a> = <b>new</b> <span class="i">ScaleMonitorDescriptor</span>(<span class="s">$&quot;</span>{<a href="#ab57f31004ffe307" class="i field">_functionId</a>}<span class="s">-QueueTrigger-</span>{<a href="#6e9a98b31b5a2191" class="i field">_queue</a>.<a href="/Azure.Storage.Queues/A.html#d1847b1478db81e4" class="i property">Name</a>}<span class="s">&quot;</span>.<span class="i">ToLower</span>(<span class="i">CultureInfo</span>.<span class="i">InvariantCulture</span>));
+            <a href="#3634108e0e5ccdad" class="i field">_shutdownCancellationTokenSource</a> = <b>new</b> <span class="i">CancellationTokenSource</span>();
+        }
+ 
+        <span class="c">// for testing</span>
+        <b>internal</b> <span class="i">TimeSpan</span> <a id="ccf5e79f22bae4f7" href="../../R/ccf5e79f22bae4f7.html" target="n" data-glyph="104,1" class="i property">MinimumVisibilityRenewalInterval</a> { <b>get</b>; <b>set</b>; } = <span class="i">TimeSpan</span>.<span class="i">FromMinutes</span>(1);
+ 
+        <b>public void</b> <a id="e699a897cf71045f" href="../../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Cancel</a>()
+        {
+            <a href="#b64d75ae1924bc62" class="i method">ThrowIfDisposed</a>();
+            <a href="#72fdee73a7e58a80" class="i field">_timer</a>.<a href="../Timers/ITaskSeriesTimer.cs.html#c4e86cd328167bdf" class="i method">Cancel</a>();
+        }
+ 
+        <b>public</b> <span class="i">Task</span> <a id="ad372bb2fb438f15" href="../../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">StartAsync</a>(<span class="i">CancellationToken</span> <span id="r12 rd" class="r12 r">cancellationToken</span>)
+        {
+            <a href="#b64d75ae1924bc62" class="i method">ThrowIfDisposed</a>();
+            <a href="#72fdee73a7e58a80" class="i field">_timer</a>.<a href="../Timers/ITaskSeriesTimer.cs.html#579a4ae4f5368e7d" class="i method">Start</a>();
+            <b>return</b> <span class="i">Task</span>.<span class="i">FromResult</span>(0);
+        }
+ 
+        <b>public async</b> <span class="i">Task</span> <a id="89fda22a20b88b62" href="../../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">StopAsync</a>(<span class="i">CancellationToken</span> <span id="r13 rd" class="r13 r">cancellationToken</span>)
+        {
+            <b>using</b> (<span class="r13 r">cancellationToken</span>.<span class="i">Register</span>(() =&gt; <a href="#3634108e0e5ccdad" class="i field">_shutdownCancellationTokenSource</a>.<span class="i">Cancel</span>()))
+            {
+                <a href="#b64d75ae1924bc62" class="i method">ThrowIfDisposed</a>();
+                <a href="#72fdee73a7e58a80" class="i field">_timer</a>.<a href="../Timers/ITaskSeriesTimer.cs.html#c4e86cd328167bdf" class="i method">Cancel</a>();
+                <b>await</b> <span class="i">Task</span>.<span class="i">WhenAll</span>(<a href="#da0c8df213ea4ac3" class="i field">_processing</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <b>await</b> <a href="#72fdee73a7e58a80" class="i field">_timer</a>.<a href="../Timers/ITaskSeriesTimer.cs.html#6c7d06c14ef93375" class="i method">StopAsync</a>(<span class="r13 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+        }
+ 
+        <b>public void</b> <a id="99348cb0f785bdc0" href="../../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Dispose</a>()
+        {
+            <b>if</b> (!<a href="#c2b216eb404f3e2f" class="i field">_disposed</a>)
+            {
+                <a href="#72fdee73a7e58a80" class="i field">_timer</a>.<span class="i">Dispose</span>();
+                <a href="#3634108e0e5ccdad" class="i field">_shutdownCancellationTokenSource</a>.<span class="i">Dispose</span>();
+                <a href="#c2b216eb404f3e2f" class="i field">_disposed</a> = <b>true</b>;
+            }
+        }
+ 
+        <b>public async</b> <span class="i">Task</span>&lt;<a href="../Timers/TaskSeriesCommandResult.cs.html#82bfc030f4f50a55" class="t t">TaskSeriesCommandResult</a>&gt; <a id="11d87577d4eef56d" href="../../R/11d87577d4eef56d.html" target="n" data-glyph="72,1" class="i method">ExecuteAsync</a>(<span class="i">CancellationToken</span> <span id="r14 rd" class="r14 r">cancellationToken</span>)
+        {
+            <b>lock</b> (<a href="#ba6216e0b06619ea" class="i field">_stopWaitingTaskSourceLock</a>)
+            {
+                <b>if</b> (<a href="#991ebb61135d5249" class="i field">_stopWaitingTaskSource</a> != <b>null</b>)
+                {
+                    <a href="#991ebb61135d5249" class="i field">_stopWaitingTaskSource</a>.<span class="i">TrySetResult</span>(<b>null</b>);
+                }
+ 
+                <a href="#991ebb61135d5249" class="i field">_stopWaitingTaskSource</a> = <b>new</b> <span class="i">TaskCompletionSource</span>&lt;<b>object</b>&gt;(<span class="i">TaskCreationOptions</span>.<span class="i">RunContinuationsAsynchronously</span>);
+            }
+ 
+            <a href="/Azure.Storage.Queues/A.html#eb02c418d8194406" class="t t">QueueMessage</a>[] <span id="r15 rd" class="r15 r">batch</span> = <b>null</b>;
+            <b>string</b> <span id="r16 rd" class="r16 r">clientRequestId</span> = <span class="i">Guid</span>.<span class="i">NewGuid</span>().<span class="i">ToString</span>();
+            <span class="i">Stopwatch</span> <span id="r17 rd" class="r17 r">sw</span> = <b>null</b>;
+            <b>using</b> (<span class="i">HttpPipeline</span>.<span class="i">CreateClientRequestIdScope</span>(<span class="r16 r">clientRequestId</span>))
+            {
+                <b>try</b>
+                {
+                    <b>if</b> (!<a href="#3afe6b89975f56ea" class="i field">_queueExists</a>.<span class="i">HasValue</span> || !<a href="#3afe6b89975f56ea" class="i field">_queueExists</a>.<span class="i">Value</span>)
+                    {
+                        <span class="c">// Before querying the queue, determine if it exists. This</span>
+                        <span class="c">// avoids generating unecessary exceptions (which pollute AppInsights logs)</span>
+                        <span class="c">// Once we establish the queue exists, we won&#39;t do the existence</span>
+                        <span class="c">// check anymore (steady state).</span>
+                        <span class="c">// However the queue can always be deleted from underneath us, in which case</span>
+                        <span class="c">// we need to recheck. That is handled below.</span>
+                        <a href="#3afe6b89975f56ea" class="i field">_queueExists</a> = <b>await</b> <a href="#6e9a98b31b5a2191" class="i field">_queue</a>.<span class="i">ExistsAsync</span>(<span class="r14 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    }
+ 
+                    <b>if</b> (<a href="#3afe6b89975f56ea" class="i field">_queueExists</a>.<span class="i">Value</span>)
+                    {
+                        <span class="r17 r">sw</span> = <span class="i">Stopwatch</span>.<span class="i">StartNew</span>();
+ 
+                        <span class="i">Response</span>&lt;<a href="/Azure.Storage.Queues/A.html#eb02c418d8194406" class="t t">QueueMessage</a>[]&gt; <span id="r18 rd" class="r18 r">response</span> = <b>await</b> <a href="#6e9a98b31b5a2191" class="i field">_queue</a>.<span class="i">ReceiveMessagesAsync</span>(<a href="#de4fc34eb6d15691" class="i field">_queueProcessor</a>.<a href="QueueProcessor.cs.html#47d468c1d7f5a22a" class="i property">QueuesOptions</a>.<a href="QueuesOptions.cs.html#cff646d56d719788" class="i property">BatchSize</a>, <a href="#1393857eb4342c81" class="i field">_visibilityTimeout</a>, <span class="r14 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        <span class="r15 r">batch</span> = <span class="r18 r">response</span>.<span class="i">Value</span>;
+ 
+                        <b>int</b> <span id="r19 rd" class="r19 r">count</span> = <span class="r15 r">batch</span>?.<span class="i">Length</span> ?? -1;
+                        <a href="QueueListener.Logger.cs.html#517163b3fed72e5c" class="t t">Logger</a>.<span class="i">GetMessages</span>(<a href="#e7bb1e4bbc4715c0" class="i field">_logger</a>, <a href="#0876828b40520870" class="i field">_functionDescriptor</a>.<span class="i">LogName</span>, <a href="#6e9a98b31b5a2191" class="i field">_queue</a>.<a href="/Azure.Storage.Queues/A.html#d1847b1478db81e4" class="i property">Name</a>, <span class="r18 r">response</span>.<span class="i">GetRawResponse</span>().<span class="i">ClientRequestId</span>, <span class="r19 r">count</span>, <span class="r17 r">sw</span>.<span class="i">ElapsedMilliseconds</span>);
+                    }
+                }
+                <b>catch</b> (<span class="i">RequestFailedException</span> <span id="r20 rd" class="r20 r">exception</span>)
+                {
+                    <span class="c">// if we get ANY errors querying the queue reset our existence check</span>
+                    <span class="c">// doing this on all errors rather than trying to special case not</span>
+                    <span class="c">// found, because correctness is the most important thing here</span>
+                    <a href="#3afe6b89975f56ea" class="i field">_queueExists</a> = <b>null</b>;
+ 
+                    <b>if</b> (<span class="r20 r">exception</span>.<a href="../RequestFailedExceptionExtensions.cs.html#adf2314e425eb5c6" class="i method">IsNotFoundQueueNotFound</a>() ||
+                        <span class="r20 r">exception</span>.<a href="../RequestFailedExceptionExtensions.cs.html#61397ad582828081" class="i method">IsConflictQueueBeingDeletedOrDisabled</a>() ||
+                        <span class="r20 r">exception</span>.<a href="../RequestFailedExceptionExtensions.cs.html#ec7088c0946272ea" class="i method">IsServerSideError</a>())
+                    {
+                        <b>long</b> <span id="r21 rd" class="r21 r">pollLatency</span> = <span class="r17 r">sw</span>?.<span class="i">ElapsedMilliseconds</span> ?? -1;
+                        <a href="QueueListener.Logger.cs.html#517163b3fed72e5c" class="t t">Logger</a>.<span class="i">HandlingStorageException</span>(<a href="#e7bb1e4bbc4715c0" class="i field">_logger</a>, <a href="#0876828b40520870" class="i field">_functionDescriptor</a>.<span class="i">LogName</span>, <a href="#6e9a98b31b5a2191" class="i field">_queue</a>.<a href="/Azure.Storage.Queues/A.html#d1847b1478db81e4" class="i property">Name</a>, <span class="r16 r">clientRequestId</span>, <span class="r21 r">pollLatency</span>, <span class="r20 r">exception</span>);
+ 
+                        <span class="c">// Back off when no message is available, or when</span>
+                        <span class="c">// transient errors occur</span>
+                        <b>return</b> <a href="#701cfe924d0a5a65" class="i method">CreateBackoffResult</a>();
+                    }
+                    <b>else</b>
+                    {
+                        <b>throw</b>;
+                    }
+                }
+            }
+ 
+            <b>if</b> (<span class="r15 r">batch</span> == <b>null</b>)
+            {
+                <b>return</b> <a href="#701cfe924d0a5a65" class="i method">CreateBackoffResult</a>();
+            }
+ 
+            <b>bool</b> <span id="r22 rd" class="r22 r">foundMessage</span> = <b>false</b>;
+            <b>foreach</b> (<a href="/Azure.Storage.Queues/A.html#eb02c418d8194406" class="k">var</a> <span id="r23 rd" class="r23 r">message</span> <b>in</b> <span class="r15 r">batch</span>)
+            {
+                <b>if</b> (<span class="r23 r">message</span> == <b>null</b>)
+                {
+                    <b>continue</b>;
+                }
+ 
+                <span class="r22 r">foundMessage</span> = <b>true</b>;
+ 
+                <span class="c">// Note: Capturing the cancellationToken passed here on a task that continues to run is a slight abuse</span>
+                <span class="c">// of the cancellation token contract. However, the timer implementation would not dispose of the</span>
+                <span class="c">// cancellation token source until it has stopped and perhaps also disposed, and we wait for all</span>
+                <span class="c">// outstanding tasks to complete before stopping the timer.</span>
+                <span class="i">Task</span> <span id="r24 rd" class="r24 r">task</span> = <a href="#9a77634484d4ba0d" class="i method">ProcessMessageAsync</a>(<span class="r23 r">message</span>, <a href="#1393857eb4342c81" class="i field">_visibilityTimeout</a>, <span class="r14 r">cancellationToken</span>);
+ 
+                <span class="c">// Having both WaitForNewBatchThreshold and this method mutate _processing is safe because the timer</span>
+                <span class="c">// contract is serial: it only calls ExecuteAsync once the wait expires (and the wait won&#39;t expire until</span>
+                <span class="c">// WaitForNewBatchThreshold has finished mutating _processing).</span>
+                <a href="#da0c8df213ea4ac3" class="i field">_processing</a>.<span class="i">Add</span>(<span class="r24 r">task</span>);
+            }
+ 
+            <span class="c">// Back off when no message was found.</span>
+            <b>if</b> (!<span class="r22 r">foundMessage</span>)
+            {
+                <b>return</b> <a href="#701cfe924d0a5a65" class="i method">CreateBackoffResult</a>();
+            }
+ 
+            <a href="#08926eb31292c904" class="i field">_foundMessageSinceLastDelay</a> = <b>true</b>;
+            <b>return</b> <a href="#3ae0b798ffd05b8e" class="i method">CreateSucceededResult</a>();
+        }
+ 
+        <b>public void</b> <a id="dc219efa9215d602" href="../../R/dc219efa9215d602.html" target="n" data-glyph="72,1" class="i method">Notify</a>()
+        {
+            <b>lock</b> (<a href="#ba6216e0b06619ea" class="i field">_stopWaitingTaskSourceLock</a>)
+            {
+                <b>if</b> (<a href="#991ebb61135d5249" class="i field">_stopWaitingTaskSource</a> != <b>null</b>)
+                {
+                    <a href="#991ebb61135d5249" class="i field">_stopWaitingTaskSource</a>.<span class="i">TrySetResult</span>(<b>null</b>);
+                }
+            }
+        }
+ 
+        <b>private</b> <span class="i">Task</span> <a id="6e7d6c233de77d72" href="../../R/6e7d6c233de77d72.html" target="n" data-glyph="76,1" class="i method">CreateDelayWithNotificationTask</a>()
+        {
+            <span class="i">TimeSpan</span> <span id="r25 rd" class="r25 r">nextDelay</span> = <a href="#3e9ecd1947a47600" class="i field">_delayStrategy</a>.<a href="../Timers/IDelayStrategy.cs.html#5b2cccf5f6d2f98d" class="i method">GetNextDelay</a>(<span class="r26 r">executionSucceeded</span>: <a href="#08926eb31292c904" class="i field">_foundMessageSinceLastDelay</a>);
+            <span class="i">Task</span> <span id="r27 rd" class="r27 r">normalDelay</span> = <span class="i">Task</span>.<span class="i">Delay</span>(<span class="r25 r">nextDelay</span>);
+            <a href="#08926eb31292c904" class="i field">_foundMessageSinceLastDelay</a> = <b>false</b>;
+ 
+            <a href="QueueListener.Logger.cs.html#517163b3fed72e5c" class="t t">Logger</a>.<span class="i">BackoffDelay</span>(<a href="#e7bb1e4bbc4715c0" class="i field">_logger</a>, <a href="#0876828b40520870" class="i field">_functionDescriptor</a>.<span class="i">LogName</span>, <a href="#6e9a98b31b5a2191" class="i field">_queue</a>.<a href="/Azure.Storage.Queues/A.html#d1847b1478db81e4" class="i property">Name</a>, <span class="r25 r">nextDelay</span>.<span class="i">TotalMilliseconds</span>);
+ 
+            <b>return</b> <span class="i">Task</span>.<span class="i">WhenAny</span>(<a href="#991ebb61135d5249" class="i field">_stopWaitingTaskSource</a>.<span class="i">Task</span>, <span class="r27 r">normalDelay</span>);
+        }
+ 
+        <b>private</b> <a href="../Timers/TaskSeriesCommandResult.cs.html#82bfc030f4f50a55" class="t t">TaskSeriesCommandResult</a> <a id="701cfe924d0a5a65" href="../../R/701cfe924d0a5a65.html" target="n" data-glyph="76,1" class="i method">CreateBackoffResult</a>()
+        {
+            <b>return</b> <b>new</b> <a href="../Timers/TaskSeriesCommandResult.cs.html#e6f28a449f351080" class="t constructor">TaskSeriesCommandResult</a>(<span class="r28 r">wait</span>: <a href="#6e7d6c233de77d72" class="i method">CreateDelayWithNotificationTask</a>());
+        }
+ 
+        <b>private</b> <a href="../Timers/TaskSeriesCommandResult.cs.html#82bfc030f4f50a55" class="t t">TaskSeriesCommandResult</a> <a id="3ae0b798ffd05b8e" href="../../R/3ae0b798ffd05b8e.html" target="n" data-glyph="76,1" class="i method">CreateSucceededResult</a>()
+        {
+            <span class="i">Task</span> <span id="r29 rd" class="r29 r">wait</span> = <a href="#714075c8bd5eed23" class="i method">WaitForNewBatchThreshold</a>();
+            <b>return</b> <b>new</b> <a href="../Timers/TaskSeriesCommandResult.cs.html#e6f28a449f351080" class="t constructor">TaskSeriesCommandResult</a>(<span class="r29 r">wait</span>);
+        }
+ 
+        <b>private async</b> <span class="i">Task</span> <a id="714075c8bd5eed23" href="../../R/714075c8bd5eed23.html" target="n" data-glyph="76,1" class="i method">WaitForNewBatchThreshold</a>()
+        {
+            <b>while</b> (<a href="#da0c8df213ea4ac3" class="i field">_processing</a>.<span class="i">Count</span> &gt; <a href="#de4fc34eb6d15691" class="i field">_queueProcessor</a>.<a href="QueueProcessor.cs.html#47d468c1d7f5a22a" class="i property">QueuesOptions</a>.<a href="QueuesOptions.cs.html#ca82c7161a128734" class="i property">NewBatchThreshold</a>)
+            {
+                <span class="i">Task</span> <span id="r30 rd" class="r30 r">processed</span> = <b>await</b> <span class="i">Task</span>.<span class="i">WhenAny</span>(<a href="#da0c8df213ea4ac3" class="i field">_processing</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <a href="#da0c8df213ea4ac3" class="i field">_processing</a>.<span class="i">Remove</span>(<span class="r30 r">processed</span>);
+            }
+        }
+ 
+        <b>internal async</b> <span class="i">Task</span> <a id="9a77634484d4ba0d" href="../../R/9a77634484d4ba0d.html" target="n" data-glyph="74,1" class="i method">ProcessMessageAsync</a>(<a href="/Azure.Storage.Queues/A.html#eb02c418d8194406" class="t t">QueueMessage</a> <span id="r31 rd" class="r31 r">message</span>, <span class="i">TimeSpan</span> <span id="r32 rd" class="r32 r">visibilityTimeout</span>, <span class="i">CancellationToken</span> <span id="r33 rd" class="r33 r">cancellationToken</span>)
+        {
+            <b>try</b>
+            {
+                <b>if</b> (!<b>await</b> <a href="#de4fc34eb6d15691" class="i field">_queueProcessor</a>.<a href="QueueProcessor.cs.html#288b9822354bf3c6" class="i method">BeginProcessingMessageAsync</a>(<span class="r31 r">message</span>, <span class="r33 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>))
+                {
+                    <b>return</b>;
+                }
+ 
+                <span class="i">FunctionResult</span> <span id="r34 rd" class="r34 r">result</span> = <b>null</b>;
+                <span class="i">Action</span>&lt;<a href="/Azure.Storage.Queues/A.html#a622bf5746390785" class="t t">UpdateReceipt</a>&gt; <span id="r35 rd" class="r35 r">onUpdateReceipt</span> = <span id="r36 rd" class="r36 r">updateReceipt</span> =&gt; { <span class="r31 r">message</span> = <span class="r31 r">message</span>.<span class="i">Update</span>(<span class="r36 r">updateReceipt</span>); };
+                <b>using</b> (<a href="../Timers/ITaskSeriesTimer.cs.html#28fb637976eaf134" class="t t">ITaskSeriesTimer</a> <span id="r37 rd" class="r37 r">timer</span> = <a href="#3cd447d2bb20d014" class="i method">CreateUpdateMessageVisibilityTimer</a>(<a href="#6e9a98b31b5a2191" class="i field">_queue</a>, <span class="r31 r">message</span>, <span class="r32 r">visibilityTimeout</span>, <a href="#07e682ac7a0d5c9e" class="i field">_exceptionHandler</a>, <span class="r35 r">onUpdateReceipt</span>))
+                {
+                    <span class="r37 r">timer</span>.<a href="../Timers/ITaskSeriesTimer.cs.html#579a4ae4f5368e7d" class="i method">Start</a>();
+ 
+                    <span class="r34 r">result</span> = <b>await</b> <a href="#3dc0abcc02e99acf" class="i field">_triggerExecutor</a>.<a href="../Listeners/ITriggerExecutor.cs.html#7022f6d9e9487c01" class="i method">ExecuteAsync</a>(<span class="r31 r">message</span>, <span class="r33 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                    <b>await</b> <span class="r37 r">timer</span>.<a href="../Timers/ITaskSeriesTimer.cs.html#6c7d06c14ef93375" class="i method">StopAsync</a>(<span class="r33 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+ 
+                <span class="c">// Use a different cancellation token for shutdown to allow graceful shutdown.</span>
+                <span class="c">// Specifically, don&#39;t cancel the completion or update of the message itself during graceful shutdown.</span>
+                <span class="c">// Only cancel completion or update of the message if a non-graceful shutdown is requested via _shutdownCancellationTokenSource.</span>
+                <b>await</b> <a href="#de4fc34eb6d15691" class="i field">_queueProcessor</a>.<span class="i">CompleteProcessingMessageAsync</span>(<span class="r31 r">message</span>, <span class="r34 r">result</span>, <a href="#3634108e0e5ccdad" class="i field">_shutdownCancellationTokenSource</a>.<span class="i">Token</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>catch</b> (<span class="i">TaskCanceledException</span>)
+            {
+                <span class="c">// Don&#39;t fail the top-level task when an inner task cancels.</span>
+            }
+            <b>catch</b> (<span class="i">OperationCanceledException</span>)
+            {
+                <span class="c">// Don&#39;t fail the top-level task when an inner task cancels.</span>
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r38 rd" class="r38 r">exception</span>)
+            {
+                <span class="c">// Immediately report any unhandled exception from this background task.</span>
+                <span class="c">// (Don&#39;t capture the exception as a fault of this Task; that would delay any exception reporting until</span>
+                <span class="c">// Stop is called, which might never happen.)</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">AZC0103</span> <span class="c">// Do not wait synchronously in asynchronous scope.</span>
+                <a href="#07e682ac7a0d5c9e" class="i field">_exceptionHandler</a>.<span class="i">OnUnhandledExceptionAsync</span>(<span class="i">ExceptionDispatchInfo</span>.<span class="i">Capture</span>(<span class="r38 r">exception</span>)).<span class="i">GetAwaiter</span>().<span class="i">GetResult</span>();
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">AZC0103</span> <span class="c">// Do not wait synchronously in asynchronous scope.</span>
+            }
+        }
+ 
+        <b>private</b> <a href="../Timers/ITaskSeriesTimer.cs.html#28fb637976eaf134" class="t t">ITaskSeriesTimer</a> <a id="3cd447d2bb20d014" href="../../R/3cd447d2bb20d014.html" target="n" data-glyph="76,1" class="i method">CreateUpdateMessageVisibilityTimer</a>(<a href="/Azure.Storage.Queues/A.html#9deade59b6175965" class="t t">QueueClient</a> <span id="r39 rd" class="r39 r">queue</span>,
+            <a href="/Azure.Storage.Queues/A.html#eb02c418d8194406" class="t t">QueueMessage</a> <span id="r40 rd" class="r40 r">message</span>, <span class="i">TimeSpan</span> <span id="r41 rd" class="r41 r">visibilityTimeout</span>,
+            <span class="i">IWebJobsExceptionHandler</span> <span id="r42 rd" class="r42 r">exceptionHandler</span>, <span class="i">Action</span>&lt;<a href="/Azure.Storage.Queues/A.html#a622bf5746390785" class="t t">UpdateReceipt</a>&gt; <span id="r43 rd" class="r43 r">onUpdateReceipt</span>)
+        {
+            <span class="c">// Update a message&#39;s visibility when it is halfway to expiring.</span>
+            <span class="i">TimeSpan</span> <span id="r44 rd" class="r44 r">normalUpdateInterval</span> = <b>new</b> <span class="i">TimeSpan</span>(<span class="r41 r">visibilityTimeout</span>.<span class="i">Ticks</span> / 2);
+ 
+            <a href="../Timers/IDelayStrategy.cs.html#53308a7cff0cdf4d" class="t t">IDelayStrategy</a> <span id="r45 rd" class="r45 r">speedupStrategy</span> = <b>new</b> <a href="../Timers/LinearSpeedupStrategy.cs.html#e895f450194a97e9" class="t constructor">LinearSpeedupStrategy</a>(<span class="r44 r">normalUpdateInterval</span>, <a href="#ccf5e79f22bae4f7" class="i property">MinimumVisibilityRenewalInterval</a>);
+            <a href="../Timers/ITaskSeriesCommand.cs.html#fce685cfaec301c6" class="t t">ITaskSeriesCommand</a> <span id="r46 rd" class="r46 r">command</span> = <b>new</b> <a href="../UpdateQueueMessageVisibilityCommand.cs.html#7e538d7aeaab5db0" class="t constructor">UpdateQueueMessageVisibilityCommand</a>(<span class="r39 r">queue</span>, <span class="r40 r">message</span>, <span class="r41 r">visibilityTimeout</span>, <span class="r45 r">speedupStrategy</span>, <span class="r43 r">onUpdateReceipt</span>);
+            <b>return</b> <b>new</b> <span class="t">TaskSeriesTimer</span>(<span class="r46 r">command</span>, <span class="r42 r">exceptionHandler</span>, <span class="i">Task</span>.<span class="i">Delay</span>(<span class="r44 r">normalUpdateInterval</span>));
+        }
+ 
+        <b>private void</b> <a id="b64d75ae1924bc62" href="../../R/b64d75ae1924bc62.html" target="n" data-glyph="76,1" class="i method">ThrowIfDisposed</a>()
+        {
+            <b>if</b> (<a href="#c2b216eb404f3e2f" class="i field">_disposed</a>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ObjectDisposedException</span>(<b>null</b>);
+            }
+        }
+ 
+        <b>internal static void</b> <a id="9c9bab45fef0f1d3" href="../../R/9c9bab45fef0f1d3.html" target="n" data-glyph="74,1" class="i method">RegisterSharedWatcherWithQueueProcessor</a>(<a href="QueueProcessor.cs.html#0d92dbb32568bea4" class="t t">QueueProcessor</a> <span id="r47 rd" class="r47 r">queueProcessor</span>, <a href="../IMessageEnqueuedWatcher.cs.html#44bf86d2541a35e1" class="t t">IMessageEnqueuedWatcher</a> <span id="r48 rd" class="r48 r">sharedWatcher</span>)
+        {
+            <b>if</b> (<span class="r48 r">sharedWatcher</span> != <b>null</b>)
+            {
+                <span class="i">EventHandler</span>&lt;<a href="PoisonMessageEventArgs.cs.html#c58a7a94e76e400d" class="t t">PoisonMessageEventArgs</a>&gt; <span id="r49 rd" class="r49 r">poisonMessageEventHandler</span> = (<b>object</b> <span id="r50 rd" class="r50 r">sender</span>, <a href="PoisonMessageEventArgs.cs.html#c58a7a94e76e400d" class="t t">PoisonMessageEventArgs</a> <span id="r51 rd" class="r51 r">e</span>) =&gt;
+                {
+                    <span class="r48 r">sharedWatcher</span>.<a href="../IMessageEnqueuedWatcher.cs.html#3cd43e78bb2309fb" class="i method">Notify</a>(<span class="r51 r">e</span>.<a href="PoisonMessageEventArgs.cs.html#21667e6c14a91470" class="i property">PoisonQueue</a>.<a href="/Azure.Storage.Queues/A.html#d1847b1478db81e4" class="i property">Name</a>);
+                };
+                <span class="r47 r">queueProcessor</span>.<a href="QueueProcessor.cs.html#0fd6c50d6d58ed1d" class="i">MessageAddedToPoisonQueue</a> += <span class="r49 r">poisonMessageEventHandler</span>;
+            }
+        }
+ 
+        <b>public</b> <span class="i">ScaleMonitorDescriptor</span> <a id="67ab60cf23f0a347" href="../../R/../../0000000000.html" target="n" data-glyph="102,1" class="i property">Descriptor</a>
+        {
+            <b>get</b>
+            {
+                <b>return</b> <a href="#4809eb6dfd033ca9" class="i field">_scaleMonitorDescriptor</a>;
+            }
+        }
+ 
+        <b>async</b> <span class="i">Task</span>&lt;<span class="i">ScaleMetrics</span>&gt; <span class="i">IScaleMonitor</span>.<a id="88e41d2353b32c35" href="../../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">GetMetricsAsync</a>()
+        {
+            <b>return</b> <b>await</b> <a href="#721b1c583ff475bf" class="i method">GetMetricsAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+        }
+ 
+        <b>public async</b> <span class="i">Task</span>&lt;<a href="QueueTriggerMetrics.cs.html#659c407ec0e31509" class="t t">QueueTriggerMetrics</a>&gt; <a id="721b1c583ff475bf" href="../../R/721b1c583ff475bf.html" target="n" data-glyph="72,1" class="i method">GetMetricsAsync</a>()
+        {
+            <b>int</b> <span id="r52 rd" class="r52 r">queueLength</span> = 0;
+            <span class="i">TimeSpan</span> <span id="r53 rd" class="r53 r">queueTime</span> = <span class="i">TimeSpan</span>.<span class="i">Zero</span>;
+ 
+            <b>try</b>
+            {
+                <a href="/Azure.Storage.Queues/A.html#a96be88bfc5ec2b4" class="t t">QueueProperties</a> <span id="r54 rd" class="r54 r">queueProperties</span> = <b>await</b> <a href="#6e9a98b31b5a2191" class="i field">_queue</a>.<span class="i">GetPropertiesAsync</span>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <span class="r52 r">queueLength</span> = <span class="r54 r">queueProperties</span>.<a href="/Azure.Storage.Queues/A.html#500a3d711e07d8c4" class="i property">ApproximateMessagesCount</a>;
+ 
+                <b>if</b> (<span class="r52 r">queueLength</span> &gt; 0)
+                {
+                    <a href="/Azure.Storage.Queues/A.html#e32155654252c9e5" class="t t">PeekedMessage</a> <span id="r55 rd" class="r55 r">message</span> = (<b>await</b> <a href="#6e9a98b31b5a2191" class="i field">_queue</a>.<span class="i">PeekMessagesAsync</span>(1).<span class="i">ConfigureAwait</span>(<b>false</b>)).<span class="i">Value</span>.<span class="i">FirstOrDefault</span>();
+                    <b>if</b> (<span class="r55 r">message</span> != <b>null</b>)
+                    {
+                        <b>if</b> (<span class="r55 r">message</span>.<a href="/Azure.Storage.Queues/A.html#45562f656b2e47e7" class="i property">InsertedOn</a>.<span class="i">HasValue</span>)
+                        {
+                            <span class="r53 r">queueTime</span> = <span class="i">DateTime</span>.<span class="i">UtcNow</span>.<span class="i">Subtract</span>(<span class="r55 r">message</span>.<a href="/Azure.Storage.Queues/A.html#45562f656b2e47e7" class="i property">InsertedOn</a>.<span class="i">Value</span>.<span class="i">DateTime</span>);
+                        }
+                    }
+                    <b>else</b>
+                    {
+                        <span class="c">// ApproximateMessageCount often returns a stale value,</span>
+                        <span class="c">// especially when the queue is empty.</span>
+                        <span class="r52 r">queueLength</span> = 0;
+                    }
+                }
+            }
+            <b>catch</b> (<span class="i">RequestFailedException</span> <span id="r56 rd" class="r56 r">ex</span>)
+            {
+                <b>if</b> (<span class="r56 r">ex</span>.<a href="../RequestFailedExceptionExtensions.cs.html#adf2314e425eb5c6" class="i method">IsNotFoundQueueNotFound</a>() ||
+                    <span class="r56 r">ex</span>.<a href="../RequestFailedExceptionExtensions.cs.html#61397ad582828081" class="i method">IsConflictQueueBeingDeletedOrDisabled</a>() ||
+                    <span class="r56 r">ex</span>.<a href="../RequestFailedExceptionExtensions.cs.html#ec7088c0946272ea" class="i method">IsServerSideError</a>())
+                {
+                    <span class="c">// ignore transient errors, and return default metrics</span>
+                    <span class="c">// E.g. if the queue doesn&#39;t exist, we&#39;ll return a zero queue length</span>
+                    <span class="c">// and scale in</span>
+                    <a href="#e7bb1e4bbc4715c0" class="i field">_logger</a>.<span class="i">LogWarning</span>(<span class="s">$&quot;</span><span class="s">Error querying for queue scale status: </span>{<span class="r56 r">ex</span>.<span class="i">Message</span>}<span class="s">&quot;</span>);
+                }
+            }
+ 
+            <b>return</b> <b>new</b> <span class="t">QueueTriggerMetrics</span>
+            {
+                <a href="QueueTriggerMetrics.cs.html#842d51d300d38b73" class="i property">QueueLength</a> = <span class="r52 r">queueLength</span>,
+                <a href="QueueTriggerMetrics.cs.html#1661a953d206d825" class="i property">QueueTime</a> = <span class="r53 r">queueTime</span>,
+                <span class="i">Timestamp</span> = <span class="i">DateTime</span>.<span class="i">UtcNow</span>
+            };
+        }
+ 
+        <span class="i">ScaleStatus</span> <span class="i">IScaleMonitor</span>.<a id="236ddb6425c073d5" href="../../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">GetScaleStatus</a>(<span class="i">ScaleStatusContext</span> <span id="r57 rd" class="r57 r">context</span>)
+        {
+            <b>return</b> <span class="i">GetScaleStatusCore</span>(<span class="r57 r">context</span>.<span class="i">WorkerCount</span>, <span class="r57 r">context</span>.<span class="i">Metrics</span>?.<span class="i">Cast</span>&lt;<a href="QueueTriggerMetrics.cs.html#659c407ec0e31509" class="t t">QueueTriggerMetrics</a>&gt;().<span class="i">ToArray</span>());
+        }
+ 
+        <b>public</b> <span class="i">ScaleStatus</span> <a id="c45a601b2f2dcbb1" href="../../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetScaleStatus</a>(<span class="i">ScaleStatusContext</span>&lt;<a href="QueueTriggerMetrics.cs.html#659c407ec0e31509" class="t t">QueueTriggerMetrics</a>&gt; <span id="r58 rd" class="r58 r">context</span>)
+        {
+            <b>return</b> <span class="i">GetScaleStatusCore</span>(<span class="r58 r">context</span>.<span class="i">WorkerCount</span>, <span class="r58 r">context</span>.<span class="i">Metrics</span>?.<span class="i">ToArray</span>());
+        }
+ 
+        <b>private</b> <span class="i">ScaleStatus</span> <a id="4289a66c0b7b9c03" href="../../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">GetScaleStatusCore</a>(<b>int</b> <span id="r59 rd" class="r59 r">workerCount</span>, <a href="QueueTriggerMetrics.cs.html#659c407ec0e31509" class="t t">QueueTriggerMetrics</a>[] <span id="r60 rd" class="r60 r">metrics</span>)
+        {
+            <span class="i">ScaleStatus</span> <span id="r61 rd" class="r61 r">status</span> = <b>new</b> <span class="i">ScaleStatus</span>
+            {
+                <span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">None</span>
+            };
+ 
+            <span class="c">// verify we have enough samples to make a scale decision.</span>
+            <b>if</b> (<span class="r60 r">metrics</span> == <b>null</b> || (<span class="r60 r">metrics</span>.<span class="i">Length</span> &lt; <a href="#bd16081183af2455" class="i field">NumberOfSamplesToConsider</a>))
+            {
+                <b>return</b> <span class="r61 r">status</span>;
+            }
+ 
+            <span class="c">// Maintain a minimum ratio of 1 worker per 1,000 queue messages.</span>
+            <b>long</b> <span id="r62 rd" class="r62 r">latestQueueLength</span> = <span class="r60 r">metrics</span>.<span class="i">Last</span>().<span class="i">QueueLength</span>;
+            <b>if</b> (<span class="r62 r">latestQueueLength</span> &gt; <span class="r59 r">workerCount</span> * 1000)
+            {
+                <span class="r61 r">status</span>.<span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">ScaleOut</span>;
+                <a href="#e7bb1e4bbc4715c0" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">QueueLength (</span>{<span class="r62 r">latestQueueLength</span>}<span class="s">) &gt; workerCount (</span>{<span class="r59 r">workerCount</span>}<span class="s">) * 1,000</span><span class="s">&quot;</span>);
+                <a href="#e7bb1e4bbc4715c0" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Length of queue (</span>{<a href="#6e9a98b31b5a2191" class="i field">_queue</a>.<a href="/Azure.Storage.Queues/A.html#d1847b1478db81e4" class="i property">Name</a>}<span class="s">, </span>{<span class="r62 r">latestQueueLength</span>}<span class="s">) is too high relative to the number of instances (</span>{<span class="r59 r">workerCount</span>}<span class="s">).</span><span class="s">&quot;</span>);
+                <b>return</b> <span class="r61 r">status</span>;
+            }
+ 
+            <span class="c">// Check to see if the queue has been empty for a while.</span>
+            <b>bool</b> <span id="r63 rd" class="r63 r">queueIsIdle</span> = <span class="r60 r">metrics</span>.<span class="i">All</span>(<span id="r64 rd" class="r64 r">p</span> =&gt; <span class="r64 r">p</span>.<span class="i">QueueLength</span> == 0);
+            <b>if</b> (<span class="r63 r">queueIsIdle</span>)
+            {
+                <span class="r61 r">status</span>.<span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">ScaleIn</span>;
+                <a href="#e7bb1e4bbc4715c0" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Queue &#39;</span>{<a href="#6e9a98b31b5a2191" class="i field">_queue</a>.<a href="/Azure.Storage.Queues/A.html#d1847b1478db81e4" class="i property">Name</a>}<span class="s">&#39; is idle</span><span class="s">&quot;</span>);
+                <b>return</b> <span class="r61 r">status</span>;
+            }
+ 
+            <span class="c">// Samples are in chronological order. Check for a continuous increase in time or length.</span>
+            <span class="c">// If detected, this results in an automatic scale out.</span>
+            <b>if</b> (<span class="r60 r">metrics</span>[0].<a href="QueueTriggerMetrics.cs.html#842d51d300d38b73" class="i property">QueueLength</a> &gt; 0)
+            {
+                <b>bool</b> <span id="r65 rd" class="r65 r">queueLengthIncreasing</span> =
+                <span class="i">IsTrueForLastN</span>(
+                    <span class="r60 r">metrics</span>,
+                    <a href="#bd16081183af2455" class="i field">NumberOfSamplesToConsider</a>,
+                    (<span id="r66 rd" class="r66 r">prev</span>, <span id="r67 rd" class="r67 r">next</span>) =&gt; <span class="r66 r">prev</span>.<span class="i">QueueLength</span> &lt; <span class="r67 r">next</span>.<span class="i">QueueLength</span>);
+                <b>if</b> (<span class="r65 r">queueLengthIncreasing</span>)
+                {
+                    <span class="r61 r">status</span>.<span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">ScaleOut</span>;
+                    <a href="#e7bb1e4bbc4715c0" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Queue length is increasing for &#39;</span>{<a href="#6e9a98b31b5a2191" class="i field">_queue</a>.<a href="/Azure.Storage.Queues/A.html#d1847b1478db81e4" class="i property">Name</a>}<span class="s">&#39;</span><span class="s">&quot;</span>);
+                    <b>return</b> <span class="r61 r">status</span>;
+                }
+            }
+ 
+            <b>if</b> (<span class="r60 r">metrics</span>[0].<a href="QueueTriggerMetrics.cs.html#1661a953d206d825" class="i property">QueueTime</a> &gt; <span class="i">TimeSpan</span>.<span class="i">Zero</span> &amp;&amp; <span class="r60 r">metrics</span>[0].<a href="QueueTriggerMetrics.cs.html#1661a953d206d825" class="i property">QueueTime</a> &lt; <span class="r60 r">metrics</span>[<a href="#bd16081183af2455" class="i field">NumberOfSamplesToConsider</a> - 1].<a href="QueueTriggerMetrics.cs.html#1661a953d206d825" class="i property">QueueTime</a>)
+            {
+                <b>bool</b> <span id="r68 rd" class="r68 r">queueTimeIncreasing</span> =
+                    <span class="i">IsTrueForLastN</span>(
+                        <span class="r60 r">metrics</span>,
+                        <a href="#bd16081183af2455" class="i field">NumberOfSamplesToConsider</a>,
+                        (<span id="r69 rd" class="r69 r">prev</span>, <span id="r70 rd" class="r70 r">next</span>) =&gt; <span class="r69 r">prev</span>.<span class="i">QueueTime</span> &lt;= <span class="r70 r">next</span>.<span class="i">QueueTime</span>);
+                <b>if</b> (<span class="r68 r">queueTimeIncreasing</span>)
+                {
+                    <span class="r61 r">status</span>.<span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">ScaleOut</span>;
+                    <a href="#e7bb1e4bbc4715c0" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Queue time is increasing for &#39;</span>{<a href="#6e9a98b31b5a2191" class="i field">_queue</a>.<a href="/Azure.Storage.Queues/A.html#d1847b1478db81e4" class="i property">Name</a>}<span class="s">&#39;</span><span class="s">&quot;</span>);
+                    <b>return</b> <span class="r61 r">status</span>;
+                }
+            }
+ 
+            <b>bool</b> <span id="r71 rd" class="r71 r">queueLengthDecreasing</span> =
+                <span class="i">IsTrueForLastN</span>(
+                    <span class="r60 r">metrics</span>,
+                    <a href="#bd16081183af2455" class="i field">NumberOfSamplesToConsider</a>,
+                    (<span id="r72 rd" class="r72 r">prev</span>, <span id="r73 rd" class="r73 r">next</span>) =&gt; <span class="r72 r">prev</span>.<span class="i">QueueLength</span> &gt; <span class="r73 r">next</span>.<span class="i">QueueLength</span>);
+            <b>if</b> (<span class="r71 r">queueLengthDecreasing</span>)
+            {
+                <span class="r61 r">status</span>.<span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">ScaleIn</span>;
+                <a href="#e7bb1e4bbc4715c0" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Queue length is decreasing for &#39;</span>{<a href="#6e9a98b31b5a2191" class="i field">_queue</a>.<a href="/Azure.Storage.Queues/A.html#d1847b1478db81e4" class="i property">Name</a>}<span class="s">&#39;</span><span class="s">&quot;</span>);
+                <b>return</b> <span class="r61 r">status</span>;
+            }
+ 
+            <b>bool</b> <span id="r74 rd" class="r74 r">queueTimeDecreasing</span> = <span class="i">IsTrueForLastN</span>(
+                <span class="r60 r">metrics</span>,
+                <a href="#bd16081183af2455" class="i field">NumberOfSamplesToConsider</a>,
+                (<span id="r75 rd" class="r75 r">prev</span>, <span id="r76 rd" class="r76 r">next</span>) =&gt; <span class="r75 r">prev</span>.<span class="i">QueueTime</span> &gt; <span class="r76 r">next</span>.<span class="i">QueueTime</span>);
+            <b>if</b> (<span class="r74 r">queueTimeDecreasing</span>)
+            {
+                <span class="r61 r">status</span>.<span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">ScaleIn</span>;
+                <a href="#e7bb1e4bbc4715c0" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Queue time is decreasing for &#39;</span>{<a href="#6e9a98b31b5a2191" class="i field">_queue</a>.<a href="/Azure.Storage.Queues/A.html#d1847b1478db81e4" class="i property">Name</a>}<span class="s">&#39;</span><span class="s">&quot;</span>);
+                <b>return</b> <span class="r61 r">status</span>;
+            }
+ 
+            <a href="#e7bb1e4bbc4715c0" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Queue &#39;</span>{<a href="#6e9a98b31b5a2191" class="i field">_queue</a>.<a href="/Azure.Storage.Queues/A.html#d1847b1478db81e4" class="i property">Name</a>}<span class="s">&#39; is steady</span><span class="s">&quot;</span>);
+ 
+            <b>return</b> <span class="r61 r">status</span>;
+        }
+ 
+        <b>private static bool</b> <a id="22d783f05e31a047" href="../../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">IsTrueForLastN</a>(<span class="i">IList</span>&lt;<a href="QueueTriggerMetrics.cs.html#659c407ec0e31509" class="t t">QueueTriggerMetrics</a>&gt; <span id="r77 rd" class="r77 r">samples</span>, <b>int</b> <span id="r78 rd" class="r78 r">count</span>, <span class="i">Func</span>&lt;<a href="QueueTriggerMetrics.cs.html#659c407ec0e31509" class="t t">QueueTriggerMetrics</a>, <a href="QueueTriggerMetrics.cs.html#659c407ec0e31509" class="t t">QueueTriggerMetrics</a>, <b>bool</b>&gt; <span id="r79 rd" class="r79 r">predicate</span>)
+        {
+            <span class="i">Debug</span>.<span class="i">Assert</span>(<span class="r78 r">count</span> &gt; 1, <span class="s">&quot;count must be greater than 1.&quot;</span>);
+            <span class="i">Debug</span>.<span class="i">Assert</span>(<span class="r78 r">count</span> &lt;= <span class="r77 r">samples</span>.<span class="i">Count</span>, <span class="s">&quot;count must be less than or equal to the list size.&quot;</span>);
+ 
+            <span class="c">// Walks through the list from left to right starting at len(samples) - count.</span>
+            <b>for</b> (<b>int</b> <span id="r80 rd" class="r80 r">i</span> = <span class="r77 r">samples</span>.<span class="i">Count</span> - <span class="r78 r">count</span>; <span class="r80 r">i</span> &lt; <span class="r77 r">samples</span>.<span class="i">Count</span> - 1; <span class="r80 r">i</span>++)
+            {
+                <b>if</b> (!<span class="r79 r">predicate</span>(<span class="r77 r">samples</span>[<span class="r80 r">i</span>], <span class="r77 r">samples</span>[<span class="r80 r">i</span> + 1]))
+                {
+                    <b>return</b> <b>false</b>;
+                }
+            }
+ 
+            <b>return</b> <b>true</b>;
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

@@ -1,0 +1,447 @@
+﻿<!DOCTYPE html>
+<html><head><title>PollingState.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(438);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Rest.ClientRuntime.Azure/PollingState.cs" target="_top">PollingState.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Rest.ClientRuntime.Azure" target="_top">..\..\ClientRuntime.Azure\ClientRuntime.Azure\Microsoft.Rest.ClientRuntime.Azure.csproj</a> (Microsoft.Rest.ClientRuntime.Azure)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Rest</span>.<span class="i n">Azure</span>
+{
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Globalization</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>.<span class="i n">Http</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Rest</span>.<span class="i n">ClientRuntime</span>.<span class="i n">Azure</span>.<span class="i n">Properties</span>;
+    <b>using</b> <span class="i">Newtonsoft</span>.<span class="i">Json</span>;
+    <b>using</b> <span class="i">Newtonsoft</span>.<span class="i">Json</span>.<span class="i">Linq</span>;
+    <b>using</b> <span class="i n">System</span>;
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Defines long running operation polling state.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r t">TBody</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Type of resource body.</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r t">THeader</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Type of resource header.</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="4b7d261bc7d8f297" href="R/4b7d261bc7d8f297.html" target="n" data-glyph="2,0" class="t t">PollingState</a>&lt;<span id="r0 rd t" class="r0 r t">TBody</span>, <span id="r1 rd t" class="r1 r t">THeader</span>&gt; <b>where</b> <span class="r0 r t">TBody</span> : <b>class where</b> <span class="r1 r t">THeader</span> : <b>class</b>
+    {
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">DEBUG</span>
+        <b>const int</b> <a id="207f22e0eadd46cb" href="R/207f22e0eadd46cb.html" target="n" data-glyph="10,1" class="i field">TEST_MIN_DELAY_SECONDS</a> = 0;
+        <b>const int</b> <a id="c1090f32f6d82c88" href="R/c1090f32f6d82c88.html" target="n" data-glyph="10,1" class="i field">DEFAULT_MIN_DELAY_SECONDS</a> = 0;
+        <b>const int</b> <a id="48d07426d0901340" href="R/../../0000000000.html" target="n" data-glyph="10,1" class="i field">DEFAULT_MAX_DELAY_SECONDS</a> = 40;
+<span class="k preprocess">#</span><span class="k preprocess">else</span>
+<span class="e">        // Delay values are in seconds
+        const int TEST_MIN_DELAY_SECONDS = 0;
+        const int DEFAULT_MIN_DELAY_SECONDS = 10;
+        const int DEFAULT_MAX_DELAY_SECONDS = 600;
+</span><span class="k preprocess">#</span><span class="k preprocess">endif</span>
+ 
+        <b>private int</b> <a id="0d236d54a9b39112" href="R/0d236d54a9b39112.html" target="n" data-glyph="46,1" class="i field">_retryAfterInSeconds</a>;
+        <b>private int</b> <a id="1f8883380bf3ff6e" href="R/1f8883380bf3ff6e.html" target="n" data-glyph="46,1" class="i field">_clientLongRunningOperationRetryTimeout</a>;
+        <b>private bool</b> <a id="55580eb324caba2b" href="R/55580eb324caba2b.html" target="n" data-glyph="46,1" class="i field">_isRunningUnderPlaybackMode</a>;
+ 
+        <b>private const string</b> <a id="dd82f24ee694190e" href="R/dd82f24ee694190e.html" target="n" data-glyph="10,1" class="i field">TEST_MODE_HEADER</a> = <span class="s">&quot;azSdkTestPlayBackMode&quot;</span>;
+        <b>private string</b> <a id="1123c7eda16d8c03" href="R/1123c7eda16d8c03.html" target="n" data-glyph="46,1" class="i field">_status</a>;
+        <b>private</b> <a href="CloudException.cs.html#7e20c5a8d8f75583" class="t t">CloudException</a> <a id="7600748fefd375e8" href="R/7600748fefd375e8.html" target="n" data-glyph="46,1" class="i field">_cloudException</a>;
+        <b>private</b> <span class="t t">HttpResponseMessage</span> <a id="415c00332196cdaf" href="R/415c00332196cdaf.html" target="n" data-glyph="46,1" class="i field">_response</a>;
+ 
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Initializes an instance of PollingState.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">response</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">First operation response.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">retryTimeout</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Default timeout.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="91280a8bd69b0ca6" href="R/91280a8bd69b0ca6.html" target="n" data-glyph="72,1" class="t constructor">PollingState</a>(<span class="i">HttpOperationResponse</span>&lt;<span class="r0 r t">TBody</span>, <span class="r1 r t">THeader</span>&gt; <span id="r2 rd" class="r2 r">response</span>, <b>int</b>? <span id="r3 rd" class="r3 r">retryTimeout</span>)
+        {
+            <span class="c">// Due to test/playback scenario, we prioritze retryTimeout set by Client (client.LongRunningOperationRetryTimeout property)</span>
+            <span class="c">// So LROTimeoutsetbyClient needs to be set first before we set the generic RetryAfterInSeconds value</span>
+            <a href="#a03443500f0563e3" class="i property">LROTimeoutSetByClient</a> = <span class="r3 r">retryTimeout</span>.<a href="@0@mscorlib/A.html#7bbe60e33e857298" class="i property">HasValue</a> ? <span class="r3 r">retryTimeout</span>.<a href="@0@mscorlib/A.html#7b38d1fa76071c95" class="i property">Value</a> : <a href="CommonModels/AzureAsyncOperation.cs.html#68f72572ceb11b1a" class="t t">AzureAsyncOperation</a>.<a href="CommonModels/AzureAsyncOperation.cs.html#42281df97b3c6979" class="i field">DefaultDelay</a>;
+            <a href="#8dc09fd23ff540a9" class="i property">RetryAfterInSeconds</a> = <span class="r3 r">retryTimeout</span>.<a href="@0@mscorlib/A.html#7bbe60e33e857298" class="i property">HasValue</a> ? <span class="r3 r">retryTimeout</span>.<a href="@0@mscorlib/A.html#7b38d1fa76071c95" class="i property">Value</a> : <a href="CommonModels/AzureAsyncOperation.cs.html#68f72572ceb11b1a" class="t t">AzureAsyncOperation</a>.<a href="CommonModels/AzureAsyncOperation.cs.html#42281df97b3c6979" class="i field">DefaultDelay</a>;
+            <a href="#3e971a98943a6bbf" class="i property">Response</a> = <span class="r2 r">response</span>.<span class="i">Response</span>;
+            <a href="#75ae42e773ce207c" class="i property">Request</a> = <span class="r2 r">response</span>.<span class="i">Request</span>;
+            <a href="#41a790c5b2d5c0a5" class="i property">Resource</a> = <span class="r2 r">response</span>.<span class="i">Body</span>;
+            <a href="#97107f2246680ee6" class="i property">ResourceHeaders</a> = <span class="r2 r">response</span>.<span class="i">Headers</span>;
+            <a href="#55580eb324caba2b" class="i field">_isRunningUnderPlaybackMode</a> = <b>false</b>;
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r4 rd" class="r4 r">raw</span> = <span class="r2 r">response</span>.<span class="i">Response</span>.<span class="i">Content</span> == <b>null</b> ? <b>null</b> : <span class="r2 r">response</span>.<span class="i">Response</span>.<span class="i">Content</span>.<span class="i">AsString</span>();
+ 
+            <span class="i">JObject</span> <span id="r5 rd" class="r5 r">resource</span> = <b>null</b>;
+            <b>if</b> (!<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r4 r">raw</span>))
+            {
+                <b>try</b>
+                {
+                    <span class="r5 r">resource</span> = <span class="i">JObject</span>.<span class="i">Parse</span>(<span class="r4 r">raw</span>);
+                }
+                <b>catch</b> (<span class="i">JsonException</span>)
+                {
+                    <span class="c">// failed to deserialize, return empty body</span>
+                }
+            }
+ 
+            <a href="#9547486028ba26bf" class="i property">Status</a> = <a href="#9bc7d4985183fa2b" class="i method">GetProvisioningStateFromBody</a>(<span class="r5 r">resource</span>, <a href="#3e971a98943a6bbf" class="i property">Response</a>.<span class="i property">StatusCode</span>);
+ 
+            <span class="k preprocess">#</span><span class="k preprocess">region</span> old code
+            <span class="c">//switch (Response.StatusCode)</span>
+            <span class="c">//{</span>
+            <span class="c">//    case HttpStatusCode.Accepted:</span>
+            <span class="c">//        Status = AzureAsyncOperation.InProgressStatus;</span>
+            <span class="c">//        break;</span>
+            <span class="c">//    case HttpStatusCode.OK:</span>
+            <span class="c">//        if (resource != null &amp;&amp; resource[&quot;properties&quot;] != null &amp;&amp;</span>
+            <span class="c">//            resource[&quot;properties&quot;][&quot;provisioningState&quot;] != null)</span>
+            <span class="c">//        {</span>
+            <span class="c">//            Status = (string)resource[&quot;properties&quot;][&quot;provisioningState&quot;];</span>
+            <span class="c">//        }</span>
+            <span class="c">//        else</span>
+            <span class="c">//        {</span>
+            <span class="c">//            Status = AzureAsyncOperation.SuccessStatus;</span>
+            <span class="c">//        }</span>
+            <span class="c">//        break;</span>
+            <span class="c">//    case HttpStatusCode.Created:</span>
+            <span class="c">//        if (resource != null &amp;&amp; resource[&quot;properties&quot;] != null &amp;&amp;</span>
+            <span class="c">//            resource[&quot;properties&quot;][&quot;provisioningState&quot;] != null)</span>
+            <span class="c">//        {</span>
+            <span class="c">//            Status = (string) resource[&quot;properties&quot;][&quot;provisioningState&quot;];</span>
+            <span class="c">//        }</span>
+            <span class="c">//        else</span>
+            <span class="c">//        {</span>
+            <span class="c">//            Status = AzureAsyncOperation.InProgressStatus;</span>
+            <span class="c">//        }</span>
+            <span class="c">//        break;</span>
+            <span class="c">//    case HttpStatusCode.NoContent:</span>
+            <span class="c">//        Status = AzureAsyncOperation.SuccessStatus;</span>
+            <span class="c">//        break;</span>
+            <span class="c">//    default:</span>
+            <span class="c">//        Status = AzureAsyncOperation.FailedStatus;</span>
+            <span class="c">//        break;</span>
+            <span class="c">//}</span>
+            <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+        }
+ 
+        <b>public virtual string</b> <a id="9bc7d4985183fa2b" href="R/9bc7d4985183fa2b.html" target="n" data-glyph="72,1" class="i method">GetProvisioningStateFromBody</a>(<span class="i">JObject</span> <span id="r6 rd" class="r6 r">body</span>, <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a> <span id="r7 rd" class="r7 r">statusCode</span>)
+        {
+            <span class="c">// We check if we got provisionState and we get the status from provisioning state</span>
+ 
+            <span class="c">// In 202 pattern ProvisioningState may not be present in </span>
+            <span class="c">// the response. In that case the assumption is the status is Succeeded.</span>
+ 
+            <span class="c">// We call IsCheckingProvisioning here just to make sure this code should be treated as one unit, you always check for provisioning state only if it&#39;s applicable</span>
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r8 rd" class="r8 r">localStatus</span> = ((<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>)<span class="r6 r">body</span>?[<span class="s">&quot;properties&quot;</span>]?[<span class="s">&quot;provisioningState&quot;</span>])?.<a href="@0@mscorlib/A.html#06a5f7c688e69307" class="i method">Trim</a>();
+ 
+            <b>switch</b> (<span class="r7 r">statusCode</span>)
+            {
+                <b>case</b> <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#1e4f1250e8e5ac5c" class="i field">Accepted</a>:
+                    <span class="r8 r">localStatus</span> = <a href="CommonModels/AzureAsyncOperation.cs.html#68f72572ceb11b1a" class="t t">AzureAsyncOperation</a>.<a href="CommonModels/AzureAsyncOperation.cs.html#9c03fa0c8867e091" class="i field">InProgressStatus</a>;
+                    <b>break</b>;
+ 
+                <b>case</b> <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#cbf374bfc92513b9" class="i field">OK</a>:
+                    <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r8 r">localStatus</span>))
+                    {
+                        <span class="r8 r">localStatus</span> = <a href="CommonModels/AzureAsyncOperation.cs.html#68f72572ceb11b1a" class="t t">AzureAsyncOperation</a>.<a href="CommonModels/AzureAsyncOperation.cs.html#c0fe7b6ce417447f" class="i field">SuccessStatus</a>;
+                    }
+                    <b>break</b>;
+ 
+                <b>case</b> <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#f7afac2697e5c882" class="i field">Created</a>:
+                    <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r8 r">localStatus</span>))
+                    {
+                        <span class="r8 r">localStatus</span> = <a href="CommonModels/AzureAsyncOperation.cs.html#68f72572ceb11b1a" class="t t">AzureAsyncOperation</a>.<a href="CommonModels/AzureAsyncOperation.cs.html#9c03fa0c8867e091" class="i field">InProgressStatus</a>;    <span class="c">//Checked with ARM and it is confirmed that in the case of Created, provisioning state will always be sent, if not it&#39;s a success</span>
+                    }
+                    <b>break</b>;
+ 
+                <b>case</b> <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#848894cdd37c6925" class="i field">NoContent</a>:
+                    <span class="r8 r">localStatus</span> = <a href="CommonModels/AzureAsyncOperation.cs.html#68f72572ceb11b1a" class="t t">AzureAsyncOperation</a>.<a href="CommonModels/AzureAsyncOperation.cs.html#c0fe7b6ce417447f" class="i field">SuccessStatus</a>;
+                    <b>break</b>;
+ 
+                <b>default</b>:
+                    <span class="r8 r">localStatus</span> = <a href="CommonModels/AzureAsyncOperation.cs.html#68f72572ceb11b1a" class="t t">AzureAsyncOperation</a>.<a href="CommonModels/AzureAsyncOperation.cs.html#095ccb22b9ec3f7e" class="i field">FailedStatus</a>;
+                    <b>break</b>;
+            }
+ 
+            <b>return</b> <span class="r8 r">localStatus</span>;
+        }
+ 
+        <b>public string</b> <a id="f179e4f144eb2dee" href="R/f179e4f144eb2dee.html" target="n" data-glyph="72,1" class="i method">GetProvisioningStateFromBody</a>(<span class="i">JObject</span> <span id="r9 rd" class="r9 r">body</span>, <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a> <span id="r10 rd" class="r10 r">statusCode</span>, <a href="@0@mscorlib/A.html#87d60abb7092d5a4" class="t t">Func</a>&lt;<b>bool</b>&gt; <span id="r11 rd" class="r11 r">checkProvisioningState</span>)
+        {
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r12 rd" class="r12 r">localStatus</span> = <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#c9f70a27facb27cf" class="i field">Empty</a>;
+            <b>if</b> (<span class="r11 r">checkProvisioningState</span>())
+            {
+                <span class="c">//localStatus = GetProvisioningStateFromBody(body, statusCode);</span>
+                <span class="r12 r">localStatus</span> = ((<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>)<span class="r9 r">body</span>?[<span class="s">&quot;properties&quot;</span>]?[<span class="s">&quot;provisioningState&quot;</span>])?.<a href="@0@mscorlib/A.html#06a5f7c688e69307" class="i method">Trim</a>();
+ 
+                <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r12 r">localStatus</span>))
+                {
+                    <span class="r12 r">localStatus</span> = <a href="CommonModels/AzureAsyncOperation.cs.html#68f72572ceb11b1a" class="t t">AzureAsyncOperation</a>.<a href="CommonModels/AzureAsyncOperation.cs.html#c0fe7b6ce417447f" class="i field">SuccessStatus</a>;
+                }
+            }
+ 
+            <b>return</b> <span class="r12 r">localStatus</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets polling status.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public string</b> <a id="9547486028ba26bf" href="R/9547486028ba26bf.html" target="n" data-glyph="102,1" class="i property">Status</a> {
+            <b>get</b>
+            {
+                <b>return</b> <a href="#1123c7eda16d8c03" class="i field">_status</a>;
+            }
+            <b>set</b>
+            {
+                <b>if</b> (<b>value</b> == <b>null</b>)
+                {
+                    <b>throw</b> <b>new</b> <a href="CloudException.cs.html#e9c1f211ebcda92d" class="t constructor">CloudException</a>(<a href="Properties/Resources.Designer.cs.html#42a5dc9a2b09593b" class="t t">Resources</a>.<a href="Properties/Resources.Designer.cs.html#a5c2559f5d5cf344" class="i property">NoProvisioningState</a>);
+                }
+                <a href="#1123c7eda16d8c03" class="i field">_status</a> = <b>value</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets the latest value captured from Azure-AsyncOperation header.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public string</b> <a id="71948fe4bba1a4a0" href="R/71948fe4bba1a4a0.html" target="n" data-glyph="102,1" class="i property">AzureAsyncOperationHeaderLink</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets the latest value captured from Location header.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public string</b> <a id="0f63c13aca1bdf1a" href="R/0f63c13aca1bdf1a.html" target="n" data-glyph="102,1" class="i property">LocationHeaderLink</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets last operation response. </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <span class="t t">HttpResponseMessage</span> <a id="3e971a98943a6bbf" href="R/3e971a98943a6bbf.html" target="n" data-glyph="102,1" class="i property">Response</a>
+        {
+            <b>get</b> { <b>return</b> <a href="#415c00332196cdaf" class="i field">_response</a>; }
+            <b>set</b>
+            {
+                <a href="#415c00332196cdaf" class="i field">_response</a> = <b>value</b>;
+                <b>if</b> (<a href="#415c00332196cdaf" class="i field">_response</a> != <b>null</b>)
+                {
+                    <b>if</b> (<a href="#415c00332196cdaf" class="i field">_response</a>.<span class="i property">Headers</span>.<span class="i method">Contains</span>(<span class="s">&quot;azSdkTestPlayBackMode&quot;</span>))
+                    {
+                        <a href="#55580eb324caba2b" class="i field">_isRunningUnderPlaybackMode</a> = <b>bool</b>.<a href="@0@mscorlib/A.html#e2a8f2e50ecf93c0" class="i method">Parse</a>(<a href="#415c00332196cdaf" class="i field">_response</a>.<span class="i property">Headers</span>.<span class="i method">GetValues</span>(<span class="s">&quot;azSdkTestPlayBackMode&quot;</span>).<a href="@0@System.Core/A.html#8087366974af11d2" class="i method">FirstOrDefault</a>());
+                    }
+                    <b>if</b> (<a href="#415c00332196cdaf" class="i field">_response</a>.<span class="i property">Headers</span>.<span class="i method">Contains</span>(<span class="s">&quot;Azure-AsyncOperation&quot;</span>))
+                    {
+                        <a href="#71948fe4bba1a4a0" class="i property">AzureAsyncOperationHeaderLink</a> = <a href="#415c00332196cdaf" class="i field">_response</a>.<span class="i property">Headers</span>.<span class="i method">GetValues</span>(<span class="s">&quot;Azure-AsyncOperation&quot;</span>).<a href="@0@System.Core/A.html#8087366974af11d2" class="i method">FirstOrDefault</a>();
+                    }
+                    <b>if</b> (<a href="#415c00332196cdaf" class="i field">_response</a>.<span class="i property">Headers</span>.<span class="i method">Contains</span>(<span class="s">&quot;Location&quot;</span>))
+                    {
+                        <a href="#0f63c13aca1bdf1a" class="i property">LocationHeaderLink</a> = <a href="#415c00332196cdaf" class="i field">_response</a>.<span class="i property">Headers</span>.<span class="i method">GetValues</span>(<span class="s">&quot;Location&quot;</span>).<a href="@0@System.Core/A.html#8087366974af11d2" class="i method">FirstOrDefault</a>();
+                    }
+                    <b>if</b> (<a href="#415c00332196cdaf" class="i field">_response</a>.<span class="i property">Headers</span>.<span class="i method">Contains</span>(<span class="s">&quot;Retry-After&quot;</span>))
+                    {
+                        <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r13 rd" class="r13 r">retryValue</span> = <a href="#415c00332196cdaf" class="i field">_response</a>.<span class="i property">Headers</span>.<span class="i method">GetValues</span>(<span class="s">&quot;Retry-After&quot;</span>).<a href="@0@System.Core/A.html#8087366974af11d2" class="i method">FirstOrDefault</a>();
+                        <b>if</b>(<b>int</b>.<a href="@0@mscorlib/A.html#325507e509229dbc" class="i method">TryParse</a>(<span class="r13 r">retryValue</span>, <b>out int</b> <span id="r14 rd" class="r14 r">retryAfterValue</span>))
+                        {
+                            <a href="#8dc09fd23ff540a9" class="i property">RetryAfterInSeconds</a> = <span class="r14 r">retryAfterValue</span>;
+                        }
+                        <b>else</b>
+                        {
+                            <a href="#8dc09fd23ff540a9" class="i property">RetryAfterInSeconds</a> = <a href="#c1090f32f6d82c88" class="i field">DEFAULT_MIN_DELAY_SECONDS</a>;
+                        }
+                    }
+                }
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets last operation request.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <span class="t t">HttpRequestMessage</span> <a id="75ae42e773ce207c" href="R/75ae42e773ce207c.html" target="n" data-glyph="102,1" class="i property">Request</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets cloud error.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a href="CommonModels/CloudError.cs.html#77e970e8689877c6" class="t t">CloudError</a> <a id="d268b89bfa78528d" href="R/d268b89bfa78528d.html" target="n" data-glyph="102,1" class="i property">Error</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets resource.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <span class="r0 r t">TBody</span> <a id="41a790c5b2d5c0a5" href="R/41a790c5b2d5c0a5.html" target="n" data-glyph="102,1" class="i property">Resource</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets resource header.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <span class="r1 r t">THeader</span> <a id="97107f2246680ee6" href="R/97107f2246680ee6.html" target="n" data-glyph="102,1" class="i property">ResourceHeaders</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> This timeout is set by client during client construction</span>
+        <span class="c">///</span><span class="c"> This is useful to detect if we are running in test/playback mode</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private int</b> <a id="a03443500f0563e3" href="R/a03443500f0563e3.html" target="n" data-glyph="106,1" class="i property">LROTimeoutSetByClient</a>
+        {
+            <b>get</b>
+            {
+                <b>return</b> <a href="#1f8883380bf3ff6e" class="i field">_clientLongRunningOperationRetryTimeout</a>;
+            }
+            <b>set</b>
+            {
+                <a href="#1f8883380bf3ff6e" class="i field">_clientLongRunningOperationRetryTimeout</a> = <b>value</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets long running operation delay in milliseconds.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        [<a href="@0@mscorlib/A.html#66ed4e142f4e14e7" class="t constructor">Obsolete</a>(<span class="s">&quot;DelayInMilliseconds property will be deprecated in future releases. You should start using DelayBetweenPolling&quot;</span>)]
+        <b>public int</b> <a id="82f5fe4fc9fc9ad6" href="R/../../0000000000.html" target="n" data-glyph="102,1" class="i property">DelayInMilliseconds</a>
+        {
+            <b>get</b>
+            {
+                <b>return</b> <a href="#8dc09fd23ff540a9" class="i property">RetryAfterInSeconds</a> * 1000;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Long running operation polling delay</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="04fda933c6cb463e" href="R/04fda933c6cb463e.html" target="n" data-glyph="102,1" class="i property">DelayBetweenPolling</a>
+        {
+            <b>get</b>
+            {
+                <b>return</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(<a href="#8dc09fd23ff540a9" class="i property">RetryAfterInSeconds</a>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Initially this is initialized with LongRunningOperationRetryTimeout value</span>
+        <span class="c">///</span><span class="c"> Verify min/max allowed value according to ARM spec (especially minimum value for throttling at ARM level)</span>
+        <span class="c">///</span><span class="c"> We want this to be int value and not int? because this value will always have a default non-zero/non-null value</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal int</b> <a id="8dc09fd23ff540a9" href="R/8dc09fd23ff540a9.html" target="n" data-glyph="104,1" class="i property">RetryAfterInSeconds</a>
+        {
+            <b>get</b>
+            {
+                <b>return</b> <a href="#0d236d54a9b39112" class="i field">_retryAfterInSeconds</a>;
+            }
+ 
+            <b>set</b>
+            {
+                <a href="#0d236d54a9b39112" class="i field">_retryAfterInSeconds</a> = <a href="#ade47db02e62537f" class="i method">ValidateRetryAfterValue</a>(<b>value</b>);
+                <span class="c">//_retryAfterInSeconds = value;</span>
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Test hook to determine if running under Playback mode (test mode)</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal bool</b> <a id="468f0b39308536cf" href="R/468f0b39308536cf.html" target="n" data-glyph="104,1" class="i property">IsRunningUnderPlaybackMode</a>
+        {
+            <b>get</b>
+            {
+                <b>if</b> (<a href="#3e971a98943a6bbf" class="i property">Response</a> != <b>null</b>)
+                {
+                    <b>if</b> (<a href="#3e971a98943a6bbf" class="i property">Response</a>.<span class="i property">Headers</span>.<span class="i method">Contains</span>(<span class="s">&quot;azSdkTestPlayBackMode&quot;</span>))
+                    {
+                        <span class="c">//_isRunningUnderPlaybackMode = bool.Parse(Response.Headers.GetValues(&quot;azSdkTestPlayBackMode&quot;).FirstOrDefault());</span>
+                        <b>if</b>(<b>bool</b>.<a href="@0@mscorlib/A.html#c8d4e2d26d59f9d0" class="i method">TryParse</a>(<a href="#3e971a98943a6bbf" class="i property">Response</a>?.<span class="i property">Headers</span>?.<span class="i method">GetValues</span>(<a href="#dd82f24ee694190e" class="i field">TEST_MODE_HEADER</a>).<a href="@0@System.Core/A.html#8087366974af11d2" class="i method">FirstOrDefault</a>(), <b>out bool</b> <span id="r15 rd" class="r15 r">isTestMode</span>))
+                        {
+                            <a href="#55580eb324caba2b" class="i field">_isRunningUnderPlaybackMode</a> = <span class="r15 r">isTestMode</span>;
+                        }
+                    }
+                }
+ 
+                <b>return</b> <a href="#55580eb324caba2b" class="i field">_isRunningUnderPlaybackMode</a>;
+            }
+        }
+ 
+        <b>private int</b> <a id="ade47db02e62537f" href="R/ade47db02e62537f.html" target="n" data-glyph="76,1" class="i method">ValidateRetryAfterValue</a>(<b>int</b>? <span id="r16 rd" class="r16 r">currentValue</span>)
+        {
+            <b>if</b> (<span class="r16 r">currentValue</span>.<a href="@0@mscorlib/A.html#7bbe60e33e857298" class="i property">HasValue</a>)
+            {
+                <b>if</b> (<a href="#468f0b39308536cf" class="i property">IsRunningUnderPlaybackMode</a>)
+                {
+                    <span class="r16 r">currentValue</span> = <a href="#207f22e0eadd46cb" class="i field">TEST_MIN_DELAY_SECONDS</a>;
+                }
+            }
+            <b>else</b>
+            { 
+                <span class="r16 r">currentValue</span> = <a href="CommonModels/AzureAsyncOperation.cs.html#68f72572ceb11b1a" class="t t">AzureAsyncOperation</a>.<a href="CommonModels/AzureAsyncOperation.cs.html#42281df97b3c6979" class="i field">DefaultDelay</a>;
+            }
+ 
+            <b>return</b> <span class="r16 r">currentValue</span>.<a href="@0@mscorlib/A.html#7b38d1fa76071c95" class="i property">Value</a>;
+        }
+ 
+        <span class="c">//private int ValidateRetryAfterValue(int? currentValue)</span>
+        <span class="c">//{</span>
+        <span class="c">//    if (currentValue.HasValue)</span>
+        <span class="c">//    {</span>
+        <span class="c">//        if (currentValue &lt;= TEST_MIN_DELAY_SECONDS)</span>
+        <span class="c">//            currentValue = TEST_MIN_DELAY_SECONDS;</span>
+        <span class="c">//        else if (currentValue &lt; DEFAULT_MIN_DELAY_SECONDS)</span>
+        <span class="c">//            currentValue = DEFAULT_MIN_DELAY_SECONDS;</span>
+        <span class="c">//        else if (currentValue &gt; DEFAULT_MAX_DELAY_SECONDS)</span>
+        <span class="c">//            currentValue = DEFAULT_MAX_DELAY_SECONDS;</span>
+ 
+        <span class="c">//        if (IsRunningUnderPlaybackMode)</span>
+        <span class="c">//        {</span>
+        <span class="c">//            currentValue = TEST_MIN_DELAY_SECONDS;</span>
+        <span class="c">//        }</span>
+        <span class="c">//        else</span>
+        <span class="c">//        {</span>
+        <span class="c">//            if (LROTimeoutSetByClient == TEST_MIN_DELAY_SECONDS)    // we assume playback mode (test mode)</span>
+        <span class="c">//            {</span>
+        <span class="c">//                if (currentValue != LROTimeoutSetByClient)  //Case where Retry-After is set to non zero, we set it to 0 in playback mode</span>
+        <span class="c">//                {</span>
+        <span class="c">//                    currentValue = TEST_MIN_DELAY_SECONDS;</span>
+        <span class="c">//                }</span>
+        <span class="c">//            }</span>
+        <span class="c">//        }</span>
+        <span class="c">//    }</span>
+        <span class="c">//    else</span>
+        <span class="c">//    {</span>
+        <span class="c">//        currentValue = AzureAsyncOperation.DefaultDelay;</span>
+        <span class="c">//    }</span>
+ 
+        <span class="c">//    return currentValue.Value;</span>
+        <span class="c">//}</span>
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets CloudException from current instance.  </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a href="CloudException.cs.html#7e20c5a8d8f75583" class="t t">CloudException</a> <a id="f4f57c54f0d4edaf" href="R/f4f57c54f0d4edaf.html" target="n" data-glyph="102,1" class="i property">CloudException</a>
+        {
+            <b>get</b>
+            {
+                <b>if</b>(<a href="#7600748fefd375e8" class="i field">_cloudException</a> == <b>null</b>)
+                {
+                    <a href="#7600748fefd375e8" class="i field">_cloudException</a> = <b>new</b> <a href="CloudException.cs.html#e9c1f211ebcda92d" class="t constructor">CloudException</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#691a34e179b91fdb" class="i method">Format</a>(<a href="@0@mscorlib/A.html#e319c6636909012f" class="t t">CultureInfo</a>.<a href="@0@mscorlib/A.html#26ef1c020f0dbb7a" class="i property">InvariantCulture</a>,
+                                            <a href="Properties/Resources.Designer.cs.html#42a5dc9a2b09593b" class="t t">Resources</a>.<a href="Properties/Resources.Designer.cs.html#8dcc9a1f2855e684" class="i property">LongRunningOperationFailed</a>, <a href="#9547486028ba26bf" class="i property">Status</a>))
+                    {
+                        <a href="CloudException.cs.html#db181b8df210bf29" class="i property">Body</a> = <a href="#d268b89bfa78528d" class="i property">Error</a>,
+                        <a href="CloudException.cs.html#c088357830e949b9" class="i property">Request</a> = <b>new</b> <span class="i">HttpRequestMessageWrapper</span>(<a href="#75ae42e773ce207c" class="i property">Request</a>, <a href="#75ae42e773ce207c" class="i property">Request</a>.<span class="i property">Content</span>.<span class="i">AsString</span>()),
+                        <a href="CloudException.cs.html#1d884b39f454cd9b" class="i property">Response</a> = <b>new</b> <span class="i">HttpResponseMessageWrapper</span>(<a href="#3e971a98943a6bbf" class="i property">Response</a>, <a href="#3e971a98943a6bbf" class="i property">Response</a>.<span class="i property">Content</span>.<span class="i">AsString</span>())
+                    };
+                }
+ 
+                <b>return</b> <a href="#7600748fefd375e8" class="i field">_cloudException</a>;
+            }
+ 
+            <b>internal set</b>
+            {
+                <a href="#7600748fefd375e8" class="i field">_cloudException</a> = <b>value</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets AzureOperationResponse from current instance. </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a href="CommonModels/AzureOperationResponse.cs.html#97171b8214ee5041" class="t t">AzureOperationResponse</a>&lt;<span class="r0 r t">TBody</span>, <span class="r1 r t">THeader</span>&gt; <a id="9feaefa576c0b5d4" href="R/9feaefa576c0b5d4.html" target="n" data-glyph="102,1" class="i property">AzureOperationResponse</a>
+        {
+            <b>get</b>
+            {
+                <b>return</b> <b>new</b> <a href="CommonModels/AzureOperationResponse.cs.html#97171b8214ee5041" class="t constructor">AzureOperationResponse</a>&lt;<span class="r0 r t">TBody</span>, <span class="r1 r t">THeader</span>&gt;
+                {
+                    <span class="i">Body</span> = <a href="#41a790c5b2d5c0a5" class="i property">Resource</a>,
+                    <span class="i">Headers</span> = <a href="#97107f2246680ee6" class="i property">ResourceHeaders</a>,
+                    <span class="i">Request</span> = <a href="#75ae42e773ce207c" class="i property">Request</a>,
+                    <span class="i">Response</span> = <a href="#3e971a98943a6bbf" class="i property">Response</a>
+                };
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

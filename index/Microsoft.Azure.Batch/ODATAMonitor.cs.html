@@ -1,0 +1,397 @@
+﻿<!DOCTYPE html>
+<html><head><title>ODATAMonitor.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(388);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.Batch/ODATAMonitor.cs" target="_top">ODATAMonitor.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.Batch" target="_top">src\Microsoft.Azure.Batch.csproj</a> (Microsoft.Azure.Batch)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+﻿<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Batch</span>
+{
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+ 
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Contains control settings used for optimal retrieval of state data via OData predicates.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>public class</b> <a id="7c3c301ba1a0d5a9" href="R/7c3c301ba1a0d5a9.html" target="n" data-glyph="0,0" class="t t"><span id="2ef3ed921c0f0b05">ODATAMonitorControl</span></a>
+    {
+        <b>private</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="08da0e22561f011c" href="R/08da0e22561f011c.html" target="n" data-glyph="46,1" class="i field">_delayBetweenDataFetch</a> = <b>new</b> <a href="@0@mscorlib/A.html#22fd9aa3d49cf498" class="t constructor">TimeSpan</a>(0, 0, <span class="r0 r">seconds</span>: 2);
+        <b>private static</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="c13a72da3b4ab27d" href="R/c13a72da3b4ab27d.html" target="n" data-glyph="46,1" class="i field">_lowerBoundDelayBetweenRefresh</a> = <b>new</b> <a href="@0@mscorlib/A.html#8f3d58581b52d6db" class="t constructor">TimeSpan</a>(0, 0, 0, 0, <span class="r1 r">milliseconds</span> : 500);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The minimum time between attempts to fetch data for a monitored instance.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="e552aa785ea29781" href="R/e552aa785ea29781.html" target="n" data-glyph="102,1" class="i property">DelayBetweenDataFetch</a>
+        {
+            <b>get</b>
+            {
+                <b>return</b> <a href="#08da0e22561f011c" class="i field">_delayBetweenDataFetch</a>;
+            }
+            <b>set</b>
+            {
+                <span class="c">// forbid values that are too small... avoid DOS of server</span>
+                <b>if</b> (<b>value</b> &lt; <a href="#c13a72da3b4ab27d" class="i field">_lowerBoundDelayBetweenRefresh</a>)
+                {
+                    <b>value</b> = <a href="#c13a72da3b4ab27d" class="i field">_lowerBoundDelayBetweenRefresh</a>;
+                }
+ 
+                <a href="#08da0e22561f011c" class="i field">_delayBetweenDataFetch</a> = <b>value</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The maximum number of characters allowed for a single OData predicate.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public int</b> <a id="10c614431bf6abbe" href="R/10c614431bf6abbe.html" target="n" data-glyph="42,1" class="i field">ODATAPredicateLimit</a> = 500;
+    }
+ 
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Use a lambda to construct the correct ListFoo calls with correct params.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r t">T</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+    <b>internal delegate</b> <a href="IPagedEnumerable.cs.html#f93c71bac5f9f1fd" class="t t">IPagedEnumerable</a>&lt;<span class="r2 r t">T</span>&gt; <a id="29a1288b3b09f978" href="R/29a1288b3b09f978.html" target="n" data-glyph="14,0" class="t t"><span id="21e655dab641332b">ListDelegate</span></a>&lt;<span id="r2 rd t" class="r2 r t">T</span>&gt;();
+ 
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> A class that leverages OData predicates to poll the states of instances.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="fa67db5d0297b83e" href="R/fa67db5d0297b83e.html" target="n" data-glyph="2,0" class="t t"><span id="5262ebcc484b7964">ODATAMonitor</span></a>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Polls the collection of instances until each has passed the condition at least once.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r t">T</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">collectionToMonitor</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">condition</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">getName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">listObjects</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">detailLevel</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Controls the detail level of the data returned by a call to the Azure Batch Service.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r10 r">control</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public static async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="582475452aa6fc30" href="R/582475452aa6fc30.html" target="n" data-glyph="72,1" class="i method">WhenAllAsync</a>&lt;<span id="r3 rd t" class="r3 r t">T</span>&gt;(
+            <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<span class="r3 r t">T</span>&gt; <span id="r4 rd" class="r4 r">collectionToMonitor</span>,
+            <a href="@0@mscorlib/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<span class="r3 r t">T</span>, <b>bool</b>&gt; <span id="r5 rd" class="r5 r">condition</span>,
+            <a href="@0@mscorlib/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<span class="r3 r t">T</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <span id="r6 rd" class="r6 r">getName</span>,
+            <a href="#29a1288b3b09f978" class="t t">ListDelegate</a>&lt;<span class="r3 r t">T</span>&gt; <span id="r7 rd" class="r7 r">listObjects</span>,
+            <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r8 rd" class="r8 r">cancellationToken</span>,
+            <a href="ODATADetailLevel.cs.html#e8b2b7d2634345fb" class="t t">ODATADetailLevel</a> <span id="r9 rd" class="r9 r">detailLevel</span>,
+            <a href="#7c3c301ba1a0d5a9" class="t t">ODATAMonitorControl</a> <span id="r10 rd" class="r10 r">control</span>) <b>where</b> <span class="r3 r t">T</span> : <a href="IRefreshable.cs.html#63c23b1f5aae2d0e" class="t t">IRefreshable</a>
+        {
+            <b>if</b> (<b>null</b> == <span class="r4 r">collectionToMonitor</span>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>(<span class="s">&quot;collectionToMonitor&quot;</span>);
+            }
+ 
+            <b>if</b> (<b>null</b> == <span class="r5 r">condition</span>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>(<span class="s">&quot;condition&quot;</span>);
+            }
+ 
+            <a href="#2dd62bfc8fcb94b7" class="t t">RefreshViaODATAFilterList</a>&lt;<span class="r3 r t">T</span>&gt; <span id="r11 rd" class="r11 r">odataRefresher</span> = <b>new</b> <a href="#995370778c14a21e" class="t constructor">RefreshViaODATAFilterList</a>&lt;<span class="r3 r t">T</span>&gt;(<span class="r8 r">cancellationToken</span>, <span class="r9 r">detailLevel</span>, <span class="r5 r">condition</span>, <span class="r7 r">listObjects</span>, <span class="r10 r">control</span>);
+ 
+            <span class="c">// populate for first pass</span>
+            <b>foreach</b> (<span class="r3 r t">T</span> <span id="r12 rd" class="r12 r">curT</span> <b>in</b> <span class="r4 r">collectionToMonitor</span>)
+            {
+                <span class="c">// filter out the instances that already meet the condition</span>
+                <b>if</b> (!<span class="r5 r">condition</span>(<span class="r12 r">curT</span>))
+                {
+                    <a href="#fc188fca9e245bf0" class="t t">MonitorLastCall</a>&lt;<span class="r3 r t">T</span>&gt; <span id="r13 rd" class="r13 r">box</span> = <b>new</b> <a href="#ee4313f7a46e2d36" class="t constructor">MonitorLastCall</a>&lt;<span class="r3 r t">T</span>&gt;(<span class="r12 r">curT</span>, <span class="c">/* flags each instance as available to refresh &quot;now&quot; */</span> <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a>.<a href="@0@mscorlib/A.html#e7670be8111807d6" class="i field">MinValue</a>);
+ 
+                    <span class="r11 r">odataRefresher</span>.<a href="#24283764d12e7a7d" class="i field">CurrentPassQueue</a>.<a href="@0@System/A.html#14c3cc45ceaf1566" class="i method">Enqueue</a>(<span class="r13 r">box</span>);
+                }
+            }
+ 
+            <span class="c">// process the instances in the current pass... swap queues to begin next pass</span>
+            <b>while</b> (!<span class="r11 r">odataRefresher</span>.<a href="#27043e2dfcd00d73" class="i property">CancellationToken</a>.<a href="@0@mscorlib/A.html#f32abbe8e2f1f6c1" class="i property">IsCancellationRequested</a> &amp;&amp;
+                <span class="r11 r">odataRefresher</span>.<a href="#24283764d12e7a7d" class="i field">CurrentPassQueue</a>.<a href="@0@System/A.html#2d2504e4ca700843" class="i property">Count</a> &gt; 0)
+            {
+                <span class="c">// get next instance</span>
+                <a href="#fc188fca9e245bf0" class="t t">MonitorLastCall</a>&lt;<span class="r3 r t">T</span>&gt; <span id="r14 rd" class="r14 r">nextInstanceToProcess</span> = <span class="r11 r">odataRefresher</span>.<a href="#24283764d12e7a7d" class="i field">CurrentPassQueue</a>.<a href="@0@System/A.html#e68caf2d91344411" class="i method">Dequeue</a>();
+ 
+                <span class="c">// build an odata filter with as many names as the limit will allow and call refresh instances as needed</span>
+                <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <span id="r15 rd" class="r15 r">asyncProcessOneInstance</span> = <span class="r11 r">odataRefresher</span>.<a href="#951b9119887ff0cf" class="i method">ProcessOneInstance</a>(<span class="r14 r">nextInstanceToProcess</span>, <span class="r6 r">getName</span>);
+ 
+                <span class="c">// a-wait for completion</span>
+                <b>await</b> <span class="r15 r">asyncProcessOneInstance</span>.<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<span class="r16 r">continueOnCapturedContext</span>: <b>false</b>);
+ 
+                <span class="c">// if the current pass queue is empty, swap the queues to begin next pass</span>
+                <b>if</b> (0 == <span class="r11 r">odataRefresher</span>.<a href="#24283764d12e7a7d" class="i field">CurrentPassQueue</a>.<a href="@0@System/A.html#2d2504e4ca700843" class="i property">Count</a>)
+                {
+                    <span class="r11 r">odataRefresher</span>.<a href="#f7ab62bc31f4830e" class="i method">SwapQueues</a>();
+ 
+                    <span class="c">// if we appear to be done, the stringbuilder might have the last predicate in it so flush that</span>
+                    <b>if</b> (0 == <span class="r11 r">odataRefresher</span>.<a href="#24283764d12e7a7d" class="i field">CurrentPassQueue</a>.<a href="@0@System/A.html#2d2504e4ca700843" class="i property">Count</a>)
+                    {
+                        <span class="c">// start the call to process the last predicate</span>
+                        <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <span id="r17 rd" class="r17 r">asyncListTask</span> = <span class="r11 r">odataRefresher</span>.<a href="#0508f9b0cccf4982" class="i method">CallListAndProcessResults</a>();
+ 
+                        <span class="c">// a-wait for completion</span>
+                        <b>await</b> <span class="r17 r">asyncListTask</span>.<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<span class="r16 r">continueOnCapturedContext</span>: <b>false</b>);
+ 
+                        <span class="c">// if the last predicate created new work... the swap will bring it into a new pass</span>
+                        <span class="r11 r">odataRefresher</span>.<a href="#f7ab62bc31f4830e" class="i method">SwapQueues</a>();
+                    }
+                }
+            }
+ 
+            <span class="c">//Were we cancelled?</span>
+            <span class="r11 r">odataRefresher</span>.<a href="#27043e2dfcd00d73" class="i property">CancellationToken</a>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Will accept instances of T and construct a filter predicate.</span>
+        <span class="c">///</span><span class="c"> The predicate will be used (and reset) when it is full or if</span>
+        <span class="c">///</span><span class="c"> the given instance was to recently refreshed (DOS avoidance).</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r18 r t">T</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+        <b>internal class</b> <a id="2dd62bfc8fcb94b7" href="R/2dd62bfc8fcb94b7.html" target="n" data-glyph="2,1" class="t t">RefreshViaODATAFilterList</a>&lt;<span id="r18 rd t" class="r18 r t">T</span>&gt;
+        {
+<span class="k preprocess">#</span><span class="k preprocess">region</span> constructors
+ 
+            <b>private</b> <a id="1d8f0b1d9d71aad2" href="R/../../0000000000.html" target="n" data-glyph="76,2" class="t constructor">RefreshViaODATAFilterList</a>()
+            {
+            }
+ 
+            <b>internal</b> <a id="995370778c14a21e" href="R/995370778c14a21e.html" target="n" data-glyph="74,2" class="t constructor">RefreshViaODATAFilterList</a>(
+                            <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r19 rd" class="r19 r">cancellationToken</span>,
+                            <a href="ODATADetailLevel.cs.html#e8b2b7d2634345fb" class="t t">ODATADetailLevel</a> <span id="r20 rd" class="r20 r">odataDetail</span>,
+                            <a href="@0@mscorlib/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<span class="r18 r t">T</span>, <b>bool</b>&gt; <span id="r21 rd" class="r21 r">condition</span>,
+                            <a href="#29a1288b3b09f978" class="t t">ListDelegate</a>&lt;<span class="r18 r t">T</span>&gt; <span id="r22 rd" class="r22 r">listObjects</span>,
+                            <a href="#7c3c301ba1a0d5a9" class="t t">ODATAMonitorControl</a> <span id="r23 rd" class="r23 r">odataMonitorControl</span>)
+            {
+                <a href="#2dd62bfc8fcb94b7" class="k">this</a>.<a href="#27043e2dfcd00d73" class="i property">CancellationToken</a> = <span class="r19 r">cancellationToken</span>;
+                <a href="#6d54d4f110bb0137" class="i field">_odataDetailLevel</a> = <span class="r20 r">odataDetail</span>;
+                <a href="#30b1007a303e7001" class="i field">_condition</a> = <span class="r21 r">condition</span>;
+                <a href="#30d30a082a577f8a" class="i field">_listObjects</a> = <span class="r22 r">listObjects</span>;
+                <a href="#ed0d81d53f8e49de" class="i field">_odataMonitorControl</a> = <span class="r23 r">odataMonitorControl</span>;
+ 
+                <a href="#24283764d12e7a7d" class="i field">CurrentPassQueue</a> = <b>new</b> <a href="@0@System/A.html#a09109def640b7b1" class="t constructor">Queue</a>&lt;<a href="#fc188fca9e245bf0" class="t t">MonitorLastCall</a>&lt;<span class="r18 r t">T</span>&gt;&gt;();
+                <a href="#0cd96b143a209f0f" class="i field">NextPassQueue</a> = <b>new</b> <a href="@0@System/A.html#a09109def640b7b1" class="t constructor">Queue</a>&lt;<a href="#fc188fca9e245bf0" class="t t">MonitorLastCall</a>&lt;<span class="r18 r t">T</span>&gt;&gt;();
+            }
+ 
+<span class="k preprocess">#</span><span class="k preprocess">endregion</span> constructors
+ 
+            <span class="c">// queue that holds the instances being refreshed on this pass</span>
+            <b>public</b> <a href="@0@System/A.html#aa3beab99b2e0db2" class="t t">Queue</a>&lt;<a href="#fc188fca9e245bf0" class="t t">MonitorLastCall</a>&lt;<span class="r18 r t">T</span>&gt;&gt; <a id="24283764d12e7a7d" href="R/24283764d12e7a7d.html" target="n" data-glyph="42,2" class="i field">CurrentPassQueue</a> = <b>new</b> <a href="@0@System/A.html#a09109def640b7b1" class="t constructor">Queue</a>&lt;<a href="#fc188fca9e245bf0" class="t t">MonitorLastCall</a>&lt;<span class="r18 r t">T</span>&gt;&gt;();
+ 
+            <span class="c">// queue that holds the instances that have been refreshed and failed the condition...</span>
+            <span class="c">// to be refreshed again on the next pass</span>
+            <b>public</b> <a href="@0@System/A.html#aa3beab99b2e0db2" class="t t">Queue</a>&lt;<a href="#fc188fca9e245bf0" class="t t">MonitorLastCall</a>&lt;<span class="r18 r t">T</span>&gt;&gt; <a id="0cd96b143a209f0f" href="R/0cd96b143a209f0f.html" target="n" data-glyph="42,2" class="i field">NextPassQueue</a> = <b>new</b> <a href="@0@System/A.html#a09109def640b7b1" class="t constructor">Queue</a>&lt;<a href="#fc188fca9e245bf0" class="t t">MonitorLastCall</a>&lt;<span class="r18 r t">T</span>&gt;&gt;();
+ 
+            <b>public</b> <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <a id="27043e2dfcd00d73" href="R/27043e2dfcd00d73.html" target="n" data-glyph="102,2" class="i property">CancellationToken</a> { <b>get</b>; <b>private set</b>; }
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> Holds the delegate that determines of the given instance no longer needs to be polled.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <b>private readonly</b> <a href="@0@mscorlib/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<span class="r18 r t">T</span>, <b>bool</b>&gt; <a id="30b1007a303e7001" href="R/30b1007a303e7001.html" target="n" data-glyph="46,2" class="i field">_condition</a>;
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> Delegate to fetch new instances fresh state data.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <b>private readonly</b> <a href="#29a1288b3b09f978" class="t t">ListDelegate</a>&lt;<span class="r18 r t">T</span>&gt; <a id="30d30a082a577f8a" href="R/30d30a082a577f8a.html" target="n" data-glyph="46,2" class="i field">_listObjects</a>;
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> To be updated with filter predicate for refreshing instance state data.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <b>private readonly</b> <a href="ODATADetailLevel.cs.html#e8b2b7d2634345fb" class="t t">ODATADetailLevel</a> <a id="6d54d4f110bb0137" href="R/6d54d4f110bb0137.html" target="n" data-glyph="46,2" class="i field">_odataDetailLevel</a>;
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> Holds control data for this odata monitor.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <b>private readonly</b> <a href="#7c3c301ba1a0d5a9" class="t t">ODATAMonitorControl</a> <a id="ed0d81d53f8e49de" href="R/ed0d81d53f8e49de.html" target="n" data-glyph="46,2" class="i field">_odataMonitorControl</a>;
+ 
+            <span class="c">// ODATA predicated will be constructed in this</span>
+            <b>private readonly</b> <a href="@0@mscorlib/A.html#adf60ee46ebd299f" class="t t">StringBuilder</a> <a id="6480db791eff7f14" href="R/6480db791eff7f14.html" target="n" data-glyph="46,2" class="i field">_odataFilterSB</a> = <b>new</b> <a href="@0@mscorlib/A.html#6e631639c1e2746b" class="t constructor">StringBuilder</a>();
+ 
+            <b>private const string</b> <a id="0d08144382826ed2" href="R/0d08144382826ed2.html" target="n" data-glyph="10,2" class="i field">IdPrefix</a> = <span class="s">&quot;id eq &#39;&quot;</span>;
+            <b>private const char</b> <a id="5bd80cd33b16ac69" href="R/5bd80cd33b16ac69.html" target="n" data-glyph="10,2" class="i field">IdPostfix</a> = <span class="s">&#39;\&#39;&#39;</span>;
+            <b>private const string</b> <a id="6064e15cb4619af9" href="R/6064e15cb4619af9.html" target="n" data-glyph="10,2" class="i field">OrOperator</a> = <span class="s">&quot; or &quot;</span>;
+ 
+            <b>internal async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="951b9119887ff0cf" href="R/951b9119887ff0cf.html" target="n" data-glyph="74,2" class="i method">ProcessOneInstance</a>(<a href="#fc188fca9e245bf0" class="t t">MonitorLastCall</a>&lt;<span class="r18 r t">T</span>&gt; <span id="r24 rd" class="r24 r">nextInstance</span>, <a href="@0@mscorlib/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<span class="r18 r t">T</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <span id="r25 rd" class="r25 r">getName</span>)
+            {
+                <span class="c">// we will loop until this is null</span>
+                <a href="#fc188fca9e245bf0" class="t t">MonitorLastCall</a>&lt;<span class="r18 r t">T</span>&gt; <span id="r26 rd" class="r26 r">processThisInstance</span> = <span class="r24 r">nextInstance</span>;
+ 
+                <b>while</b> (<b>null</b> != <span class="r26 r">processThisInstance</span>)
+                {
+                    <b>bool</b> <span id="r27 rd" class="r27 r">usePredicateToCallList</span> = <b>false</b>;
+                    <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a> <span id="r28 rd" class="r28 r">utcNow</span> = <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a>.<a href="@0@mscorlib/A.html#b0d5e4c9a8d4ddac" class="i property">UtcNow</a>;
+ 
+                    <span class="c">// if it is not too early, we can use this instance</span>
+                    <b>if</b> (<span class="r28 r">utcNow</span> &gt;= <span class="r24 r">nextInstance</span>.<a href="#40b8db4301bfc52d" class="i property">DoNotRefreshUntilUTC</a>)
+                    {
+                        <span class="c">// now check to see if it will fit</span>
+                        <span class="c">// remember the limit on the name is 64 and the limit on the predicate is 500</span>
+                        <span class="c">// the assumption is that even if these #s evolve at least one max-sized-name will fit.</span>
+ 
+                        <a href="@0@mscorlib/A.html#adf60ee46ebd299f" class="t t">StringBuilder</a> <span id="r29 rd" class="r29 r">possibleAdditionalExpression</span> = <b>new</b> <a href="@0@mscorlib/A.html#6e631639c1e2746b" class="t constructor">StringBuilder</a>();
+ 
+                        <span class="c">// if this is not the first name then we must &quot;or&quot; this name in</span>
+                        <b>if</b> (0 != <a href="#6480db791eff7f14" class="i field">_odataFilterSB</a>.<a href="@0@mscorlib/A.html#7d7729bd88adac53" class="i property">Length</a>)
+                        {
+                            <span class="r29 r">possibleAdditionalExpression</span>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<a href="#6064e15cb4619af9" class="i field">OrOperator</a>);
+                        }
+ 
+                        <span class="c">// add in the name prefix</span>
+                        <span class="r29 r">possibleAdditionalExpression</span>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<a href="#0d08144382826ed2" class="i field">IdPrefix</a>);
+ 
+                        <span class="c">// get the name of the object</span>
+                        <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r30 rd" class="r30 r">name</span> = <span class="r25 r">getName</span>(<span class="r24 r">nextInstance</span>.<a href="#3ca945a0486407b8" class="i property">Instance</a>);
+ 
+                        <span class="c">// add in the name</span>
+                        <span class="r29 r">possibleAdditionalExpression</span>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<span class="r30 r">name</span>);
+ 
+                        <span class="c">// add the name postfix</span>
+                        <span class="r29 r">possibleAdditionalExpression</span>.<a href="@0@mscorlib/A.html#a2e7c78d85807da5" class="i method">Append</a>(<a href="#5bd80cd33b16ac69" class="i field">IdPostfix</a>);
+ 
+                        <span class="c">// if it will fit then append the clause to the predicate</span>
+                        <b>if</b> ((<a href="#6480db791eff7f14" class="i field">_odataFilterSB</a>.<a href="@0@mscorlib/A.html#7d7729bd88adac53" class="i property">Length</a> + <span class="r29 r">possibleAdditionalExpression</span>.<a href="@0@mscorlib/A.html#7d7729bd88adac53" class="i property">Length</a>) &lt; <a href="#ed0d81d53f8e49de" class="i field">_odataMonitorControl</a>.<a href="#10c614431bf6abbe" class="i field">ODATAPredicateLimit</a>)
+                        {
+                            <span class="c">// amend the predicate to refresh the object</span>
+                            <a href="#6480db791eff7f14" class="i field">_odataFilterSB</a>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<span class="r29 r">possibleAdditionalExpression</span>.<a href="@0@mscorlib/A.html#5a97da49a158a3c9" class="i method">ToString</a>());
+ 
+                            <span class="r26 r">processThisInstance</span> = <b>null</b>;  <span class="c">// we are done</span>
+                        }
+                        <b>else</b>
+                        {
+                            <span class="c">// it will not fit so we are done with this predicate</span>
+                            <span class="r27 r">usePredicateToCallList</span> = <b>true</b>;
+                        }
+                    }
+                    <b>else</b> <span class="c">// if the next instance cannot be refreshed yet we may need to wait a bit</span>
+                    {
+                        <span class="c">// if we have work to do... return to process that work and use up time</span>
+                        <b>if</b> (<a href="#6480db791eff7f14" class="i field">_odataFilterSB</a>.<a href="@0@mscorlib/A.html#7d7729bd88adac53" class="i property">Length</a> &gt; 0)
+                        {
+                            <span class="r27 r">usePredicateToCallList</span> = <b>true</b>;
+                        }
+                        <b>else</b>  <span class="c">// if we have no work to do we should delay until the instance can be refreshed</span>
+                        {
+                            <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r31 rd" class="r31 r">delayThisMuch</span> = <span class="r26 r">processThisInstance</span>.<a href="#40b8db4301bfc52d" class="i property">DoNotRefreshUntilUTC</a> - <span class="r28 r">utcNow</span>;
+ 
+                            <b>if</b> (<span class="r31 r">delayThisMuch</span>.<a href="@0@mscorlib/A.html#45b3882f7cfdd300" class="i property">Ticks</a> &gt; 0)
+                            {
+                                <b>await</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>.<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#87a671fb5b9b4384" class="i method">Delay</a>(<span class="r31 r">delayThisMuch</span>).<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<span class="r16 r">continueOnCapturedContext</span>: <b>false</b>);
+                            }
+                        }
+                    }
+ 
+                    <span class="c">// should we call the server with the current predicate data?</span>
+                    <b>if</b> (<span class="r27 r">usePredicateToCallList</span>)
+                    {
+                        <span class="r27 r">usePredicateToCallList</span> = <b>false</b>;
+ 
+                        <span class="c">// start the new list operation</span>
+                        <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <span id="r32 rd" class="r32 r">asyncListTask</span> = <a href="#0508f9b0cccf4982" class="i method">CallListAndProcessResults</a>();
+ 
+                        <span class="c">// wait for completion</span>
+                        <b>await</b> <span class="r32 r">asyncListTask</span>.<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<span class="r16 r">continueOnCapturedContext</span>: <b>false</b>);
+                    }
+                }
+            }
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> Will swap the queues.  This is the transition from one pass to the next.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <b>internal void</b> <a id="f7ab62bc31f4830e" href="R/f7ab62bc31f4830e.html" target="n" data-glyph="74,2" class="i method">SwapQueues</a>()
+            {
+                <a href="@0@System/A.html#aa3beab99b2e0db2" class="t t">Queue</a>&lt;<a href="#fc188fca9e245bf0" class="t t">MonitorLastCall</a>&lt;<span class="r18 r t">T</span>&gt;&gt; <span id="r33 rd" class="r33 r">tmp</span> = <a href="#2dd62bfc8fcb94b7" class="k">this</a>.<a href="#24283764d12e7a7d" class="i field">CurrentPassQueue</a>;
+ 
+                <a href="#2dd62bfc8fcb94b7" class="k">this</a>.<a href="#24283764d12e7a7d" class="i field">CurrentPassQueue</a> = <a href="#2dd62bfc8fcb94b7" class="k">this</a>.<a href="#0cd96b143a209f0f" class="i field">NextPassQueue</a>;
+                <a href="#2dd62bfc8fcb94b7" class="k">this</a>.<a href="#0cd96b143a209f0f" class="i field">NextPassQueue</a> = <span class="r33 r">tmp</span>;
+            }
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> Uses list func to fetch fresh data on the instances in the predicate.</span>
+            <span class="c">///</span><span class="c"> Instances that fail the condition are enqueued for the next pass.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+            <b>internal async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="0508f9b0cccf4982" href="R/0508f9b0cccf4982.html" target="n" data-glyph="74,2" class="i method">CallListAndProcessResults</a>()
+            {
+                <span class="c">// extract the predicate that restricts the list call</span>
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r34 rd" class="r34 r">predicate</span> = <a href="#6480db791eff7f14" class="i field">_odataFilterSB</a>.<a href="@0@mscorlib/A.html#5a97da49a158a3c9" class="i method">ToString</a>();
+ 
+                <span class="c">// clear the sb for the next batch</span>
+                <a href="#6480db791eff7f14" class="i field">_odataFilterSB</a>.<a href="@0@mscorlib/A.html#12bafac7fd9481fd" class="i method">Clear</a>();
+ 
+                <span class="c">// early exit if there is no work to do</span>
+                <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>(<span class="r34 r">predicate</span>))
+                {
+                    <b>return</b>;
+                }
+ 
+                <span class="c">// update the detail level</span>
+                <a href="#6d54d4f110bb0137" class="i field">_odataDetailLevel</a>.<a href="ODATADetailLevel.cs.html#320e51351a44e333" class="i property">FilterClause</a> = <span class="r34 r">predicate</span>;
+ 
+                <span class="c">// get the enumerable to refresh the instances</span>
+                <a href="IPagedEnumerable.cs.html#f93c71bac5f9f1fd" class="t t">IPagedEnumerable</a>&lt;<span class="r18 r t">T</span>&gt; <span id="r35 rd" class="r35 r">tEnumberable</span> = <a href="#30d30a082a577f8a" class="i field">_listObjects</a>();
+ 
+                <span class="c">// get the enumerator for asycn walk of the collection</span>
+                <a href="IPagedEnumerator.cs.html#73142b51637e9ea3" class="t t">IPagedEnumerator</a>&lt;<span class="r18 r t">T</span>&gt; <span id="r36 rd" class="r36 r">tEnumerator</span> = <span class="r35 r">tEnumberable</span>.<a href="IPagedEnumerable.cs.html#ddeb8c96744ae7f1" class="i method">GetPagedEnumerator</a>();
+ 
+                <span class="c">// used to enumerate until out of data</span>
+                <b>bool</b> <span id="r37 rd" class="r37 r">thereIsMoreData</span>;
+ 
+                <b>do</b>
+                {
+                    <span class="c">// move to next instance, possibley make call to server to get next batch</span>
+                    <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>bool</b>&gt; <span id="r38 rd" class="r38 r">asyncTask</span> = <span class="r36 r">tEnumerator</span>.<a href="IPagedEnumerator.cs.html#d04609a3462762a4" class="i method">MoveNextAsync</a>(<a href="#2dd62bfc8fcb94b7" class="k">this</a>.<a href="#27043e2dfcd00d73" class="i property">CancellationToken</a>);
+ 
+                    <span class="r37 r">thereIsMoreData</span> = <b>await</b> <span class="r38 r">asyncTask</span>.<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<span class="r39 r">continueOnCapturedContext</span>: <b>false</b>);
+ 
+                    <b>if</b> (<span class="r37 r">thereIsMoreData</span>)
+                    {
+                        <span class="c">// get the current instance</span>
+                        <span class="r18 r t">T</span> <span id="r40 rd" class="r40 r">refreshedInstance</span> = <span class="r36 r">tEnumerator</span>.<a href="IPagedEnumerator.cs.html#911125a470bf033a" class="i property">Current</a>;
+ 
+                        <span class="c">// test it to see if it is done</span>
+                        <b>if</b> (!<a href="#30b1007a303e7001" class="i field">_condition</a>(<span class="r40 r">refreshedInstance</span>))
+                        {
+                            <span class="c">// we will have to refresh it again so put in queue for next pass</span>
+ 
+                            <span class="c">// box it up</span>
+                            <a href="#fc188fca9e245bf0" class="t t">MonitorLastCall</a>&lt;<span class="r18 r t">T</span>&gt; <span id="r41 rd" class="r41 r">mlc</span> = <b>new</b> <a href="#ee4313f7a46e2d36" class="t constructor">MonitorLastCall</a>&lt;<span class="r18 r t">T</span>&gt;(<span class="r40 r">refreshedInstance</span>, <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a>.<a href="@0@mscorlib/A.html#b0d5e4c9a8d4ddac" class="i property">UtcNow</a> + <a href="#ed0d81d53f8e49de" class="i field">_odataMonitorControl</a>.<a href="#e552aa785ea29781" class="i property">DelayBetweenDataFetch</a>);
+ 
+                            <span class="c">// enqueue it for next pass</span>
+                            <a href="#2dd62bfc8fcb94b7" class="k">this</a>.<a href="#0cd96b143a209f0f" class="i field">NextPassQueue</a>.<a href="@0@System/A.html#14c3cc45ceaf1566" class="i method">Enqueue</a>(<span class="r41 r">mlc</span>);
+                        }
+                    }
+                }
+                <b>while</b> (<span class="r37 r">thereIsMoreData</span>);
+            }
+        }
+    }
+ 
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> A class to track the last time an instance was refreshed/monitored.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r42 r t">T</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="fc188fca9e245bf0" href="R/fc188fca9e245bf0.html" target="n" data-glyph="2,0" class="t t">MonitorLastCall</a>&lt;<span id="r42 rd t" class="r42 r t">T</span>&gt;
+    {
+        <b>private</b> <a id="14e1e785a0edf8d1" href="R/../../0000000000.html" target="n" data-glyph="76,1" class="t constructor">MonitorLastCall</a>()
+        {
+        }
+ 
+        <b>internal</b> <a id="ee4313f7a46e2d36" href="R/ee4313f7a46e2d36.html" target="n" data-glyph="74,1" class="t constructor">MonitorLastCall</a>(<span class="r42 r t">T</span> <span id="r43 rd" class="r43 r">instance</span>, <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a> <span id="r44 rd" class="r44 r">timestamp</span>)
+        {
+            <a href="#fc188fca9e245bf0" class="k">this</a>.<a href="#40b8db4301bfc52d" class="i property">DoNotRefreshUntilUTC</a> = <span class="r44 r">timestamp</span>;
+            <a href="#fc188fca9e245bf0" class="k">this</a>.<a href="#3ca945a0486407b8" class="i property">Instance</a> = <span class="r43 r">instance</span>;
+        }
+ 
+        <b>public</b> <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a> <a id="40b8db4301bfc52d" href="R/40b8db4301bfc52d.html" target="n" data-glyph="102,1" class="i property">DoNotRefreshUntilUTC</a> { <b>get</b>; <b>internal set</b>; }
+ 
+        <b>public</b> <span class="r42 r t">T</span> <a id="3ca945a0486407b8" href="R/3ca945a0486407b8.html" target="n" data-glyph="102,1" class="i property">Instance</a> { <b>get</b>; <b>internal set</b>; }
+    }
+}
+</pre></td></tr></table></div></body></html>

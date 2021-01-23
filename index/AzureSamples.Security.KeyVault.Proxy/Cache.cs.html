@@ -1,0 +1,110 @@
+﻿<!DOCTYPE html>
+<html><head><title>Cache.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(101);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#AzureSamples.Security.KeyVault.Proxy/Cache.cs" target="_top">Cache.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#AzureSamples.Security.KeyVault.Proxy" target="_top">src\AzureSamples.Security.KeyVault.Proxy.csproj</a> (AzureSamples.Security.KeyVault.Proxy)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">Azure</span>;
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+ 
+<b>namespace</b> <span class="i n">AzureSamples</span>.<span class="i n">Security</span>.<span class="i n">KeyVault</span>.<span class="i n">Proxy</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Maintains a cache of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="CachedResponse.cs.html#5b709950b549a965" class="t t">CachedResponse</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> items.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="194906495c193632" href="R/194906495c193632.html" target="n" data-glyph="2,0" class="t t"><span id="fa3a7a4ae85de220">Cache</span></a> : <span class="i">IDisposable</span>
+    {
+        <b>private readonly</b> <span class="i">Dictionary</span>&lt;<b>string</b>, <a href="CachedResponse.cs.html#5b709950b549a965" class="t t">CachedResponse</a>&gt; <a id="6a20a2adf5df4329" href="R/6a20a2adf5df4329.html" target="n" data-glyph="46,1" class="i field">_cache</a> = <b>new</b> <span class="i">Dictionary</span>&lt;<b>string</b>, <a href="CachedResponse.cs.html#5b709950b549a965" class="t t">CachedResponse</a>&gt;(<span class="i">StringComparer</span>.<span class="i">OrdinalIgnoreCase</span>);
+        <b>private</b> <span class="i">SemaphoreSlim</span>? <a id="323efbf3685312ed" href="R/323efbf3685312ed.html" target="n" data-glyph="46,1" class="i field">_lock</a> = <b>new</b> <span class="i">SemaphoreSlim</span>(1, 1);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public void</b> <a id="a92a707dab3615e5" href="R/a92a707dab3615e5.html" target="n" data-glyph="72,1" class="i method">Dispose</a>()
+        {
+            <b>if</b> (<a href="#323efbf3685312ed" class="i field">_lock</a> <b>is</b> {})
+            {
+                <a href="#323efbf3685312ed" class="i field">_lock</a>.<span class="i">Dispose</span>();
+                <a href="#323efbf3685312ed" class="i field">_lock</a> = <b>null</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets a valid </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">Response</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> or requests and caches a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="CachedResponse.cs.html#5b709950b549a965" class="t t">CachedResponse</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">isAsync</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Whether certain operations should be performed asynchronously.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">uri</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The URI sans query parameters to cache.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">ttl</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The amount of time for which the cached item is valid.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">action</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The action to request a response.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A new </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">Response</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>internal async</b> <span class="i">ValueTask</span>&lt;<span class="i">Response</span>&gt; <a id="d0650bc7a2fd8b0a" href="R/../../0000000000.html" target="n" data-glyph="74,1" class="i method">GetOrAddAsync</a>(<b>bool</b> <span id="r0 rd" class="r0 r">isAsync</span>, <b>string</b> <span id="r1 rd" class="r1 r">uri</span>, <span class="i">TimeSpan</span> <span id="r2 rd" class="r2 r">ttl</span>, <span class="i">Func</span>&lt;<span class="i">ValueTask</span>&lt;<span class="i">Response</span>&gt;&gt; <span id="r3 rd" class="r3 r">action</span>)
+        {
+            <a href="#41dac037bc5269ab" class="i method">ThrowIfDisposed</a>();
+ 
+            <b>if</b> (<span class="r0 r">isAsync</span>)
+            {
+                <b>await</b> <a href="#323efbf3685312ed" class="i field">_lock</a>!.<span class="i">WaitAsync</span>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>else</b>
+            {
+                <a href="#323efbf3685312ed" class="i field">_lock</a>!.<span class="i">Wait</span>();
+            }
+ 
+            <b>try</b>
+            {
+                <span class="c">// Try to get a valid cached response inside the lock before fetching.</span>
+                <b>if</b> (<a href="#6a20a2adf5df4329" class="i field">_cache</a>.<span class="i">TryGetValue</span>(<span class="r1 r">uri</span>, <b>out</b> <a href="CachedResponse.cs.html#5b709950b549a965" class="t t">CachedResponse</a> <span id="r4 rd" class="r4 r">cachedResponse</span>) &amp;&amp; <span class="r4 r">cachedResponse</span>.<a href="CachedResponse.cs.html#af7d4e9934ea5f4d" class="i property">IsValid</a>)
+                {
+                    <b>return</b> <b>await</b> <span class="r4 r">cachedResponse</span>.<a href="CachedResponse.cs.html#f807903bdadcc6f8" class="i method">CloneAsync</a>(<span class="r0 r">isAsync</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+ 
+                <span class="i">Response</span> <span id="r5 rd" class="r5 r">response</span> = <b>await</b> <span class="r3 r">action</span>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <b>if</b> (<span class="r5 r">response</span>.<span class="i">Status</span> == 200 &amp;&amp; <span class="r5 r">response</span>.<span class="i">ContentStream</span> <b>is</b> { })
+                {
+                    <span class="r4 r">cachedResponse</span> = <b>await</b> <a href="CachedResponse.cs.html#5b709950b549a965" class="t t">CachedResponse</a>.<a href="CachedResponse.cs.html#8fcbfd9c9d5d296e" class="i method">CreateAsync</a>(<span class="r0 r">isAsync</span>, <span class="r5 r">response</span>, <span class="r2 r">ttl</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    <a href="#6a20a2adf5df4329" class="i field">_cache</a>[<span class="r1 r">uri</span>] = <span class="r4 r">cachedResponse</span>;
+                }
+ 
+                <b>return</b> <span class="r5 r">response</span>;
+            }
+            <b>finally</b>
+            {
+                <a href="#323efbf3685312ed" class="i field">_lock</a>.<span class="i">Release</span>();
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Clears the cache.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal void</b> <a id="6a5f266e59609bdc" href="R/6a5f266e59609bdc.html" target="n" data-glyph="74,1" class="i method">Clear</a>()
+        {
+            <a href="#41dac037bc5269ab" class="i method">ThrowIfDisposed</a>();
+ 
+            <a href="#323efbf3685312ed" class="i field">_lock</a>!.<span class="i">Wait</span>();
+            <b>try</b>
+            {
+                <a href="#6a20a2adf5df4329" class="i field">_cache</a>.<span class="i">Clear</span>();
+            }
+            <b>finally</b>
+            {
+                <a href="#323efbf3685312ed" class="i field">_lock</a>.<span class="i">Release</span>();
+            }
+        }
+ 
+        <b>private void</b> <a id="41dac037bc5269ab" href="R/41dac037bc5269ab.html" target="n" data-glyph="76,1" class="i method">ThrowIfDisposed</a>()
+        {
+            <b>if</b> (<a href="#323efbf3685312ed" class="i field">_lock</a> <b>is null</b>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ObjectDisposedException</span>(<b>nameof</b>(<a href="#323efbf3685312ed" class="i field">_lock</a>));
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

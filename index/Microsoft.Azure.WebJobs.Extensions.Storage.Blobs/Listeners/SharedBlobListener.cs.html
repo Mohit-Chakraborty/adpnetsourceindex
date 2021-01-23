@@ -1,0 +1,125 @@
+﻿<!DOCTYPE html>
+<html><head><title>SharedBlobListener.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(116);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs/Listeners/SharedBlobListener.cs" target="_top">Listeners\SharedBlobListener.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs" target="_top">Microsoft.Azure.WebJobs.Extensions.Storage.Blobs\src\Microsoft.Azure.WebJobs.Extensions.Storage.Blobs.csproj</a> (Microsoft.Azure.WebJobs.Extensions.Storage.Blobs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Common</span>.<span class="i n">Listeners</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Common</span>.<span class="i n">Timers</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Timers</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Logging</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>.<span class="i n">Listeners</span>
+{
+    <b>internal sealed class</b> <a id="6734f3473052fb24" href="../R/6734f3473052fb24.html" target="n" data-glyph="2,0" class="t t">SharedBlobListener</a> : <a href="../Shared/Listeners/ISharedListener.cs.html#e55edac2ba120311" class="t t">ISharedListener</a>
+    {
+        <b>private readonly</b> <a href="IBlobListenerStrategy.cs.html#528416e145265466" class="t t">IBlobListenerStrategy</a> <a id="d4f6141078fd9424" href="../R/d4f6141078fd9424.html" target="n" data-glyph="46,1" class="i field">_strategy</a>;
+        <b>private readonly</b> <a href="../Shared/Timers/ITaskSeriesTimer.cs.html#28fb637976eaf134" class="t t">ITaskSeriesTimer</a> <a id="a9ca2c6dc4aa3dd7" href="../R/a9ca2c6dc4aa3dd7.html" target="n" data-glyph="46,1" class="i field">_timer</a>;
+ 
+        <b>private bool</b> <a id="0a40714164f17f02" href="../R/0a40714164f17f02.html" target="n" data-glyph="46,1" class="i field">_started</a>;
+        <b>private bool</b> <a id="9ef8c04f8536aa40" href="../R/9ef8c04f8536aa40.html" target="n" data-glyph="46,1" class="i field">_disposed</a>;
+ 
+        <b>public</b> <a id="bc5cf8eced5e8d90" href="../R/bc5cf8eced5e8d90.html" target="n" data-glyph="72,1" class="t constructor">SharedBlobListener</a>(<b>string</b> <span id="r0 rd" class="r0 r">hostId</span>, <a href="/Azure.Storage.Blobs/A.html#5c3c4fe54cdb5868" class="t t">BlobServiceClient</a> <span id="r1 rd" class="r1 r">blobServiceClient</span>,
+            <span class="i">IWebJobsExceptionHandler</span> <span id="r2 rd" class="r2 r">exceptionHandler</span>, <span class="i">ILogger</span>&lt;<a href="BlobListener.cs.html#f6072afdd237218d" class="t t">BlobListener</a>&gt; <span id="r3 rd" class="r3 r">logger</span>)
+        {
+            <b>if</b> (<span class="r3 r">logger</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r3 r">logger</span>));
+            }
+ 
+            <b>if</b> (<span class="r2 r">exceptionHandler</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r2 r">exceptionHandler</span>));
+            }
+ 
+            <a href="#d4f6141078fd9424" class="i field">_strategy</a> = <a href="#46408aa39b82d9e3" class="i method">CreateStrategy</a>(<span class="r0 r">hostId</span>, <span class="r1 r">blobServiceClient</span>, <span class="r2 r">exceptionHandler</span>, <span class="r3 r">logger</span>);
+ 
+            <span class="c">// Start the first iteration immediately.</span>
+            <a href="#a9ca2c6dc4aa3dd7" class="i field">_timer</a> = <b>new</b> <span class="t">TaskSeriesTimer</span>(<a href="#d4f6141078fd9424" class="i field">_strategy</a>, <span class="r2 r">exceptionHandler</span>, <span class="i">initialWait</span>: <span class="i">Task</span>.<span class="i">Delay</span>(0));
+        }
+ 
+        <b>public</b> <a href="../IBlobWrittenWatcher.cs.html#79f2f00bd03cfb0b" class="t t">IBlobWrittenWatcher</a> <a id="452fd07449cbce94" href="../R/452fd07449cbce94.html" target="n" data-glyph="102,1" class="i property">BlobWritterWatcher</a>
+        {
+            <b>get</b> { <b>return</b> <a href="#d4f6141078fd9424" class="i field">_strategy</a>; }
+        }
+ 
+        <b>public</b> <span class="i">Task</span> <a id="304b3f59ca1799e3" href="../R/304b3f59ca1799e3.html" target="n" data-glyph="72,1" class="i method">RegisterAsync</a>(<a href="/Azure.Storage.Blobs/A.html#5c3c4fe54cdb5868" class="t t">BlobServiceClient</a> <span id="r4 rd" class="r4 r">blobServiceClient</span>, <a href="/Azure.Storage.Blobs/A.html#6bb2c165ee95c7d4" class="t t">BlobContainerClient</a> <span id="r5 rd" class="r5 r">container</span>, <a href="../Shared/Listeners/ITriggerExecutor.cs.html#7371353e2f184692" class="t t">ITriggerExecutor</a>&lt;<a href="BlobTriggerExecutorContext.cs.html#082c94806db01159" class="t t">BlobTriggerExecutorContext</a>&gt; <span id="r6 rd" class="r6 r">triggerExecutor</span>,
+            <span class="i">CancellationToken</span> <span id="r7 rd" class="r7 r">cancellationToken</span>)
+        {
+            <b>if</b> (<a href="#0a40714164f17f02" class="i field">_started</a>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">InvalidOperationException</span>(
+                    <span class="s">&quot;Registrations may not be added while the shared listener is running.&quot;</span>);
+            }
+ 
+            <b>return</b> <a href="#d4f6141078fd9424" class="i field">_strategy</a>.<a href="IBlobNotificationStrategy.cs.html#de302cca903548d2" class="i method">RegisterAsync</a>(<span class="r4 r">blobServiceClient</span>, <span class="r5 r">container</span>, <span class="r6 r">triggerExecutor</span>, <span class="r7 r">cancellationToken</span>);
+        }
+ 
+        <b>public</b> <span class="i">Task</span> <a id="b49a42cb7d4610db" href="../R/b49a42cb7d4610db.html" target="n" data-glyph="72,1" class="i method">EnsureAllStartedAsync</a>(<span class="i">CancellationToken</span> <span id="r8 rd" class="r8 r">cancellationToken</span>)
+        {
+            <b>if</b> (!<a href="#0a40714164f17f02" class="i field">_started</a>)
+            {
+                <a href="#a9ca2c6dc4aa3dd7" class="i field">_timer</a>.<a href="../Shared/Timers/ITaskSeriesTimer.cs.html#579a4ae4f5368e7d" class="i method">Start</a>();
+                <a href="#d4f6141078fd9424" class="i field">_strategy</a>.<a href="IBlobListenerStrategy.cs.html#b50c06e388430ced" class="i method">Start</a>();
+                <a href="#0a40714164f17f02" class="i field">_started</a> = <b>true</b>;
+            }
+ 
+            <b>return</b> <span class="i">Task</span>.<span class="i">FromResult</span>(0);
+        }
+ 
+        <b>public async</b> <span class="i">Task</span> <a id="8d9cf00a678ed70d" href="../R/8d9cf00a678ed70d.html" target="n" data-glyph="72,1" class="i method">EnsureAllStoppedAsync</a>(<span class="i">CancellationToken</span> <span id="r9 rd" class="r9 r">cancellationToken</span>)
+        {
+            <b>if</b> (<a href="#0a40714164f17f02" class="i field">_started</a>)
+            {
+                <a href="#d4f6141078fd9424" class="i field">_strategy</a>.<a href="IBlobListenerStrategy.cs.html#1cd9873e5675f9e8" class="i method">Cancel</a>();
+                <b>await</b> <a href="#a9ca2c6dc4aa3dd7" class="i field">_timer</a>.<a href="../Shared/Timers/ITaskSeriesTimer.cs.html#6c7d06c14ef93375" class="i method">StopAsync</a>(<span class="r9 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <a href="#0a40714164f17f02" class="i field">_started</a> = <b>false</b>;
+            }
+        }
+ 
+        <b>public void</b> <a id="c39663c54d606abe" href="../R/c39663c54d606abe.html" target="n" data-glyph="72,1" class="i method">EnsureAllCanceled</a>()
+        {
+            <a href="#d4f6141078fd9424" class="i field">_strategy</a>.<a href="IBlobListenerStrategy.cs.html#1cd9873e5675f9e8" class="i method">Cancel</a>();
+            <a href="#a9ca2c6dc4aa3dd7" class="i field">_timer</a>.<a href="../Shared/Timers/ITaskSeriesTimer.cs.html#c4e86cd328167bdf" class="i method">Cancel</a>();
+        }
+ 
+        <b>public void</b> <a id="eab223210f3afdc1" href="../R/eab223210f3afdc1.html" target="n" data-glyph="72,1" class="i method">EnsureAllDisposed</a>()
+        {
+            <a href="#f146779cd43682a5" class="i method">Dispose</a>();
+        }
+ 
+        <b>public void</b> <a id="f146779cd43682a5" href="../R/f146779cd43682a5.html" target="n" data-glyph="72,1" class="i method">Dispose</a>()
+        {
+            <b>if</b> (!<a href="#9ef8c04f8536aa40" class="i field">_disposed</a>)
+            {
+                <a href="#d4f6141078fd9424" class="i field">_strategy</a>.<span class="i">Dispose</span>();
+                <a href="#a9ca2c6dc4aa3dd7" class="i field">_timer</a>.<span class="i">Dispose</span>();
+                <a href="#9ef8c04f8536aa40" class="i field">_disposed</a> = <b>true</b>;
+            }
+        }
+ 
+        <b>private static</b> <a href="IBlobListenerStrategy.cs.html#528416e145265466" class="t t">IBlobListenerStrategy</a> <a id="46408aa39b82d9e3" href="../R/46408aa39b82d9e3.html" target="n" data-glyph="76,1" class="i method">CreateStrategy</a>(<b>string</b> <span id="r10 rd" class="r10 r">hostId</span>, <a href="/Azure.Storage.Blobs/A.html#5c3c4fe54cdb5868" class="t t">BlobServiceClient</a> <span id="r11 rd" class="r11 r">blobServiceClient</span>, <span class="i">IWebJobsExceptionHandler</span> <span id="r12 rd" class="r12 r">exceptionHandler</span>, <span class="i">ILogger</span>&lt;<a href="BlobListener.cs.html#f6072afdd237218d" class="t t">BlobListener</a>&gt; <span id="r13 rd" class="r13 r">logger</span>)
+        {
+            <b>if</b> (!<span class="r11 r">blobServiceClient</span>.<a href="../BlobServiceClientExtensions.cs.html#887da7c098385b80" class="i method">IsDevelopmentStorageAccount</a>())
+            {
+                <a href="IBlobScanInfoManager.cs.html#3c68988d428afdc1" class="t t">IBlobScanInfoManager</a> <span id="r14 rd" class="r14 r">scanInfoManager</span> = <b>new</b> <a href="StorageBlobScanInfoManager.cs.html#c6727d4375c7d70d" class="t constructor">StorageBlobScanInfoManager</a>(<span class="r10 r">hostId</span>, <span class="r11 r">blobServiceClient</span>);
+                <b>return</b> <b>new</b> <a href="ScanBlobScanLogHybridPollingStrategy.cs.html#777fadff4e303135" class="t constructor">ScanBlobScanLogHybridPollingStrategy</a>(<span class="r14 r">scanInfoManager</span>, <span class="r12 r">exceptionHandler</span>, <span class="r13 r">logger</span>);
+            }
+            <b>else</b>
+            {
+                <b>return</b> <b>new</b> <a href="ScanContainersStrategy.cs.html#f8fcceb3df657ae4" class="t constructor">ScanContainersStrategy</a>();
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

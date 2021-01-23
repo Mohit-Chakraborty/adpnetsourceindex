@@ -1,0 +1,98 @@
+﻿<!DOCTYPE html>
+<html><head><title>RandomizedExponentialBackoffStrategy.cs</title><link rel="stylesheet" href="../../../styles.css"><script src="../../../scripts.js"></script></head>
+<body class="cB" onload="i(89);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs/Shared/Timers/RandomizedExponentialBackoffStrategy.cs" target="_top">Shared\Timers\RandomizedExponentialBackoffStrategy.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs" target="_top">Microsoft.Azure.WebJobs.Extensions.Storage.Blobs\src\Microsoft.Azure.WebJobs.Extensions.Storage.Blobs.csproj</a> (Microsoft.Azure.WebJobs.Extensions.Storage.Blobs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Common</span>.<span class="i n">Timers</span>
+{
+    <b>internal class</b> <a id="48b3f0dfba4755c1" href="../../R/48b3f0dfba4755c1.html" target="n" data-glyph="2,0" class="t t">RandomizedExponentialBackoffStrategy</a> : <a href="IDelayStrategy.cs.html#53308a7cff0cdf4d" class="t t">IDelayStrategy</a>
+    {
+        <b>public const double</b> <a id="f6d70424d9729ce5" href="../../R/f6d70424d9729ce5.html" target="n" data-glyph="6,1" class="i field">RandomizationFactor</a> = 0.2;
+ 
+        <b>private readonly</b> <span class="i">TimeSpan</span> <a id="560427be7edff351" href="../../R/560427be7edff351.html" target="n" data-glyph="46,1" class="i field">_minimumInterval</a>;
+        <b>private readonly</b> <span class="i">TimeSpan</span> <a id="a29f743a9265490b" href="../../R/a29f743a9265490b.html" target="n" data-glyph="46,1" class="i field">_maximumInterval</a>;
+        <b>private readonly</b> <span class="i">TimeSpan</span> <a id="511926a258bd10c6" href="../../R/511926a258bd10c6.html" target="n" data-glyph="46,1" class="i field">_deltaBackoff</a>;
+ 
+        <b>private</b> <span class="i">TimeSpan</span> <a id="3108b875a7cf71e8" href="../../R/3108b875a7cf71e8.html" target="n" data-glyph="46,1" class="i field">_currentInterval</a>;
+        <b>private uint</b> <a id="cba02fbff77fcf7d" href="../../R/cba02fbff77fcf7d.html" target="n" data-glyph="46,1" class="i field">_backoffExponent</a>;
+        <b>private</b> <span class="i">Random</span> <a id="70508b54f788fb61" href="../../R/70508b54f788fb61.html" target="n" data-glyph="46,1" class="i field">_random</a>;
+ 
+        <b>public</b> <a id="84a745eb56f05a88" href="../../R/84a745eb56f05a88.html" target="n" data-glyph="72,1" class="t constructor">RandomizedExponentialBackoffStrategy</a>(<span class="i">TimeSpan</span> <span id="r0 rd" class="r0 r">minimumInterval</span>, <span class="i">TimeSpan</span> <span id="r1 rd" class="r1 r">maximumInterval</span>)
+            : <a href="#f7d40913dc228492" class="k">this</a>(<span class="r0 r">minimumInterval</span>, <span class="r1 r">maximumInterval</span>, <span class="r0 r">minimumInterval</span>)
+        {
+        }
+ 
+        <b>public</b> <a id="f7d40913dc228492" href="../../R/f7d40913dc228492.html" target="n" data-glyph="72,1" class="t constructor">RandomizedExponentialBackoffStrategy</a>(<span class="i">TimeSpan</span> <span id="r2 rd" class="r2 r">minimumInterval</span>, <span class="i">TimeSpan</span> <span id="r3 rd" class="r3 r">maximumInterval</span>,
+            <span class="i">TimeSpan</span> <span id="r4 rd" class="r4 r">deltaBackoff</span>)
+        {
+            <b>if</b> (<span class="r2 r">minimumInterval</span>.<span class="i">Ticks</span> &lt; 0)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentOutOfRangeException</span>(<b>nameof</b>(<span class="r2 r">minimumInterval</span>), <span class="s">&quot;The TimeSpan must not be negative.&quot;</span>);
+            }
+ 
+            <b>if</b> (<span class="r3 r">maximumInterval</span>.<span class="i">Ticks</span> &lt; 0)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentOutOfRangeException</span>(<b>nameof</b>(<span class="r3 r">maximumInterval</span>), <span class="s">&quot;The TimeSpan must not be negative.&quot;</span>);
+            }
+ 
+            <b>if</b> (<span class="r2 r">minimumInterval</span>.<span class="i">Ticks</span> &gt; <span class="r3 r">maximumInterval</span>.<span class="i">Ticks</span>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentException</span>(<span class="s">&quot;The minimumInterval must not be greater than the maximumInterval.&quot;</span>,
+                    <b>nameof</b>(<span class="r2 r">minimumInterval</span>));
+            }
+ 
+            <a href="#560427be7edff351" class="i field">_minimumInterval</a> = <span class="r2 r">minimumInterval</span>;
+            <a href="#a29f743a9265490b" class="i field">_maximumInterval</a> = <span class="r3 r">maximumInterval</span>;
+            <a href="#511926a258bd10c6" class="i field">_deltaBackoff</a> = <span class="r4 r">deltaBackoff</span>;
+        }
+ 
+        <b>public</b> <span class="i">TimeSpan</span> <a id="199f235c3f09f2f2" href="../../R/199f235c3f09f2f2.html" target="n" data-glyph="72,1" class="i method">GetNextDelay</a>(<b>bool</b> <span id="r5 rd" class="r5 r">executionSucceeded</span>)
+        {
+            <b>if</b> (<span class="r5 r">executionSucceeded</span>)
+            {
+                <a href="#3108b875a7cf71e8" class="i field">_currentInterval</a> = <a href="#560427be7edff351" class="i field">_minimumInterval</a>;
+                <a href="#cba02fbff77fcf7d" class="i field">_backoffExponent</a> = 1;
+            }
+            <b>else</b> <b>if</b> (<a href="#3108b875a7cf71e8" class="i field">_currentInterval</a> != <a href="#a29f743a9265490b" class="i field">_maximumInterval</a>)
+            {
+                <span class="i">TimeSpan</span> <span id="r6 rd" class="r6 r">backoffInterval</span> = <a href="#560427be7edff351" class="i field">_minimumInterval</a>;
+ 
+                <b>if</b> (<a href="#cba02fbff77fcf7d" class="i field">_backoffExponent</a> &gt; 0)
+                {
+                    <b>if</b> (<a href="#70508b54f788fb61" class="i field">_random</a> == <b>null</b>)
+                    {
+                        <a href="#70508b54f788fb61" class="i field">_random</a> = <b>new</b> <span class="i">Random</span>();
+                    }
+ 
+                    <b>double</b> <span id="r7 rd" class="r7 r">incrementMsec</span> = <a href="#70508b54f788fb61" class="i field">_random</a>.<span class="i">Next</span>(1.0 - <a href="#f6d70424d9729ce5" class="i field">RandomizationFactor</a>, 1.0 + <a href="#f6d70424d9729ce5" class="i field">RandomizationFactor</a>) *
+                        <span class="i">Math</span>.<span class="i">Pow</span>(2.0, <a href="#cba02fbff77fcf7d" class="i field">_backoffExponent</a> - 1) *
+                        <a href="#511926a258bd10c6" class="i field">_deltaBackoff</a>.<span class="i">TotalMilliseconds</span>;
+                    <span class="r6 r">backoffInterval</span> += <span class="i">TimeSpan</span>.<span class="i">FromMilliseconds</span>(<span class="r7 r">incrementMsec</span>);
+                }
+ 
+                <b>if</b> (<span class="r6 r">backoffInterval</span> &lt; <a href="#a29f743a9265490b" class="i field">_maximumInterval</a>)
+                {
+                    <a href="#3108b875a7cf71e8" class="i field">_currentInterval</a> = <span class="r6 r">backoffInterval</span>;
+                    <a href="#cba02fbff77fcf7d" class="i field">_backoffExponent</a>++;
+                }
+                <b>else</b>
+                {
+                    <a href="#3108b875a7cf71e8" class="i field">_currentInterval</a> = <a href="#a29f743a9265490b" class="i field">_maximumInterval</a>;
+                }
+            }
+            <span class="c">// else do nothing and keep current interval equal to max</span>
+ 
+            <b>return</b> <a href="#3108b875a7cf71e8" class="i field">_currentInterval</a>;
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

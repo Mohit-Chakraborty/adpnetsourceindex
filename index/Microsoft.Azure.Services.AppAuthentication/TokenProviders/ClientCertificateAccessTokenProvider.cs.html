@@ -1,0 +1,251 @@
+﻿<!DOCTYPE html>
+<html><head><title>ClientCertificateAccessTokenProvider.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(242);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.Services.AppAuthentication/TokenProviders/ClientCertificateAccessTokenProvider.cs" target="_top">TokenProviders\ClientCertificateAccessTokenProvider.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.Services.AppAuthentication" target="_top">Azure.Services.AppAuthentication\Microsoft.Azure.Services.AppAuthentication.csproj</a> (Microsoft.Azure.Services.AppAuthentication)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Security</span>.<span class="i n">Cryptography</span>.<span class="i n">X509Certificates</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">IdentityModel</span>.<span class="i">Clients</span>.<span class="i">ActiveDirectory</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Services</span>.<span class="i n">AppAuthentication</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Used to acquire token using certificate associated with an Azure AD application.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="15d12b94b6b8d431" href="../R/15d12b94b6b8d431.html" target="n" data-glyph="2,0" class="t t">ClientCertificateAzureServiceTokenProvider</a> : <a href="NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="t t">NonInteractiveAzureServiceTokenProviderBase</a>
+    {
+        <span class="c">// AppId of the application.</span>
+        <b>private readonly string</b> <a id="9ddfda285319feb3" href="../R/9ddfda285319feb3.html" target="n" data-glyph="46,1" class="i field">_clientId</a>;
+ 
+        <span class="c">// Certificate identifier: subject, thumbprint, or Key Vault secret identifier</span>
+        <b>private readonly string</b> <a id="5141168f6e7ff9c5" href="../R/5141168f6e7ff9c5.html" target="n" data-glyph="46,1" class="i field">_certificateIdentifier</a>;
+ 
+        <span class="c">// Enum which tells if subject, thumbprint, or Key Vault secret identifier is being used as identifier</span>
+        <b>private readonly</b> <a href="#88081d67685a2cf8" class="t t">CertificateIdentifierType</a> <a id="9e71938189312f55" href="../R/9e71938189312f55.html" target="n" data-glyph="46,1" class="i field">_certificateIdentifierType</a>;
+ 
+        <b>private readonly string</b> <a id="5ab0575058833c70" href="../R/5ab0575058833c70.html" target="n" data-glyph="46,1" class="i field">_azureAdInstance</a>;
+ 
+        <b>private string</b> <a id="fcb5851a26c15bd2" href="../R/fcb5851a26c15bd2.html" target="n" data-glyph="46,1" class="i field">_tenantId</a>;
+ 
+        <b>private readonly</b> <a href="../Clients/IAuthenticationContext.cs.html#de2e64e2289e4107" class="t t">IAuthenticationContext</a> <a id="6c03cb6ac0481d63" href="../R/6c03cb6ac0481d63.html" target="n" data-glyph="46,1" class="i field">_authenticationContext</a>;
+ 
+        <b>private readonly</b> <a href="../Clients/KeyVault/KeyVaultClient.cs.html#5e7f9dc8b5300af2" class="t t">KeyVaultClient</a> <a id="9b3ea650d106c6f2" href="../R/9b3ea650d106c6f2.html" target="n" data-glyph="46,1" class="i field">_keyVaultClient</a>;
+ 
+        <span class="c">// Store where certificate is deployed. </span>
+        <b>private readonly</b> <a href="@0@System/A.html#e81845c204e06e00" class="t t">StoreLocation</a> <a id="76968376521cf3c7" href="../R/76968376521cf3c7.html" target="n" data-glyph="46,1" class="i field">_storeLocation</a>;
+ 
+        <b>internal enum</b> <a id="88081d67685a2cf8" href="../R/88081d67685a2cf8.html" target="n" data-glyph="20,1" class="t t"><span id="fc27ca65f64958c7">CertificateIdentifierType</span></a>
+        {
+            <a id="a32b8b90135c94ad" href="../R/a32b8b90135c94ad.html" target="n" data-glyph="24,2" class="i field">SubjectName</a>,
+            <a id="0b408c5fb32c2eda" href="../R/0b408c5fb32c2eda.html" target="n" data-glyph="24,2" class="i field">Thumbprint</a>,
+            <a id="a46ef1ca1bb44841" href="../R/a46ef1ca1bb44841.html" target="n" data-glyph="24,2" class="i field">KeyVaultCertificateSecretIdentifier</a>
+        };
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates instance of ClientCertificateAzureServiceTokenProvider class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">clientId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">certificateIdentifier</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">certificateIdentifierType</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">storeLocation</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">azureAdInstance</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">authenticationContext</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">tenantId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>internal</b> <a id="1614f9e7381f1cb8" href="../R/1614f9e7381f1cb8.html" target="n" data-glyph="74,1" class="t constructor">ClientCertificateAzureServiceTokenProvider</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r0 rd" class="r0 r">clientId</span>,
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r1 rd" class="r1 r">certificateIdentifier</span>, <a href="#88081d67685a2cf8" class="t t">CertificateIdentifierType</a> <span id="r2 rd" class="r2 r">certificateIdentifierType</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r3 rd" class="r3 r">storeLocation</span>,
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r4 rd" class="r4 r">azureAdInstance</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r6 rd" class="r6 r">tenantId</span> = <b>default</b>, <b>int</b> <span id="r7 rd" class="r7 r">msiRetryTimeoutInSeconds</span> = 0,
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r8 rd" class="r8 r">keyVaultUserAssignedManagedIdentityId</span> = <b>null</b>,
+            <a href="../Clients/IAuthenticationContext.cs.html#de2e64e2289e4107" class="t t">IAuthenticationContext</a> <span id="r5 rd" class="r5 r">authenticationContext</span> = <b>null</b>, <a href="../Clients/KeyVault/KeyVaultClient.cs.html#5e7f9dc8b5300af2" class="t t">KeyVaultClient</a> <span id="r9 rd" class="r9 r">keyVaultClient</span> = <b>null</b>)
+        {
+            <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>(<span class="r0 r">clientId</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>(<b>nameof</b>(<span class="r0 r">clientId</span>));
+            }
+ 
+            <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>(<span class="r1 r">certificateIdentifier</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>(<b>nameof</b>(<span class="r1 r">certificateIdentifier</span>));
+            }
+ 
+            <span class="c">// require storeLocation if using subject name or thumbprint identifier</span>
+            <b>if</b> (<span class="r2 r">certificateIdentifierType</span> == <a href="#88081d67685a2cf8" class="t t">CertificateIdentifierType</a>.<a href="#a32b8b90135c94ad" class="i field">SubjectName</a>
+                || <span class="r2 r">certificateIdentifierType</span> == <a href="#88081d67685a2cf8" class="t t">CertificateIdentifierType</a>.<a href="#0b408c5fb32c2eda" class="i field">Thumbprint</a>)
+            {
+                <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>(<span class="r3 r">storeLocation</span>))
+                {
+                    <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>(<b>nameof</b>(<span class="r3 r">storeLocation</span>));
+                }
+ 
+                <span class="c">// Parse store location specified in connection string. </span>
+                <a href="@0@System/A.html#e81845c204e06e00" class="t t">StoreLocation</a> <span id="r10 rd" class="r10 r">location</span>;
+                <b>if</b> (<a href="@0@mscorlib/A.html#36729210e317a805" class="t t">Enum</a>.<a href="@0@mscorlib/A.html#7ef4c46032079d2b" class="i method">TryParse</a>(<span class="r3 r">storeLocation</span>, <b>true</b>, <b>out</b> <span class="r10 r">location</span>))
+                {
+                    <a href="#76968376521cf3c7" class="i field">_storeLocation</a> = <span class="r10 r">location</span>;
+                }
+                <b>else</b>
+                {
+                    <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(
+                        <span class="s">$&quot;</span><span class="s">StoreLocation </span>{<span class="r3 r">storeLocation</span>}<span class="s"> is not valid. Valid values are CurrentUser and LocalMachine.</span><span class="s">&quot;</span>);
+                }
+            }
+            <b>else</b>
+            {
+                <a href="#9b3ea650d106c6f2" class="i field">_keyVaultClient</a> = <span class="r9 r">keyVaultClient</span> ?? <b>new</b> <a href="../Clients/KeyVault/KeyVaultClient.cs.html#d52f5b12d0568f2f" class="t constructor">KeyVaultClient</a>(<span class="r7 r">msiRetryTimeoutInSeconds</span>, <span class="r8 r">keyVaultUserAssignedManagedIdentityId</span>);
+            }
+ 
+            <a href="#9ddfda285319feb3" class="i field">_clientId</a> = <span class="r0 r">clientId</span>;
+ 
+            <a href="#9e71938189312f55" class="i field">_certificateIdentifierType</a> = <span class="r2 r">certificateIdentifierType</span>;
+            <a href="#5ab0575058833c70" class="i field">_azureAdInstance</a> = <span class="r4 r">azureAdInstance</span>;
+            <a href="#fcb5851a26c15bd2" class="i field">_tenantId</a> = <span class="r6 r">tenantId</span>;
+            <a href="#6c03cb6ac0481d63" class="i field">_authenticationContext</a> = <span class="r5 r">authenticationContext</span> ?? <b>new</b> <a href="../Clients/AdalAuthenticationContext.cs.html#97b31cdaff68109f" class="t constructor">AdalAuthenticationContext</a>();
+ 
+            <a href="#5141168f6e7ff9c5" class="i field">_certificateIdentifier</a> = <span class="r1 r">certificateIdentifier</span>;
+ 
+            <a href="NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a> = <b>new</b> <a href="../Principal.cs.html#ee98ea95591837a0" class="t constructor">Principal</a>
+            {
+                <a href="../Principal.cs.html#d9e4b09403dc585a" class="i field">Type</a> = <span class="s">&quot;App&quot;</span>,
+                <a href="../Principal.cs.html#d85fbf1b18e43572" class="i field">AppId</a> = <a href="#9ddfda285319feb3" class="i field">_clientId</a>
+            };
+        }
+ 
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Get access token using asymmetric key associated with an Azure AD application.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r11 r">resource</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Resource to access.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">authority</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Authority where resource is.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public override async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="../AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="t t">AppAuthenticationResult</a>&gt; <a id="f0a9a830caba97b9" href="../R/f0a9a830caba97b9.html" target="n" data-glyph="72,1" class="i method">GetAuthResultAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r11 rd" class="r11 r">resource</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r12 rd" class="r12 r">authority</span>,
+            <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r13 rd" class="r13 r">cancellationToken</span> = <b>default</b>)
+        {
+            <span class="c">// If authority is not specified and tenantId was present in connection string, create it using azureAdInstance and tenantId. </span>
+            <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>(<span class="r12 r">authority</span>) &amp;&amp; !<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>(<a href="#fcb5851a26c15bd2" class="i field">_tenantId</a>))
+            {
+                <span class="r12 r">authority</span> = <span class="s">$&quot;</span>{<a href="#5ab0575058833c70" class="i field">_azureAdInstance</a>}{<a href="#fcb5851a26c15bd2" class="i field">_tenantId</a>}<span class="s">&quot;</span>;
+            }
+ 
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="@0@System/A.html#2e8ad9e6007798e5" class="t t">X509Certificate2</a>&gt; <span id="r14 rd" class="r14 r">certs</span> = <b>null</b>;
+            <a href="@0@mscorlib/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <span id="r15 rd" class="r15 r">exceptionDictionary</span> = <b>new</b> <a href="@0@mscorlib/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;();
+ 
+            <b>try</b>
+            {
+                <b>switch</b> (<a href="#9e71938189312f55" class="i field">_certificateIdentifierType</a>)
+                {
+                    <b>case</b> <a href="#88081d67685a2cf8" class="t t">CertificateIdentifierType</a>.<a href="#a46ef1ca1bb44841" class="i field">KeyVaultCertificateSecretIdentifier</a>:
+                        <span class="c">// Get certificate for the given Key Vault secret identifier</span>
+                        <b>try</b>
+                        {
+                            <a href="@0@System/A.html#2e8ad9e6007798e5" class="k">var</a> <span id="r16 rd" class="r16 r">keyVaultCert</span> = <b>await</b> <a href="#9b3ea650d106c6f2" class="i field">_keyVaultClient</a>
+                                .<a href="../Clients/KeyVault/KeyVaultClient.cs.html#5f36e4f1a22b0dec" class="i method">GetCertificateAsync</a>(<a href="#5141168f6e7ff9c5" class="i field">_certificateIdentifier</a>, <span class="r13 r">cancellationToken</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                            <span class="r14 r">certs</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="@0@System/A.html#2e8ad9e6007798e5" class="t t">X509Certificate2</a>&gt;() { <span class="r16 r">keyVaultCert</span> };
+ 
+                            <span class="c">// If authority is still not specified, create it using azureAdInstance and tenantId. Tenant ID comes from Key Vault access token.</span>
+                            <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>(<span class="r12 r">authority</span>))
+                            {
+                                <a href="#fcb5851a26c15bd2" class="i field">_tenantId</a> = <a href="#9b3ea650d106c6f2" class="i field">_keyVaultClient</a>.<a href="../Clients/KeyVault/KeyVaultClient.cs.html#9c1f22f83fb0ebf5" class="i property">PrincipalUsed</a>.<a href="../Principal.cs.html#64e7621ee7fb4766" class="i field">TenantId</a>;
+                                <span class="r12 r">authority</span> = <span class="s">$&quot;</span>{<a href="#5ab0575058833c70" class="i field">_azureAdInstance</a>}{<a href="#fcb5851a26c15bd2" class="i field">_tenantId</a>}<span class="s">&quot;</span>;
+                            }
+                        }
+                        <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r17 rd" class="r17 r">exp</span>)
+                        {
+                            <b>throw</b> <b>new</b> <a href="../AzureServiceTokenProviderException.cs.html#70a0a38c19f200fb" class="t constructor">AzureServiceTokenProviderException</a>(<a href="NonInteractiveAccessTokenProviderBase.cs.html#24367a95c4c1012b" class="i field">ConnectionString</a>, <span class="r11 r">resource</span>, <span class="r12 r">authority</span>,
+                                <span class="s">$&quot;</span>{<a href="../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a>.<a href="../AzureServiceTokenProviderException.cs.html#002b42fd390d3a00" class="i field">KeyVaultCertificateRetrievalError</a>}<span class="s"> </span>{<span class="r17 r">exp</span>.<a href="@0@mscorlib/A.html#5fba0e16215b42a3" class="i property">Message</a>}<span class="s">&quot;</span>);
+                        }
+                        <b>break</b>;
+                    <b>case</b> <a href="#88081d67685a2cf8" class="t t">CertificateIdentifierType</a>.<a href="#a32b8b90135c94ad" class="i field">SubjectName</a>:
+                    <b>case</b> <a href="#88081d67685a2cf8" class="t t">CertificateIdentifierType</a>.<a href="#0b408c5fb32c2eda" class="i field">Thumbprint</a>:
+                        <span class="c">// Get certificates for the given thumbprint or subject name. </span>
+                        <b>bool</b> <span id="r18 rd" class="r18 r">isThumbprint</span> = <a href="#9e71938189312f55" class="i field">_certificateIdentifierType</a> == <a href="#88081d67685a2cf8" class="t t">CertificateIdentifierType</a>.<a href="#0b408c5fb32c2eda" class="i field">Thumbprint</a>;
+                        <span class="r14 r">certs</span> = <a href="../Helpers/CertificateHelper.cs.html#6ce18f5a3af6e0bd" class="t t">CertificateHelper</a>.<a href="../Helpers/CertificateHelper.cs.html#6272d1c1ddd84cd8" class="i method">GetCertificates</a>(<a href="#5141168f6e7ff9c5" class="i field">_certificateIdentifier</a>, <span class="r18 r">isThumbprint</span>,
+                            <a href="#76968376521cf3c7" class="i field">_storeLocation</a>);
+ 
+                        <b>if</b> (<span class="r14 r">certs</span> == <b>null</b> || <span class="r14 r">certs</span>.<a href="@0@mscorlib/A.html#78a69d857716bc68" class="i property">Count</a> == 0)
+                        {
+                            <b>throw</b> <b>new</b> <a href="../AzureServiceTokenProviderException.cs.html#70a0a38c19f200fb" class="t constructor">AzureServiceTokenProviderException</a>(<a href="NonInteractiveAccessTokenProviderBase.cs.html#24367a95c4c1012b" class="i field">ConnectionString</a>, <span class="r11 r">resource</span>, <span class="r12 r">authority</span>,
+                                <a href="../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a>.<a href="../AzureServiceTokenProviderException.cs.html#7ad5d1a12d5ffda4" class="i field">LocalCertificateNotFound</a>);
+                        }
+                        <b>break</b>;
+                }
+ 
+                <a href="@0@System/A.html#632c6da37ce825df" class="t t">Debug</a>.<a href="@0@System/A.html#4f55cf5792dfc5e6" class="i method">Assert</a>(<span class="r14 r">certs</span> != <b>null</b>, <span class="s">&quot;Probably wrong certificateIdentifierType was used to instantiate this class!&quot;</span>);
+ 
+                <span class="c">// If multiple certs were found, use in order of most recently created.</span>
+                <span class="c">// This helps if old cert is rolled over, but not removed.</span>
+                <span class="c">// To hold reason why token could not be acquired per cert tried. </span>
+                <b>foreach</b> (<a href="@0@System/A.html#2e8ad9e6007798e5" class="t t">X509Certificate2</a> <span id="r19 rd" class="r19 r">cert</span> <b>in</b> <span class="r14 r">certs</span>.<a href="@0@System.Core/A.html#7eec09816d04e761" class="i method">OrderByDescending</a>(<span id="r20 rd" class="r20 r">p</span> =&gt; <span class="r20 r">p</span>.<a href="@0@System/A.html#e3dec5ca024c7d14" class="i property">NotBefore</a>))
+                {
+                    <b>if</b> (!<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r19 r">cert</span>.<a href="@0@System/A.html#6313394a0155d4d0" class="i property">Thumbprint</a>))
+                    {
+                        <b>try</b>
+                        {
+                            <span class="i">ClientAssertionCertificate</span> <span id="r21 rd" class="r21 r">certCred</span> = <b>new</b> <span class="i">ClientAssertionCertificate</span>(<a href="#9ddfda285319feb3" class="i field">_clientId</a>, <span class="r19 r">cert</span>);
+ 
+                            <b>var</b> <span id="r22 rd" class="r22 r">authResult</span> =
+                                <b>await</b> <a href="#6c03cb6ac0481d63" class="i field">_authenticationContext</a>.<span class="i">AcquireTokenAsync</span>(<span class="r12 r">authority</span>, <span class="r11 r">resource</span>, <span class="r21 r">certCred</span>)
+                                    .<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                            <b>var</b> <span id="r23 rd" class="r23 r">accessToken</span> = <span class="r22 r">authResult</span>?.<span class="i">AccessToken</span>;
+ 
+                            <b>if</b> (<span class="r23 r">accessToken</span> != <b>null</b>)
+                            {
+                                <a href="NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a>.<a href="../Principal.cs.html#359e050d7d2b172e" class="i field">CertificateThumbprint</a> = <span class="r19 r">cert</span>.<a href="@0@System/A.html#6313394a0155d4d0" class="i property">Thumbprint</a>;
+                                <a href="NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a>.<a href="../Principal.cs.html#409d9406f1d3c582" class="i field">IsAuthenticated</a> = <b>true</b>;
+                                <a href="NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a>.<a href="../Principal.cs.html#64e7621ee7fb4766" class="i field">TenantId</a> = <a href="../AccessToken.cs.html#4bf4fd515869512d" class="t t">AccessToken</a>.<span class="i">Parse</span>(<span class="r23 r">accessToken</span>).<a href="../AccessToken.cs.html#665b479704e13887" class="i property">TenantId</a>;
+ 
+                                <b>return</b> <span class="r22 r">authResult</span>;
+                            }
+                        }
+                        <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r24 rd" class="r24 r">exp</span>)
+                        {
+                            <span class="c">// If token cannot be acquired using a cert, try the next one</span>
+                            <span class="r15 r">exceptionDictionary</span><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="r19 r">cert</span>.<a href="@0@System/A.html#6313394a0155d4d0" class="i property">Thumbprint</a>] = <span class="r24 r">exp</span>.<a href="@0@mscorlib/A.html#5fba0e16215b42a3" class="i property">Message</a>;
+                        }
+                    }
+                }
+            }
+            <b>finally</b>
+            {
+                <b>if</b> (<span class="r14 r">certs</span> != <b>null</b>)
+                {
+                    <b>foreach</b> (<a href="@0@System/A.html#2e8ad9e6007798e5" class="k">var</a> <span id="r25 rd" class="r25 r">cert</span> <b>in</b> <span class="r14 r">certs</span>)
+                    {
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">net452</span>
+<span class="e">                        cert.Reset();
+</span><span class="k preprocess">#</span><span class="k preprocess">else</span>
+                        <span class="r25 r">cert</span>.<a href="@0@mscorlib/A.html#c8b04fcf45871e3f" class="i method">Dispose</a>();
+<span class="k preprocess">#</span><span class="k preprocess">endif</span>
+                    }
+                }
+            }
+ 
+            <span class="c">// Could not acquire access token, throw exception</span>
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r26 rd" class="r26 r">message</span> = <span class="s">$&quot;</span><span class="s">Tried </span>{<span class="r14 r">certs</span>.<a href="@0@mscorlib/A.html#78a69d857716bc68" class="i property">Count</a>}<span class="s"> certificate(s). </span>{<a href="../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a>.<a href="../AzureServiceTokenProviderException.cs.html#74c51a6320d16d98" class="i field">GenericErrorMessage</a>}<span class="s">&quot;</span>;
+ 
+            <span class="c">// Include exception details for each cert that was tried</span>
+            <b>int</b> <span id="r27 rd" class="r27 r">count</span> = 1;
+            <b>foreach</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r28 rd" class="r28 r">thumbprint</span> <b>in</b> <span class="r15 r">exceptionDictionary</span>.<a href="@0@mscorlib/A.html#9a3c0cb5c149c9f7" class="i property">Keys</a>)
+            {
+                <span class="r26 r">message</span> += <a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a> +
+                           <span class="s">$&quot;</span><span class="s">Exception for cert #</span>{<span class="r27 r">count</span>}<span class="s"> with thumbprint </span>{<span class="r28 r">thumbprint</span>}<span class="s">: </span>{<span class="r15 r">exceptionDictionary</span><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="r28 r">thumbprint</span>]}<span class="s">&quot;</span>;
+                <span class="r27 r">count</span>++;
+            }
+ 
+            <b>throw</b> <b>new</b> <a href="../AzureServiceTokenProviderException.cs.html#70a0a38c19f200fb" class="t constructor">AzureServiceTokenProviderException</a>(<a href="NonInteractiveAccessTokenProviderBase.cs.html#24367a95c4c1012b" class="i field">ConnectionString</a>, <span class="r11 r">resource</span>, <span class="r12 r">authority</span>, <span class="r26 r">message</span>);
+        }
+ 
+    }
+}
+</pre></td></tr></table></div></body></html>

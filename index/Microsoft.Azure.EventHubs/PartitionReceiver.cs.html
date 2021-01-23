@@ -1,0 +1,307 @@
+﻿<!DOCTYPE html>
+<html><head><title>PartitionReceiver.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(298);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.EventHubs/PartitionReceiver.cs" target="_top">PartitionReceiver.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.EventHubs" target="_top">Microsoft.Azure.EventHubs\src\Microsoft.Azure.EventHubs.csproj</a> (Microsoft.Azure.EventHubs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft. All rights reserved.</span>
+<span class="c">// Licensed under the MIT license. See LICENSE file in the project root for full license information.</span>
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">EventHubs</span>
+{
+    <b>using</b> <span class="i">System</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Globalization</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Text</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+ 
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> This is a logical representation of receiving from a EventHub partition.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">para</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> A PartitionReceiver is tied to a ConsumerGroup + Partition combination. If you are creating an epoch based</span>
+    <span class="c">///</span><span class="c"> PartitionReceiver (i.e. PartitionReceiver.Epoch != 0) you cannot have more than one active receiver per</span>
+    <span class="c">///</span><span class="c"> ConsumerGroup + Partition combo. You can have multiple receivers per ConsumerGroup + Partition combination with </span>
+    <span class="c">///</span><span class="c"> non-epoch receivers.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">para</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="EventHubClient.cs.html#ef11bbb905992f88" class="t t">EventHubClient</a>.<a href="EventHubClient.cs.html#de3b024c736874a2" class="i method">CreateReceiver</a>(<b>string</b>, <b>string</b>, <a href="EventPosition.cs.html#5c55f1ce5bfdf68d" class="t t">EventPosition</a>, <a href="ReceiverOptions.cs.html#f0c29f0f48ec0eaa" class="t t">ReceiverOptions</a>)<span class="c">&quot;</span><span class="c">/&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="EventHubClient.cs.html#ef11bbb905992f88" class="t t">EventHubClient</a>.<a href="EventHubClient.cs.html#6af520e0d78e4e01" class="i method">CreateEpochReceiver</a>(<b>string</b>, <b>string</b>, <a href="EventPosition.cs.html#5c55f1ce5bfdf68d" class="t t">EventPosition</a>, <b>long</b>, <a href="ReceiverOptions.cs.html#f0c29f0f48ec0eaa" class="t t">ReceiverOptions</a>)<span class="c">&quot;</span><span class="c">/&gt;</span>
+    <b>public abstract class</b> <a id="c6301acd46b0811a" href="R/c6301acd46b0811a.html" target="n" data-glyph="0,0" class="t t">PartitionReceiver</a> : <a href="Primitives/ClientEntity.cs.html#a0afa5cf8d7b86bf" class="t t">ClientEntity</a>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The default consumer group name: $Default.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public static readonly string</b> <a id="12f64878a4e0638b" href="R/12f64878a4e0638b.html" target="n" data-glyph="42,1" class="i field">DefaultConsumerGroupName</a> = <span class="s">&quot;$Default&quot;</span>;
+ 
+        <b>internal const long</b> <a id="07fbfa73adb519b6" href="R/../../0000000000.html" target="n" data-glyph="8,1" class="i field">NullEpoch</a> = 0;
+ 
+        <b>const int</b> <a id="5c6200b76a9d8c0d" href="R/5c6200b76a9d8c0d.html" target="n" data-glyph="10,1" class="i field">MinPrefetchCount</a> = 10;
+        <b>const int</b> <a id="9d780049082e3a9e" href="R/9d780049082e3a9e.html" target="n" data-glyph="10,1" class="i field">DefaultPrefetchCount</a> = 300;
+        <b>int</b> <a id="b0bc70a7c95235a5" href="R/b0bc70a7c95235a5.html" target="n" data-glyph="46,1" class="i field">prefetchCount</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">eventHubClient</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">consumerGroupName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">partitionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">eventPosition</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">epoch</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">receiverOptions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>protected</b> <a id="1270bed3fa49be7e" href="R/1270bed3fa49be7e.html" target="n" data-glyph="75,1" class="t constructor">PartitionReceiver</a>(
+            <a href="EventHubClient.cs.html#ef11bbb905992f88" class="t t">EventHubClient</a> <span id="r0 rd" class="r0 r">eventHubClient</span>,
+            <b>string</b> <span id="r1 rd" class="r1 r">consumerGroupName</span>,
+            <b>string</b> <span id="r2 rd" class="r2 r">partitionId</span>,
+            <a href="EventPosition.cs.html#5c55f1ce5bfdf68d" class="t t">EventPosition</a> <span id="r3 rd" class="r3 r">eventPosition</span>,
+            <b>long</b>? <span id="r4 rd" class="r4 r">epoch</span>,
+            <a href="ReceiverOptions.cs.html#f0c29f0f48ec0eaa" class="t t">ReceiverOptions</a> <span id="r5 rd" class="r5 r">receiverOptions</span>)
+            : <a href="Primitives/ClientEntity.cs.html#3edb1b686f2de50f" class="k">base</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="#c6301acd46b0811a" class="t t">PartitionReceiver</a>)}{<a href="Primitives/ClientEntity.cs.html#a0afa5cf8d7b86bf" class="t t">ClientEntity</a>.<a href="Primitives/ClientEntity.cs.html#a6bcf34c95b5621e" class="i method">GetNextId</a>()}<span class="s">(</span>{<span class="r0 r">eventHubClient</span>.<a href="EventHubClient.cs.html#cb2687894300e685" class="i property">EventHubName</a>}<span class="s">,</span>{<span class="r1 r">consumerGroupName</span>}<span class="s">,</span>{<span class="r2 r">partitionId</span>}<span class="s">)</span><span class="s">&quot;</span>)
+        {
+            <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#41b7077a1ae2add1" class="i property">EventHubClient</a> = <span class="r0 r">eventHubClient</span>;
+            <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#d4384e540d8fb158" class="i property">ConsumerGroupName</a> = <span class="r1 r">consumerGroupName</span>;
+            <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#470835fa67813644" class="i property">PartitionId</a> = <span class="r2 r">partitionId</span>;
+            <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#8686e364c2fca6e0" class="i property">EventPosition</a> = <span class="r3 r">eventPosition</span>;
+            <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#b0bc70a7c95235a5" class="i field">prefetchCount</a> = <a href="#9d780049082e3a9e" class="i field">DefaultPrefetchCount</a>;
+            <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#1f0653f0aca87420" class="i property">Epoch</a> = <span class="r4 r">epoch</span>;
+            <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#1a3b6e7a3af58e20" class="i property">RuntimeInfo</a> = <b>new</b> <a href="ReceiverRuntimeInfo.cs.html#b20100dcf238bbff" class="t constructor">ReceiverRuntimeInformation</a>(<span class="r2 r">partitionId</span>);
+            <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#f9d085f517fbf112" class="i property">ReceiverRuntimeMetricEnabled</a> = <span class="r5 r">receiverOptions</span> == <b>null</b>
+                ? <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#41b7077a1ae2add1" class="i property">EventHubClient</a>.<a href="EventHubClient.cs.html#5bf4054cc2318221" class="i property">EnableReceiverRuntimeMetric</a>
+                : <span class="r5 r">receiverOptions</span>.<a href="ReceiverOptions.cs.html#1f6ab35f7307a573" class="i property">EnableReceiverRuntimeMetric</a>;
+ 
+            <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#1c1b27012cf589dd" class="i property">Identifier</a> = <span class="r5 r">receiverOptions</span> != <b>null</b>
+                ? <span class="r5 r">receiverOptions</span>.<a href="ReceiverOptions.cs.html#a855211b679fa6a5" class="i property">Identifier</a>
+                : <b>null</b>;
+            <a href="#c6301acd46b0811a" class="k">this</a>.<a href="Primitives/ClientEntity.cs.html#133e57fb5d300f42" class="i property">RetryPolicy</a> = <span class="r0 r">eventHubClient</span>.<a href="Primitives/ClientEntity.cs.html#133e57fb5d300f42" class="i property">RetryPolicy</a>.<a href="Primitives/RetryPolicy.cs.html#1449f93a764035e3" class="i method">Clone</a>();
+            <span class="r0 r">eventHubClient</span>.<a href="EventHubClient.cs.html#de8952fb7dd3c8fb" class="i method">AddChildEntity</a>(<a href="#c6301acd46b0811a" class="k">this</a>);
+ 
+            <a href="EventHubsEventSource.cs.html#a8d90a446db9f305" class="t t">EventHubsEventSource</a>.<a href="EventHubsEventSource.cs.html#876999de01c1c51a" class="i property">Log</a>.<a href="EventHubsEventSource.cs.html#cd961c51848920ed" class="i method">ClientCreated</a>(<a href="#c6301acd46b0811a" class="k">this</a>.<a href="Primitives/ClientEntity.cs.html#5b2ded861d3b6cd6" class="i property">ClientId</a>, <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#d94395f41e0ced57" class="i method">FormatTraceDetails</a>());
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The EventHubClient this PartitionReceiver was created from.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a href="EventHubClient.cs.html#ef11bbb905992f88" class="t t">EventHubClient</a> <a id="41b7077a1ae2add1" href="R/41b7077a1ae2add1.html" target="n" data-glyph="102,1" class="i property">EventHubClient</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The Consumer Group Name</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public string</b> <a id="d4384e540d8fb158" href="R/d4384e540d8fb158.html" target="n" data-glyph="102,1" class="i property">ConsumerGroupName</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Get the EventHub partition identifier.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span><span class="c">The identifier representing the partition from which this receiver is fetching data</span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        <b>public string</b> <a id="470835fa67813644" href="R/470835fa67813644.html" target="n" data-glyph="102,1" class="i property">PartitionId</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Get Prefetch Count configured on the Receiver.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span><span class="c">The upper limit of events this receiver will actively receive regardless of whether a receive operation is pending.</span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        <b>public int</b> <a id="08586c50f20673c9" href="R/08586c50f20673c9.html" target="n" data-glyph="102,1" class="i property">PrefetchCount</a>
+        {
+            <b>get</b> =&gt; <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#b0bc70a7c95235a5" class="i field">prefetchCount</a>;
+ 
+            <b>set</b>
+            {
+                <b>if</b> (<b>value</b> &lt; <a href="#5c6200b76a9d8c0d" class="i field">MinPrefetchCount</a>)
+                {
+                    <b>throw</b> <a href="Primitives/Fx.cs.html#b0aa19c5eed5b9f5" class="t t">Fx</a>.<a href="Primitives/Fx.cs.html#0460fd9e6943b44f" class="i property">Exception</a>.<a href="Primitives/ExceptionUtility.cs.html#eba4630e51921c85" class="i method">ArgumentOutOfRange</a>(
+                        <span class="s">&quot;PrefetchCount&quot;</span>,
+                        <b>value</b>,
+                        <a href="Resources.Designer.cs.html#384a7f500795c32f" class="t t">Resources</a>.<a href="Resources.Designer.cs.html#46d547a6ad3282a8" class="i property">ValueOutOfRange</a>.<span class="i">FormatForUser</span>(<a href="#5c6200b76a9d8c0d" class="i field">MinPrefetchCount</a>, <b>int</b>.<span class="i">MaxValue</span>));
+                }
+ 
+                <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#b0bc70a7c95235a5" class="i field">prefetchCount</a> = <b>value</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Get the epoch value that this receiver is currently using for partition ownership.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">para</span><span class="c">&gt;</span><span class="c">A value of null means this receiver is not an epoch-based receiver.</span><span class="c">&lt;/</span><span class="c">para</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span><span class="c">the epoch value that this receiver is currently using for partition ownership.</span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        <b>public long</b>? <a id="1f0653f0aca87420" href="R/1f0653f0aca87420.html" target="n" data-glyph="102,1" class="i property">Epoch</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>protected</b> <a href="EventPosition.cs.html#5c55f1ce5bfdf68d" class="t t">EventPosition</a> <a id="8686e364c2fca6e0" href="R/8686e364c2fca6e0.html" target="n" data-glyph="105,1" class="i property">EventPosition</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">Gets the identifier of a receiver which was set during the creation of the receiver.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span><span class="c"> </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span><span class="c">A string representing the identifier of a receiver. It will return null if the identifier is not set.</span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        <b>public string</b> <a id="1c1b27012cf589dd" href="R/1c1b27012cf589dd.html" target="n" data-glyph="102,1" class="i property">Identifier</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Receive a batch of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="EventData.cs.html#f56ed6e805f7061b" class="t t">EventData</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">&#39;s from an EventHub partition</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">example</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Sample code:</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">code</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> EventHubClient client = EventHubClient.Create(&quot;__connectionString__&quot;);</span>
+        <span class="c">///</span><span class="c"> PartitionReceiver receiver = client.CreateReceiver(&quot;ConsumerGroup1&quot;, &quot;1&quot;);</span>
+        <span class="c">///</span><span class="c"> IEnumerable</span><span class="c">&amp;lt;</span><span class="c">EventData</span><span class="c">&amp;gt;</span><span class="c"> receivedEvents = await receiver.ReceiveAsync(BatchSize);</span>
+        <span class="c">///</span><span class="c">      </span>
+        <span class="c">///</span><span class="c"> while (true)</span>
+        <span class="c">///</span><span class="c"> {</span>
+        <span class="c">///</span><span class="c">     int batchSize = 0;</span>
+        <span class="c">///</span><span class="c">     if (receivedEvents != null)</span>
+        <span class="c">///</span><span class="c">     {</span>
+        <span class="c">///</span><span class="c">         foreach (EventData receivedEvent in receivedEvents)</span>
+        <span class="c">///</span><span class="c">         {</span>
+        <span class="c">///</span><span class="c">             Console.WriteLine(&quot;Message Payload: {0}&quot;, Encoding.UTF8.GetString(receivedEvent.Body));</span>
+        <span class="c">///</span><span class="c">             Console.WriteLine(&quot;Offset: {0}, SeqNo: {1}, EnqueueTime: {2}&quot;, </span>
+        <span class="c">///</span><span class="c">                 receivedEvent.SystemProperties.Offset, </span>
+        <span class="c">///</span><span class="c">                 receivedEvent.SystemProperties.SequenceNumber, </span>
+        <span class="c">///</span><span class="c">                 receivedEvent.SystemProperties.EnqueuedTime);</span>
+        <span class="c">///</span><span class="c">             batchSize++;</span>
+        <span class="c">///</span><span class="c">         }</span>
+        <span class="c">///</span><span class="c">     }</span>
+        <span class="c">///</span><span class="c">          </span>
+        <span class="c">///</span><span class="c">     Console.WriteLine(&quot;ReceivedBatch Size: {0}&quot;, batchSize);</span>
+        <span class="c">///</span><span class="c">     receivedEvents = await receiver.ReceiveAsync();</span>
+        <span class="c">///</span><span class="c"> }</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">code</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">example</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A Task that will yield a batch of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="EventData.cs.html#f56ed6e805f7061b" class="t t">EventData</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> from the partition on which this receiver is created. Returns &#39;null&#39; if no EventData is present.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public</b> <span class="i">Task</span>&lt;<span class="i">IEnumerable</span>&lt;<a href="EventData.cs.html#f56ed6e805f7061b" class="t t">EventData</a>&gt;&gt; <a id="bb31ba9a4e2f93c1" href="R/bb31ba9a4e2f93c1.html" target="n" data-glyph="72,1" class="i method">ReceiveAsync</a>(<b>int</b> <span id="r6 rd" class="r6 r">maxMessageCount</span>)
+        {
+            <b>return</b> <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#95db3a57b8059f8f" class="i method">ReceiveAsync</a>(<span class="r6 r">maxMessageCount</span>, <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#41b7077a1ae2add1" class="i property">EventHubClient</a>.<a href="EventHubClient.cs.html#58a8e47a06e35c53" class="i property">ConnectionStringBuilder</a>.<a href="Primitives/EventHubsConnectionStringBuilder.cs.html#9bdfa559ce29adc5" class="i property">OperationTimeout</a>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Receive a batch of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="EventData.cs.html#f56ed6e805f7061b" class="t t">EventData</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">&#39;s from an EventHub partition by allowing wait time on each individual call.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A Task that will yield a batch of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="EventData.cs.html#f56ed6e805f7061b" class="t t">EventData</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> from the partition on which this receiver is created. Returns &#39;null&#39; if no EventData is present.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public async</b> <span class="i">Task</span>&lt;<span class="i">IEnumerable</span>&lt;<a href="EventData.cs.html#f56ed6e805f7061b" class="t t">EventData</a>&gt;&gt; <a id="95db3a57b8059f8f" href="R/95db3a57b8059f8f.html" target="n" data-glyph="72,1" class="i method">ReceiveAsync</a>(<b>int</b> <span id="r7 rd" class="r7 r">maxMessageCount</span>, <span class="i">TimeSpan</span> <span id="r8 rd" class="r8 r">waitTime</span>)
+        {
+            <a href="#c6301acd46b0811a" class="k">this</a>.<a href="Primitives/ClientEntity.cs.html#c3517d421bd9e8cb" class="i method">ThrowIfClosed</a>();
+ 
+            <a href="EventHubsEventSource.cs.html#a8d90a446db9f305" class="t t">EventHubsEventSource</a>.<a href="EventHubsEventSource.cs.html#876999de01c1c51a" class="i property">Log</a>.<a href="EventHubsEventSource.cs.html#ffeef73fcb5415e0" class="i method">EventReceiveStart</a>(<a href="#c6301acd46b0811a" class="k">this</a>.<a href="Primitives/ClientEntity.cs.html#5b2ded861d3b6cd6" class="i property">ClientId</a>);
+            <span class="i">Activity</span> <span id="r9 rd" class="r9 r">activity</span> = <a href="EventHubsDiagnosticSource.cs.html#75bd91bbbfd82c87" class="t t">EventHubsDiagnosticSource</a>.<a href="EventHubsDiagnosticSource.cs.html#81c12a2a6dfbc92d" class="i method">StartReceiveActivity</a>(<a href="#c6301acd46b0811a" class="k">this</a>.<a href="Primitives/ClientEntity.cs.html#5b2ded861d3b6cd6" class="i property">ClientId</a>, <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#41b7077a1ae2add1" class="i property">EventHubClient</a>.<a href="EventHubClient.cs.html#58a8e47a06e35c53" class="i property">ConnectionStringBuilder</a>, <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#470835fa67813644" class="i property">PartitionId</a>, <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#d4384e540d8fb158" class="i property">ConsumerGroupName</a>, <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#8686e364c2fca6e0" class="i property">EventPosition</a>);
+ 
+            <span class="i">Task</span>&lt;<span class="i">IList</span>&lt;<a href="EventData.cs.html#f56ed6e805f7061b" class="t t">EventData</a>&gt;&gt; <span id="r10 rd" class="r10 r">receiveTask</span> = <b>null</b>;
+            <span class="i">IList</span>&lt;<a href="EventData.cs.html#f56ed6e805f7061b" class="t t">EventData</a>&gt; <span id="r11 rd" class="r11 r">events</span> = <b>null</b>;
+            <b>int</b> <span id="r12 rd" class="r12 r">count</span> = 0;
+ 
+            <b>try</b>
+            {
+                <span class="r10 r">receiveTask</span> = <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#704f1490fa72fe09" class="i method">OnReceiveAsync</a>(<span class="r7 r">maxMessageCount</span>, <span class="r8 r">waitTime</span>);
+                <span class="r11 r">events</span> = <b>await</b> <span class="r10 r">receiveTask</span>.<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <span class="r12 r">count</span> = <span class="r11 r">events</span>?.<span class="i">Count</span> ?? 0;
+                <a href="EventData.cs.html#f56ed6e805f7061b" class="t t">EventData</a> <span id="r13 rd" class="r13 r">lastEvent</span> = <span class="r11 r">events</span>?[<span class="r12 r">count</span> - 1];
+                <b>if</b> (<span class="r13 r">lastEvent</span> != <b>null</b>)
+                {
+                    <span class="c">// Store the current position in the stream of messages</span>
+                    <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#8686e364c2fca6e0" class="i property">EventPosition</a>.<a href="EventPosition.cs.html#6e1b91ec6adbd33f" class="i property">Offset</a> = <span class="r13 r">lastEvent</span>.<a href="EventData.cs.html#e7fb791d9e8f640f" class="i property">SystemProperties</a>.<a href="EventData.cs.html#5b0de2f2d1795809" class="i property">Offset</a>;
+                    <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#8686e364c2fca6e0" class="i property">EventPosition</a>.<a href="EventPosition.cs.html#3bc83e36b7539151" class="i property">EnqueuedTimeUtc</a> = <span class="r13 r">lastEvent</span>.<a href="EventData.cs.html#e7fb791d9e8f640f" class="i property">SystemProperties</a>.<a href="EventData.cs.html#0a54039c88801e19" class="i property">EnqueuedTimeUtc</a>;
+                    <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#8686e364c2fca6e0" class="i property">EventPosition</a>.<a href="EventPosition.cs.html#cb766c6ae4d91738" class="i property">SequenceNumber</a> = <span class="r13 r">lastEvent</span>.<a href="EventData.cs.html#e7fb791d9e8f640f" class="i property">SystemProperties</a>.<a href="EventData.cs.html#2a8052ea026d5835" class="i property">SequenceNumber</a>;
+ 
+                    <span class="c">// Update receiver runtime metrics?</span>
+                    <b>if</b> (<a href="#c6301acd46b0811a" class="k">this</a>.<a href="#f9d085f517fbf112" class="i property">ReceiverRuntimeMetricEnabled</a>)
+                    {
+                        <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#1a3b6e7a3af58e20" class="i property">RuntimeInfo</a>.<a href="ReceiverRuntimeInfo.cs.html#4fdd945800972a65" class="i method">Update</a>(<span class="r13 r">lastEvent</span>);
+                    }
+                }
+ 
+                <b>return</b> <span class="r11 r">events</span>;
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r14 rd" class="r14 r">e</span>)
+            {
+                <a href="EventHubsEventSource.cs.html#a8d90a446db9f305" class="t t">EventHubsEventSource</a>.<a href="EventHubsEventSource.cs.html#876999de01c1c51a" class="i property">Log</a>.<span class="i">EventReceiveException</span>(<a href="#c6301acd46b0811a" class="k">this</a>.<a href="Primitives/ClientEntity.cs.html#5b2ded861d3b6cd6" class="i property">ClientId</a>, <span class="r14 r">e</span>.<span class="i">ToString</span>());
+                <a href="EventHubsDiagnosticSource.cs.html#75bd91bbbfd82c87" class="t t">EventHubsDiagnosticSource</a>.<a href="EventHubsDiagnosticSource.cs.html#34cddb7007796bb7" class="i method">FailReceiveActivity</a>(<span class="r9 r">activity</span>, <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#41b7077a1ae2add1" class="i property">EventHubClient</a>.<a href="EventHubClient.cs.html#58a8e47a06e35c53" class="i property">ConnectionStringBuilder</a>, <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#470835fa67813644" class="i property">PartitionId</a>, <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#d4384e540d8fb158" class="i property">ConsumerGroupName</a>, <span class="r14 r">e</span>);
+                <b>throw</b>;
+            }
+            <b>finally</b>
+            {
+                <a href="EventHubsEventSource.cs.html#a8d90a446db9f305" class="t t">EventHubsEventSource</a>.<a href="EventHubsEventSource.cs.html#876999de01c1c51a" class="i property">Log</a>.<a href="EventHubsEventSource.cs.html#26b332543f3b08af" class="i method">EventReceiveStop</a>(<a href="#c6301acd46b0811a" class="k">this</a>.<a href="Primitives/ClientEntity.cs.html#5b2ded861d3b6cd6" class="i property">ClientId</a>, <span class="r12 r">count</span>);
+                <a href="EventHubsDiagnosticSource.cs.html#75bd91bbbfd82c87" class="t t">EventHubsDiagnosticSource</a>.<span class="i">StopReceiveActivity</span>(<span class="r9 r">activity</span>, <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#41b7077a1ae2add1" class="i property">EventHubClient</a>.<a href="EventHubClient.cs.html#58a8e47a06e35c53" class="i property">ConnectionStringBuilder</a>, <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#470835fa67813644" class="i property">PartitionId</a>, <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#d4384e540d8fb158" class="i property">ConsumerGroupName</a>, <span class="r11 r">events</span>, <span class="r10 r">receiveTask</span>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Sets the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="IPartitionReceiveHandler.cs.html#4376c1c4658c32ac" class="t t">IPartitionReceiveHandler</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to process events.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">receiveHandler</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="IPartitionReceiveHandler.cs.html#4376c1c4658c32ac" class="t t">IPartitionReceiveHandler</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> used to process events.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r16 r">invokeWhenNoEvents</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Flag to indicate whether the handler should be invoked when the receive call times out.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public void</b> <a id="e05d856745b4634d" href="R/e05d856745b4634d.html" target="n" data-glyph="72,1" class="i method">SetReceiveHandler</a>(<a href="IPartitionReceiveHandler.cs.html#4376c1c4658c32ac" class="t t">IPartitionReceiveHandler</a> <span id="r15 rd" class="r15 r">receiveHandler</span>, <b>bool</b> <span id="r16 rd" class="r16 r">invokeWhenNoEvents</span> = <b>false</b>)
+        {
+            <a href="#c6301acd46b0811a" class="k">this</a>.<a href="Primitives/ClientEntity.cs.html#c3517d421bd9e8cb" class="i method">ThrowIfClosed</a>();
+ 
+            <a href="EventHubsEventSource.cs.html#a8d90a446db9f305" class="t t">EventHubsEventSource</a>.<a href="EventHubsEventSource.cs.html#876999de01c1c51a" class="i property">Log</a>.<span class="i">SetReceiveHandlerStart</span>(<a href="#c6301acd46b0811a" class="k">this</a>.<a href="Primitives/ClientEntity.cs.html#5b2ded861d3b6cd6" class="i property">ClientId</a>, <span class="r15 r">receiveHandler</span> != <b>null</b> ? <span class="r15 r">receiveHandler</span>.<span class="i">GetType</span>().<span class="i">ToString</span>() : <span class="s">&quot;null&quot;</span>);
+            <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#d3f805382593700a" class="i method">OnSetReceiveHandler</a>(<span class="r15 r">receiveHandler</span>, <span class="r16 r">invokeWhenNoEvents</span>);
+            <a href="EventHubsEventSource.cs.html#a8d90a446db9f305" class="t t">EventHubsEventSource</a>.<a href="EventHubsEventSource.cs.html#876999de01c1c51a" class="i property">Log</a>.<a href="EventHubsEventSource.cs.html#ebc9ba7451dcabc9" class="i method">SetReceiveHandlerStop</a>(<a href="#c6301acd46b0811a" class="k">this</a>.<a href="Primitives/ClientEntity.cs.html#5b2ded861d3b6cd6" class="i property">ClientId</a>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Closes and releases resources associated with </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#c6301acd46b0811a" class="t t">PartitionReceiver</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">An asynchronous operation</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public sealed override</b> <span class="i">Task</span> <a id="8e558432509fb0f0" href="R/8e558432509fb0f0.html" target="n" data-glyph="72,1" class="i method">CloseAsync</a>()
+        {
+            <a href="#c6301acd46b0811a" class="k">this</a>.<a href="Primitives/ClientEntity.cs.html#136db9d3ec1ba014" class="i property">IsClosed</a> = <b>true</b>;
+ 
+            <a href="EventHubsEventSource.cs.html#a8d90a446db9f305" class="t t">EventHubsEventSource</a>.<a href="EventHubsEventSource.cs.html#876999de01c1c51a" class="i property">Log</a>.<a href="EventHubsEventSource.cs.html#a34b011175a3b474" class="i method">ClientCloseStart</a>(<a href="#c6301acd46b0811a" class="k">this</a>.<a href="Primitives/ClientEntity.cs.html#5b2ded861d3b6cd6" class="i property">ClientId</a>);
+            <b>try</b>
+            {
+                <b>return</b> <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#47c4f39f598ee82c" class="i method">OnCloseAsync</a>();
+            }
+            <b>finally</b>
+            {
+                <a href="EventHubsEventSource.cs.html#a8d90a446db9f305" class="t t">EventHubsEventSource</a>.<a href="EventHubsEventSource.cs.html#876999de01c1c51a" class="i property">Log</a>.<a href="EventHubsEventSource.cs.html#202ca0152c385c25" class="i method">ClientCloseStop</a>(<a href="#c6301acd46b0811a" class="k">this</a>.<a href="Primitives/ClientEntity.cs.html#5b2ded861d3b6cd6" class="i property">ClientId</a>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r17 r">maxMessageCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r18 r">waitTime</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>protected abstract</b> <span class="i">Task</span>&lt;<span class="i">IList</span>&lt;<a href="EventData.cs.html#f56ed6e805f7061b" class="t t">EventData</a>&gt;&gt; <a id="704f1490fa72fe09" href="R/704f1490fa72fe09.html" target="n" data-glyph="75,1" class="i method">OnReceiveAsync</a>(<b>int</b> <span id="r17 rd" class="r17 r">maxMessageCount</span>, <span class="i">TimeSpan</span> <span id="r18 rd" class="r18 r">waitTime</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r19 r">receiveHandler</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r20 r">invokeWhenNoEvents</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>protected abstract void</b> <a id="d3f805382593700a" href="R/d3f805382593700a.html" target="n" data-glyph="75,1" class="i method">OnSetReceiveHandler</a>(<a href="IPartitionReceiveHandler.cs.html#4376c1c4658c32ac" class="t t">IPartitionReceiveHandler</a> <span id="r19 rd" class="r19 r">receiveHandler</span>, <b>bool</b> <span id="r20 rd" class="r20 r">invokeWhenNoEvents</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the approximate receiver runtime information for a logical partition of an Event Hub.</span>
+        <span class="c">///</span><span class="c"> To enable the setting, refer to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ReceiverOptions.cs.html#f0c29f0f48ec0eaa" class="t t">ReceiverOptions</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> and </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="EventHubClient.cs.html#ef11bbb905992f88" class="t t">EventHubClient</a>.<a href="EventHubClient.cs.html#5bf4054cc2318221" class="i property">EnableReceiverRuntimeMetric</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a href="ReceiverRuntimeInfo.cs.html#2dbeea716ad95ee6" class="t t">ReceiverRuntimeInformation</a> <a id="1a3b6e7a3af58e20" href="R/1a3b6e7a3af58e20.html" target="n" data-glyph="102,1" class="i property">RuntimeInfo</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c"> Gets a value indicating whether the runtime metric of a receiver is enabled. </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public bool</b> <a id="f9d085f517fbf112" href="R/f9d085f517fbf112.html" target="n" data-glyph="102,1" class="i property">ReceiverRuntimeMetricEnabled</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>protected abstract</b> <span class="i">Task</span> <a id="47c4f39f598ee82c" href="R/47c4f39f598ee82c.html" target="n" data-glyph="75,1" class="i method">OnCloseAsync</a>();
+ 
+        <b>string</b> <a id="d94395f41e0ced57" href="R/d94395f41e0ced57.html" target="n" data-glyph="76,1" class="i method">FormatTraceDetails</a>()
+        {
+            <span class="i">StringBuilder</span> <span id="r21 rd" class="r21 r">sb</span> = <b>new</b> <span class="i">StringBuilder</span>();
+            <span class="r21 r">sb</span>.<span class="i">AppendFormat</span>(<span class="s">&quot;ConsumerGroup:{0}, PartitionId:{1}&quot;</span>, <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#d4384e540d8fb158" class="i property">ConsumerGroupName</a>, <a href="#470835fa67813644" class="i property">PartitionId</a>);
+ 
+            <b>if</b> (!<b>string</b>.<span class="i">IsNullOrEmpty</span>(<a href="#c6301acd46b0811a" class="k">this</a>.<a href="#8686e364c2fca6e0" class="i property">EventPosition</a>.<a href="EventPosition.cs.html#6e1b91ec6adbd33f" class="i property">Offset</a>))
+            {
+                <span class="r21 r">sb</span>.<span class="i">AppendFormat</span>(<span class="s">&quot;, StartOffset:{0}, IsInclusive:{1}&quot;</span>, <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#8686e364c2fca6e0" class="i property">EventPosition</a>.<a href="EventPosition.cs.html#6e1b91ec6adbd33f" class="i property">Offset</a>, <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#8686e364c2fca6e0" class="i property">EventPosition</a>.<a href="EventPosition.cs.html#61f0a2531a7686b2" class="i property">IsInclusive</a>);
+            }
+ 
+            <b>if</b> (<a href="#c6301acd46b0811a" class="k">this</a>.<a href="#8686e364c2fca6e0" class="i property">EventPosition</a>.<a href="EventPosition.cs.html#cb766c6ae4d91738" class="i property">SequenceNumber</a> != <b>null</b>)
+            {
+                <span class="r21 r">sb</span>.<span class="i">AppendFormat</span>(<span class="s">&quot;, SequenceNumber:{0}, IsInclusive:{1}&quot;</span>, <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#8686e364c2fca6e0" class="i property">EventPosition</a>.<a href="EventPosition.cs.html#cb766c6ae4d91738" class="i property">SequenceNumber</a>, <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#8686e364c2fca6e0" class="i property">EventPosition</a>.<a href="EventPosition.cs.html#61f0a2531a7686b2" class="i property">IsInclusive</a>);
+            }
+ 
+            <b>if</b> (<a href="#c6301acd46b0811a" class="k">this</a>.<a href="#8686e364c2fca6e0" class="i property">EventPosition</a>.<a href="EventPosition.cs.html#3bc83e36b7539151" class="i property">EnqueuedTimeUtc</a> != <b>null</b>)
+            {
+                <span class="r21 r">sb</span>.<span class="i">AppendFormat</span>(<span class="s">&quot;, StartTime:{0}&quot;</span>, <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#8686e364c2fca6e0" class="i property">EventPosition</a>.<a href="EventPosition.cs.html#3bc83e36b7539151" class="i property">EnqueuedTimeUtc</a>);
+            }
+ 
+            <b>if</b> (<a href="#c6301acd46b0811a" class="k">this</a>.<a href="#1f0653f0aca87420" class="i property">Epoch</a>.<span class="i">HasValue</span>)
+            {
+                <span class="r21 r">sb</span>.<span class="i">AppendFormat</span>(<span class="s">&quot;, Epoch:{0}&quot;</span>, <a href="#c6301acd46b0811a" class="k">this</a>.<a href="#1f0653f0aca87420" class="i property">Epoch</a>.<span class="i">Value</span>);
+            }
+ 
+            <b>return</b> <span class="r21 r">sb</span>.<span class="i">ToString</span>();
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

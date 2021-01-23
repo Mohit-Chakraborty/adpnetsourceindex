@@ -1,0 +1,241 @@
+﻿<!DOCTYPE html>
+<html><head><title>StorageWriteStream.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(232);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Storage.Files.DataLake/Shared/StorageWriteStream.cs" target="_top">Shared\StorageWriteStream.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Storage.Files.DataLake" target="_top">Azure.Storage.Files.DataLake\src\Azure.Storage.Files.DataLake.csproj</a> (Azure.Storage.Files.DataLake)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Buffers</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Shared</span>
+{
+    <b>internal abstract class</b> <a id="2ef52d219ab72c98" href="../R/2ef52d219ab72c98.html" target="n" data-glyph="2,0" class="t t">StorageWriteStream</a> : <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a>
+    {
+        <b>protected long</b> <a id="1542e54eae4f293e" href="../R/1542e54eae4f293e.html" target="n" data-glyph="45,1" class="i field">_position</a>;
+        <b>protected long</b> <a id="5282f0a692ebb8b2" href="../R/5282f0a692ebb8b2.html" target="n" data-glyph="45,1" class="i field">_bufferSize</a>;
+        <b>protected readonly</b> <a href="@1@netstandard/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<b>long</b>&gt; <a id="9b00e4d780f36a6e" href="../R/9b00e4d780f36a6e.html" target="n" data-glyph="45,1" class="i field">_progressHandler</a>;
+        <b>protected readonly</b> <a href="PooledMemoryStream.cs.html#1b57485f6b2784fa" class="t t">PooledMemoryStream</a> <a id="7cdf4db98bed6a8f" href="../R/7cdf4db98bed6a8f.html" target="n" data-glyph="45,1" class="i field">_buffer</a>;
+        <b>private bool</b> <a id="76e9dc76b2207393" href="../R/76e9dc76b2207393.html" target="n" data-glyph="46,1" class="i field">_disposed</a>;
+        <b>private bool</b> <a id="64da7f3f944cc005" href="../R/64da7f3f944cc005.html" target="n" data-glyph="46,1" class="i field">_shouldDisposeBuffer</a>;
+ 
+        <b>protected</b> <a id="ce3639355ce0a3e7" href="../R/ce3639355ce0a3e7.html" target="n" data-glyph="75,1" class="t constructor">StorageWriteStream</a>(
+            <b>long</b> <span id="r0 rd" class="r0 r">position</span>,
+            <b>long</b> <span id="r1 rd" class="r1 r">bufferSize</span>,
+            <a href="@1@netstandard/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<b>long</b>&gt; <span id="r2 rd" class="r2 r">progressHandler</span>,
+            <a href="PooledMemoryStream.cs.html#1b57485f6b2784fa" class="t t">PooledMemoryStream</a> <span id="r3 rd" class="r3 r">buffer</span> = <b>null</b>)
+        {
+            <a href="#1542e54eae4f293e" class="i field">_position</a> = <span class="r0 r">position</span>;
+            <a href="#5282f0a692ebb8b2" class="i field">_bufferSize</a> = <span class="r1 r">bufferSize</span>;
+ 
+            <b>if</b> (<span class="r2 r">progressHandler</span> != <b>null</b>)
+            {
+                <a href="#9b00e4d780f36a6e" class="i field">_progressHandler</a> = <b>new</b> <a href="AggregatingProgressIncrementer.cs.html#63dd31008ce64717" class="t constructor">AggregatingProgressIncrementer</a>(<span class="r2 r">progressHandler</span>);
+            }
+ 
+            <b>if</b> (<span class="r3 r">buffer</span> != <b>null</b>)
+            {
+                <a href="#7cdf4db98bed6a8f" class="i field">_buffer</a> = <span class="r3 r">buffer</span>;
+                <a href="#64da7f3f944cc005" class="i field">_shouldDisposeBuffer</a> = <b>false</b>;
+            }
+            <b>else</b>
+            {
+                <a href="#7cdf4db98bed6a8f" class="i field">_buffer</a> = <b>new</b> <a href="PooledMemoryStream.cs.html#3ec4bbfffe6d9912" class="t constructor">PooledMemoryStream</a>(
+                <span class="r4 r">arrayPool</span>: <span class="t t">ArrayPool</span>&lt;<b>byte</b>&gt;.<span class="i property">Shared</span>,
+                <span class="r5 r">absolutePosition</span>: 0,
+                <span class="r6 r">maxArraySize</span>: (<b>int</b>)<a href="@1@netstandard/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@1@netstandard/A.html#8cf0c6d1543ff08d" class="i method">Min</a>(<a href="Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Constants.cs.html#f083580f332431a9" class="i field">MB</a>, <span class="r1 r">bufferSize</span>));
+                <a href="#64da7f3f944cc005" class="i field">_shouldDisposeBuffer</a> = <b>true</b>;
+            }
+        }
+ 
+        <b>public override bool</b> <a id="52eaed4f8ef84245" href="../R/52eaed4f8ef84245.html" target="n" data-glyph="102,1" class="i property">CanRead</a> =&gt; <b>false</b>;
+ 
+        <b>public override bool</b> <a id="e8a9c23c3ae0c961" href="../R/e8a9c23c3ae0c961.html" target="n" data-glyph="102,1" class="i property">CanSeek</a> =&gt; <b>false</b>;
+ 
+        <b>public override bool</b> <a id="8ddae30f7e669ea6" href="../R/8ddae30f7e669ea6.html" target="n" data-glyph="102,1" class="i property">CanWrite</a> =&gt; <b>true</b>;
+ 
+        <b>public override long</b> <a id="9a38a5a486245356" href="../R/9a38a5a486245356.html" target="n" data-glyph="102,1" class="i property">Length</a> =&gt; <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#ab0acd5f99886747" class="t constructor">NotSupportedException</a>();
+ 
+        <b>public override long</b> <a id="4e52ff1864763f1a" href="../R/4e52ff1864763f1a.html" target="n" data-glyph="102,1" class="i property">Position</a> { <b>get</b> =&gt; <a href="#1542e54eae4f293e" class="i field">_position</a>; <b>set</b> =&gt; <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#ab0acd5f99886747" class="t constructor">NotSupportedException</a>(); }
+ 
+        <b>public override int</b> <a id="1dd9cdd8ddfc7069" href="../R/1dd9cdd8ddfc7069.html" target="n" data-glyph="72,1" class="i method">Read</a>(<b>byte</b>[] <span id="r7 rd" class="r7 r">buffer</span>, <b>int</b> <span id="r8 rd" class="r8 r">offset</span>, <b>int</b> <span id="r9 rd" class="r9 r">count</span>)
+            =&gt; <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#ab0acd5f99886747" class="t constructor">NotSupportedException</a>();
+ 
+        <b>public override long</b> <a id="c534ca10959c126e" href="../R/c534ca10959c126e.html" target="n" data-glyph="72,1" class="i method">Seek</a>(<b>long</b> <span id="r10 rd" class="r10 r">offset</span>, <a href="@1@netstandard/A.html#2cc1cf6635f00a52" class="t t">SeekOrigin</a> <span id="r11 rd" class="r11 r">origin</span>)
+            =&gt; <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#ab0acd5f99886747" class="t constructor">NotSupportedException</a>();
+ 
+        <b>public override void</b> <a id="3b410558faa503a1" href="../R/3b410558faa503a1.html" target="n" data-glyph="72,1" class="i method">SetLength</a>(<b>long</b> <span id="r12 rd" class="r12 r">value</span>)
+            =&gt; <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#ab0acd5f99886747" class="t constructor">NotSupportedException</a>();
+ 
+        <b>public override void</b> <a id="7d086152eddb7a7f" href="../R/7d086152eddb7a7f.html" target="n" data-glyph="72,1" class="i method">Write</a>(
+            <b>byte</b>[] <span id="r13 rd" class="r13 r">buffer</span>,
+            <b>int</b> <span id="r14 rd" class="r14 r">offset</span>,
+            <b>int</b> <span id="r15 rd" class="r15 r">count</span>)
+            =&gt; <a href="#33bd935a7c7e7339" class="i method">WriteInternal</a>(
+                <span class="r13 r">buffer</span>,
+                <span class="r14 r">offset</span>,
+                <span class="r15 r">count</span>,
+                <span class="r16 r">async</span>: <b>false</b>,
+                <span class="r17 r">cancellationToken</span>: <b>default</b>)
+            .<a href="Core/TaskExtensions.cs.html#9a35b0afd931dc48" class="i method">EnsureCompleted</a>();
+ 
+        <b>public override async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="27396f2880e99115" href="../R/27396f2880e99115.html" target="n" data-glyph="72,1" class="i method">WriteAsync</a>(
+            <b>byte</b>[] <span id="r18 rd" class="r18 r">buffer</span>,
+            <b>int</b> <span id="r19 rd" class="r19 r">offset</span>,
+            <b>int</b> <span id="r20 rd" class="r20 r">count</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r21 rd" class="r21 r">cancellationToken</span>)
+            =&gt; <b>await</b> <a href="#33bd935a7c7e7339" class="i method">WriteInternal</a>(
+                <span class="r18 r">buffer</span>,
+                <span class="r19 r">offset</span>,
+                <span class="r20 r">count</span>,
+                <span class="r16 r">async</span>: <b>true</b>,
+                <span class="r21 r">cancellationToken</span>)
+            .<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+        <b>protected virtual async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="33bd935a7c7e7339" href="../R/33bd935a7c7e7339.html" target="n" data-glyph="75,1" class="i method">WriteInternal</a>(
+            <b>byte</b>[] <span id="r22 rd" class="r22 r">buffer</span>,
+            <b>int</b> <span id="r23 rd" class="r23 r">offset</span>,
+            <b>int</b> <span id="r24 rd" class="r24 r">count</span>,
+            <b>bool</b> <span id="r16 rd" class="r16 r">async</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r17 rd" class="r17 r">cancellationToken</span>)
+        {
+            <a href="#c280c32830406cee" class="i method">ValidateWriteParameters</a>(<span class="r22 r">buffer</span>, <span class="r23 r">offset</span>, <span class="r24 r">count</span>);
+            <b>int</b> <span id="r25 rd" class="r25 r">remaining</span> = <span class="r24 r">count</span>;
+ 
+            <span class="c">// New bytes will fit in the buffer.</span>
+            <b>if</b> (<span class="r24 r">count</span> &lt;= <a href="#5282f0a692ebb8b2" class="i field">_bufferSize</a> - <a href="#7cdf4db98bed6a8f" class="i field">_buffer</a>.<a href="PooledMemoryStream.cs.html#7837e3930028e944" class="i property">Position</a>)
+            {
+                <b>await</b> <a href="#b374c665d02e2659" class="i method">WriteToBufferInternal</a>(<span class="r22 r">buffer</span>, <span class="r23 r">offset</span>, <span class="r24 r">count</span>, <span class="r16 r">async</span>, <span class="r17 r">cancellationToken</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+            }
+            <b>else</b>
+            {
+                <span class="c">// Finish filling the buffer.</span>
+                <b>int</b> <span id="r26 rd" class="r26 r">remainingSpace</span> = (<b>int</b>)(<a href="#5282f0a692ebb8b2" class="i field">_bufferSize</a> - <a href="#7cdf4db98bed6a8f" class="i field">_buffer</a>.<a href="PooledMemoryStream.cs.html#7837e3930028e944" class="i property">Position</a>);
+                <b>await</b> <a href="#b374c665d02e2659" class="i method">WriteToBufferInternal</a>(
+                    <span class="r22 r">buffer</span>,
+                    <span class="r23 r">offset</span>,
+                    <span class="r26 r">remainingSpace</span>,
+                    <span class="r16 r">async</span>,
+                    <span class="r17 r">cancellationToken</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+                <span class="r25 r">remaining</span> -= <span class="r26 r">remainingSpace</span>;
+                <span class="r23 r">offset</span> += <span class="r26 r">remainingSpace</span>;
+ 
+                <span class="c">// Upload bytes.</span>
+                <b>await</b> <a href="#9b302dde7d029379" class="i method">AppendInternal</a>(<span class="r16 r">async</span>, <span class="r17 r">cancellationToken</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                <span class="c">// We need to loop, because remaining bytes might be greater than _buffer size.</span>
+                <b>while</b> (<span class="r25 r">remaining</span> &gt; 0)
+                {
+                    <b>int</b> <span id="r27 rd" class="r27 r">available</span> = (<b>int</b>)<a href="@1@netstandard/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@1@netstandard/A.html#8cf0c6d1543ff08d" class="i method">Min</a>(<span class="r25 r">remaining</span>, <a href="#5282f0a692ebb8b2" class="i field">_bufferSize</a>);
+                    <b>await</b> <a href="#b374c665d02e2659" class="i method">WriteToBufferInternal</a>(
+                        <span class="r22 r">buffer</span>,
+                        <span class="r23 r">offset</span>,
+                        <span class="r27 r">available</span>,
+                        <span class="r16 r">async</span>,
+                        <span class="r17 r">cancellationToken</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+                    <span class="r25 r">remaining</span> -= <span class="r27 r">available</span>;
+                    <span class="r23 r">offset</span> += <span class="r27 r">available</span>;
+ 
+                    <span class="c">// Renaming bytes won&#39;t fit in buffer.</span>
+                    <b>if</b> (<span class="r25 r">remaining</span> &gt; 0)
+                    {
+                        <b>await</b> <a href="#9b302dde7d029379" class="i method">AppendInternal</a>(<span class="r16 r">async</span>, <span class="r17 r">cancellationToken</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+                    }
+                }
+            }
+        }
+ 
+        <b>protected abstract</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="069c746cdca1dc9a" href="../R/069c746cdca1dc9a.html" target="n" data-glyph="75,1" class="i method">FlushInternal</a>(<b>bool</b> <span id="r28 rd" class="r28 r">async</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r29 rd" class="r29 r">cancellationToken</span>);
+ 
+        <b>public override void</b> <a id="a0682d4da66050f5" href="../R/a0682d4da66050f5.html" target="n" data-glyph="72,1" class="i method">Flush</a>()
+            =&gt; <a href="#069c746cdca1dc9a" class="i method">FlushInternal</a>(
+                <span class="r28 r">async</span>: <b>false</b>,
+                <span class="r29 r">cancellationToken</span>: <b>default</b>).<a href="Core/TaskExtensions.cs.html#9a35b0afd931dc48" class="i method">EnsureCompleted</a>();
+ 
+        <b>public override async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="3e7ce15b975273f5" href="../R/3e7ce15b975273f5.html" target="n" data-glyph="72,1" class="i method">FlushAsync</a>(<a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r30 rd" class="r30 r">cancellationToken</span>)
+            =&gt; <b>await</b> <a href="#069c746cdca1dc9a" class="i method">FlushInternal</a>(
+                <span class="r28 r">async</span>: <b>true</b>,
+                <span class="r30 r">cancellationToken</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+        <b>protected abstract</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="9b302dde7d029379" href="../R/9b302dde7d029379.html" target="n" data-glyph="75,1" class="i method">AppendInternal</a>(<b>bool</b> <span id="r31 rd" class="r31 r">async</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r32 rd" class="r32 r">cancellationToken</span>);
+ 
+        <b>protected abstract void</b> <a id="0846e85962dfe089" href="../R/0846e85962dfe089.html" target="n" data-glyph="75,1" class="i method">ValidateBufferSize</a>(<b>long</b> <span id="r33 rd" class="r33 r">bufferSize</span>);
+ 
+        <b>protected async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="b374c665d02e2659" href="../R/b374c665d02e2659.html" target="n" data-glyph="75,1" class="i method">WriteToBufferInternal</a>(
+            <b>byte</b>[] <span id="r34 rd" class="r34 r">buffer</span>,
+            <b>int</b> <span id="r35 rd" class="r35 r">offset</span>,
+            <b>int</b> <span id="r36 rd" class="r36 r">count</span>,
+            <b>bool</b> <span id="r37 rd" class="r37 r">async</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r38 rd" class="r38 r">cancellationToken</span>)
+        {
+            <b>if</b> (<span class="r37 r">async</span>)
+            {
+                <b>await</b> <a href="#7cdf4db98bed6a8f" class="i field">_buffer</a>.<a href="@1@netstandard/A.html#646bf77f3c9e8556" class="i method">WriteAsync</a>(<span class="r34 r">buffer</span>, <span class="r35 r">offset</span>, <span class="r36 r">count</span>, <span class="r38 r">cancellationToken</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+            }
+            <b>else</b>
+            {
+                <a href="#7cdf4db98bed6a8f" class="i field">_buffer</a>.<a href="PooledMemoryStream.cs.html#c2d93dd5dd85f572" class="i method">Write</a>(<span class="r34 r">buffer</span>, <span class="r35 r">offset</span>, <span class="r36 r">count</span>);
+            }
+            <a href="#1542e54eae4f293e" class="i field">_position</a> += <span class="r36 r">count</span>;
+        }
+ 
+        <b>protected static void</b> <a id="c280c32830406cee" href="../R/c280c32830406cee.html" target="n" data-glyph="75,1" class="i method">ValidateWriteParameters</a>(<b>byte</b>[] <span id="r39 rd" class="r39 r">buffer</span>, <b>int</b> <span id="r40 rd" class="r40 r">offset</span>, <b>int</b> <span id="r41 rd" class="r41 r">count</span>)
+        {
+            <b>if</b> (<span class="r39 r">buffer</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#b50c77b2acc23eca" class="t constructor">ArgumentNullException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="r39 r">buffer</span>)}<span class="s">&quot;</span>, <span class="s">$&quot;</span>{<b>nameof</b>(<span class="r39 r">buffer</span>)}<span class="s"> cannot be null.</span><span class="s">&quot;</span>);
+            }
+ 
+            <b>if</b> (<span class="r40 r">offset</span> &lt; 0)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#5fec5e06371b1f6c" class="t constructor">ArgumentOutOfRangeException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="r40 r">offset</span>)}<span class="s"> cannot be less than 0.</span><span class="s">&quot;</span>);
+            }
+ 
+            <b>if</b> (<span class="r40 r">offset</span> &gt; <span class="r39 r">buffer</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#5fec5e06371b1f6c" class="t constructor">ArgumentOutOfRangeException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="r40 r">offset</span>)}<span class="s"> cannot be greater than </span>{<b>nameof</b>(<span class="r39 r">buffer</span>)}<span class="s"> length.</span><span class="s">&quot;</span>);
+            }
+ 
+            <b>if</b> (<span class="r41 r">count</span> &lt; 0)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#5fec5e06371b1f6c" class="t constructor">ArgumentOutOfRangeException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="r41 r">count</span>)}<span class="s"> cannot be less than 0.</span><span class="s">&quot;</span>);
+            }
+ 
+            <b>if</b> (<span class="r40 r">offset</span> + <span class="r41 r">count</span> &gt; <span class="r39 r">buffer</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#5fec5e06371b1f6c" class="t constructor">ArgumentOutOfRangeException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="r40 r">offset</span>)}<span class="s"> + </span>{<b>nameof</b>(<span class="r41 r">count</span>)}<span class="s"> cannot exceed </span>{<b>nameof</b>(<span class="r39 r">buffer</span>)}<span class="s"> length.</span><span class="s">&quot;</span>);
+            }
+        }
+ 
+        <b>protected override void</b> <a id="233648c22c5d0e27" href="../R/233648c22c5d0e27.html" target="n" data-glyph="75,1" class="i method">Dispose</a>(<b>bool</b> <span id="r42 rd" class="r42 r">disposing</span>)
+        {
+            <b>if</b> (<a href="#76e9dc76b2207393" class="i field">_disposed</a>)
+            {
+                <b>return</b>;
+            }
+ 
+            <b>if</b> (<span class="r42 r">disposing</span>)
+            {
+                <a href="#a0682d4da66050f5" class="i method">Flush</a>();
+                <b>if</b> (<a href="#64da7f3f944cc005" class="i field">_shouldDisposeBuffer</a>)
+                {
+                    <a href="#7cdf4db98bed6a8f" class="i field">_buffer</a>.<a href="@1@netstandard/A.html#f1b4285950a82354" class="i method">Dispose</a>();
+                }
+            }
+ 
+            <a href="#76e9dc76b2207393" class="i field">_disposed</a> = <b>true</b>;
+ 
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="k">base</a>.<a href="@1@netstandard/A.html#f35c7d226df4a465" class="i method">Dispose</a>(<span class="r42 r">disposing</span>);
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

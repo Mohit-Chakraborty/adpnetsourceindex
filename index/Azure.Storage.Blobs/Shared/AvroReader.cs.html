@@ -1,0 +1,264 @@
+﻿<!DOCTYPE html>
+<html><head><title>AvroReader.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(255);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Storage.Blobs/Shared/AvroReader.cs" target="_top">Shared\AvroReader.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Storage.Blobs" target="_top">Azure.Storage.Blobs\src\Azure.Storage.Blobs.csproj</a> (Azure.Storage.Blobs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>.<span class="i n">Json</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Internal</span>.<span class="i n">Avro</span>
+{
+    <b>internal class</b> <a id="c2f49d0fdd2145f8" href="../R/c2f49d0fdd2145f8.html" target="n" data-glyph="2,0" class="t t">AvroReader</a> : <a href="@1@netstandard/A.html#1f55292c3174123d" class="t t">IDisposable</a>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Stream containing the body of the Avro file.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly</b> <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <a id="d6b169e5596b635e" href="../R/d6b169e5596b635e.html" target="n" data-glyph="46,1" class="i field">_dataStream</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Stream containing the header of the Avro file.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly</b> <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <a id="f0821e9cff7412ba" href="../R/f0821e9cff7412ba.html" target="n" data-glyph="46,1" class="i field">_headerStream</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Sync marker.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private byte</b>[] <a id="65e99b04fae64b39" href="../R/65e99b04fae64b39.html" target="n" data-glyph="46,1" class="i field">_syncMarker</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Avro metadata.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private</b> <a href="@1@netstandard/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="79f7e5a02d5abd05" href="../R/79f7e5a02d5abd05.html" target="n" data-glyph="46,1" class="i field">_metadata</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Avro schema.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private</b> <a href="AvroParser.cs.html#89e09445d2493e41" class="t t">AvroType</a> <a id="f3bd335eb984acad" href="../R/f3bd335eb984acad.html" target="n" data-glyph="46,1" class="i field">_itemType</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The number of items remaining in the current block.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private long</b> <a id="b73fffbc2a7330f0" href="../R/b73fffbc2a7330f0.html" target="n" data-glyph="46,1" class="i field">_itemsRemainingInBlock</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The byte offset within the Avro file (both header and data)</span>
+        <span class="c">///</span><span class="c"> of the start of the current block.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public virtual long</b> <a id="a814479185d1557f" href="../R/a814479185d1557f.html" target="n" data-glyph="102,1" class="i property">BlockOffset</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The index of the current object within the current block.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public virtual long</b> <a id="b70ee87c0860a00b" href="../R/b70ee87c0860a00b.html" target="n" data-glyph="102,1" class="i property">ObjectIndex</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> If this Avro Reader has been initalized.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private bool</b> <a id="18d94718d3934235" href="../R/18d94718d3934235.html" target="n" data-glyph="46,1" class="i field">_initalized</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> To detect redundant calls</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private bool</b> <a id="46082721504a7874" href="../R/46082721504a7874.html" target="n" data-glyph="46,1" class="i field">_disposed</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Remembers where we started if partial data stream was provided.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly long</b> <a id="a1f6ac5b169bdda1" href="../R/a1f6ac5b169bdda1.html" target="n" data-glyph="46,1" class="i field">_initialBlockOffset</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Constructor for an AvroReader that will read from the</span>
+        <span class="c">///</span><span class="c"> beginning of an Avro file.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a id="f166d0acc1db7150" href="../R/f166d0acc1db7150.html" target="n" data-glyph="72,1" class="t constructor">AvroReader</a>(<a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r0 rd" class="r0 r">dataStream</span>)
+        {
+            <b>if</b> (<span class="r0 r">dataStream</span>.<a href="@1@netstandard/A.html#73e4413d240b4cee" class="i property">CanSeek</a>)
+            {
+                <a href="#d6b169e5596b635e" class="i field">_dataStream</a> = <span class="r0 r">dataStream</span>;
+                <a href="#f0821e9cff7412ba" class="i field">_headerStream</a> = <span class="r0 r">dataStream</span>;
+            }
+            <b>else</b>
+            {
+                <a href="#d6b169e5596b635e" class="i field">_dataStream</a> = <b>new</b> <a href="StreamWithPosition.cs.html#1e2107653f7c69be" class="t constructor">StreamWithPosition</a>(<span class="r0 r">dataStream</span>);
+                <a href="#f0821e9cff7412ba" class="i field">_headerStream</a> = <a href="#d6b169e5596b635e" class="i field">_dataStream</a>;
+            }
+ 
+            <a href="#79f7e5a02d5abd05" class="i field">_metadata</a> = <b>new</b> <a href="@1@netstandard/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>&gt;();
+            <a href="#18d94718d3934235" class="i field">_initalized</a> = <b>false</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Constructor for an Avro Reader that will read beginning</span>
+        <span class="c">///</span><span class="c"> in the middle of an Avro file.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a id="ee4950486d3cc1eb" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">AvroReader</a>(
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r1 rd" class="r1 r">dataStream</span>,
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r2 rd" class="r2 r">headerStream</span>,
+            <b>long</b> <span id="r3 rd" class="r3 r">currentBlockOffset</span>,
+            <b>long</b> <span id="r4 rd" class="r4 r">indexWithinCurrentBlock</span>)
+        {
+            <b>if</b> (<span class="r1 r">dataStream</span>.<a href="@1@netstandard/A.html#73e4413d240b4cee" class="i property">CanSeek</a>)
+            {
+                <a href="#d6b169e5596b635e" class="i field">_dataStream</a> = <span class="r1 r">dataStream</span>;
+            }
+            <b>else</b>
+            {
+                <a href="#d6b169e5596b635e" class="i field">_dataStream</a> = <b>new</b> <a href="StreamWithPosition.cs.html#1e2107653f7c69be" class="t constructor">StreamWithPosition</a>(<span class="r1 r">dataStream</span>);
+            }
+ 
+            <b>if</b> (<span class="r2 r">headerStream</span>.<a href="@1@netstandard/A.html#73e4413d240b4cee" class="i property">CanSeek</a>)
+            {
+                <a href="#f0821e9cff7412ba" class="i field">_headerStream</a> = <span class="r2 r">headerStream</span>;
+            }
+            <b>else</b>
+            {
+                <a href="#f0821e9cff7412ba" class="i field">_headerStream</a> = <b>new</b> <a href="StreamWithPosition.cs.html#1e2107653f7c69be" class="t constructor">StreamWithPosition</a>(<span class="r2 r">headerStream</span>);
+            }
+ 
+            <a href="#79f7e5a02d5abd05" class="i field">_metadata</a> = <b>new</b> <a href="@1@netstandard/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>&gt;();
+            <a href="#18d94718d3934235" class="i field">_initalized</a> = <b>false</b>;
+            <a href="#a1f6ac5b169bdda1" class="i field">_initialBlockOffset</a> = <span class="r3 r">currentBlockOffset</span>;
+            <a href="#a814479185d1557f" class="i property">BlockOffset</a> = <span class="r3 r">currentBlockOffset</span>;
+            <a href="#b70ee87c0860a00b" class="i property">ObjectIndex</a> = <span class="r4 r">indexWithinCurrentBlock</span>;
+            <a href="#18d94718d3934235" class="i field">_initalized</a> = <b>false</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Constructor for mocking.  Do not use.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a id="03a92e61719aaa3f" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">AvroReader</a>() { }
+ 
+        <b>public virtual async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="48be616621d39e59" href="../R/48be616621d39e59.html" target="n" data-glyph="72,1" class="i method">Initalize</a>(<b>bool</b> <span id="r5 rd" class="r5 r">async</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r6 rd" class="r6 r">cancellationToken</span> = <b>default</b>)
+        {
+            <span class="c">// Four bytes, ASCII &#39;O&#39;, &#39;b&#39;, &#39;j&#39;, followed by 1.</span>
+            <b>byte</b>[] <span id="r7 rd" class="r7 r">header</span> = <b>await</b> <a href="AvroParser.cs.html#a1fdbc1325804408" class="t t">AvroParser</a>.<a href="AvroParser.cs.html#26ef4a4b7b7566a4" class="i method">ReadFixedBytesAsync</a>(<a href="#f0821e9cff7412ba" class="i field">_headerStream</a>, <a href="AvroConstants.cs.html#2e0a8d84c3ae83f7" class="t t">AvroConstants</a>.<a href="AvroConstants.cs.html#e1982d3dadd5c803" class="i field">InitBytes</a>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>, <span class="r5 r">async</span>, <span class="r6 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+            <b>if</b> (!<span class="r7 r">header</span>.<a href="@1@netstandard/A.html#9bdd6ef7ba6a5615" class="i method">SequenceEqual</a>(<a href="AvroConstants.cs.html#2e0a8d84c3ae83f7" class="t t">AvroConstants</a>.<a href="AvroConstants.cs.html#e1982d3dadd5c803" class="i field">InitBytes</a>))
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">&quot;Stream is not an Avro file.&quot;</span>);
+            }
+ 
+            <span class="c">// File metadata is written as if defined by the following map schema:</span>
+            <span class="c">// { &quot;type&quot;: &quot;map&quot;, &quot;values&quot;: &quot;bytes&quot;}</span>
+            <a href="#79f7e5a02d5abd05" class="i field">_metadata</a> = <b>await</b> <a href="AvroParser.cs.html#a1fdbc1325804408" class="t t">AvroParser</a>.<a href="AvroParser.cs.html#ae1bef9bc39d50fd" class="i method">ReadMapAsync</a>(<a href="#f0821e9cff7412ba" class="i field">_headerStream</a>, <a href="AvroParser.cs.html#a1fdbc1325804408" class="t t">AvroParser</a>.<a href="AvroParser.cs.html#310a9cecb9b4359c" class="i method">ReadStringAsync</a>, <span class="r5 r">async</span>, <span class="r6 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <span class="c">// Validate codec</span>
+            <a href="#79f7e5a02d5abd05" class="i field">_metadata</a>.<a href="@1@netstandard/A.html#2e5bc6d8c0f21e67" class="i method">TryGetValue</a>(<a href="AvroConstants.cs.html#2e0a8d84c3ae83f7" class="t t">AvroConstants</a>.<a href="AvroConstants.cs.html#fa178533dbfb2f3a" class="i field">CodecKey</a>, <b>out string</b> <span id="r8 rd" class="r8 r">codec</span>);
+            <b>if</b> (!(<span class="r8 r">codec</span> == <b>null</b> || <span class="r8 r">codec</span> == <span class="s">&quot;null&quot;</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">&quot;Codecs are not supported&quot;</span>);
+            }
+ 
+            <span class="c">// The 16-byte, randomly-generated sync marker for this file.</span>
+            <a href="#65e99b04fae64b39" class="i field">_syncMarker</a> = <b>await</b> <a href="AvroParser.cs.html#a1fdbc1325804408" class="t t">AvroParser</a>.<a href="AvroParser.cs.html#26ef4a4b7b7566a4" class="i method">ReadFixedBytesAsync</a>(<a href="#f0821e9cff7412ba" class="i field">_headerStream</a>, <a href="AvroConstants.cs.html#2e0a8d84c3ae83f7" class="t t">AvroConstants</a>.<a href="AvroConstants.cs.html#c3ea5efe38e82707" class="i field">SyncMarkerSize</a>, <span class="r5 r">async</span>, <span class="r6 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <span class="c">// Parse the schema</span>
+            <b>using</b> <span class="t t">JsonDocument</span> <span id="r9 rd" class="r9 r">schema</span> = <span class="t t">JsonDocument</span>.<span class="i method">Parse</span>(<a href="#79f7e5a02d5abd05" class="i field">_metadata</a><a href="@1@netstandard/A.html#49962975508e2d83">[</a><a href="AvroConstants.cs.html#2e0a8d84c3ae83f7" class="t t">AvroConstants</a>.<a href="AvroConstants.cs.html#c84dabd79429bd55" class="i field">SchemaKey</a>]);
+            <a href="#f3bd335eb984acad" class="i field">_itemType</a> = <a href="AvroParser.cs.html#89e09445d2493e41" class="t t">AvroType</a>.<a href="AvroParser.cs.html#0f6034d3f57568c1" class="i method">FromSchema</a>(<span class="r9 r">schema</span>.<span class="i property">RootElement</span>);
+ 
+            <b>if</b> (<a href="#a814479185d1557f" class="i property">BlockOffset</a> == 0)
+            {
+                <a href="#a814479185d1557f" class="i property">BlockOffset</a> = <a href="#a1f6ac5b169bdda1" class="i field">_initialBlockOffset</a> + <a href="#d6b169e5596b635e" class="i field">_dataStream</a>.<a href="@1@netstandard/A.html#35112b2a53fb536a" class="i property">Position</a>;
+            }
+ 
+            <span class="c">// Populate _itemsRemainingInCurrentBlock</span>
+            <a href="#b73fffbc2a7330f0" class="i field">_itemsRemainingInBlock</a> = <b>await</b> <a href="AvroParser.cs.html#a1fdbc1325804408" class="t t">AvroParser</a>.<a href="AvroParser.cs.html#49f3de2c12763dd9" class="i method">ReadLongAsync</a>(<a href="#d6b169e5596b635e" class="i field">_dataStream</a>, <span class="r5 r">async</span>, <span class="r6 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <span class="c">// skip block length</span>
+            <b>await</b> <a href="AvroParser.cs.html#a1fdbc1325804408" class="t t">AvroParser</a>.<a href="AvroParser.cs.html#49f3de2c12763dd9" class="i method">ReadLongAsync</a>(<a href="#d6b169e5596b635e" class="i field">_dataStream</a>, <span class="r5 r">async</span>, <span class="r6 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <a href="#18d94718d3934235" class="i field">_initalized</a> = <b>true</b>;
+ 
+            <b>if</b> (<a href="#b70ee87c0860a00b" class="i property">ObjectIndex</a> &gt; 0)
+            {
+                <b>for</b> (<b>int</b> <span id="r10 rd" class="r10 r">i</span> = 0; <span class="r10 r">i</span> &lt; <a href="#b70ee87c0860a00b" class="i property">ObjectIndex</a>; <span class="r10 r">i</span>++)
+                {
+                    <b>await</b> <a href="#f3bd335eb984acad" class="i field">_itemType</a>.<a href="AvroParser.cs.html#18d4d90d45305626" class="i method">ReadAsync</a>(<a href="#d6b169e5596b635e" class="i field">_dataStream</a>, <span class="r5 r">async</span>, <span class="r6 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                    <a href="#b73fffbc2a7330f0" class="i field">_itemsRemainingInBlock</a>--;
+                }
+            }
+        }
+ 
+        <b>public virtual bool</b> <a id="c85e3217fd3f0f0f" href="../R/c85e3217fd3f0f0f.html" target="n" data-glyph="72,1" class="i method">HasNext</a>() =&gt; !<a href="#18d94718d3934235" class="i field">_initalized</a> || <a href="#b73fffbc2a7330f0" class="i field">_itemsRemainingInBlock</a> &gt; 0;
+ 
+        <b>public virtual async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>object</b>&gt; <a id="1f38b587b1ca468d" href="../R/1f38b587b1ca468d.html" target="n" data-glyph="72,1" class="i method">Next</a>(<b>bool</b> <span id="r11 rd" class="r11 r">async</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r12 rd" class="r12 r">cancellationToken</span> = <b>default</b>)
+        {
+            <span class="c">// Initialize AvroReader, if necessary.</span>
+            <b>if</b> (!<a href="#18d94718d3934235" class="i field">_initalized</a>)
+            {
+                <b>await</b> <a href="#48be616621d39e59" class="i method">Initalize</a>(<span class="r11 r">async</span>, <span class="r12 r">cancellationToken</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+            }
+ 
+            <b>if</b> (!<a href="#c85e3217fd3f0f0f" class="i method">HasNext</a>())
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">&quot;There are no more items in the stream&quot;</span>);
+            }
+ 
+            <b>object</b> <span id="r13 rd" class="r13 r">result</span> = <b>await</b> <a href="#f3bd335eb984acad" class="i field">_itemType</a>.<a href="AvroParser.cs.html#18d4d90d45305626" class="i method">ReadAsync</a>(<a href="#d6b169e5596b635e" class="i field">_dataStream</a>, <span class="r11 r">async</span>, <span class="r12 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <a href="#b73fffbc2a7330f0" class="i field">_itemsRemainingInBlock</a>--;
+            <a href="#b70ee87c0860a00b" class="i property">ObjectIndex</a>++;
+ 
+            <b>if</b> (<a href="#b73fffbc2a7330f0" class="i field">_itemsRemainingInBlock</a> == 0)
+            {
+                <b>byte</b>[] <span id="r14 rd" class="r14 r">marker</span> = <b>await</b> <a href="AvroParser.cs.html#a1fdbc1325804408" class="t t">AvroParser</a>.<a href="AvroParser.cs.html#26ef4a4b7b7566a4" class="i method">ReadFixedBytesAsync</a>(<a href="#d6b169e5596b635e" class="i field">_dataStream</a>, 16, <span class="r11 r">async</span>, <span class="r12 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                <a href="#a814479185d1557f" class="i property">BlockOffset</a> = <a href="#a1f6ac5b169bdda1" class="i field">_initialBlockOffset</a> + <a href="#d6b169e5596b635e" class="i field">_dataStream</a>.<a href="@1@netstandard/A.html#35112b2a53fb536a" class="i property">Position</a>;
+                <a href="#b70ee87c0860a00b" class="i property">ObjectIndex</a> = 0;
+ 
+                <b>if</b> (!<a href="#65e99b04fae64b39" class="i field">_syncMarker</a>.<a href="@1@netstandard/A.html#9bdd6ef7ba6a5615" class="i method">SequenceEqual</a>(<span class="r14 r">marker</span>))
+                {
+                    <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">&quot;Stream is not a valid Avro file.&quot;</span>);
+                }
+ 
+                <b>try</b>
+                {
+                    <a href="#b73fffbc2a7330f0" class="i field">_itemsRemainingInBlock</a> = <b>await</b> <a href="AvroParser.cs.html#a1fdbc1325804408" class="t t">AvroParser</a>.<a href="AvroParser.cs.html#49f3de2c12763dd9" class="i method">ReadLongAsync</a>(<a href="#d6b169e5596b635e" class="i field">_dataStream</a>, <span class="r11 r">async</span>, <span class="r12 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                }
+                <b>catch</b> (<a href="@1@netstandard/A.html#beac22dfca574cd4" class="t t">InvalidOperationException</a>)
+                {
+                    <span class="c">// We hit the end of the stream.</span>
+                }
+ 
+                <b>if</b> (<a href="#b73fffbc2a7330f0" class="i field">_itemsRemainingInBlock</a> &gt; 0)
+                {
+                    <span class="c">// Ignore block size</span>
+                    <b>await</b> <a href="AvroParser.cs.html#a1fdbc1325804408" class="t t">AvroParser</a>.<a href="AvroParser.cs.html#49f3de2c12763dd9" class="i method">ReadLongAsync</a>(<a href="#d6b169e5596b635e" class="i field">_dataStream</a>, <span class="r11 r">async</span>, <span class="r12 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                }
+            }
+ 
+            <b>return</b> <span class="r13 r">result</span>;
+        }
+ 
+        <b>public void</b> <a id="912f872a701f7863" href="../R/912f872a701f7863.html" target="n" data-glyph="72,1" class="i method">Dispose</a>() =&gt; <a href="#c2914edf1920ff50" class="i method">Dispose</a>(<b>true</b>);
+ 
+        <b>protected virtual void</b> <a id="c2914edf1920ff50" href="../R/c2914edf1920ff50.html" target="n" data-glyph="75,1" class="i method">Dispose</a>(<b>bool</b> <span id="r15 rd" class="r15 r">disposing</span>)
+        {
+            <b>if</b> (<a href="#46082721504a7874" class="i field">_disposed</a>)
+            {
+                <b>return</b>;
+            }
+ 
+            <b>if</b> (<span class="r15 r">disposing</span>)
+            {
+                <a href="#d6b169e5596b635e" class="i field">_dataStream</a>.<a href="@1@netstandard/A.html#f1b4285950a82354" class="i method">Dispose</a>();
+                <a href="#f0821e9cff7412ba" class="i field">_headerStream</a>.<a href="@1@netstandard/A.html#f1b4285950a82354" class="i method">Dispose</a>();
+            }
+ 
+            <a href="#46082721504a7874" class="i field">_disposed</a> = <b>true</b>;
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

@@ -1,0 +1,258 @@
+﻿<!DOCTYPE html>
+<html><head><title>ExpressionWriter.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(249);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Data.Tables/Queryable/ExpressionWriter.cs" target="_top">Queryable\ExpressionWriter.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Data.Tables" target="_top">src\Azure.Data.Tables.csproj</a> (Azure.Data.Tables)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Globalization</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Linq</span>.<span class="i">Expressions</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Reflection</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Text</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Data</span>.<span class="i n">Tables</span>.<span class="i n">Queryable</span>
+{
+    <b>internal class</b> <a id="5f835c601bf162d0" href="../R/5f835c601bf162d0.html" target="n" data-glyph="2,0" class="t t">ExpressionWriter</a> : <a href="LinqExpressionVisitor.cs.html#1822f80369bc1131" class="t t">LinqExpressionVisitor</a>
+    {
+        <b>internal readonly</b> <span class="i">StringBuilder</span> <a id="433bb59ae6c501a5" href="../R/433bb59ae6c501a5.html" target="n" data-glyph="44,1" class="i field">_builder</a>;
+        <b>private readonly</b> <span class="i">Stack</span>&lt;<span class="i">Expression</span>&gt; <a id="e2051de8a5185e1f" href="../R/e2051de8a5185e1f.html" target="n" data-glyph="46,1" class="i field">_expressionStack</a>;
+        <b>private bool</b> <a id="e35017315d6a627a" href="../R/e35017315d6a627a.html" target="n" data-glyph="46,1" class="i field">_cantTranslateExpression</a>;
+ 
+        <b>protected</b> <a id="b953f07f5c32b0a6" href="../R/b953f07f5c32b0a6.html" target="n" data-glyph="75,1" class="t constructor">ExpressionWriter</a>()
+        {
+            <a href="#433bb59ae6c501a5" class="i field">_builder</a> = <b>new</b> <span class="i">StringBuilder</span>();
+            <a href="#e2051de8a5185e1f" class="i field">_expressionStack</a> = <b>new</b> <span class="i">Stack</span>&lt;<span class="i">Expression</span>&gt;();
+            <a href="#e2051de8a5185e1f" class="i field">_expressionStack</a>.<span class="i">Push</span>(<b>null</b>);
+        }
+ 
+        <b>internal static string</b> <a id="e2f8b55d47c57f4d" href="../R/../../0000000000.html" target="n" data-glyph="74,1" class="i method">ExpressionToString</a>(<span class="i">Expression</span> <span id="r0 rd" class="r0 r">e</span>)
+        {
+            <a href="#5f835c601bf162d0" class="t t">ExpressionWriter</a> <span id="r1 rd" class="r1 r">ew</span> = <b>new</b> <a href="#b953f07f5c32b0a6" class="t constructor">ExpressionWriter</a>();
+            <b>return</b> <span class="r1 r">ew</span>.<a href="#a30a732b98bb8579" class="i method">ConvertExpressionToString</a>(<span class="r0 r">e</span>);
+        }
+ 
+        <b>internal string</b> <a id="a30a732b98bb8579" href="../R/a30a732b98bb8579.html" target="n" data-glyph="74,1" class="i method">ConvertExpressionToString</a>(<span class="i">Expression</span> <span id="r2 rd" class="r2 r">e</span>)
+        {
+            <b>string</b> <span id="r3 rd" class="r3 r">serialized</span> = <a href="#068d9270851a2ca2" class="i method">Translate</a>(<span class="r2 r">e</span>);
+ 
+            <b>if</b> (<a href="#e35017315d6a627a" class="i field">_cantTranslateExpression</a>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">NotSupportedException</span>(<b>string</b>.<span class="i">Format</span>(<span class="i">CultureInfo</span>.<span class="i">CurrentCulture</span>, <a href="SR.cs.html#1832e2280cf78d38" class="t t">SR</a>.<a href="SR.cs.html#ecd12b0d1048a8d1" class="i field">ALinqCantTranslateExpression</a>, <span class="r2 r">e</span>.<span class="i">ToString</span>()));
+            }
+ 
+            <b>return</b> <span class="r3 r">serialized</span>;
+        }
+ 
+        <b>internal override</b> <span class="i">Expression</span> <a id="31f531f2d1ea6460" href="../R/31f531f2d1ea6460.html" target="n" data-glyph="74,1" class="i method">Visit</a>(<span class="i">Expression</span> <span id="r4 rd" class="r4 r">exp</span>)
+        {
+            <a href="#e2051de8a5185e1f" class="i field">_expressionStack</a>.<span class="i">Push</span>(<span class="r4 r">exp</span>);
+            <span class="i">Expression</span> <span id="r5 rd" class="r5 r">result</span> = <a href="LinqExpressionVisitor.cs.html#1822f80369bc1131" class="k">base</a>.<a href="LinqExpressionVisitor.cs.html#b19674d2965b1ffb" class="i method">Visit</a>(<span class="r4 r">exp</span>);
+            <a href="#e2051de8a5185e1f" class="i field">_expressionStack</a>.<span class="i">Pop</span>();
+            <b>return</b> <span class="r5 r">result</span>;
+        }
+ 
+        <b>internal override</b> <span class="i">Expression</span> <a id="50141885b51abe6b" href="../R/50141885b51abe6b.html" target="n" data-glyph="74,1" class="i method">VisitMethodCall</a>(<span class="i">MethodCallExpression</span> <span id="r6 rd" class="r6 r">m</span>)
+        {
+            <b>if</b> (<a href="ReflectionUtil.cs.html#3d4f03f20b471f32" class="t t">ReflectionUtil</a>.<a href="ReflectionUtil.cs.html#bbb9554a80116195" class="i field">s_dictionaryMethodInfosHash</a>.<span class="i">Contains</span>(<span class="r6 r">m</span>.<span class="i">Method</span>) &amp;&amp; <span class="r6 r">m</span>.<span class="i">Arguments</span>.<span class="i">Count</span> == 1 &amp;&amp; <span class="r6 r">m</span>.<span class="i">Arguments</span>[0] <b>is</b> <span class="i">ConstantExpression</span> <span id="r7 rd" class="r7 r">ce</span>)
+            {
+                <a href="#433bb59ae6c501a5" class="i field">_builder</a>.<span class="i">Append</span>(<span class="r7 r">ce</span>.<span class="i">Value</span> <b>as string</b>);
+            }
+            <b>else</b>
+            {
+                <b>return</b> <a href="LinqExpressionVisitor.cs.html#1822f80369bc1131" class="k">base</a>.<a href="LinqExpressionVisitor.cs.html#cef6b51541426ef7" class="i method">VisitMethodCall</a>(<span class="r6 r">m</span>);
+            }
+ 
+            <b>return</b> <span class="r6 r">m</span>;
+        }
+ 
+        <b>internal override</b> <span class="i">Expression</span> <a id="83467cd69ccc2e00" href="../R/83467cd69ccc2e00.html" target="n" data-glyph="74,1" class="i method">VisitMemberAccess</a>(<span class="i">MemberExpression</span> <span id="r8 rd" class="r8 r">m</span>)
+        {
+            <b>if</b> (<span class="r8 r">m</span>.<span class="i">Member</span> <b>is</b> <span class="i">FieldInfo</span>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">NotSupportedException</span>(<b>string</b>.<span class="i">Format</span>(<span class="i">CultureInfo</span>.<span class="i">CurrentCulture</span>, <a href="SR.cs.html#1832e2280cf78d38" class="t t">SR</a>.<a href="SR.cs.html#679a1334aa6a72d3" class="i field">ALinqCantReferToPublicField</a>, <span class="r8 r">m</span>.<span class="i">Member</span>.<span class="i">Name</span>));
+            }
+ 
+            <span class="i">Expression</span> <span id="r9 rd" class="r9 r">e</span> = <span class="i">Visit</span>(<span class="r8 r">m</span>.<span class="i">Expression</span>);
+            <b>if</b> (<span class="r8 r">m</span>.<span class="i">Member</span>.<span class="i">Name</span> == <span class="s">&quot;Value&quot;</span> &amp;&amp; <span class="r8 r">m</span>.<span class="i">Member</span>.<span class="i">DeclaringType</span>.<span class="i">IsGenericType</span>
+                &amp;&amp; <span class="r8 r">m</span>.<span class="i">Member</span>.<span class="i">DeclaringType</span>.<span class="i">GetGenericTypeDefinition</span>() == <b>typeof</b>(<span class="i">Nullable</span>&lt;&gt;))
+            {
+                <b>return</b> <span class="r8 r">m</span>;
+            }
+ 
+            <b>if</b> (!<a href="#51d03cd853cc7961" class="i method">IsInputReference</a>(<span class="r9 r">e</span>) &amp;&amp; <span class="r9 r">e</span>.<span class="i">NodeType</span> != <span class="i">ExpressionType</span>.<span class="i">Convert</span> &amp;&amp; <span class="r9 r">e</span>.<span class="i">NodeType</span> != <span class="i">ExpressionType</span>.<span class="i">ConvertChecked</span>)
+            {
+                <a href="#433bb59ae6c501a5" class="i field">_builder</a>.<span class="i">Append</span>(<a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#65520ef1314f8c84" class="i field">FORWARDSLASH</a>);
+            }
+ 
+            <a href="#433bb59ae6c501a5" class="i field">_builder</a>.<span class="i">Append</span>(<span class="i">TranslateMemberName</span>(<span class="r8 r">m</span>.<span class="i">Member</span>.<span class="i">Name</span>));
+ 
+            <b>return</b> <span class="r8 r">m</span>;
+        }
+ 
+        <b>internal override</b> <span class="i">Expression</span> <a id="2c3a2a3214367f20" href="../R/2c3a2a3214367f20.html" target="n" data-glyph="74,1" class="i method">VisitConstant</a>(<span class="i">ConstantExpression</span> <span id="r10 rd" class="r10 r">c</span>)
+        {
+            <b>string</b> <span id="r11 rd" class="r11 r">result</span>;
+            <b>if</b> (<span class="r10 r">c</span>.<span class="i">Value</span> == <b>null</b>)
+            {
+                <a href="#433bb59ae6c501a5" class="i field">_builder</a>.<span class="i">Append</span>(<a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#72243cb1d8a8f199" class="i field">NULL</a>);
+                <b>return</b> <span class="r10 r">c</span>;
+            }
+            <b>else</b> <b>if</b> (!<a href="ClientConvert.cs.html#4fe68e5998ab9af3" class="t t">ClientConvert</a>.<span class="i">TryKeyPrimitiveToString</span>(<span class="r10 r">c</span>.<span class="i">Value</span>, <b>out</b> <span class="r11 r">result</span>))
+            {
+                <b>throw</b> <b>new</b> <span class="i">InvalidOperationException</span>(<b>string</b>.<span class="i">Format</span>(<span class="i">CultureInfo</span>.<span class="i">CurrentCulture</span>, <a href="SR.cs.html#1832e2280cf78d38" class="t t">SR</a>.<a href="SR.cs.html#e636c6de32671292" class="i field">ALinqCouldNotConvert</a>, <span class="r10 r">c</span>.<span class="i">Value</span>));
+            }
+ 
+            <span class="i">Debug</span>.<span class="i">Assert</span>(<span class="r11 r">result</span> != <b>null</b>, <span class="s">&quot;result != null&quot;</span>);
+ 
+            <span class="c">// A Difference from WCF Data Services is that we will escape later when we execute the fully parsed query.</span>
+            <a href="#433bb59ae6c501a5" class="i field">_builder</a>.<span class="i">Append</span>(<span class="r11 r">result</span>);
+            <b>return</b> <span class="r10 r">c</span>;
+        }
+ 
+        <b>internal override</b> <span class="i">Expression</span> <a id="2aa77a5580699bdb" href="../R/2aa77a5580699bdb.html" target="n" data-glyph="74,1" class="i method">VisitUnary</a>(<span class="i">UnaryExpression</span> <span id="r12 rd" class="r12 r">u</span>)
+        {
+            <b>switch</b> (<span class="r12 r">u</span>.<span class="i">NodeType</span>)
+            {
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">Not</span>:
+                    <a href="#433bb59ae6c501a5" class="i field">_builder</a>.<span class="i">Append</span>(<a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#57fb524b2f69d955" class="i field">NOT</a>);
+                    <a href="#433bb59ae6c501a5" class="i field">_builder</a>.<span class="i">Append</span>(<a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#21734d58e8e8a74f" class="i field">SPACE</a>);
+                    <span class="i">VisitOperand</span>(<span class="r12 r">u</span>.<span class="i">Operand</span>);
+                    <b>break</b>;
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">Negate</span>:
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">NegateChecked</span>:
+                    <a href="#433bb59ae6c501a5" class="i field">_builder</a>.<span class="i">Append</span>(<a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#21734d58e8e8a74f" class="i field">SPACE</a>);
+                    <a href="#433bb59ae6c501a5" class="i field">_builder</a>.<span class="i">Append</span>(<span class="i">TranslateOperator</span>(<span class="r12 r">u</span>.<span class="i">NodeType</span>));
+                    <span class="i">VisitOperand</span>(<span class="r12 r">u</span>.<span class="i">Operand</span>);
+                    <b>break</b>;
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">Convert</span>:
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">ConvertChecked</span>:
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">UnaryPlus</span>:
+                    <b>break</b>;
+                <b>default</b>:
+                    <a href="#e35017315d6a627a" class="i field">_cantTranslateExpression</a> = <b>true</b>;
+                    <b>break</b>;
+            }
+ 
+            <b>return</b> <span class="r12 r">u</span>;
+        }
+ 
+        <b>internal override</b> <span class="i">Expression</span> <a id="e5dd76633abba568" href="../R/e5dd76633abba568.html" target="n" data-glyph="74,1" class="i method">VisitBinary</a>(<span class="i">BinaryExpression</span> <span id="r13 rd" class="r13 r">b</span>)
+        {
+            <span class="i">VisitOperand</span>(<span class="r13 r">b</span>.<span class="i">Left</span>);
+            <a href="#433bb59ae6c501a5" class="i field">_builder</a>.<span class="i">Append</span>(<a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#21734d58e8e8a74f" class="i field">SPACE</a>);
+            <b>string</b> <span id="r14 rd" class="r14 r">operatorString</span> = <span class="i">TranslateOperator</span>(<span class="r13 r">b</span>.<span class="i">NodeType</span>);
+            <b>if</b> (<b>string</b>.<span class="i">IsNullOrEmpty</span>(<span class="r14 r">operatorString</span>))
+            {
+                <a href="#e35017315d6a627a" class="i field">_cantTranslateExpression</a> = <b>true</b>;
+            }
+            <b>else</b>
+            {
+                <a href="#433bb59ae6c501a5" class="i field">_builder</a>.<span class="i">Append</span>(<span class="r14 r">operatorString</span>);
+            }
+ 
+            <a href="#433bb59ae6c501a5" class="i field">_builder</a>.<span class="i">Append</span>(<a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#21734d58e8e8a74f" class="i field">SPACE</a>);
+            <span class="i">VisitOperand</span>(<span class="r13 r">b</span>.<span class="i">Right</span>);
+            <b>return</b> <span class="r13 r">b</span>;
+        }
+ 
+        <b>internal override</b> <span class="i">Expression</span> <a id="db879c0202919bff" href="../R/db879c0202919bff.html" target="n" data-glyph="74,1" class="i method">VisitParameter</a>(<span class="i">ParameterExpression</span> <span id="r15 rd" class="r15 r">p</span>)
+        {
+            <b>return</b> <span class="r15 r">p</span>;
+        }
+ 
+        <b>private static bool</b> <a id="51d03cd853cc7961" href="../R/51d03cd853cc7961.html" target="n" data-glyph="76,1" class="i method">IsInputReference</a>(<span class="i">Expression</span> <span id="r16 rd" class="r16 r">exp</span>)
+        {
+            <b>return</b> <span class="r16 r">exp</span> <b>is</b> <span class="i">ParameterExpression</span>;
+        }
+ 
+        <b>private void</b> <a id="be617cec23e5668c" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">VisitOperand</a>(<span class="i">Expression</span> <span id="r17 rd" class="r17 r">e</span>)
+        {
+            <b>if</b> (<span class="r17 r">e</span> <b>is</b> <span class="i">BinaryExpression</span> || <span class="r17 r">e</span> <b>is</b> <span class="i">UnaryExpression</span>)
+            {
+                <b>if</b> (<span class="r17 r">e</span> <b>is</b> <span class="i">UnaryExpression</span> <span id="r18 rd" class="r18 r">unary</span> &amp;&amp; <span class="r18 r">unary</span>.<span class="i">NodeType</span> == <span class="i">ExpressionType</span>.<span class="i">TypeAs</span>)
+                {
+                    <span class="i">Visit</span>(<span class="r18 r">unary</span>.<span class="i">Operand</span>);
+                }
+                <b>else</b>
+                {
+                    <a href="#433bb59ae6c501a5" class="i field">_builder</a>.<span class="i">Append</span>(<a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#49e3ee18ba983abd" class="i field">LEFTPAREN</a>);
+                    <a href="#31f531f2d1ea6460" class="i method">Visit</a>(<span class="r17 r">e</span>);
+                    <a href="#433bb59ae6c501a5" class="i field">_builder</a>.<span class="i">Append</span>(<a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#681814021772316e" class="i field">RIGHTPAREN</a>);
+                }
+            }
+            <b>else</b>
+            {
+                <a href="#31f531f2d1ea6460" class="i method">Visit</a>(<span class="r17 r">e</span>);
+            }
+        }
+ 
+        <b>private string</b> <a id="068d9270851a2ca2" href="../R/068d9270851a2ca2.html" target="n" data-glyph="76,1" class="i method">Translate</a>(<span class="i">Expression</span> <span id="r19 rd" class="r19 r">e</span>)
+        {
+            <a href="#31f531f2d1ea6460" class="i method">Visit</a>(<span class="r19 r">e</span>);
+            <b>return</b> <a href="#433bb59ae6c501a5" class="i field">_builder</a>.<span class="i">ToString</span>();
+        }
+ 
+        <b>protected virtual string</b> <a id="93d8f0e0b89465b2" href="../R/../../0000000000.html" target="n" data-glyph="75,1" class="i method">TranslateMemberName</a>(<b>string</b> <span id="r20 rd" class="r20 r">memberName</span>)
+        {
+            <b>return</b> <span class="r20 r">memberName</span>;
+        }
+ 
+        <b>protected virtual string</b> <a id="5606334e81b14c62" href="../R/../../0000000000.html" target="n" data-glyph="75,1" class="i method">TranslateOperator</a>(<span class="i">ExpressionType</span> <span id="r21 rd" class="r21 r">type</span>)
+        {
+            <b>switch</b> (<span class="r21 r">type</span>)
+            {
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">AndAlso</span>:
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">And</span>:
+                    <b>return</b> <a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#d419907925a51e07" class="i field">AND</a>;
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">OrElse</span>:
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">Or</span>:
+                    <b>return</b> <a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#c1ec6457feffe679" class="i field">OR</a>;
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">Equal</span>:
+                    <b>return</b> <a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#255d83a09826c9ef" class="i field">EQ</a>;
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">NotEqual</span>:
+                    <b>return</b> <a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#17ede9efdbaf6bb5" class="i field">NE</a>;
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">LessThan</span>:
+                    <b>return</b> <a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#2550f699f2cbe14d" class="i field">LT</a>;
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">LessThanOrEqual</span>:
+                    <b>return</b> <a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#2a69823ec703e31f" class="i field">LE</a>;
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">GreaterThan</span>:
+                    <b>return</b> <a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#0d75613a0d965d36" class="i field">GT</a>;
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">GreaterThanOrEqual</span>:
+                    <b>return</b> <a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#147b717a05b5aa21" class="i field">GE</a>;
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">Add</span>:
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">AddChecked</span>:
+                    <b>return</b> <a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#6cd689b8d79c994b" class="i field">ADD</a>;
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">Subtract</span>:
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">SubtractChecked</span>:
+                    <b>return</b> <a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#8674b8ef4f163cd0" class="i field">SUB</a>;
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">Multiply</span>:
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">MultiplyChecked</span>:
+                    <b>return</b> <a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#4b2e394b1344149c" class="i field">MUL</a>;
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">Divide</span>:
+                    <b>return</b> <a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#3cec477073194d78" class="i field">DIV</a>;
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">Modulo</span>:
+                    <b>return</b> <a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#35eccedd62c8f203" class="i field">MOD</a>;
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">Negate</span>:
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">NegateChecked</span>:
+                    <b>return</b> <a href="UriHelper.cs.html#bfa4092085286270" class="t t">UriHelper</a>.<a href="UriHelper.cs.html#31e91a99ba52b500" class="i field">NEGATE</a>;
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">ArrayIndex</span>:
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">Power</span>:
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">Coalesce</span>:
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">ExclusiveOr</span>:
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">LeftShift</span>:
+                <b>case</b> <span class="i">ExpressionType</span>.<span class="i">RightShift</span>:
+                <b>default</b>:
+                    <b>return</b> <b>null</b>;
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

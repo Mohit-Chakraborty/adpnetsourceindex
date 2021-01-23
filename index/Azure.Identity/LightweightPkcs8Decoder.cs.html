@@ -1,0 +1,187 @@
+﻿<!DOCTYPE html>
+<html><head><title>LightweightPkcs8Decoder.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(178);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Identity/LightweightPkcs8Decoder.cs" target="_top">LightweightPkcs8Decoder.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Identity" target="_top">..\..\identity\Azure.Identity\src\Azure.Identity.csproj</a> (Azure.Identity)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Security</span>.<span class="i n">Cryptography</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Identity</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> This is a very targeted PKCS#8 decoder for use when reading a PKCS# encoded RSA private key from an</span>
+    <span class="c">///</span><span class="c"> DER encoded ASN.1 blob. In an ideal world, we would be able to call AsymmetricAlgorithm.ImportPkcs8PrivateKey</span>
+    <span class="c">///</span><span class="c"> off an RSA object to import the private key from a byte array, which we got from the PEM file. There</span>
+    <span class="c">///</span><span class="c"> are a few issues with this however:</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c"> 1. ImportPkcs8PrivateKey does not exist in the Desktop .NET Framework as of today.</span>
+    <span class="c">///</span><span class="c"> 2. ImportPkcs8PrivateKey was added to .NET Core in 3.0, and we&#39;d love to be able to support this</span>
+    <span class="c">///</span><span class="c">    on older versions of .NET Core.</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c"> This code is able to decode RSA keys (without any attributes) from well formed PKCS#8 blobs.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="db48761596c83aab" href="R/db48761596c83aab.html" target="n" data-glyph="2,0" class="t t"><span id="def60e59031c4500">LightweightPkcs8Decoder</span></a>
+    {
+        <b>private static readonly byte</b>[] <a id="dca82e08cc7a34e3" href="R/dca82e08cc7a34e3.html" target="n" data-glyph="46,1" class="i field">s_derIntegerZero</a> = { 0x02, 0x01, 0x00 };
+ 
+        <b>private static readonly byte</b>[] <a id="35ab96e2ce4d9083" href="R/35ab96e2ce4d9083.html" target="n" data-glyph="46,1" class="i field">s_rsaAlgorithmId</a> =
+        {
+            0x30, 0x0D,
+            0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01,
+            0x05, 0x00,
+        };
+ 
+        <b>private static int</b> <a id="b9dfecc4894c0761" href="R/b9dfecc4894c0761.html" target="n" data-glyph="76,1" class="i method">ReadLength</a>(<b>byte</b>[] <span id="r0 rd" class="r0 r">data</span>, <b>ref int</b> <span id="r1 rd" class="r1 r">offset</span>)
+        {
+            <b>byte</b> <span id="r2 rd" class="r2 r">lengthOrLengthLength</span> = <span class="r0 r">data</span>[<span class="r1 r">offset</span>++];
+ 
+            <b>if</b> (<span class="r2 r">lengthOrLengthLength</span> &lt; 0x80)
+            {
+                <b>return</b> <span class="r2 r">lengthOrLengthLength</span>;
+            }
+ 
+            <b>int</b> <span id="r3 rd" class="r3 r">lengthLength</span> = <span class="r2 r">lengthOrLengthLength</span> &amp; 0x7F;
+            <b>int</b> <span id="r4 rd" class="r4 r">length</span> = 0;
+ 
+            <b>for</b> (<b>int</b> <span id="r5 rd" class="r5 r">i</span> = 0; <span class="r5 r">i</span> &lt; <span class="r3 r">lengthLength</span>; <span class="r5 r">i</span>++)
+            {
+                <b>if</b> (<span class="r4 r">length</span> &gt; <b>ushort</b>.<a href="@1@netstandard/A.html#21ac26ada195222b" class="i field">MaxValue</a>)
+                {
+                    <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#3be0a1f685d20864" class="t constructor">InvalidDataException</a>(<span class="s">&quot;Invalid PKCS#8 Data&quot;</span>);
+                }
+ 
+                <span class="r4 r">length</span> &lt;&lt;= 8;
+                <span class="r4 r">length</span> |= <span class="r0 r">data</span>[<span class="r1 r">offset</span>++];
+            }
+ 
+            <b>return</b> <span class="r4 r">length</span>;
+        }
+ 
+        <b>private static byte</b>[] <a id="4934b5feaf955f44" href="R/4934b5feaf955f44.html" target="n" data-glyph="76,1" class="i method">ReadUnsignedInteger</a>(<b>byte</b>[] <span id="r6 rd" class="r6 r">data</span>, <b>ref int</b> <span id="r7 rd" class="r7 r">offset</span>, <b>int</b> <span id="r8 rd" class="r8 r">targetSize</span> = 0)
+        {
+            <b>if</b> (<span class="r6 r">data</span>[<span class="r7 r">offset</span>++] != 0x02)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#3be0a1f685d20864" class="t constructor">InvalidDataException</a>(<span class="s">&quot;Invalid PKCS#8 Data&quot;</span>);
+            }
+ 
+            <b>int</b> <span id="r9 rd" class="r9 r">length</span> = <a href="#b9dfecc4894c0761" class="i method">ReadLength</a>(<span class="r6 r">data</span>, <b>ref</b> <span class="r7 r">offset</span>);
+ 
+            <span class="c">// Encoding rules say 0 is encoded as the one byte value 0x00.</span>
+            <span class="c">// Since we expect unsigned, throw if the high bit is set.</span>
+            <b>if</b> (<span class="r9 r">length</span> &lt; 1 || <span class="r6 r">data</span>[<span class="r7 r">offset</span>] &gt;= 0x80)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#3be0a1f685d20864" class="t constructor">InvalidDataException</a>(<span class="s">&quot;Invalid PKCS#8 Data&quot;</span>);
+            }
+ 
+            <b>byte</b>[] <span id="r10 rd" class="r10 r">ret</span>;
+ 
+            <b>if</b> (<span class="r9 r">length</span> == 1)
+            {
+                <span class="r10 r">ret</span> = <b>new</b> <b>byte</b>[<span class="r9 r">length</span>];
+                <span class="r10 r">ret</span>[0] = <span class="r6 r">data</span>[<span class="r7 r">offset</span>++];
+                <b>return</b> <span class="r10 r">ret</span>;
+            }
+ 
+            <b>if</b> (<span class="r6 r">data</span>[<span class="r7 r">offset</span>] == 0)
+            {
+                <span class="r7 r">offset</span>++;
+                <span class="r9 r">length</span>--;
+            }
+ 
+            <b>if</b> (<span class="r8 r">targetSize</span> != 0)
+            {
+                <b>if</b> (<span class="r9 r">length</span> &gt; <span class="r8 r">targetSize</span>)
+                {
+                    <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#3be0a1f685d20864" class="t constructor">InvalidDataException</a>(<span class="s">&quot;Invalid PKCS#8 Data&quot;</span>);
+                }
+ 
+                <span class="r10 r">ret</span> = <b>new</b> <b>byte</b>[<span class="r8 r">targetSize</span>];
+            }
+            <b>else</b>
+            {
+                <span class="r10 r">ret</span> = <b>new</b> <b>byte</b>[<span class="r9 r">length</span>];
+            }
+ 
+            <a href="@1@netstandard/A.html#570e88af5685d024" class="t t">Buffer</a>.<a href="@1@netstandard/A.html#1fbec67d6ee92203" class="i method">BlockCopy</a>(<span class="r6 r">data</span>, <span class="r7 r">offset</span>, <span class="r10 r">ret</span>, <span class="r10 r">ret</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a> - <span class="r9 r">length</span>, <span class="r9 r">length</span>);
+            <span class="r7 r">offset</span> += <span class="r9 r">length</span>;
+            <b>return</b> <span class="r10 r">ret</span>;
+        }
+ 
+        <b>private static void</b> <a id="0f91cce2c7ea5f70" href="R/0f91cce2c7ea5f70.html" target="n" data-glyph="76,1" class="i method">ConsumeFullPayloadTag</a>(<b>byte</b>[] <span id="r11 rd" class="r11 r">data</span>, <b>ref int</b> <span id="r12 rd" class="r12 r">offset</span>, <b>byte</b> <span id="r13 rd" class="r13 r">tagValue</span>)
+        {
+            <b>if</b> (<span class="r11 r">data</span>[<span class="r12 r">offset</span>++] != <span class="r13 r">tagValue</span>)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#3be0a1f685d20864" class="t constructor">InvalidDataException</a>(<span class="s">&quot;Invalid PKCS#8 Data&quot;</span>);
+            }
+ 
+            <b>int</b> <span id="r14 rd" class="r14 r">length</span> = <a href="#b9dfecc4894c0761" class="i method">ReadLength</a>(<span class="r11 r">data</span>, <b>ref</b> <span class="r12 r">offset</span>);
+ 
+            <b>if</b> (<span class="r11 r">data</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a> - <span class="r12 r">offset</span> != <span class="r14 r">length</span>)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#3be0a1f685d20864" class="t constructor">InvalidDataException</a>(<span class="s">&quot;Invalid PKCS#8 Data&quot;</span>);
+            }
+        }
+ 
+        <b>private static void</b> <a id="35786f60624665d2" href="R/35786f60624665d2.html" target="n" data-glyph="76,1" class="i method">ConsumeMatch</a>(<b>byte</b>[] <span id="r15 rd" class="r15 r">data</span>, <b>ref int</b> <span id="r16 rd" class="r16 r">offset</span>, <b>byte</b>[] <span id="r17 rd" class="r17 r">toMatch</span>)
+        {
+            <b>if</b> (<span class="r15 r">data</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a> - <span class="r16 r">offset</span> &gt; <span class="r17 r">toMatch</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>)
+            {
+                <b>if</b> (<span class="r15 r">data</span>.<a href="@1@netstandard/A.html#90ccdbd47b57182e" class="i method">Skip</a>(<span class="r16 r">offset</span>).<a href="@1@netstandard/A.html#aae92b018fa12b39" class="i method">Take</a>(<span class="r17 r">toMatch</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>).<a href="@1@netstandard/A.html#9bdd6ef7ba6a5615" class="i method">SequenceEqual</a>(<span class="r17 r">toMatch</span>))
+                {
+                    <span class="r16 r">offset</span> += <span class="r17 r">toMatch</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>;
+                    <b>return</b>;
+                }
+            }
+ 
+            <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#3be0a1f685d20864" class="t constructor">InvalidDataException</a>(<span class="s">&quot;Invalid PKCS#8 Data&quot;</span>);
+        }
+ 
+        <b>public static</b> <a href="@1@netstandard/A.html#9e72392556b1419c" class="t t">RSA</a> <a id="94480702f6232182" href="R/94480702f6232182.html" target="n" data-glyph="72,1" class="i method">DecodeRSAPkcs8</a>(<b>byte</b>[] <span id="r18 rd" class="r18 r">pkcs8Bytes</span>)
+        {
+            <b>int</b> <span id="r19 rd" class="r19 r">offset</span> = 0;
+ 
+            <span class="c">// PrivateKeyInfo SEQUENCE</span>
+            <a href="#0f91cce2c7ea5f70" class="i method">ConsumeFullPayloadTag</a>(<span class="r18 r">pkcs8Bytes</span>, <b>ref</b> <span class="r19 r">offset</span>, 0x30);
+            <span class="c">// PKCS#8 PrivateKeyInfo.version == 0</span>
+            <a href="#35786f60624665d2" class="i method">ConsumeMatch</a>(<span class="r18 r">pkcs8Bytes</span>, <b>ref</b> <span class="r19 r">offset</span>, <a href="#dca82e08cc7a34e3" class="i field">s_derIntegerZero</a>);
+            <span class="c">// rsaEncryption AlgorithmIdentifier value</span>
+            <a href="#35786f60624665d2" class="i method">ConsumeMatch</a>(<span class="r18 r">pkcs8Bytes</span>, <b>ref</b> <span class="r19 r">offset</span>, <a href="#35ab96e2ce4d9083" class="i field">s_rsaAlgorithmId</a>);
+            <span class="c">// PrivateKeyInfo.privateKey OCTET STRING</span>
+            <a href="#0f91cce2c7ea5f70" class="i method">ConsumeFullPayloadTag</a>(<span class="r18 r">pkcs8Bytes</span>, <b>ref</b> <span class="r19 r">offset</span>, 0x04);
+            <span class="c">// RSAPrivateKey SEQUENCE</span>
+            <a href="#0f91cce2c7ea5f70" class="i method">ConsumeFullPayloadTag</a>(<span class="r18 r">pkcs8Bytes</span>, <b>ref</b> <span class="r19 r">offset</span>, 0x30);
+            <span class="c">// RSAPrivateKey.version == 0</span>
+            <a href="#35786f60624665d2" class="i method">ConsumeMatch</a>(<span class="r18 r">pkcs8Bytes</span>, <b>ref</b> <span class="r19 r">offset</span>, <a href="#dca82e08cc7a34e3" class="i field">s_derIntegerZero</a>);
+ 
+            <a href="@1@netstandard/A.html#dfd6cfff509b13df" class="t t">RSAParameters</a> <span id="r20 rd" class="r20 r">rsaParameters</span> = <b>new</b> <a href="@1@netstandard/A.html#dfd6cfff509b13df" class="t constructor">RSAParameters</a>();
+            <span class="r20 r">rsaParameters</span>.<a href="@1@netstandard/A.html#f2621da5f160ffb5" class="i field">Modulus</a> = <a href="#4934b5feaf955f44" class="i method">ReadUnsignedInteger</a>(<span class="r18 r">pkcs8Bytes</span>, <b>ref</b> <span class="r19 r">offset</span>);
+            <span class="r20 r">rsaParameters</span>.<a href="@1@netstandard/A.html#91d13f36d3d02fd7" class="i field">Exponent</a> = <a href="#4934b5feaf955f44" class="i method">ReadUnsignedInteger</a>(<span class="r18 r">pkcs8Bytes</span>, <b>ref</b> <span class="r19 r">offset</span>);
+            <span class="r20 r">rsaParameters</span>.<a href="@1@netstandard/A.html#33f3738835659b02" class="i field">D</a> = <a href="#4934b5feaf955f44" class="i method">ReadUnsignedInteger</a>(<span class="r18 r">pkcs8Bytes</span>, <b>ref</b> <span class="r19 r">offset</span>, <span class="r20 r">rsaParameters</span>.<a href="@1@netstandard/A.html#f2621da5f160ffb5" class="i field">Modulus</a>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>);
+            <b>int</b> <span id="r21 rd" class="r21 r">halfModulus</span> = (<span class="r20 r">rsaParameters</span>.<a href="@1@netstandard/A.html#f2621da5f160ffb5" class="i field">Modulus</a>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a> + 1) / 2;
+            <span class="r20 r">rsaParameters</span>.<a href="@1@netstandard/A.html#0c464c45da683f89" class="i field">P</a> = <a href="#4934b5feaf955f44" class="i method">ReadUnsignedInteger</a>(<span class="r18 r">pkcs8Bytes</span>, <b>ref</b> <span class="r19 r">offset</span>, <span class="r21 r">halfModulus</span>);
+            <span class="r20 r">rsaParameters</span>.<a href="@1@netstandard/A.html#e6f0eac2caa4e0c0" class="i field">Q</a> = <a href="#4934b5feaf955f44" class="i method">ReadUnsignedInteger</a>(<span class="r18 r">pkcs8Bytes</span>, <b>ref</b> <span class="r19 r">offset</span>, <span class="r21 r">halfModulus</span>);
+            <span class="r20 r">rsaParameters</span>.<a href="@1@netstandard/A.html#7b8dbd3faf1d9481" class="i field">DP</a> = <a href="#4934b5feaf955f44" class="i method">ReadUnsignedInteger</a>(<span class="r18 r">pkcs8Bytes</span>, <b>ref</b> <span class="r19 r">offset</span>, <span class="r21 r">halfModulus</span>);
+            <span class="r20 r">rsaParameters</span>.<a href="@1@netstandard/A.html#155c902ff43a9ea8" class="i field">DQ</a> = <a href="#4934b5feaf955f44" class="i method">ReadUnsignedInteger</a>(<span class="r18 r">pkcs8Bytes</span>, <b>ref</b> <span class="r19 r">offset</span>, <span class="r21 r">halfModulus</span>);
+            <span class="r20 r">rsaParameters</span>.<a href="@1@netstandard/A.html#8c8c5dd0c42c705e" class="i field">InverseQ</a> = <a href="#4934b5feaf955f44" class="i method">ReadUnsignedInteger</a>(<span class="r18 r">pkcs8Bytes</span>, <b>ref</b> <span class="r19 r">offset</span>, <span class="r21 r">halfModulus</span>);
+ 
+            <b>if</b> (<span class="r19 r">offset</span> != <span class="r18 r">pkcs8Bytes</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#3be0a1f685d20864" class="t constructor">InvalidDataException</a>(<span class="s">&quot;Invalid PKCS#8 Data&quot;</span>);
+            }
+ 
+            <a href="@1@netstandard/A.html#9e72392556b1419c" class="t t">RSA</a> <span id="r22 rd" class="r22 r">rsa</span> = <a href="@1@netstandard/A.html#9e72392556b1419c" class="t t">RSA</a>.<a href="@1@netstandard/A.html#7c10efd163896171" class="i method">Create</a>();
+            <span class="r22 r">rsa</span>.<a href="@1@netstandard/A.html#4219e2cf695e37fd" class="i method">ImportParameters</a>(<span class="r20 r">rsaParameters</span>);
+            <b>return</b> <span class="r22 r">rsa</span>;
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

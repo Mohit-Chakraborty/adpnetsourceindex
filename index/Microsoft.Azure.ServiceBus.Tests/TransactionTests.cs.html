@@ -1,0 +1,595 @@
+﻿<!DOCTYPE html>
+<html><head><title>TransactionTests.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(586);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.ServiceBus.Tests/TransactionTests.cs" target="_top">TransactionTests.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.ServiceBus.Tests" target="_top">tests\Microsoft.Azure.ServiceBus.Tests.csproj</a> (Microsoft.Azure.ServiceBus.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft. All rights reserved.</span>
+<span class="c">// Licensed under the MIT license. See LICENSE file in the project root for full license information.</span>
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">ServiceBus</span>.<span class="i n">UnitTests</span>
+{
+    <b>using</b> <span class="i n">System</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Transactions</span>;
+    <b>using</b> <span class="i n">Core</span>;
+    <b>using</b> <span class="i">Xunit</span>;
+ 
+    <b>public class</b> <a id="c6258d760ed675d9" href="R/../../0000000000.html" target="n" data-glyph="0,0" class="t t"><span id="603f15efe25b6fa2">TransactionTests</span></a>
+    {
+        <b>static readonly string</b> <a id="2470a4a4cec91fe5" href="R/2470a4a4cec91fe5.html" target="n" data-glyph="46,1" class="i field">ConnectionString</a> = <a href="Infrastructure/TestUtility.cs.html#3d9d7f837b56950e" class="t t">TestUtility</a>.<a href="Infrastructure/TestUtility.cs.html#db98d5e9b0210d2d" class="i property">NamespaceConnectionString</a>;
+        <b>static readonly</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="69a8b600e99b54b8" href="R/69a8b600e99b54b8.html" target="n" data-glyph="46,1" class="i field">ReceiveTimeout</a> = <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(5);
+ 
+        <b>public static</b> <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<b>object</b>[]&gt; <a id="1e0cf8aba1f9529e" href="R/1e0cf8aba1f9529e.html" target="n" data-glyph="102,1" class="i property">TestPermutations</a> =&gt; <b>new</b> <b>object</b>[][]
+        {
+            <span class="c">// Expected structure: { usePartitionedQueue, useSessionQueue }</span>
+            <b>new</b> <b>object</b>[] { <b>false</b>, <b>false</b> },
+            <b>new</b> <b>object</b>[] { <b>true</b>, <b>false</b> }
+        };
+ 
+        <b>public static</b> <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<b>object</b>[]&gt; <a id="6f6607fb7d793851" href="R/6f6607fb7d793851.html" target="n" data-glyph="102,1" class="i property">SessionTestPermutations</a> =&gt; <b>new</b> <b>object</b>[][]
+        {
+            <span class="c">// Expected structure: { usePartitionedQueue, useSessionQueue }</span>
+            <b>new</b> <b>object</b>[] { <b>false</b>, <b>true</b> },
+            <b>new</b> <b>object</b>[] { <b>true</b>, <b>true</b> }
+        };
+ 
+        [<span class="i">Theory</span>]
+        [<span class="i">MemberData</span>(<b>nameof</b>(<a href="#1e0cf8aba1f9529e" class="i property">TestPermutations</a>))]
+        [<a href="Infrastructure/LiveTestAttribute.cs.html#ada6db6baaebd450" class="t constructor">LiveTest</a>]
+        [<span class="i">DisplayTestMethodName</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="3140f967062b5b50" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">TransactionalSendCommitTest</a>(<b>bool</b> <span id="r0 rd" class="r0 r">partitioned</span>, <b>bool</b> <span id="r1 rd" class="r1 r">sessionEnabled</span>)
+        {
+            <b>await</b> <a href="Infrastructure/ServiceBusScope.cs.html#e1a746ce9b5539bc" class="t t">ServiceBusScope</a>.<span class="i">UsingQueueAsync</span>(<span class="r0 r">partitioned</span>, <span class="r1 r">sessionEnabled</span>, <b>async</b> <span id="r2 rd" class="r2 r">queueName</span> =&gt;
+            {
+                <a href="/Microsoft.Azure.ServiceBus/A.html#435f723d21eebd94" class="k">var</a> <span id="r3 rd" class="r3 r">sender</span> = <b>new</b> <span class="t">MessageSender</span>(<a href="#2470a4a4cec91fe5" class="i field">ConnectionString</a>, <span class="r2 r">queueName</span>);
+                <a href="/Microsoft.Azure.ServiceBus/A.html#df59eb99899d6167" class="k">var</a> <span id="r4 rd" class="r4 r">receiver</span> = <b>new</b> <span class="t">MessageReceiver</span>(<a href="#2470a4a4cec91fe5" class="i field">ConnectionString</a>, <span class="r2 r">queueName</span>);
+ 
+                <b>try</b>
+                {
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r5 rd" class="r5 r">body</span> = <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#8015cb30da6ca742" class="i method">ToString</a>(<span class="s">&quot;N&quot;</span>);
+                    <a href="/Microsoft.Azure.ServiceBus/A.html#74fc1aa4fea2b013" class="k">var</a> <span id="r6 rd" class="r6 r">message</span> = <b>new</b> <span class="t">Message</span>(<span class="r5 r">body</span>.<a href="Infrastructure/TestUtility.cs.html#4f1c77c0da788f8f" class="i method">GetBytes</a>()) {<a href="/Microsoft.Azure.ServiceBus/A.html#99fb27efd92a94d4" class="i property">PartitionKey</a> = <span class="s">&quot;pk&quot;</span>};
+                    <b>using</b> (<a href="@0@System.Transactions/A.html#988b00261b7ce735" class="k">var</a> <span id="r7 rd" class="r7 r">ts</span> = <b>new</b> <a href="@0@System.Transactions/A.html#9d2b286f835e4dcf" class="t constructor">TransactionScope</a>(<a href="@0@System.Transactions/A.html#2b6090823dbe18fd" class="t t">TransactionScopeAsyncFlowOption</a>.<a href="@0@System.Transactions/A.html#932ccd853179033f" class="i field">Enabled</a>))
+                    {
+                        <b>await</b> <span class="r3 r">sender</span>.<span class="i">SendAsync</span>(<span class="r6 r">message</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        <span class="r7 r">ts</span>.<a href="@0@System.Transactions/A.html#2a10f031a7f0b3b6" class="i method">Complete</a>();
+                    }
+ 
+                    <b>var</b> <span id="r8 rd" class="r8 r">receivedMessage</span> = <b>await</b> <span class="r4 r">receiver</span>.<span class="i">ReceiveAsync</span>(<a href="#69a8b600e99b54b8" class="i field">ReceiveTimeout</a>);
+ 
+                    <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r8 r">receivedMessage</span>);
+                    <span class="i">Assert</span>.<span class="i">Equal</span>(<span class="r5 r">body</span>, <span class="r8 r">receivedMessage</span>.<span class="i">Body</span>.<span class="i">GetString</span>());
+                    <b>await</b> <span class="r4 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r8 r">receivedMessage</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+                }
+                <b>finally</b>
+                {
+                    <b>await</b> <span class="r3 r">sender</span>.<span class="i">CloseAsync</span>();
+                    <b>await</b> <span class="r4 r">receiver</span>.<span class="i">CloseAsync</span>();
+                }
+            });
+        }
+ 
+        [<span class="i">Theory</span>]
+        [<span class="i">MemberData</span>(<b>nameof</b>(<a href="#1e0cf8aba1f9529e" class="i property">TestPermutations</a>))]
+        [<a href="Infrastructure/LiveTestAttribute.cs.html#ada6db6baaebd450" class="t constructor">LiveTest</a>]
+        [<span class="i">DisplayTestMethodName</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="3559ef4b5a06a961" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">TransactionalSendRollbackTest</a>(<b>bool</b> <span id="r9 rd" class="r9 r">partitioned</span>, <b>bool</b> <span id="r10 rd" class="r10 r">sessionEnabled</span>)
+        {
+            <b>await</b> <a href="Infrastructure/ServiceBusScope.cs.html#e1a746ce9b5539bc" class="t t">ServiceBusScope</a>.<span class="i">UsingQueueAsync</span>(<span class="r9 r">partitioned</span>, <span class="r10 r">sessionEnabled</span>, <b>async</b> <span id="r11 rd" class="r11 r">queueName</span> =&gt;
+            {
+                <a href="/Microsoft.Azure.ServiceBus/A.html#435f723d21eebd94" class="k">var</a> <span id="r12 rd" class="r12 r">sender</span> = <b>new</b> <span class="t">MessageSender</span>(<a href="#2470a4a4cec91fe5" class="i field">ConnectionString</a>, <span class="r11 r">queueName</span>);
+                <a href="/Microsoft.Azure.ServiceBus/A.html#df59eb99899d6167" class="k">var</a> <span id="r13 rd" class="r13 r">receiver</span> = <b>new</b> <span class="t">MessageReceiver</span>(<a href="#2470a4a4cec91fe5" class="i field">ConnectionString</a>, <span class="r11 r">queueName</span>);
+ 
+                <b>try</b>
+                {
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r14 rd" class="r14 r">body</span> = <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#8015cb30da6ca742" class="i method">ToString</a>(<span class="s">&quot;N&quot;</span>);
+                    <a href="/Microsoft.Azure.ServiceBus/A.html#74fc1aa4fea2b013" class="k">var</a> <span id="r15 rd" class="r15 r">message</span> = <b>new</b> <span class="t">Message</span>(<span class="r14 r">body</span>.<a href="Infrastructure/TestUtility.cs.html#4f1c77c0da788f8f" class="i method">GetBytes</a>()) { <a href="/Microsoft.Azure.ServiceBus/A.html#99fb27efd92a94d4" class="i property">PartitionKey</a> = <span class="s">&quot;pk&quot;</span> };
+                    <b>using</b> (<a href="@0@System.Transactions/A.html#988b00261b7ce735" class="k">var</a> <span id="r16 rd" class="r16 r">ts</span> = <b>new</b> <a href="@0@System.Transactions/A.html#9d2b286f835e4dcf" class="t constructor">TransactionScope</a>(<a href="@0@System.Transactions/A.html#2b6090823dbe18fd" class="t t">TransactionScopeAsyncFlowOption</a>.<a href="@0@System.Transactions/A.html#932ccd853179033f" class="i field">Enabled</a>))
+                    {
+                        <b>await</b> <span class="r12 r">sender</span>.<span class="i">SendAsync</span>(<span class="r15 r">message</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    }
+ 
+                    <span class="c">// Adding delay since transaction Commit/Rollback is an asynchronous operation.</span>
+                    <span class="c">// Operating on the same message should not be done.</span>
+                    <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#87a671fb5b9b4384" class="i method">Delay</a>(<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(2));
+ 
+                    <b>var</b> <span id="r17 rd" class="r17 r">receivedMessage</span> = <b>await</b> <span class="r13 r">receiver</span>.<span class="i">ReceiveAsync</span>(<a href="#69a8b600e99b54b8" class="i field">ReceiveTimeout</a>);
+                    <span class="i">Assert</span>.<span class="i">Null</span>(<span class="r17 r">receivedMessage</span>);
+                }
+                <b>finally</b>
+                {
+                    <b>await</b> <span class="r12 r">sender</span>.<span class="i">CloseAsync</span>();
+                    <b>await</b> <span class="r13 r">receiver</span>.<span class="i">CloseAsync</span>();
+                }
+            });
+        }
+ 
+        [<span class="i">Theory</span>]
+        [<span class="i">MemberData</span>(<b>nameof</b>(<a href="#1e0cf8aba1f9529e" class="i property">TestPermutations</a>))]
+        [<a href="Infrastructure/LiveTestAttribute.cs.html#ada6db6baaebd450" class="t constructor">LiveTest</a>]
+        [<span class="i">DisplayTestMethodName</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="a0ea85fa85b363da" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">TransactionalCompleteCommitTest</a>(<b>bool</b> <span id="r18 rd" class="r18 r">partitioned</span>, <b>bool</b> <span id="r19 rd" class="r19 r">sessionEnabled</span>)
+        {
+            <b>await</b> <a href="Infrastructure/ServiceBusScope.cs.html#e1a746ce9b5539bc" class="t t">ServiceBusScope</a>.<span class="i">UsingQueueAsync</span>(<span class="r18 r">partitioned</span>, <span class="r19 r">sessionEnabled</span>, <b>async</b> <span id="r20 rd" class="r20 r">queueName</span> =&gt;
+            {
+                <a href="/Microsoft.Azure.ServiceBus/A.html#435f723d21eebd94" class="k">var</a> <span id="r21 rd" class="r21 r">sender</span> = <b>new</b> <span class="t">MessageSender</span>(<a href="#2470a4a4cec91fe5" class="i field">ConnectionString</a>, <span class="r20 r">queueName</span>);
+                <a href="/Microsoft.Azure.ServiceBus/A.html#df59eb99899d6167" class="k">var</a> <span id="r22 rd" class="r22 r">receiver</span> = <b>new</b> <span class="t">MessageReceiver</span>(<a href="#2470a4a4cec91fe5" class="i field">ConnectionString</a>, <span class="r20 r">queueName</span>);
+ 
+                <b>try</b>
+                {
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r23 rd" class="r23 r">body</span> = <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#8015cb30da6ca742" class="i method">ToString</a>(<span class="s">&quot;N&quot;</span>);
+                    <a href="/Microsoft.Azure.ServiceBus/A.html#74fc1aa4fea2b013" class="k">var</a> <span id="r24 rd" class="r24 r">message</span> = <b>new</b> <span class="t">Message</span>(<span class="r23 r">body</span>.<a href="Infrastructure/TestUtility.cs.html#4f1c77c0da788f8f" class="i method">GetBytes</a>());
+                    <b>await</b> <span class="r21 r">sender</span>.<span class="i">SendAsync</span>(<span class="r24 r">message</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                    <b>var</b> <span id="r25 rd" class="r25 r">receivedMessage</span> = <b>await</b> <span class="r22 r">receiver</span>.<span class="i">ReceiveAsync</span>(<a href="#69a8b600e99b54b8" class="i field">ReceiveTimeout</a>);
+                    <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r25 r">receivedMessage</span>);
+                    <span class="i">Assert</span>.<span class="i">Equal</span>(<span class="r23 r">body</span>, <span class="r25 r">receivedMessage</span>.<span class="i">Body</span>.<span class="i">GetString</span>());
+ 
+                    <b>using</b> (<a href="@0@System.Transactions/A.html#988b00261b7ce735" class="k">var</a> <span id="r26 rd" class="r26 r">ts</span> = <b>new</b> <a href="@0@System.Transactions/A.html#9d2b286f835e4dcf" class="t constructor">TransactionScope</a>(<a href="@0@System.Transactions/A.html#2b6090823dbe18fd" class="t t">TransactionScopeAsyncFlowOption</a>.<a href="@0@System.Transactions/A.html#932ccd853179033f" class="i field">Enabled</a>))
+                    {
+                        <b>await</b> <span class="r22 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r25 r">receivedMessage</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+                        <span class="r26 r">ts</span>.<a href="@0@System.Transactions/A.html#2a10f031a7f0b3b6" class="i method">Complete</a>();
+                    }
+ 
+                    <span class="c">// Adding delay since transaction Commit/Rollback is an asynchronous operation.</span>
+                    <span class="c">// Operating on the same message should not be done.</span>
+                    <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#87a671fb5b9b4384" class="i method">Delay</a>(<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(2));
+ 
+                    <b>await</b> <span class="i">Assert</span>.<span class="i">ThrowsAsync</span>&lt;<a href="/Microsoft.Azure.ServiceBus/A.html#e603b9dfe7c7189d" class="t t">MessageLockLostException</a>&gt;(<b>async</b> () =&gt; <b>await</b> <span class="r22 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r25 r">receivedMessage</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>));
+                }
+                <b>finally</b>
+                {
+                    <b>await</b> <span class="r21 r">sender</span>.<span class="i">CloseAsync</span>();
+                    <b>await</b> <span class="r22 r">receiver</span>.<span class="i">CloseAsync</span>();
+                }
+            });
+        }
+ 
+        [<span class="i">Theory</span>]
+        [<span class="i">MemberData</span>(<b>nameof</b>(<a href="#1e0cf8aba1f9529e" class="i property">TestPermutations</a>))]
+        [<a href="Infrastructure/LiveTestAttribute.cs.html#ada6db6baaebd450" class="t constructor">LiveTest</a>]
+        [<span class="i">DisplayTestMethodName</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="285f5af21e4f166e" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">TransactionalCompleteRollbackTest</a>(<b>bool</b> <span id="r27 rd" class="r27 r">partitioned</span>, <b>bool</b> <span id="r28 rd" class="r28 r">sessionEnabled</span>)
+        {
+            <b>await</b> <a href="Infrastructure/ServiceBusScope.cs.html#e1a746ce9b5539bc" class="t t">ServiceBusScope</a>.<span class="i">UsingQueueAsync</span>(<span class="r27 r">partitioned</span>, <span class="r28 r">sessionEnabled</span>, <b>async</b> <span id="r29 rd" class="r29 r">queueName</span> =&gt;
+            {
+                <a href="/Microsoft.Azure.ServiceBus/A.html#435f723d21eebd94" class="k">var</a> <span id="r30 rd" class="r30 r">sender</span> = <b>new</b> <span class="t">MessageSender</span>(<a href="#2470a4a4cec91fe5" class="i field">ConnectionString</a>, <span class="r29 r">queueName</span>);
+                <a href="/Microsoft.Azure.ServiceBus/A.html#df59eb99899d6167" class="k">var</a> <span id="r31 rd" class="r31 r">receiver</span> = <b>new</b> <span class="t">MessageReceiver</span>(<a href="#2470a4a4cec91fe5" class="i field">ConnectionString</a>, <span class="r29 r">queueName</span>);
+ 
+                <b>try</b>
+                {
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r32 rd" class="r32 r">body</span> = <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#8015cb30da6ca742" class="i method">ToString</a>(<span class="s">&quot;N&quot;</span>);
+                    <a href="/Microsoft.Azure.ServiceBus/A.html#74fc1aa4fea2b013" class="k">var</a> <span id="r33 rd" class="r33 r">message</span> = <b>new</b> <span class="t">Message</span>(<span class="r32 r">body</span>.<a href="Infrastructure/TestUtility.cs.html#4f1c77c0da788f8f" class="i method">GetBytes</a>());
+                    <b>await</b> <span class="r30 r">sender</span>.<span class="i">SendAsync</span>(<span class="r33 r">message</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                    <b>var</b> <span id="r34 rd" class="r34 r">receivedMessage</span> = <b>await</b> <span class="r31 r">receiver</span>.<span class="i">ReceiveAsync</span>(<a href="#69a8b600e99b54b8" class="i field">ReceiveTimeout</a>);
+                    <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r34 r">receivedMessage</span>);
+                    <span class="i">Assert</span>.<span class="i">Equal</span>(<span class="r32 r">body</span>, <span class="r34 r">receivedMessage</span>.<span class="i">Body</span>.<span class="i">GetString</span>());
+ 
+                    <b>using</b> (<a href="@0@System.Transactions/A.html#988b00261b7ce735" class="k">var</a> <span id="r35 rd" class="r35 r">ts</span> = <b>new</b> <a href="@0@System.Transactions/A.html#9d2b286f835e4dcf" class="t constructor">TransactionScope</a>(<a href="@0@System.Transactions/A.html#2b6090823dbe18fd" class="t t">TransactionScopeAsyncFlowOption</a>.<a href="@0@System.Transactions/A.html#932ccd853179033f" class="i field">Enabled</a>))
+                    {
+                        <b>await</b> <span class="r31 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r34 r">receivedMessage</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+                    }
+ 
+                    <span class="c">// Adding delay since transaction Commit/Rollback is an asynchronous operation.</span>
+                    <span class="c">// Operating on the same message should not be done.</span>
+                    <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#87a671fb5b9b4384" class="i method">Delay</a>(<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(2));
+ 
+                    <b>await</b> <span class="r31 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r34 r">receivedMessage</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+                }
+                <b>finally</b>
+                {
+                    <b>await</b> <span class="r30 r">sender</span>.<span class="i">CloseAsync</span>();
+                    <b>await</b> <span class="r31 r">receiver</span>.<span class="i">CloseAsync</span>();
+                }
+            });
+        }
+ 
+        [<span class="i">Theory</span>]
+        [<span class="i">MemberData</span>(<b>nameof</b>(<a href="#6f6607fb7d793851" class="i property">SessionTestPermutations</a>))]
+        [<a href="Infrastructure/LiveTestAttribute.cs.html#ada6db6baaebd450" class="t constructor">LiveTest</a>]
+        [<span class="i">DisplayTestMethodName</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="2238df36be40bc06" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">TransactionalSessionDispositionTest</a>(<b>bool</b> <span id="r36 rd" class="r36 r">partitioned</span>, <b>bool</b> <span id="r37 rd" class="r37 r">sessionEnabled</span>)
+        {
+            <b>await</b> <a href="Infrastructure/ServiceBusScope.cs.html#e1a746ce9b5539bc" class="t t">ServiceBusScope</a>.<span class="i">UsingQueueAsync</span>(<span class="r36 r">partitioned</span>, <span class="r37 r">sessionEnabled</span>, <b>async</b> <span id="r38 rd" class="r38 r">queueName</span> =&gt;
+            {
+                <a href="/Microsoft.Azure.ServiceBus/A.html#435f723d21eebd94" class="k">var</a> <span id="r39 rd" class="r39 r">sender</span> = <b>new</b> <span class="t">MessageSender</span>(<a href="#2470a4a4cec91fe5" class="i field">ConnectionString</a>, <span class="r38 r">queueName</span>);
+                <a href="/Microsoft.Azure.ServiceBus/A.html#665e503e2b872f1f" class="k">var</a> <span id="r40 rd" class="r40 r">sessionClient</span> = <b>new</b> <span class="t">SessionClient</span>(<a href="#2470a4a4cec91fe5" class="i field">ConnectionString</a>, <span class="r38 r">queueName</span>);
+                <a href="/Microsoft.Azure.ServiceBus/A.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a> <span id="r41 rd" class="r41 r">receiver</span> = <b>null</b>;
+ 
+                <b>try</b>
+                {
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r42 rd" class="r42 r">body</span> = <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#8015cb30da6ca742" class="i method">ToString</a>(<span class="s">&quot;N&quot;</span>);
+                    <a href="/Microsoft.Azure.ServiceBus/A.html#74fc1aa4fea2b013" class="k">var</a> <span id="r43 rd" class="r43 r">message</span> = <b>new</b> <span class="t">Message</span>(<span class="r42 r">body</span>.<a href="Infrastructure/TestUtility.cs.html#4f1c77c0da788f8f" class="i method">GetBytes</a>())
+                    {
+                        <a href="/Microsoft.Azure.ServiceBus/A.html#688c80d5d9a7e2b3" class="i property">SessionId</a> = <span class="r42 r">body</span>
+                    };
+                    <b>await</b> <span class="r39 r">sender</span>.<span class="i">SendAsync</span>(<span class="r43 r">message</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                    <span class="r41 r">receiver</span> = <b>await</b> <span class="r40 r">sessionClient</span>.<span class="i">AcceptMessageSessionAsync</span>(<span class="r42 r">body</span>);
+ 
+                    <b>var</b> <span id="r44 rd" class="r44 r">receivedMessage</span> = <b>await</b> <span class="r41 r">receiver</span>.<span class="i">ReceiveAsync</span>(<a href="#69a8b600e99b54b8" class="i field">ReceiveTimeout</a>);
+                    <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r44 r">receivedMessage</span>);
+                    <span class="i">Assert</span>.<span class="i">Equal</span>(<span class="r42 r">body</span>, <span class="r44 r">receivedMessage</span>.<span class="i">Body</span>.<span class="i">GetString</span>());
+ 
+                    <b>using</b> (<a href="@0@System.Transactions/A.html#988b00261b7ce735" class="k">var</a> <span id="r45 rd" class="r45 r">ts</span> = <b>new</b> <a href="@0@System.Transactions/A.html#9d2b286f835e4dcf" class="t constructor">TransactionScope</a>(<a href="@0@System.Transactions/A.html#2b6090823dbe18fd" class="t t">TransactionScopeAsyncFlowOption</a>.<a href="@0@System.Transactions/A.html#932ccd853179033f" class="i field">Enabled</a>))
+                    {
+                        <b>await</b> <span class="r41 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r44 r">receivedMessage</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+                    }
+ 
+                    <span class="c">// Adding delay since transaction Commit/Rollback is an asynchronous operation.</span>
+                    <span class="c">// Operating on the same message should not be done.</span>
+                    <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#87a671fb5b9b4384" class="i method">Delay</a>(<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(2));
+ 
+                    <b>using</b> (<a href="@0@System.Transactions/A.html#988b00261b7ce735" class="k">var</a> <span id="r46 rd" class="r46 r">ts</span> = <b>new</b> <a href="@0@System.Transactions/A.html#9d2b286f835e4dcf" class="t constructor">TransactionScope</a>(<a href="@0@System.Transactions/A.html#2b6090823dbe18fd" class="t t">TransactionScopeAsyncFlowOption</a>.<a href="@0@System.Transactions/A.html#932ccd853179033f" class="i field">Enabled</a>))
+                    {
+                        <b>await</b> <span class="r41 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r44 r">receivedMessage</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+                        <span class="r46 r">ts</span>.<a href="@0@System.Transactions/A.html#2a10f031a7f0b3b6" class="i method">Complete</a>();
+                    }
+ 
+                    <span class="c">// Adding delay since transaction Commit/Rollback is an asynchronous operation.</span>
+                    <span class="c">// Operating on the same message should not be done.</span>
+                    <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#87a671fb5b9b4384" class="i method">Delay</a>(<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(2));
+ 
+                    <b>await</b> <span class="i">Assert</span>.<span class="i">ThrowsAsync</span>&lt;<a href="/Microsoft.Azure.ServiceBus/A.html#26f997db560b78e3" class="t t">SessionLockLostException</a>&gt;(<b>async</b> () =&gt; <b>await</b> <span class="r41 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r44 r">receivedMessage</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>));
+                }
+                <b>finally</b>
+                {
+                    <b>await</b> <span class="r39 r">sender</span>.<span class="i">CloseAsync</span>();
+                    <b>await</b> <span class="r40 r">sessionClient</span>.<span class="i">CloseAsync</span>();
+                    <b>await</b> <span class="r41 r">receiver</span>?.<span class="i">CloseAsync</span>();
+                }
+            });
+        }
+ 
+        [<span class="i">Theory</span>]
+        [<span class="i">MemberData</span>(<b>nameof</b>(<a href="#1e0cf8aba1f9529e" class="i property">TestPermutations</a>))]
+        [<a href="Infrastructure/LiveTestAttribute.cs.html#ada6db6baaebd450" class="t constructor">LiveTest</a>]
+        [<span class="i">DisplayTestMethodName</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="c564bcab8836bce5" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">TransactionalRequestResponseDispositionTest</a>(<b>bool</b> <span id="r47 rd" class="r47 r">partitioned</span>, <b>bool</b> <span id="r48 rd" class="r48 r">sessionEnabled</span>)
+        {
+            <b>await</b> <a href="Infrastructure/ServiceBusScope.cs.html#e1a746ce9b5539bc" class="t t">ServiceBusScope</a>.<span class="i">UsingQueueAsync</span>(<span class="r47 r">partitioned</span>, <span class="r48 r">sessionEnabled</span>, <b>async</b> <span id="r49 rd" class="r49 r">queueName</span> =&gt;
+            {
+                <a href="/Microsoft.Azure.ServiceBus/A.html#435f723d21eebd94" class="k">var</a> <span id="r50 rd" class="r50 r">sender</span> = <b>new</b> <span class="t">MessageSender</span>(<a href="#2470a4a4cec91fe5" class="i field">ConnectionString</a>, <span class="r49 r">queueName</span>);
+                <a href="/Microsoft.Azure.ServiceBus/A.html#df59eb99899d6167" class="k">var</a> <span id="r51 rd" class="r51 r">receiver</span> = <b>new</b> <span class="t">MessageReceiver</span>(<a href="#2470a4a4cec91fe5" class="i field">ConnectionString</a>, <span class="r49 r">queueName</span>);
+ 
+                <b>try</b>
+                {
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r52 rd" class="r52 r">body</span> = <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#8015cb30da6ca742" class="i method">ToString</a>(<span class="s">&quot;N&quot;</span>);
+                    <a href="/Microsoft.Azure.ServiceBus/A.html#74fc1aa4fea2b013" class="k">var</a> <span id="r53 rd" class="r53 r">message</span> = <b>new</b> <span class="t">Message</span>(<span class="r52 r">body</span>.<a href="Infrastructure/TestUtility.cs.html#4f1c77c0da788f8f" class="i method">GetBytes</a>());
+                    <b>await</b> <span class="r50 r">sender</span>.<span class="i">SendAsync</span>(<span class="r53 r">message</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                    <b>var</b> <span id="r54 rd" class="r54 r">receivedMessage</span> = <b>await</b> <span class="r51 r">receiver</span>.<span class="i">ReceiveAsync</span>(<a href="#69a8b600e99b54b8" class="i field">ReceiveTimeout</a>);
+                    <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r54 r">receivedMessage</span>);
+                    <span class="i">Assert</span>.<span class="i">Equal</span>(<span class="r52 r">body</span>, <span class="r54 r">receivedMessage</span>.<span class="i">Body</span>.<span class="i">GetString</span>());
+                    <b>var</b> <span id="r55 rd" class="r55 r">sequenceNumber</span> = <span class="r54 r">receivedMessage</span>.<span class="i">SystemProperties</span>.<span class="i">SequenceNumber</span>;
+                    <b>await</b> <span class="r51 r">receiver</span>.<span class="i">DeferAsync</span>(<span class="r54 r">receivedMessage</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+ 
+                    <b>var</b> <span id="r56 rd" class="r56 r">deferredMessage</span> = <b>await</b> <span class="r51 r">receiver</span>.<span class="i">ReceiveDeferredMessageAsync</span>(<span class="r55 r">sequenceNumber</span>);
+ 
+                    <b>using</b> (<a href="@0@System.Transactions/A.html#988b00261b7ce735" class="k">var</a> <span id="r57 rd" class="r57 r">ts</span> = <b>new</b> <a href="@0@System.Transactions/A.html#9d2b286f835e4dcf" class="t constructor">TransactionScope</a>(<a href="@0@System.Transactions/A.html#2b6090823dbe18fd" class="t t">TransactionScopeAsyncFlowOption</a>.<a href="@0@System.Transactions/A.html#932ccd853179033f" class="i field">Enabled</a>))
+                    {
+                        <b>await</b> <span class="r51 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r56 r">deferredMessage</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+                    }
+ 
+                    <span class="c">// Adding delay since transaction Commit/Rollback is an asynchronous operation.</span>
+                    <span class="c">// Operating on the same message should not be done.</span>
+                    <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#87a671fb5b9b4384" class="i method">Delay</a>(<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(2));
+ 
+                    <b>using</b> (<a href="@0@System.Transactions/A.html#988b00261b7ce735" class="k">var</a> <span id="r58 rd" class="r58 r">ts</span> = <b>new</b> <a href="@0@System.Transactions/A.html#9d2b286f835e4dcf" class="t constructor">TransactionScope</a>(<a href="@0@System.Transactions/A.html#2b6090823dbe18fd" class="t t">TransactionScopeAsyncFlowOption</a>.<a href="@0@System.Transactions/A.html#932ccd853179033f" class="i field">Enabled</a>))
+                    {
+                        <b>await</b> <span class="r51 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r56 r">deferredMessage</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+                        <span class="r58 r">ts</span>.<a href="@0@System.Transactions/A.html#2a10f031a7f0b3b6" class="i method">Complete</a>();
+                    }
+ 
+                    <span class="c">// Adding delay since transaction Commit/Rollback is an asynchronous operation.</span>
+                    <span class="c">// Operating on the same message should not be done.</span>
+                    <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#87a671fb5b9b4384" class="i method">Delay</a>(<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(2));
+ 
+                    <b>await</b> <span class="i">Assert</span>.<span class="i">ThrowsAsync</span>&lt;<a href="/Microsoft.Azure.ServiceBus/A.html#e603b9dfe7c7189d" class="t t">MessageLockLostException</a>&gt;(<b>async</b> () =&gt; <b>await</b> <span class="r51 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r56 r">deferredMessage</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>));
+                }
+                <b>finally</b>
+                {
+                    <b>await</b> <span class="r50 r">sender</span>.<span class="i">CloseAsync</span>();
+                    <b>await</b> <span class="r51 r">receiver</span>.<span class="i">CloseAsync</span>();
+                }
+            });
+        }
+ 
+        [<span class="i">Fact</span>]
+        [<a href="Infrastructure/LiveTestAttribute.cs.html#ada6db6baaebd450" class="t constructor">LiveTest</a>]
+        [<span class="i">DisplayTestMethodName</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="5b51ed531d44fb02" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">TransactionThrowsWhenOperationsOfDifferentPartitionsAreInSameTransaction</a>()
+        {
+            <b>await</b> <a href="Infrastructure/ServiceBusScope.cs.html#e1a746ce9b5539bc" class="t t">ServiceBusScope</a>.<span class="i">UsingQueueAsync</span>(<span class="i">partitioned</span>: <b>false</b>, <span class="i">sessionEnabled</span>: <b>false</b>, <b>async</b> <span id="r59 rd" class="r59 r">queueName</span> =&gt;
+            {
+                <a href="/Microsoft.Azure.ServiceBus/A.html#435f723d21eebd94" class="k">var</a> <span id="r60 rd" class="r60 r">sender</span> = <b>new</b> <span class="t">MessageSender</span>(<a href="#2470a4a4cec91fe5" class="i field">ConnectionString</a>, <span class="r59 r">queueName</span>);
+                <a href="/Microsoft.Azure.ServiceBus/A.html#df59eb99899d6167" class="k">var</a> <span id="r61 rd" class="r61 r">receiver</span> = <b>new</b> <span class="t">MessageReceiver</span>(<a href="#2470a4a4cec91fe5" class="i field">ConnectionString</a>, <span class="r59 r">queueName</span>);
+ 
+                <b>try</b>
+                {
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r62 rd" class="r62 r">body</span> = <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#8015cb30da6ca742" class="i method">ToString</a>(<span class="s">&quot;N&quot;</span>);
+                    <a href="/Microsoft.Azure.ServiceBus/A.html#74fc1aa4fea2b013" class="k">var</a> <span id="r63 rd" class="r63 r">message1</span> = <b>new</b> <span class="t">Message</span>((<span class="r62 r">body</span> + <span class="s">&quot;1&quot;</span>).<a href="Infrastructure/TestUtility.cs.html#4f1c77c0da788f8f" class="i method">GetBytes</a>())
+                    {
+                        <a href="/Microsoft.Azure.ServiceBus/A.html#99fb27efd92a94d4" class="i property">PartitionKey</a> = <span class="s">&quot;1&quot;</span>
+                    };
+                    <a href="/Microsoft.Azure.ServiceBus/A.html#74fc1aa4fea2b013" class="k">var</a> <span id="r64 rd" class="r64 r">message2</span> = <b>new</b> <span class="t">Message</span>((<span class="r62 r">body</span> + <span class="s">&quot;2&quot;</span>).<a href="Infrastructure/TestUtility.cs.html#4f1c77c0da788f8f" class="i method">GetBytes</a>())
+                    {
+                        <a href="/Microsoft.Azure.ServiceBus/A.html#99fb27efd92a94d4" class="i property">PartitionKey</a> = <span class="s">&quot;2&quot;</span>
+                    };
+ 
+                    <span class="c">// Two send operations to different partitions.</span>
+                    <a href="@0@System.Transactions/A.html#eefd73f3d02884a4" class="k">var</a> <span id="r65 rd" class="r65 r">transaction</span> = <b>new</b> <a href="@0@System.Transactions/A.html#9c182f8f0a227dd8" class="t constructor">CommittableTransaction</a>();
+                    <b>using</b> (<a href="@0@System.Transactions/A.html#988b00261b7ce735" class="t t">TransactionScope</a> <span id="r66 rd" class="r66 r">ts</span> = <b>new</b> <a href="@0@System.Transactions/A.html#cc65ba4049e510c8" class="t constructor">TransactionScope</a>(<span class="r65 r">transaction</span>, <a href="@0@System.Transactions/A.html#2b6090823dbe18fd" class="t t">TransactionScopeAsyncFlowOption</a>.<a href="@0@System.Transactions/A.html#932ccd853179033f" class="i field">Enabled</a>))
+                    {
+                        <b>await</b> <span class="r60 r">sender</span>.<span class="i">SendAsync</span>(<span class="r63 r">message1</span>);
+ 
+                        <b>await</b> <span class="i">Assert</span>.<span class="i">ThrowsAsync</span>&lt;<a href="@0@mscorlib/A.html#beac22dfca574cd4" class="t t">InvalidOperationException</a>&gt;(
+                            <b>async</b> () =&gt; <b>await</b> <span class="r60 r">sender</span>.<span class="i">SendAsync</span>(<span class="r64 r">message2</span>));
+                        <span class="r66 r">ts</span>.<a href="@0@System.Transactions/A.html#2a10f031a7f0b3b6" class="i method">Complete</a>();
+                    }
+ 
+                    <span class="r65 r">transaction</span>.<a href="@0@System.Transactions/A.html#b87a5ac057d6a568" class="i method">Rollback</a>();
+ 
+                    <span class="c">// Adding delay since transaction Commit/Rollback is an asynchronous operation.</span>
+                    <span class="c">// Operating on the same message should not be done.</span>
+                    <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#87a671fb5b9b4384" class="i method">Delay</a>(<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(2));
+ 
+                    <span class="c">// Two complete operations to different partitions.</span>
+                    <b>await</b> <span class="r60 r">sender</span>.<span class="i">SendAsync</span>(<span class="r63 r">message1</span>);
+                    <b>await</b> <span class="r60 r">sender</span>.<span class="i">SendAsync</span>(<span class="r64 r">message2</span>);
+ 
+                    <b>var</b> <span id="r67 rd" class="r67 r">receivedMessage1</span> = <b>await</b> <span class="r61 r">receiver</span>.<span class="i">ReceiveAsync</span>(<a href="#69a8b600e99b54b8" class="i field">ReceiveTimeout</a>);
+                    <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r67 r">receivedMessage1</span>);
+                    <b>var</b> <span id="r68 rd" class="r68 r">receivedMessage2</span> = <b>await</b> <span class="r61 r">receiver</span>.<span class="i">ReceiveAsync</span>(<a href="#69a8b600e99b54b8" class="i field">ReceiveTimeout</a>);
+                    <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r68 r">receivedMessage2</span>);
+ 
+                    <span class="r65 r">transaction</span> = <b>new</b> <a href="@0@System.Transactions/A.html#9c182f8f0a227dd8" class="t constructor">CommittableTransaction</a>();
+                    <b>using</b> (<a href="@0@System.Transactions/A.html#988b00261b7ce735" class="t t">TransactionScope</a> <span id="r69 rd" class="r69 r">ts</span> = <b>new</b> <a href="@0@System.Transactions/A.html#cc65ba4049e510c8" class="t constructor">TransactionScope</a>(<span class="r65 r">transaction</span>, <a href="@0@System.Transactions/A.html#2b6090823dbe18fd" class="t t">TransactionScopeAsyncFlowOption</a>.<a href="@0@System.Transactions/A.html#932ccd853179033f" class="i field">Enabled</a>))
+                    {
+                        <b>await</b> <span class="r61 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r67 r">receivedMessage1</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+ 
+                        <b>await</b> <span class="i">Assert</span>.<span class="i">ThrowsAsync</span>&lt;<a href="@0@mscorlib/A.html#beac22dfca574cd4" class="t t">InvalidOperationException</a>&gt;(
+                            <b>async</b> () =&gt; <b>await</b> <span class="r61 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r68 r">receivedMessage2</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>));
+                        <span class="r69 r">ts</span>.<a href="@0@System.Transactions/A.html#2a10f031a7f0b3b6" class="i method">Complete</a>();
+                    }
+ 
+                    <span class="r65 r">transaction</span>.<a href="@0@System.Transactions/A.html#b87a5ac057d6a568" class="i method">Rollback</a>();
+ 
+                    <span class="c">// Adding delay since transaction Commit/Rollback is an asynchronous operation.</span>
+                    <span class="c">// Operating on the same message should not be done.</span>
+                    <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#87a671fb5b9b4384" class="i method">Delay</a>(<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(2));
+ 
+                    <b>await</b> <span class="r61 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r67 r">receivedMessage1</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+                    <b>await</b> <span class="r61 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r68 r">receivedMessage2</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+                }
+                <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r70 rd" class="r70 r">e</span>)
+                {
+                    <a href="@0@mscorlib/A.html#f907d79481da6ba4" class="t t">Console</a>.<a href="@0@mscorlib/A.html#17999987f8ff4399" class="i method">WriteLine</a>(<span class="r70 r">e</span>);
+                }
+                <b>finally</b>
+                {
+                    <b>await</b> <span class="r60 r">sender</span>.<span class="i">CloseAsync</span>();
+                    <b>await</b> <span class="r61 r">receiver</span>.<span class="i">CloseAsync</span>();
+                }
+            });
+        }
+ 
+        [<span class="i">Fact</span>]
+        [<a href="Infrastructure/LiveTestAttribute.cs.html#ada6db6baaebd450" class="t constructor">LiveTest</a>]
+        [<span class="i">DisplayTestMethodName</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="7043f5c7f634a1cc" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">TransactionCommitWorksAcrossClientsUsingSameConnectionToSameEntity</a>()
+        {
+            <b>await</b> <a href="Infrastructure/ServiceBusScope.cs.html#e1a746ce9b5539bc" class="t t">ServiceBusScope</a>.<span class="i">UsingQueueAsync</span>(<span class="i">partitioned</span>: <b>false</b>, <span class="i">sessionEnabled</span>: <b>false</b>, <b>async</b> <span id="r71 rd" class="r71 r">queueName</span> =&gt;
+            {
+                <a href="/Microsoft.Azure.ServiceBus/A.html#d4af28baeaa553d8" class="k">var</a> <span id="r72 rd" class="r72 r">connection</span> = <b>new</b> <span class="t">ServiceBusConnection</span>(<a href="#2470a4a4cec91fe5" class="i field">ConnectionString</a>);
+                <a href="/Microsoft.Azure.ServiceBus/A.html#435f723d21eebd94" class="k">var</a> <span id="r73 rd" class="r73 r">sender</span> = <b>new</b> <span class="t">MessageSender</span>(<span class="r72 r">connection</span>, <span class="r71 r">queueName</span>);
+                <a href="/Microsoft.Azure.ServiceBus/A.html#df59eb99899d6167" class="k">var</a> <span id="r74 rd" class="r74 r">receiver</span> = <b>new</b> <span class="t">MessageReceiver</span>(<span class="r72 r">connection</span>, <span class="r71 r">queueName</span>);
+ 
+                <b>try</b>
+                {
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r75 rd" class="r75 r">body1</span> = <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#8015cb30da6ca742" class="i method">ToString</a>(<span class="s">&quot;N&quot;</span>);
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r76 rd" class="r76 r">body2</span> = <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#8015cb30da6ca742" class="i method">ToString</a>(<span class="s">&quot;N&quot;</span>);
+                    <a href="/Microsoft.Azure.ServiceBus/A.html#74fc1aa4fea2b013" class="k">var</a> <span id="r77 rd" class="r77 r">message</span> = <b>new</b> <span class="t">Message</span>(<span class="r75 r">body1</span>.<a href="Infrastructure/TestUtility.cs.html#4f1c77c0da788f8f" class="i method">GetBytes</a>());
+                    <a href="/Microsoft.Azure.ServiceBus/A.html#74fc1aa4fea2b013" class="k">var</a> <span id="r78 rd" class="r78 r">message2</span> = <b>new</b> <span class="t">Message</span>(<span class="r76 r">body2</span>.<a href="Infrastructure/TestUtility.cs.html#4f1c77c0da788f8f" class="i method">GetBytes</a>());
+                    <b>await</b> <span class="r73 r">sender</span>.<span class="i">SendAsync</span>(<span class="r77 r">message</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                    <b>var</b> <span id="r79 rd" class="r79 r">receivedMessage</span> = <b>await</b> <span class="r74 r">receiver</span>.<span class="i">ReceiveAsync</span>(<a href="#69a8b600e99b54b8" class="i field">ReceiveTimeout</a>);
+                    <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r79 r">receivedMessage</span>);
+                    <span class="i">Assert</span>.<span class="i">Equal</span>(<span class="r75 r">body1</span>, <span class="r79 r">receivedMessage</span>.<span class="i">Body</span>.<span class="i">GetString</span>());
+ 
+                    <b>using</b> (<a href="@0@System.Transactions/A.html#988b00261b7ce735" class="k">var</a> <span id="r80 rd" class="r80 r">ts</span> = <b>new</b> <a href="@0@System.Transactions/A.html#9d2b286f835e4dcf" class="t constructor">TransactionScope</a>(<a href="@0@System.Transactions/A.html#2b6090823dbe18fd" class="t t">TransactionScopeAsyncFlowOption</a>.<a href="@0@System.Transactions/A.html#932ccd853179033f" class="i field">Enabled</a>))
+                    {
+                        <b>await</b> <span class="r74 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r79 r">receivedMessage</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+                        <b>await</b> <span class="r73 r">sender</span>.<span class="i">SendAsync</span>(<span class="r78 r">message2</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        <span class="r80 r">ts</span>.<a href="@0@System.Transactions/A.html#2a10f031a7f0b3b6" class="i method">Complete</a>();
+                    }
+ 
+                    <span class="c">// Adding delay since transaction Commit/Rollback is an asynchronous operation.</span>
+                    <span class="c">// Operating on the same message should not be done.</span>
+                    <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#87a671fb5b9b4384" class="i method">Delay</a>(<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(2));
+ 
+                    <span class="c">// Assert that complete did succeed</span>
+                    <b>await</b> <span class="i">Assert</span>.<span class="i">ThrowsAsync</span>&lt;<a href="/Microsoft.Azure.ServiceBus/A.html#e603b9dfe7c7189d" class="t t">MessageLockLostException</a>&gt;(<b>async</b> () =&gt; <b>await</b> <span class="r74 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r79 r">receivedMessage</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>));
+ 
+                    <span class="c">// Assert that send did succeed</span>
+                    <span class="r79 r">receivedMessage</span> = <b>await</b> <span class="r74 r">receiver</span>.<span class="i">ReceiveAsync</span>(<a href="#69a8b600e99b54b8" class="i field">ReceiveTimeout</a>);
+                    <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r79 r">receivedMessage</span>);
+                    <span class="i">Assert</span>.<span class="i">Equal</span>(<span class="r76 r">body2</span>, <span class="r79 r">receivedMessage</span>.<span class="i">Body</span>.<span class="i">GetString</span>());
+                    <b>await</b> <span class="r74 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r79 r">receivedMessage</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+                }
+                <b>finally</b>
+                {
+                    <b>await</b> <span class="r73 r">sender</span>.<span class="i">CloseAsync</span>();
+                    <b>await</b> <span class="r74 r">receiver</span>.<span class="i">CloseAsync</span>();
+                    <b>await</b> <span class="r72 r">connection</span>.<span class="i">CloseAsync</span>();
+                }
+            });
+        }
+ 
+        [<span class="i">Fact</span>]
+        [<a href="Infrastructure/LiveTestAttribute.cs.html#ada6db6baaebd450" class="t constructor">LiveTest</a>]
+        [<span class="i">DisplayTestMethodName</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="a7d633107e12cfa6" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">TransactionRollbackWorksAcrossClientsUsingSameConnectionToSameEntity</a>()
+        {
+            <b>await</b> <a href="Infrastructure/ServiceBusScope.cs.html#e1a746ce9b5539bc" class="t t">ServiceBusScope</a>.<span class="i">UsingQueueAsync</span>(<span class="i">partitioned</span>: <b>false</b>, <span class="i">sessionEnabled</span>: <b>false</b>, <b>async</b> <span id="r81 rd" class="r81 r">queueName</span> =&gt;
+            {
+                <a href="/Microsoft.Azure.ServiceBus/A.html#d4af28baeaa553d8" class="k">var</a> <span id="r82 rd" class="r82 r">connection</span> = <b>new</b> <span class="t">ServiceBusConnection</span>(<a href="#2470a4a4cec91fe5" class="i field">ConnectionString</a>);
+                <a href="/Microsoft.Azure.ServiceBus/A.html#435f723d21eebd94" class="k">var</a> <span id="r83 rd" class="r83 r">sender</span> = <b>new</b> <span class="t">MessageSender</span>(<span class="r82 r">connection</span>, <span class="r81 r">queueName</span>);
+                <a href="/Microsoft.Azure.ServiceBus/A.html#df59eb99899d6167" class="k">var</a> <span id="r84 rd" class="r84 r">receiver</span> = <b>new</b> <span class="t">MessageReceiver</span>(<span class="r82 r">connection</span>, <span class="r81 r">queueName</span>);
+ 
+                <b>try</b>
+                {
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r85 rd" class="r85 r">body1</span> = <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#8015cb30da6ca742" class="i method">ToString</a>(<span class="s">&quot;N&quot;</span>);
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r86 rd" class="r86 r">body2</span> = <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#8015cb30da6ca742" class="i method">ToString</a>(<span class="s">&quot;N&quot;</span>);
+                    <a href="/Microsoft.Azure.ServiceBus/A.html#74fc1aa4fea2b013" class="k">var</a> <span id="r87 rd" class="r87 r">message</span> = <b>new</b> <span class="t">Message</span>(<span class="r85 r">body1</span>.<a href="Infrastructure/TestUtility.cs.html#4f1c77c0da788f8f" class="i method">GetBytes</a>());
+                    <a href="/Microsoft.Azure.ServiceBus/A.html#74fc1aa4fea2b013" class="k">var</a> <span id="r88 rd" class="r88 r">message2</span> = <b>new</b> <span class="t">Message</span>(<span class="r86 r">body2</span>.<a href="Infrastructure/TestUtility.cs.html#4f1c77c0da788f8f" class="i method">GetBytes</a>());
+                    <b>await</b> <span class="r83 r">sender</span>.<span class="i">SendAsync</span>(<span class="r87 r">message</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                    <b>var</b> <span id="r89 rd" class="r89 r">receivedMessage</span> = <b>await</b> <span class="r84 r">receiver</span>.<span class="i">ReceiveAsync</span>(<a href="#69a8b600e99b54b8" class="i field">ReceiveTimeout</a>);
+                    <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r89 r">receivedMessage</span>);
+                    <span class="i">Assert</span>.<span class="i">Equal</span>(<span class="r85 r">body1</span>, <span class="r89 r">receivedMessage</span>.<span class="i">Body</span>.<span class="i">GetString</span>());
+ 
+                    <b>using</b> (<a href="@0@System.Transactions/A.html#988b00261b7ce735" class="k">var</a> <span id="r90 rd" class="r90 r">ts</span> = <b>new</b> <a href="@0@System.Transactions/A.html#9d2b286f835e4dcf" class="t constructor">TransactionScope</a>(<a href="@0@System.Transactions/A.html#2b6090823dbe18fd" class="t t">TransactionScopeAsyncFlowOption</a>.<a href="@0@System.Transactions/A.html#932ccd853179033f" class="i field">Enabled</a>))
+                    {
+                        <b>await</b> <span class="r84 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r89 r">receivedMessage</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+                        <b>await</b> <span class="r83 r">sender</span>.<span class="i">SendAsync</span>(<span class="r88 r">message2</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    }
+ 
+                    <span class="c">// Adding delay since transaction Commit/Rollback is an asynchronous operation.</span>
+                    <span class="c">// Operating on the same message should not be done.</span>
+                    <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#87a671fb5b9b4384" class="i method">Delay</a>(<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(2));
+ 
+                    <span class="c">// Following should succeed without exceptions</span>
+                    <b>await</b> <span class="r84 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r89 r">receivedMessage</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+ 
+                    <span class="c">// Assert that send failed</span>
+                    <span class="r89 r">receivedMessage</span> = <b>await</b> <span class="r84 r">receiver</span>.<span class="i">ReceiveAsync</span>(<a href="#69a8b600e99b54b8" class="i field">ReceiveTimeout</a>);
+                    <span class="i">Assert</span>.<span class="i">Null</span>(<span class="r89 r">receivedMessage</span>);
+                }
+                <b>finally</b>
+                {
+                    <b>await</b> <span class="r83 r">sender</span>.<span class="i">CloseAsync</span>();
+                    <b>await</b> <span class="r84 r">receiver</span>.<span class="i">CloseAsync</span>();
+                    <b>await</b> <span class="r82 r">connection</span>.<span class="i">CloseAsync</span>();
+                }
+            });
+        }
+ 
+        [<span class="i">Fact</span>]
+        [<a href="Infrastructure/LiveTestAttribute.cs.html#ada6db6baaebd450" class="t constructor">LiveTest</a>]
+        [<span class="i">DisplayTestMethodName</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="967ab3fcbeb7f835" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">TransactionalSendViaCommitTest</a>()
+        {
+            <a href="/Microsoft.Azure.ServiceBus/A.html#d4af28baeaa553d8" class="k">var</a> <span id="r91 rd" class="r91 r">connection</span> = <b>new</b> <span class="t">ServiceBusConnection</span>(<a href="#2470a4a4cec91fe5" class="i field">ConnectionString</a>);
+ 
+            <a href="Infrastructure/ServiceBusScope.cs.html#2b388887046cacab" class="k">var</a> <span id="r92 rd" class="r92 r">intermediateQueue</span> = <b>default</b>(<a href="Infrastructure/ServiceBusScope.cs.html#e1a746ce9b5539bc" class="t t">ServiceBusScope</a>.<a href="Infrastructure/ServiceBusScope.cs.html#2b388887046cacab" class="t t">QueueScope</a>);
+            <a href="Infrastructure/ServiceBusScope.cs.html#efc1bfe19098a8d7" class="k">var</a> <span id="r93 rd" class="r93 r">destination1</span> = <b>default</b>(<a href="Infrastructure/ServiceBusScope.cs.html#e1a746ce9b5539bc" class="t t">ServiceBusScope</a>.<a href="Infrastructure/ServiceBusScope.cs.html#efc1bfe19098a8d7" class="t t">TopicScope</a>);
+            <a href="Infrastructure/ServiceBusScope.cs.html#2b388887046cacab" class="k">var</a> <span id="r94 rd" class="r94 r">destination2</span> = <b>default</b>(<a href="Infrastructure/ServiceBusScope.cs.html#e1a746ce9b5539bc" class="t t">ServiceBusScope</a>.<a href="Infrastructure/ServiceBusScope.cs.html#2b388887046cacab" class="t t">QueueScope</a>);
+            <a href="/Microsoft.Azure.ServiceBus/A.html#435f723d21eebd94" class="k">var</a> <span id="r95 rd" class="r95 r">intermediateSender</span> = <b>default</b>(<a href="/Microsoft.Azure.ServiceBus/A.html#435f723d21eebd94" class="t t">MessageSender</a>);
+            <a href="/Microsoft.Azure.ServiceBus/A.html#df59eb99899d6167" class="k">var</a> <span id="r96 rd" class="r96 r">intermediateReceiver</span> = <b>default</b>(<a href="/Microsoft.Azure.ServiceBus/A.html#df59eb99899d6167" class="t t">MessageReceiver</a>);
+            <a href="/Microsoft.Azure.ServiceBus/A.html#435f723d21eebd94" class="k">var</a> <span id="r97 rd" class="r97 r">destination1Sender</span> = <b>default</b>(<a href="/Microsoft.Azure.ServiceBus/A.html#435f723d21eebd94" class="t t">MessageSender</a>);
+            <a href="/Microsoft.Azure.ServiceBus/A.html#435f723d21eebd94" class="k">var</a> <span id="r98 rd" class="r98 r">destination1ViaSender</span> = <b>default</b>(<a href="/Microsoft.Azure.ServiceBus/A.html#435f723d21eebd94" class="t t">MessageSender</a>);
+            <a href="/Microsoft.Azure.ServiceBus/A.html#435f723d21eebd94" class="k">var</a> <span id="r99 rd" class="r99 r">destination2ViaSender</span> = <b>default</b>(<a href="/Microsoft.Azure.ServiceBus/A.html#435f723d21eebd94" class="t t">MessageSender</a>);
+            <a href="/Microsoft.Azure.ServiceBus/A.html#df59eb99899d6167" class="k">var</a> <span id="r100 rd" class="r100 r">destination1Receiver</span> = <b>default</b>(<a href="/Microsoft.Azure.ServiceBus/A.html#df59eb99899d6167" class="t t">MessageReceiver</a>);
+            <a href="/Microsoft.Azure.ServiceBus/A.html#df59eb99899d6167" class="k">var</a> <span id="r101 rd" class="r101 r">destination2Receiver</span> = <b>default</b>(<a href="/Microsoft.Azure.ServiceBus/A.html#df59eb99899d6167" class="t t">MessageReceiver</a>);
+ 
+            <b>try</b>
+            {
+                <span class="r92 r">intermediateQueue</span> = <b>await</b> <a href="Infrastructure/ServiceBusScope.cs.html#e1a746ce9b5539bc" class="t t">ServiceBusScope</a>.<a href="Infrastructure/ServiceBusScope.cs.html#09594334f80d0bdd" class="i method">CreateQueueAsync</a>(<span class="r102 r">partitioned</span>: <b>true</b>, <span class="r103 r">sessionEnabled</span>: <b>false</b>);
+                <span class="r93 r">destination1</span> = <b>await</b> <a href="Infrastructure/ServiceBusScope.cs.html#e1a746ce9b5539bc" class="t t">ServiceBusScope</a>.<a href="Infrastructure/ServiceBusScope.cs.html#79f36f0819463684" class="i method">CreateTopicAsync</a>(<span class="r104 r">partitioned</span>: <b>true</b>, <span class="r105 r">sessionEnabled</span>: <b>false</b>);
+                <span class="r94 r">destination2</span> = <b>await</b> <a href="Infrastructure/ServiceBusScope.cs.html#e1a746ce9b5539bc" class="t t">ServiceBusScope</a>.<a href="Infrastructure/ServiceBusScope.cs.html#09594334f80d0bdd" class="i method">CreateQueueAsync</a>(<span class="r102 r">partitioned</span>: <b>false</b>, <span class="r103 r">sessionEnabled</span>: <b>false</b>);
+ 
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r106 rd" class="r106 r">intermediateQueueName</span> = <span class="r92 r">intermediateQueue</span>.<a href="Infrastructure/ServiceBusScope.cs.html#f73b3df91627c8ec" class="i field">Name</a>;
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r107 rd" class="r107 r">destination1Name</span> = <span class="r93 r">destination1</span>.<a href="Infrastructure/ServiceBusScope.cs.html#e7004ec1d1b442b0" class="i field">TopicName</a>;
+                <b>var</b> <span id="r108 rd" class="r108 r">destination1ReceiverName</span> = <a href="/Microsoft.Azure.ServiceBus/A.html#9ee269f221b531da" class="t t">EntityNameHelper</a>.<span class="i">FormatSubscriptionPath</span>(<span class="r93 r">destination1</span>.<a href="Infrastructure/ServiceBusScope.cs.html#e7004ec1d1b442b0" class="i field">TopicName</a>, <span class="r93 r">destination1</span>.<a href="Infrastructure/ServiceBusScope.cs.html#f90ccf5bd6cf0fd2" class="i field">SubscriptionName</a>);
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r109 rd" class="r109 r">destination2Name</span> = <span class="r94 r">destination2</span>.<a href="Infrastructure/ServiceBusScope.cs.html#f73b3df91627c8ec" class="i field">Name</a>;
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r110 rd" class="r110 r">destination2ReceiverName</span> = <span class="r94 r">destination2</span>.<a href="Infrastructure/ServiceBusScope.cs.html#f73b3df91627c8ec" class="i field">Name</a>;
+ 
+                <span class="r95 r">intermediateSender</span> = <b>new</b> <span class="t">MessageSender</span>(<span class="r91 r">connection</span>, <span class="r106 r">intermediateQueueName</span>);
+                <span class="r96 r">intermediateReceiver</span> = <b>new</b> <span class="t">MessageReceiver</span>(<span class="r91 r">connection</span>, <span class="r106 r">intermediateQueueName</span>);
+                <span class="r97 r">destination1Sender</span> = <b>new</b> <span class="t">MessageSender</span>(<span class="r91 r">connection</span>, <span class="r107 r">destination1Name</span>);
+                <span class="r98 r">destination1ViaSender</span> = <b>new</b> <span class="t">MessageSender</span>(<span class="r91 r">connection</span>, <span class="r107 r">destination1Name</span>, <span class="r106 r">intermediateQueueName</span>);
+                <span class="r99 r">destination2ViaSender</span> = <b>new</b> <span class="t">MessageSender</span>(<span class="r91 r">connection</span>, <span class="r109 r">destination2Name</span>, <span class="r106 r">intermediateQueueName</span>);
+                <span class="r100 r">destination1Receiver</span> = <b>new</b> <span class="t">MessageReceiver</span>(<span class="r91 r">connection</span>, <span class="r108 r">destination1ReceiverName</span>);
+                <span class="r101 r">destination2Receiver</span> = <b>new</b> <span class="t">MessageReceiver</span>(<span class="r91 r">connection</span>, <span class="r110 r">destination2ReceiverName</span>);
+ 
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r111 rd" class="r111 r">body</span> = <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#8015cb30da6ca742" class="i method">ToString</a>(<span class="s">&quot;N&quot;</span>);
+                <a href="/Microsoft.Azure.ServiceBus/A.html#74fc1aa4fea2b013" class="k">var</a> <span id="r112 rd" class="r112 r">message1</span> = <b>new</b> <span class="t">Message</span>(<span class="r111 r">body</span>.<a href="Infrastructure/TestUtility.cs.html#4f1c77c0da788f8f" class="i method">GetBytes</a>()) { <a href="/Microsoft.Azure.ServiceBus/A.html#6b02c9ff5b03ba9c" class="i property">MessageId</a> = <span class="s">&quot;1&quot;</span>, <a href="/Microsoft.Azure.ServiceBus/A.html#99fb27efd92a94d4" class="i property">PartitionKey</a> = <span class="s">&quot;pk1&quot;</span> };
+                <a href="/Microsoft.Azure.ServiceBus/A.html#74fc1aa4fea2b013" class="k">var</a> <span id="r113 rd" class="r113 r">message2</span> = <b>new</b> <span class="t">Message</span>(<span class="r111 r">body</span>.<a href="Infrastructure/TestUtility.cs.html#4f1c77c0da788f8f" class="i method">GetBytes</a>()) { <a href="/Microsoft.Azure.ServiceBus/A.html#6b02c9ff5b03ba9c" class="i property">MessageId</a> = <span class="s">&quot;2&quot;</span>, <a href="/Microsoft.Azure.ServiceBus/A.html#99fb27efd92a94d4" class="i property">PartitionKey</a> = <span class="s">&quot;pk2&quot;</span>, <a href="/Microsoft.Azure.ServiceBus/A.html#187ce45c7e8dca5c" class="i property">ViaPartitionKey</a> = <span class="s">&quot;pk1&quot;</span> };
+                <a href="/Microsoft.Azure.ServiceBus/A.html#74fc1aa4fea2b013" class="k">var</a> <span id="r114 rd" class="r114 r">message3</span> = <b>new</b> <span class="t">Message</span>(<span class="r111 r">body</span>.<a href="Infrastructure/TestUtility.cs.html#4f1c77c0da788f8f" class="i method">GetBytes</a>()) { <a href="/Microsoft.Azure.ServiceBus/A.html#6b02c9ff5b03ba9c" class="i property">MessageId</a> = <span class="s">&quot;3&quot;</span>, <a href="/Microsoft.Azure.ServiceBus/A.html#99fb27efd92a94d4" class="i property">PartitionKey</a> = <span class="s">&quot;pk3&quot;</span>, <a href="/Microsoft.Azure.ServiceBus/A.html#187ce45c7e8dca5c" class="i property">ViaPartitionKey</a> = <span class="s">&quot;pk1&quot;</span> };
+ 
+                <b>await</b> <span class="r95 r">intermediateSender</span>.<span class="i">SendAsync</span>(<span class="r112 r">message1</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <b>var</b> <span id="r115 rd" class="r115 r">receivedMessage</span> = <b>await</b> <span class="r96 r">intermediateReceiver</span>.<span class="i">ReceiveAsync</span>();
+                <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r115 r">receivedMessage</span>);
+                <span class="i">Assert</span>.<span class="i">Equal</span>(<span class="s">&quot;pk1&quot;</span>, <span class="r115 r">receivedMessage</span>.<span class="i">PartitionKey</span>);
+ 
+                <span class="c">// If the transaction succeeds, then all the operations occurred on the same partition.</span>
+                <b>using</b> (<a href="@0@System.Transactions/A.html#988b00261b7ce735" class="k">var</a> <span id="r116 rd" class="r116 r">ts</span> = <b>new</b> <a href="@0@System.Transactions/A.html#9d2b286f835e4dcf" class="t constructor">TransactionScope</a>(<a href="@0@System.Transactions/A.html#2b6090823dbe18fd" class="t t">TransactionScopeAsyncFlowOption</a>.<a href="@0@System.Transactions/A.html#932ccd853179033f" class="i field">Enabled</a>))
+                {
+                    <b>await</b> <span class="r96 r">intermediateReceiver</span>.<span class="i">CompleteAsync</span>(<span class="r115 r">receivedMessage</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+                    <b>await</b> <span class="r98 r">destination1ViaSender</span>.<span class="i">SendAsync</span>(<span class="r113 r">message2</span>);
+                    <b>await</b> <span class="r99 r">destination2ViaSender</span>.<span class="i">SendAsync</span>(<span class="r114 r">message3</span>);
+                    <span class="r116 r">ts</span>.<a href="@0@System.Transactions/A.html#2a10f031a7f0b3b6" class="i method">Complete</a>();
+                }
+ 
+                <span class="c">// Assert that first message indeed completed.</span>
+                <span class="r115 r">receivedMessage</span> = <b>await</b> <span class="r96 r">intermediateReceiver</span>.<span class="i">ReceiveAsync</span>(<a href="#69a8b600e99b54b8" class="i field">ReceiveTimeout</a>);
+                <span class="i">Assert</span>.<span class="i">Null</span>(<span class="r115 r">receivedMessage</span>);
+ 
+                <span class="c">// Assert that second message reached its destination.</span>
+                <b>var</b> <span id="r117 rd" class="r117 r">receivedMessage1</span> = <b>await</b> <span class="r100 r">destination1Receiver</span>.<span class="i">ReceiveAsync</span>();
+                <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r117 r">receivedMessage1</span>);
+                <span class="i">Assert</span>.<span class="i">Equal</span>(<span class="s">&quot;pk2&quot;</span>, <span class="r117 r">receivedMessage1</span>.<span class="i">PartitionKey</span>);
+ 
+                <span class="c">// Assert destination1 message actually used partitionKey in the destination entity.</span>
+                <a href="/Microsoft.Azure.ServiceBus/A.html#74fc1aa4fea2b013" class="k">var</a> <span id="r118 rd" class="r118 r">destination1Message</span> = <b>new</b> <span class="t">Message</span>(<span class="r111 r">body</span>.<a href="Infrastructure/TestUtility.cs.html#4f1c77c0da788f8f" class="i method">GetBytes</a>())
+                {
+                    <a href="/Microsoft.Azure.ServiceBus/A.html#99fb27efd92a94d4" class="i property">PartitionKey</a> = <span class="s">&quot;pk2&quot;</span>
+                };
+                <b>using</b> (<a href="@0@System.Transactions/A.html#988b00261b7ce735" class="k">var</a> <span id="r119 rd" class="r119 r">ts</span> = <b>new</b> <a href="@0@System.Transactions/A.html#9d2b286f835e4dcf" class="t constructor">TransactionScope</a>(<a href="@0@System.Transactions/A.html#2b6090823dbe18fd" class="t t">TransactionScopeAsyncFlowOption</a>.<a href="@0@System.Transactions/A.html#932ccd853179033f" class="i field">Enabled</a>))
+                {
+                    <b>await</b> <span class="r100 r">destination1Receiver</span>.<span class="i">CompleteAsync</span>(<span class="r117 r">receivedMessage1</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+                    <b>await</b> <span class="r97 r">destination1Sender</span>.<span class="i">SendAsync</span>(<span class="r118 r">destination1Message</span>);
+                    <span class="r119 r">ts</span>.<a href="@0@System.Transactions/A.html#2a10f031a7f0b3b6" class="i method">Complete</a>();
+                }
+ 
+                <span class="c">// Assert that third message reached its destination.</span>
+                <b>var</b> <span id="r120 rd" class="r120 r">receivedMessage2</span> = <b>await</b> <span class="r101 r">destination2Receiver</span>.<span class="i">ReceiveAsync</span>();
+                <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r120 r">receivedMessage2</span>);
+                <span class="i">Assert</span>.<span class="i">Equal</span>(<span class="s">&quot;pk3&quot;</span>, <span class="r120 r">receivedMessage2</span>.<span class="i">PartitionKey</span>);
+                <b>await</b> <span class="r101 r">destination2Receiver</span>.<span class="i">CompleteAsync</span>(<span class="r120 r">receivedMessage2</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+ 
+                <span class="c">// Cleanup</span>
+                <span class="r117 r">receivedMessage1</span> = <b>await</b> <span class="r100 r">destination1Receiver</span>.<span class="i">ReceiveAsync</span>();
+                <b>await</b> <span class="r100 r">destination1Receiver</span>.<span class="i">CompleteAsync</span>(<span class="r117 r">receivedMessage1</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+            }
+            <b>finally</b>
+            {
+                <span class="c">// The cleanup methods will not throw and are safe to call outside of a try/catch.  They</span>
+                <span class="c">// also have no dependencies on execution order, so allowing them to run in parallel is fine.</span>
+                <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#929d1a3d98d89901" class="i method">WhenAll</a>(
+                    <a href="#74a57592b29e190e" class="i method">SafeCloseAllAsync</a>(<span class="r95 r">intermediateSender</span>, <span class="r96 r">intermediateReceiver</span>, <span class="r97 r">destination1Sender</span>, <span class="r98 r">destination1ViaSender</span>, <span class="r99 r">destination2ViaSender</span>, <span class="r100 r">destination1Receiver</span>, <span class="r101 r">destination2Receiver</span>),
+                    <span class="r92 r">intermediateQueue</span>?.<a href="Infrastructure/ServiceBusScope.cs.html#5c1caad3a63fa26a" class="i method">CleanupAsync</a>(),
+                    <span class="r93 r">destination1</span>?.<a href="Infrastructure/ServiceBusScope.cs.html#8c88db367bc7b10c" class="i method">CleanupAsync</a>(),
+                    <span class="r94 r">destination2</span>?.<a href="Infrastructure/ServiceBusScope.cs.html#5c1caad3a63fa26a" class="i method">CleanupAsync</a>());
+            }
+        }
+ 
+        <b>private</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="74a57592b29e190e" href="R/74a57592b29e190e.html" target="n" data-glyph="76,1" class="i method">SafeCloseAllAsync</a>(<b>params</b> <a href="/Microsoft.Azure.ServiceBus/A.html#8269d2b438904d04" class="t t">IClientEntity</a>[] <span id="r121 rd" class="r121 r">clientEntities</span>)
+        {
+            <b>async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="f7795d92e3857941" href="R/f7795d92e3857941.html" target="n" data-glyph="76,2" class="i method">closeEntity</a>(<a href="/Microsoft.Azure.ServiceBus/A.html#8269d2b438904d04" class="t t">IClientEntity</a> <span id="r122 rd" class="r122 r">entity</span>)
+            {
+                <b>try</b> { <b>await</b> <span class="r122 r">entity</span>.<span class="i">CloseAsync</span>(); }  <b>catch</b> {}
+            };
+ 
+            <b>return</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#69351c6da968e5d1" class="i method">WhenAll</a>(<span class="r121 r">clientEntities</span>.<a href="@0@System.Core/A.html#5c652c53e80df013" class="i method">Select</a>(<span id="r123 rd" class="r123 r">entity</span> =&gt; <a href="#f7795d92e3857941" class="i method">closeEntity</a>(<span class="r123 r">entity</span>)));
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

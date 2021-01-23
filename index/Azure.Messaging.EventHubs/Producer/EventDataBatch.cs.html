@@ -1,0 +1,263 @@
+﻿<!DOCTYPE html>
+<html><head><title>EventDataBatch.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(254);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Messaging.EventHubs/Producer/EventDataBatch.cs" target="_top">Producer\EventDataBatch.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Messaging.EventHubs" target="_top">src\Azure.Messaging.EventHubs.csproj</a> (Azure.Messaging.EventHubs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Diagnostics</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Producer</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">   A set of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> with size constraints known up-front,</span>
+    <span class="c">///</span><span class="c">   intended to be sent to the Event Hubs service in a single operation.</span>
+    <span class="c">///</span><span class="c">   When published, the result is atomic; either all events that belong to the batch</span>
+    <span class="c">///</span><span class="c">   were successful or all have failed.  Partial success is not possible.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">   The operations for this class are thread-safe and will prevent changes when</span>
+    <span class="c">///</span><span class="c">   actively being published to the Event Hubs service.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <b>public sealed class</b> <a id="c992a211bbcf6874" href="../R/c992a211bbcf6874.html" target="n" data-glyph="0,0" class="t t">EventDataBatch</a> : <span class="i">IDisposable</span>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">An object instance to use as the synchronization root for ensuring the thread-safety of operations.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly object</b> <a id="fd338fe9d1638bc7" href="../R/fd338fe9d1638bc7.html" target="n" data-glyph="46,1" class="i field">SyncGuard</a> = <b>new</b> <b>object</b>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">A flag indicating that the batch is locked, such as when in use during a publish operation.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private bool</b> <a id="1a4c2d395fcd6ab9" href="../R/1a4c2d395fcd6ab9.html" target="n" data-glyph="46,1" class="i field">_locked</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The maximum size allowed for the batch, in bytes.  This includes the events in the batch as</span>
+        <span class="c">///</span><span class="c">   well as any overhead for the batch itself when sent to the Event Hubs service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public long</b> <a id="4ed983dbd227a3f6" href="../R/4ed983dbd227a3f6.html" target="n" data-glyph="102,1" class="i property">MaximumSizeInBytes</a> =&gt; <a href="#158e58f2c288dad3" class="i property">InnerBatch</a>.<a href="../Core/TransportEventBatch.cs.html#c39793dfe56f0a82" class="i property">MaximumSizeInBytes</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The size of the batch, in bytes, as it will be sent to the Event Hubs</span>
+        <span class="c">///</span><span class="c">   service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public long</b> <a id="ec6b4cb93458ab83" href="../R/ec6b4cb93458ab83.html" target="n" data-glyph="102,1" class="i property">SizeInBytes</a> =&gt; <a href="#158e58f2c288dad3" class="i property">InnerBatch</a>.<a href="../Core/TransportEventBatch.cs.html#709484ce4306d10b" class="i property">SizeInBytes</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The publishing sequence number assigned to the first event in the batch at the time</span>
+        <span class="c">///</span><span class="c">   the batch was successfully published.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The sequence number of the first event in the batch, if the batch was successfully</span>
+        <span class="c">///</span><span class="c">   published by a sequence-aware producer.  If the producer was not configured to apply</span>
+        <span class="c">///</span><span class="c">   sequence numbering or if the batch has not yet been successfully published, this member</span>
+        <span class="c">///</span><span class="c">   will be </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The starting published sequence number is only populated and relevant when certain features</span>
+        <span class="c">///</span><span class="c">   of the producer are enabled.  For example, it is used by idempotent publishing.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public int</b>? <a id="5ddf6ed597765ae4" href="../R/5ddf6ed597765ae4.html" target="n" data-glyph="102,1" class="i property">StartingPublishedSequenceNumber</a> { <b>get</b>; <b>internal set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The count of events contained in the batch.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public int</b> <a id="529a3bc3bdf5f8c5" href="../R/529a3bc3bdf5f8c5.html" target="n" data-glyph="102,1" class="i property">Count</a> =&gt; <a href="#158e58f2c288dad3" class="i property">InnerBatch</a>.<a href="../Core/TransportEventBatch.cs.html#72d7e4f7c04e9114" class="i property">Count</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The set of options that should be used when publishing the batch.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal</b> <a href="SendEventOptions.cs.html#b41cc3b18fb38fa6" class="t t">SendEventOptions</a> <a id="2e9e35fbafdda2c7" href="../R/2e9e35fbafdda2c7.html" target="n" data-glyph="104,1" class="i property">SendOptions</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The transport-specific batch responsible for performing the batch operations</span>
+        <span class="c">///</span><span class="c">   in a manner compatible with the associated </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Core/TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <a href="../Core/TransportEventBatch.cs.html#d626c58b5be68e2d" class="t t">TransportEventBatch</a> <a id="158e58f2c288dad3" href="../R/158e58f2c288dad3.html" target="n" data-glyph="106,1" class="i property">InnerBatch</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The fully qualified Event Hubs namespace that the batch is associated with.  To be used</span>
+        <span class="c">///</span><span class="c">   during instrumentation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private string</b> <a id="aca8bc0f9bb1a347" href="../R/aca8bc0f9bb1a347.html" target="n" data-glyph="106,1" class="i property">FullyQualifiedNamespace</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The name of the Event Hub that the batch is associated with, specific to the</span>
+        <span class="c">///</span><span class="c">   Event Hubs namespace that contains it.  To be used during instrumentation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private string</b> <a id="3ed06da2048bf2e9" href="../R/3ed06da2048bf2e9.html" target="n" data-glyph="106,1" class="i property">EventHubName</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The list of diagnostic identifiers of events added to this batch.  To be used during</span>
+        <span class="c">///</span><span class="c">   instrumentation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <span class="i">List</span>&lt;<b>string</b>&gt; <a id="113290b16ec41dfd" href="../R/113290b16ec41dfd.html" target="n" data-glyph="106,1" class="i property">EventDiagnosticIdentifiers</a> { <b>get</b>; } = <b>new</b> <span class="i">List</span>&lt;<b>string</b>&gt;();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#c992a211bbcf6874" class="t t">EventDataBatch</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">transportBatch</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The  transport-specific batch responsible for performing the batch operations.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">fullyQualifiedNamespace</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The fully qualified Event Hubs namespace to use for instrumentation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">eventHubName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the specific Event Hub to associate the events with during instrumentation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">sendOptions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The set of options that should be used when publishing the batch.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   As an internal type, this class performs only basic sanity checks against its arguments.  It</span>
+        <span class="c">///</span><span class="c">   is assumed that callers are trusted and have performed deep validation.</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c">   Any parameters passed are assumed to be owned by this instance and safe to mutate or dispose;</span>
+        <span class="c">///</span><span class="c">   creation of clones or otherwise protecting the parameters is assumed to be the purview of the</span>
+        <span class="c">///</span><span class="c">   caller.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal</b> <a id="d227769487dc876f" href="../R/d227769487dc876f.html" target="n" data-glyph="74,1" class="t constructor">EventDataBatch</a>(<a href="../Core/TransportEventBatch.cs.html#d626c58b5be68e2d" class="t t">TransportEventBatch</a> <span id="r0 rd" class="r0 r">transportBatch</span>,
+                                <b>string</b> <span id="r1 rd" class="r1 r">fullyQualifiedNamespace</span>,
+                                <b>string</b> <span id="r2 rd" class="r2 r">eventHubName</span>,
+                                <a href="SendEventOptions.cs.html#b41cc3b18fb38fa6" class="t t">SendEventOptions</a> <span id="r3 rd" class="r3 r">sendOptions</span>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r0 r">transportBatch</span>, <b>nameof</b>(<span class="r0 r">transportBatch</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r1 r">fullyQualifiedNamespace</span>, <b>nameof</b>(<span class="r1 r">fullyQualifiedNamespace</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r2 r">eventHubName</span>, <b>nameof</b>(<span class="r2 r">eventHubName</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r3 r">sendOptions</span>, <b>nameof</b>(<span class="r3 r">sendOptions</span>));
+ 
+            <a href="#158e58f2c288dad3" class="i property">InnerBatch</a> = <span class="r0 r">transportBatch</span>;
+            <a href="#aca8bc0f9bb1a347" class="i property">FullyQualifiedNamespace</a> = <span class="r1 r">fullyQualifiedNamespace</span>;
+            <a href="#3ed06da2048bf2e9" class="i property">EventHubName</a> = <span class="r2 r">eventHubName</span>;
+            <a href="#2e9e35fbafdda2c7" class="i property">SendOptions</a> = <span class="r3 r">sendOptions</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Attempts to add an event to the batch, ensuring that the size</span>
+        <span class="c">///</span><span class="c">   of the batch does not exceed its maximum.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">eventData</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The event to attempt to add to the batch.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the event was added; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public bool</b> <a id="41b4133addd3135b" href="../R/41b4133addd3135b.html" target="n" data-glyph="72,1" class="i method">TryAdd</a>(<a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a> <span id="r4 rd" class="r4 r">eventData</span>)
+        {
+            <b>lock</b> (<a href="#fd338fe9d1638bc7" class="i field">SyncGuard</a>)
+            {
+                <a href="#b0fe3a65541d998a" class="i method">AssertNotLocked</a>();
+ 
+                <span class="r4 r">eventData</span> = <span class="r4 r">eventData</span>.<a href="../EventData.cs.html#483269f484f73e91" class="i method">Clone</a>();
+                <a href="../SharedSource/Diagnostics/EventDataInstrumentation.cs.html#29a2ad8b9661f165" class="t t">EventDataInstrumentation</a>.<a href="../SharedSource/Diagnostics/EventDataInstrumentation.cs.html#748c053c38d7d350" class="i method">InstrumentEvent</a>(<span class="r4 r">eventData</span>, <a href="#aca8bc0f9bb1a347" class="i property">FullyQualifiedNamespace</a>, <a href="#3ed06da2048bf2e9" class="i property">EventHubName</a>);
+ 
+                <b>var</b> <span id="r5 rd" class="r5 r">added</span> = <a href="#158e58f2c288dad3" class="i property">InnerBatch</a>.<a href="../Core/TransportEventBatch.cs.html#79fd34da9f02e5a3" class="i method">TryAdd</a>(<span class="r4 r">eventData</span>);
+ 
+                <b>if</b> ((<span class="r5 r">added</span>) &amp;&amp; (<a href="../SharedSource/Diagnostics/EventDataInstrumentation.cs.html#29a2ad8b9661f165" class="t t">EventDataInstrumentation</a>.<a href="../SharedSource/Diagnostics/EventDataInstrumentation.cs.html#443a64f1538af62f" class="i method">TryExtractDiagnosticId</a>(<span class="r4 r">eventData</span>, <b>out string</b> <span id="r6 rd" class="r6 r">diagnosticId</span>)))
+                {
+                    <a href="#113290b16ec41dfd" class="i property">EventDiagnosticIdentifiers</a>.<span class="i">Add</span>(<span class="r6 r">diagnosticId</span>);
+                }
+ 
+                <b>return</b> <span class="r5 r">added</span>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Performs the task needed to clean up resources used by the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#c992a211bbcf6874" class="t t">EventDataBatch</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public void</b> <a id="b3f08559c491baec" href="../R/b3f08559c491baec.html" target="n" data-glyph="72,1" class="i method">Dispose</a>()
+        {
+            <b>lock</b> (<a href="#fd338fe9d1638bc7" class="i field">SyncGuard</a>)
+            {
+                <a href="#b0fe3a65541d998a" class="i method">AssertNotLocked</a>();
+                <a href="#158e58f2c288dad3" class="i property">InnerBatch</a>.<a href="../Core/TransportEventBatch.cs.html#ffc6881626726aeb" class="i method">Dispose</a>();
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Clears the batch, removing all events and resetting the</span>
+        <span class="c">///</span><span class="c">   available size.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal void</b> <a id="000af2741068189c" href="../R/000af2741068189c.html" target="n" data-glyph="74,1" class="i method">Clear</a>()
+        {
+            <b>lock</b> (<a href="#fd338fe9d1638bc7" class="i field">SyncGuard</a>)
+            {
+                <a href="#b0fe3a65541d998a" class="i method">AssertNotLocked</a>();
+                <a href="#158e58f2c288dad3" class="i property">InnerBatch</a>.<a href="../Core/TransportEventBatch.cs.html#309fb39ec70609c9" class="i method">Clear</a>();
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Represents the batch as an enumerable set of specific representations of an event.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r t">T</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The specific event representation being requested.</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The set of events as an enumerable of the requested type.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal</b> <span class="i">IEnumerable</span>&lt;<span class="r7 r t">T</span>&gt; <a id="ce1a601fff7086d5" href="../R/ce1a601fff7086d5.html" target="n" data-glyph="74,1" class="i method">AsEnumerable</a>&lt;<span id="r7 rd t" class="r7 r t">T</span>&gt;() =&gt; <a href="#158e58f2c288dad3" class="i property">InnerBatch</a>.<a href="../Core/TransportEventBatch.cs.html#2ede29e40464c767" class="i method">AsEnumerable</a>&lt;<span class="r7 r t">T</span>&gt;();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Gets the list of diagnostic identifiers of events added to this batch.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A read-only list of diagnostic identifiers.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal</b> <span class="i">IReadOnlyList</span>&lt;<b>string</b>&gt; <a id="ad20e621d6e5ad11" href="../R/ad20e621d6e5ad11.html" target="n" data-glyph="74,1" class="i method">GetEventDiagnosticIdentifiers</a>() =&gt; <a href="#113290b16ec41dfd" class="i property">EventDiagnosticIdentifiers</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Locks the batch to prevent new events from being added while a service</span>
+        <span class="c">///</span><span class="c">   operation is active.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal void</b> <a id="f8f379af3d34fe26" href="../R/f8f379af3d34fe26.html" target="n" data-glyph="74,1" class="i method">Lock</a>()
+        {
+            <b>lock</b> (<a href="#fd338fe9d1638bc7" class="i field">SyncGuard</a>)
+            {
+                <a href="#1a4c2d395fcd6ab9" class="i field">_locked</a> = <b>true</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Unlocks the batch, allowing new events to be added.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal void</b> <a id="ae1f6cb9af8be5e6" href="../R/ae1f6cb9af8be5e6.html" target="n" data-glyph="74,1" class="i method">Unlock</a>()
+        {
+            <b>lock</b> (<a href="#fd338fe9d1638bc7" class="i field">SyncGuard</a>)
+            {
+                <a href="#1a4c2d395fcd6ab9" class="i field">_locked</a> = <b>false</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Validates that the batch is not in a locked state, triggering an</span>
+        <span class="c">///</span><span class="c">   invalid operation if it is.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">InvalidOperationException</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Occurs when the batch is locked.</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private void</b> <a id="b0fe3a65541d998a" href="../R/b0fe3a65541d998a.html" target="n" data-glyph="76,1" class="i method">AssertNotLocked</a>()
+        {
+            <b>if</b> (<a href="#1a4c2d395fcd6ab9" class="i field">_locked</a>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">InvalidOperationException</span>(<a href="../Resources.Designer.cs.html#0f60eafa1a3b4f36" class="t t">Resources</a>.<a href="../Resources.Designer.cs.html#be1937147ab1d4fb" class="i property">EventBatchIsLocked</a>);
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

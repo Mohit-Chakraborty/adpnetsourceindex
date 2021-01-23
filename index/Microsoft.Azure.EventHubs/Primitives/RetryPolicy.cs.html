@@ -1,0 +1,121 @@
+﻿<!DOCTYPE html>
+<html><head><title>RetryPolicy.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(112);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.EventHubs/Primitives/RetryPolicy.cs" target="_top">Primitives\RetryPolicy.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.EventHubs" target="_top">Microsoft.Azure.EventHubs\src\Microsoft.Azure.EventHubs.csproj</a> (Microsoft.Azure.EventHubs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft. All rights reserved.</span>
+<span class="c">// Licensed under the MIT license. See LICENSE file in the project root for full license information.</span>
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">EventHubs</span>
+{
+    <b>using</b> <span class="i">System</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Net</span>.<span class="i">Sockets</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">EventHubs</span>.<span class="i n">Primitives</span>;
+ 
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Represents an abstraction for retrying messaging operations. Users should not </span>
+    <span class="c">///</span><span class="c"> implement this class, and instead should use one of the provided implementations.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>public abstract class</b> <a id="62083090add5f40b" href="../R/62083090add5f40b.html" target="n" data-glyph="0,0" class="t t"><span id="051c5bef6d22cbe2">RetryPolicy</span></a>
+    {
+        <b>const int</b> <a id="18bb6b361e0909d7" href="../R/18bb6b361e0909d7.html" target="n" data-glyph="10,1" class="i field">DefaultRetryMaxCount</a> = 10;
+ 
+        <b>static readonly</b> <span class="i">TimeSpan</span> <a id="9ba25266f5abe7eb" href="../R/9ba25266f5abe7eb.html" target="n" data-glyph="46,1" class="i field">DefaultRetryMinBackoff</a> = <span class="i">TimeSpan</span>.<span class="i">Zero</span>;
+        <b>static readonly</b> <span class="i">TimeSpan</span> <a id="46be85a00c90f771" href="../R/46be85a00c90f771.html" target="n" data-glyph="46,1" class="i field">DefaultRetryMaxBackoff</a> = <span class="i">TimeSpan</span>.<span class="i">FromSeconds</span>(30);
+ 
+        <b>readonly object</b> <a id="3c832b90155afa8b" href="../R/3c832b90155afa8b.html" target="n" data-glyph="46,1" class="i field">serverBusySync</a> = <b>new</b> <b>object</b>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Determines whether or not the exception can be retried.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">exception</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A bool indicating whether or not the operation can be retried.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public static bool</b> <a id="e6b8fd1adf2dcd45" href="../R/e6b8fd1adf2dcd45.html" target="n" data-glyph="72,1" class="i method">IsRetryableException</a>(<span class="i">Exception</span> <span id="r0 rd" class="r0 r">exception</span>)
+        {
+            <a href="Guard.cs.html#b565701b95b9c8b9" class="t t">Guard</a>.<span class="i">ArgumentNotNull</span>(<b>nameof</b>(<span class="r0 r">exception</span>), <span class="r0 r">exception</span>);
+ 
+            <b>if</b> (<span class="r0 r">exception</span> <b>is</b> <a href="EventHubsException.cs.html#8b9817f4bb66b95f" class="t t">EventHubsException</a>)
+            {
+                <b>return</b> ((<a href="EventHubsException.cs.html#8b9817f4bb66b95f" class="t t">EventHubsException</a>)<span class="r0 r">exception</span>).<a href="EventHubsException.cs.html#82f11a700820e554" class="i property">IsTransient</a>;
+            }
+ 
+            <b>if</b> (<span class="r0 r">exception</span> <b>is</b> <span class="i">TaskCanceledException</span>)
+            {
+                <b>return</b> <span class="r0 r">exception</span>.<span class="i">InnerException</span> == <b>null</b> || <span class="i">IsRetryableException</span>(<span class="r0 r">exception</span>.<span class="i">InnerException</span>);
+            }
+ 
+            <span class="c">// Flatten AggregateException</span>
+            <b>if</b> (<span class="r0 r">exception</span> <b>is</b> <span class="i">AggregateException</span>)
+            {
+                <b>var</b> <span id="r1 rd" class="r1 r">fltAggException</span> = (<span class="r0 r">exception</span> <b>as</b> <span class="i">AggregateException</span>).<span class="i">Flatten</span>();
+                <b>return</b> <span class="r1 r">fltAggException</span>.<span class="i">InnerException</span> != <b>null</b> &amp;&amp; <span class="i">IsRetryableException</span>(<span class="r1 r">fltAggException</span>.<span class="i">InnerException</span>);
+            }
+ 
+            <span class="c">// Other retryable exceptions here.</span>
+            <b>if</b> (<span class="r0 r">exception</span> <b>is</b> <span class="i">OperationCanceledException</span> || <span class="r0 r">exception</span> <b>is</b> <span class="i">SocketException</span>)
+            {
+                <b>return</b> <b>true</b>;
+            }
+ 
+            <b>return</b> <b>false</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Returns the default retry policy, </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="RetryExponential.cs.html#02a0164b22001422" class="t t">RetryExponential</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public static</b> <a href="#62083090add5f40b" class="t t">RetryPolicy</a> <a id="98992b964ded54f2" href="../R/98992b964ded54f2.html" target="n" data-glyph="102,1" class="i property">Default</a> =&gt; <b>new</b> <a href="RetryExponential.cs.html#835de4f471417bd7" class="t constructor">RetryExponential</a>(<a href="#9ba25266f5abe7eb" class="i field">DefaultRetryMinBackoff</a>, <a href="#46be85a00c90f771" class="i field">DefaultRetryMaxBackoff</a>, <a href="#18bb6b361e0909d7" class="i field">DefaultRetryMaxCount</a>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Returns the default retry policy, </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#4c2a8a9476547ca0" class="i property">NoRetry</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public static</b> <a href="#62083090add5f40b" class="t t">RetryPolicy</a> <a id="4c2a8a9476547ca0" href="../R/4c2a8a9476547ca0.html" target="n" data-glyph="102,1" class="i property">NoRetry</a> =&gt; <b>new</b> <span class="t">RetryExponential</span>(<span class="i">TimeSpan</span>.<span class="i">Zero</span>, <span class="i">TimeSpan</span>.<span class="i">Zero</span>, 0);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">lastException</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">remainingTime</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">baseWaitTime</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">retryCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>protected abstract</b> <span class="i">TimeSpan</span>? <a id="0cfa1f613d332112" href="../R/0cfa1f613d332112.html" target="n" data-glyph="75,1" class="i method">OnGetNextRetryInterval</a>(<span class="i">Exception</span> <span id="r2 rd" class="r2 r">lastException</span>, <span class="i">TimeSpan</span> <span id="r3 rd" class="r3 r">remainingTime</span>, <b>int</b> <span id="r4 rd" class="r4 r">baseWaitTime</span>, <b>int</b> <span id="r5 rd" class="r5 r">retryCount</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the timespan for the next retry operation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">lastException</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The last exception that was thrown</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">remainingTime</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Remaining time for the cumulative timeout</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">retryCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Current retry count</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public</b> <span class="i">TimeSpan</span>? <a id="d892f0c5bf7c5dbe" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetNextRetryInterval</a>(<span class="i">Exception</span> <span id="r6 rd" class="r6 r">lastException</span>, <span class="i">TimeSpan</span> <span id="r7 rd" class="r7 r">remainingTime</span>, <b>int</b> <span id="r8 rd" class="r8 r">retryCount</span>)
+        {
+            <b>int</b> <span id="r9 rd" class="r9 r">baseWaitTime</span> = 0;
+            <b>lock</b> (<a href="#62083090add5f40b" class="k">this</a>.<a href="#3c832b90155afa8b" class="i field">serverBusySync</a>)
+            {
+                <b>if</b> (<span class="r6 r">lastException</span> != <b>null</b> &amp;&amp;
+                        (<span class="r6 r">lastException</span> <b>is</b> <a href="ServerBusyException.cs.html#0ded6e48423a5faf" class="t t">ServerBusyException</a> || (<span class="r6 r">lastException</span>.<span class="i">InnerException</span> != <b>null</b> &amp;&amp; <span class="r6 r">lastException</span>.<span class="i">InnerException</span> <b>is</b> <a href="ServerBusyException.cs.html#0ded6e48423a5faf" class="t t">ServerBusyException</a>)))
+                {
+                    <span class="r9 r">baseWaitTime</span> += <a href="ClientConstants.cs.html#1bf37eeaed226d94" class="t t">ClientConstants</a>.<a href="ClientConstants.cs.html#56e462aecd59ad25" class="i field">ServerBusyBaseSleepTimeInSecs</a>;
+                }
+            }
+ 
+            <b>var</b> <span id="r10 rd" class="r10 r">retryAfter</span> = <a href="#62083090add5f40b" class="k">this</a>.<a href="#0cfa1f613d332112" class="i method">OnGetNextRetryInterval</a>(<span class="r6 r">lastException</span>, <span class="r7 r">remainingTime</span>, <span class="r9 r">baseWaitTime</span>, <span class="r8 r">retryCount</span>);
+ 
+            <span class="c">// Don&#39;t retry if remaining time isn&#39;t enough.</span>
+            <b>if</b> (<span class="r10 r">retryAfter</span> == <b>null</b> ||
+                <span class="r7 r">remainingTime</span>.<span class="i">TotalSeconds</span> &lt; <span class="i">Math</span>.<span class="i">Max</span>(<span class="r10 r">retryAfter</span>.<span class="i">Value</span>.<span class="i">TotalSeconds</span>, <a href="ClientConstants.cs.html#1bf37eeaed226d94" class="t t">ClientConstants</a>.<a href="ClientConstants.cs.html#b7fd91102def414f" class="i field">TimerToleranceInSeconds</a>))
+            {
+                <b>return</b> <b>null</b>;
+            }
+ 
+            <b>return</b> <span class="r10 r">retryAfter</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">Creates a new copy of the current </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#62083090add5f40b" class="t t">RetryPolicy</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> and clones it into a new instance.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A new copy of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#62083090add5f40b" class="t t">RetryPolicy</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public abstract</b> <a href="#62083090add5f40b" class="t t">RetryPolicy</a> <a id="1449f93a764035e3" href="../R/1449f93a764035e3.html" target="n" data-glyph="72,1" class="i method">Clone</a>();
+    }
+}</pre></td></tr></table></div></body></html>

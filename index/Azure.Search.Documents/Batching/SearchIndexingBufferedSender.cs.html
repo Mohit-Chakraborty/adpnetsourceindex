@@ -1,0 +1,684 @@
+﻿<!DOCTYPE html>
+<html><head><title>SearchIndexingBufferedSender.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(675);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Search.Documents/Batching/SearchIndexingBufferedSender.cs" target="_top">Batching\SearchIndexingBufferedSender.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Search.Documents" target="_top">Azure.Search.Documents\src\Azure.Search.Documents.csproj</a> (Azure.Search.Documents)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>.<span class="i n">Expressions</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Search</span>.<span class="i n">Documents</span>.<span class="i n">Batching</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Search</span>.<span class="i n">Documents</span>.<span class="i n">Indexes</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Search</span>.<span class="i n">Documents</span>.<span class="i n">Indexes</span>.<span class="i n">Models</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Search</span>.<span class="i n">Documents</span>.<span class="i n">Models</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Search</span>.<span class="i n">Documents</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Index search documents with intelligent batching, automatic flushing,</span>
+    <span class="c">///</span><span class="c"> and retries for failed indexing actions.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r t">T</span><span class="c">&quot;</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> The .NET type that maps to the index schema.  Instances of this</span>
+    <span class="c">///</span><span class="c"> type can be retrieved as documents from the index. You can use</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../P/5b8083eede53810d.html#5b8083eede53810d" class="t t">SearchDocument</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> for dynamic documents.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+    <b>public class</b> <a id="4c603ee25963f349" href="../R/4c603ee25963f349.html" target="n" data-glyph="0,0" class="t t">SearchIndexingBufferedSender</a>&lt;<span id="r0 rd t" class="r0 r t">T</span>&gt; : <a href="@1@netstandard/A.html#1f55292c3174123d" class="t t">IDisposable</a>, <span class="t t">IAsyncDisposable</span>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Flag indicating whether the sender has been disposed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private volatile int</b> <a id="413ae4098a55b26f" href="../R/413ae4098a55b26f.html" target="n" data-glyph="46,1" class="i field">_disposed</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The single publisher responsible for submitting requests.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA2213</span> <span class="c">// Member should be disposed. Disposed in DisposeAsync</span>
+        <b>private</b> <a href="SearchIndexingPublisher.cs.html#239454a68c0c5f0d" class="t t">SearchIndexingPublisher</a>&lt;<span class="r0 r t">T</span>&gt; <a id="74e91230c1f27a2a" href="../R/74e91230c1f27a2a.html" target="n" data-glyph="46,1" class="i field">_publisher</a>;
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">CA2213</span> <span class="c">// Member should be disposed. Disposed in DisposeAsync</span>
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#7a558ac743b24d17" class="i property">SearchClient</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> used to send requests to the</span>
+        <span class="c">///</span><span class="c"> service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal virtual</b> <a href="../SearchClient.cs.html#4a8a1a9e2cf03b3c" class="t t">SearchClient</a> <a id="7a558ac743b24d17" href="../R/7a558ac743b24d17.html" target="n" data-glyph="104,1" class="i property">SearchClient</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the URI endpoint of the Search Service.  This is likely</span>
+        <span class="c">///</span><span class="c"> to be similar to &quot;https://{search_service}.search.windows.net&quot;.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> This is not the URI of the Search Index.  You could construct that</span>
+        <span class="c">///</span><span class="c"> URI with &quot;{Endpoint}/indexes/{IndexName}&quot; if needed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public virtual</b> <a href="@1@netstandard/A.html#991565dd25f47c90" class="t t">Uri</a> <a id="075016370a351fa5" href="../R/../../0000000000.html" target="n" data-glyph="102,1" class="i property">Endpoint</a> =&gt; <a href="#7a558ac743b24d17" class="i property">SearchClient</a>.<a href="../SearchClient.cs.html#7af2aa26f2e35100" class="i property">Endpoint</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the name of the Search Service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public virtual string</b> <a id="44d10f809cae8088" href="../R/../../0000000000.html" target="n" data-glyph="102,1" class="i property">ServiceName</a> =&gt; <a href="#7a558ac743b24d17" class="i property">SearchClient</a>.<a href="../SearchClient.cs.html#1d096aa52c812586" class="i property">ServiceName</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the name of the Search Index.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public virtual string</b> <a id="428eb6919883285f" href="../R/428eb6919883285f.html" target="n" data-glyph="102,1" class="i property">IndexName</a> =&gt; <a href="#7a558ac743b24d17" class="i property">SearchClient</a>.<a href="../SearchClient.cs.html#e4add8fb6a774f4b" class="i property">IndexName</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets a function that can be used to access the index key value of a</span>
+        <span class="c">///</span><span class="c"> document.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal virtual</b> <a href="@1@netstandard/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<span class="r0 r t">T</span>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="452c31e5f59d9d5e" href="../R/452c31e5f59d9d5e.html" target="n" data-glyph="104,1" class="i property">KeyFieldAccessor</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Task used to minimize simultaneous requests for the key field</span>
+        <span class="c">///</span><span class="c"> accessor.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="0294c25b53ac840e" href="../R/0294c25b53ac840e.html" target="n" data-glyph="46,1" class="i field">_getKeyFieldAccessorTask</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Async event raised whenever an indexing action is added to the</span>
+        <span class="c">///</span><span class="c"> sender.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public event</b> <a href="@1@netstandard/A.html#8adbe0476ca899db" class="t t">Func</a>&lt;<a href="../Models/IndexDocumentsAction.cs.html#da0a147b704a3aa4" class="t t">IndexDocumentsAction</a>&lt;<span class="r0 r t">T</span>&gt;, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>, <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a>&gt; <a id="8f881702e0227c97" href="../R/8f881702e0227c97.html" target="n" data-glyph="30,1" class="i">ActionAddedAsync</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Async event raised whenever an indexing action is sent by the</span>
+        <span class="c">///</span><span class="c"> sender.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public event</b> <a href="@1@netstandard/A.html#8adbe0476ca899db" class="t t">Func</a>&lt;<a href="../Models/IndexDocumentsAction.cs.html#da0a147b704a3aa4" class="t t">IndexDocumentsAction</a>&lt;<span class="r0 r t">T</span>&gt;, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>, <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a>&gt; <a id="928943251469532c" href="../R/928943251469532c.html" target="n" data-glyph="30,1" class="i">ActionSentAsync</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Async event raised whenever an indexing action was submitted</span>
+        <span class="c">///</span><span class="c"> successfully.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public event</b> <a href="@1@netstandard/A.html#d6a8fafda0383fc5" class="t t">Func</a>&lt;<a href="../Models/IndexDocumentsAction.cs.html#da0a147b704a3aa4" class="t t">IndexDocumentsAction</a>&lt;<span class="r0 r t">T</span>&gt;, <a href="../P/e09ca5837453d57c.html#e09ca5837453d57c" class="t t">IndexingResult</a>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>, <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a>&gt; <a id="82d4c3a83b2e41ce" href="../R/82d4c3a83b2e41ce.html" target="n" data-glyph="30,1" class="i">ActionCompletedAsync</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Async event raised whenever an indexing action failed.  The</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../P/e09ca5837453d57c.html#e09ca5837453d57c" class="t t">IndexingResult</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> or </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> may be null</span>
+        <span class="c">///</span><span class="c"> depending on the failure.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public event</b> <a href="@1@netstandard/A.html#dd88852b83582863" class="t t">Func</a>&lt;<a href="../Models/IndexDocumentsAction.cs.html#da0a147b704a3aa4" class="t t">IndexDocumentsAction</a>&lt;<span class="r0 r t">T</span>&gt;, <a href="../P/e09ca5837453d57c.html#e09ca5837453d57c" class="t t">IndexingResult</a>, <a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>, <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a>&gt; <a id="6bd21377ffe2fd68" href="../R/6bd21377ffe2fd68.html" target="n" data-glyph="30,1" class="i">ActionFailedAsync</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Protected constructor for mocking.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>protected</b> <a id="a965e9a4922f33c6" href="../R/../../0000000000.html" target="n" data-glyph="75,1" class="t constructor">SearchIndexingBufferedSender</a>() { }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new instance of the SearchIndexingBufferedSender.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">searchClient</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The SearchClient used to send requests to the service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">options</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Provides the configuration options for the sender.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>internal</b> <a id="5036b4f660107521" href="../R/5036b4f660107521.html" target="n" data-glyph="74,1" class="t constructor">SearchIndexingBufferedSender</a>(
+            <a href="../SearchClient.cs.html#4a8a1a9e2cf03b3c" class="t t">SearchClient</a> <span id="r1 rd" class="r1 r">searchClient</span>,
+            <a href="SearchIndexingBufferedSenderOptions.cs.html#f508777539c2f3a5" class="t t">SearchIndexingBufferedSenderOptions</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r2 rd" class="r2 r">options</span> = <b>null</b>)
+        {
+            <a href="../Shared/Argument.cs.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Shared/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r1 r">searchClient</span>, <b>nameof</b>(<span class="r1 r">searchClient</span>));
+            <a href="#7a558ac743b24d17" class="i property">SearchClient</a> = <span class="r1 r">searchClient</span>;
+ 
+            <span class="r2 r">options</span> ??= <b>new</b> <a href="SearchIndexingBufferedSenderOptions.cs.html#f508777539c2f3a5" class="t constructor">SearchIndexingBufferedSenderOptions</a>&lt;<span class="r0 r t">T</span>&gt;();
+            <a href="#452c31e5f59d9d5e" class="i property">KeyFieldAccessor</a> = <span class="r2 r">options</span>.<a href="SearchIndexingBufferedSenderOptions.cs.html#4efe7f28de3750ba" class="i property">KeyFieldAccessor</a>;
+            <a href="#74e91230c1f27a2a" class="i field">_publisher</a> = <b>new</b> <a href="SearchIndexingPublisher.cs.html#6d66ef7c4a264702" class="t constructor">SearchIndexingPublisher</a>&lt;<span class="r0 r t">T</span>&gt;(
+                <a href="#4c603ee25963f349" class="k">this</a>,
+                <span class="r2 r">options</span>.<a href="SearchIndexingBufferedSenderOptions.cs.html#0bd9d23f3452147e" class="i property">AutoFlush</a>,
+                <span class="r2 r">options</span>.<a href="SearchIndexingBufferedSenderOptions.cs.html#8df329740b2233d0" class="i property">AutoFlushInterval</a>,
+                <span class="r2 r">options</span>.<a href="SearchIndexingBufferedSenderOptions.cs.html#715abb394fdb5e12" class="i property">InitialBatchActionCount</a>,
+                <span class="r2 r">options</span>.<a href="SearchIndexingBufferedSenderOptions.cs.html#87a08ce59afefd25" class="i property">BatchPayloadSize</a>,
+                <span class="r2 r">options</span>.<a href="SearchIndexingBufferedSenderOptions.cs.html#26968dd215ad2ad5" class="i property">MaxRetries</a>,
+                <span class="r2 r">options</span>.<a href="SearchIndexingBufferedSenderOptions.cs.html#3b2d876781c75515" class="i property">RetryDelay</a>,
+                <span class="r2 r">options</span>.<a href="SearchIndexingBufferedSenderOptions.cs.html#323a7413745cfa86" class="i property">MaxRetryDelay</a>,
+                <span class="r2 r">options</span>.<a href="SearchIndexingBufferedSenderOptions.cs.html#6f45b1a46481ee50" class="i property">FlushCancellationToken</a>);
+        }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Dispose
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Flush any remaining work and clean up resources.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA1816</span> <span class="c">// Dispose methods should call SuppressFinalize</span>
+        <b>void</b> <a href="@1@netstandard/A.html#1f55292c3174123d" class="t t">IDisposable</a>.<a href="@1@netstandard/A.html#4e23fed29bd598fa" class="i method">Dispose</a>() =&gt;
+            <a href="#d88eb441f9bf6453" class="i method">DisposeAsync</a>(<span class="r3 r">async</span>: <b>false</b>).<a href="../Shared/TaskExtensions.cs.html#9a35b0afd931dc48" class="i method">EnsureCompleted</a>();
+        <span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">CA1816</span> <span class="c">// Dispose methods should call SuppressFinalize</span>
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Flush any remaining work and clean up resources.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A task that will complete when the object has finished disposing.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA1816</span> <span class="c">// Dispose methods should call SuppressFinalize</span>
+        <b>async</b> <span class="t t">ValueTask</span> <span class="t t">IAsyncDisposable</span>.<span class="i method">DisposeAsync</span>() =&gt;
+            <b>await</b> <a href="#d88eb441f9bf6453" class="i method">DisposeAsync</a>(<span class="r3 r">async</span>: <b>true</b>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">CA1816</span> <span class="c">// Dispose methods should call SuppressFinalize</span>
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Dispose the sender and flush any remaining indexing actions that</span>
+        <span class="c">///</span><span class="c"> haven&#39;t been sent yet.  This will block until everything&#39;s been</span>
+        <span class="c">///</span><span class="c"> sent.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">async</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Whether to call this sync or async.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A Task that will wait until we&#39;re disposed.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>internal async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="d88eb441f9bf6453" href="../R/d88eb441f9bf6453.html" target="n" data-glyph="74,1" class="i method">DisposeAsync</a>(<b>bool</b> <span id="r3 rd" class="r3 r">async</span>)
+        {
+            <b>if</b> (<a href="@1@netstandard/A.html#8792520ddc6dadcb" class="t t">Interlocked</a>.<a href="@1@netstandard/A.html#1e337a3aaaf240e4" class="i method">CompareExchange</a>(<b>ref</b> <a href="#413ae4098a55b26f" class="i field">_disposed</a>, 1, 0) == 0)
+            {
+                <b>await</b> <a href="#74e91230c1f27a2a" class="i field">_publisher</a>.<a href="Publisher.cs.html#d13355bf5a0c6b4e" class="i method">DisposeAsync</a>(<span class="r3 r">async</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Ensure the sender was properly disposed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        ~<a id="f1effd12a145cd5c" href="../R/../../0000000000.html" target="n" data-glyph="75,1" class="t method">SearchIndexingBufferedSender</a>()
+        {
+            <b>if</b> (<a href="#74e91230c1f27a2a" class="i field">_publisher</a>?.<a href="Publisher.cs.html#e905c0de8aa55041" class="i property">IndexingActionsCount</a> &gt; 0)
+            {
+                <b>try</b>
+                {
+                    <span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA1065</span> <span class="c">// Do not raise exceptions in unexpected locations</span>
+                    <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(
+                        <span class="s">$&quot;</span>{<b>nameof</b>(<a href="#4c603ee25963f349" class="t t">SearchIndexingBufferedSender</a>&lt;<span class="r0 r t">T</span>&gt;)}<span class="s"> has </span>{<a href="#74e91230c1f27a2a" class="i field">_publisher</a>.<a href="Publisher.cs.html#e905c0de8aa55041" class="i property">IndexingActionsCount</a>}<span class="s"> unsent indexing actions.</span><span class="s">&quot;</span>);
+                    <span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">CA1065</span> <span class="c">// Do not raise exceptions in unexpected locations</span>
+                }
+                <b>catch</b> (<a href="@1@netstandard/A.html#beac22dfca574cd4" class="t t">InvalidOperationException</a>)
+                {
+                }
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Ensure nobody&#39;s trying to use this after it&#39;s been disposed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="8436016eaea3eb81" href="../R/8436016eaea3eb81.html" target="n" data-glyph="76,1" class="i method">EnsureNotDisposed</a>()
+        {
+            <b>if</b> (<a href="#413ae4098a55b26f" class="i field">_disposed</a> &gt; 0)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#53515c848f859933" class="t constructor">ObjectDisposedException</a>(<b>nameof</b>(<a href="#4c603ee25963f349" class="t t">SearchIndexingBufferedSender</a>&lt;<span class="r0 r t">T</span>&gt;));
+            }
+        }
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span> Dispose
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Get Key Field
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Ensure we have a valid KeyFieldAccessor (and probe the type or</span>
+        <span class="c">///</span><span class="c"> service to find one).</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">async</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Whether to run sync or async.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The Cancellation token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A task that will complete after we&#39;ve checked.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="ba45529bbd119159" href="../R/ba45529bbd119159.html" target="n" data-glyph="76,1" class="i method">EnsureKeyFieldAccessorAsync</a>(<b>bool</b> <span id="r4 rd" class="r4 r">async</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r5 rd" class="r5 r">cancellationToken</span>)
+        {
+            <span class="c">// Skip initialization if we already have one</span>
+            <b>if</b> (<a href="#452c31e5f59d9d5e" class="i property">KeyFieldAccessor</a> != <b>null</b>) { <b>return</b>; }
+ 
+            <span class="c">// If we have multiple threads attempting to verify we have a key</span>
+            <span class="c">// field we want to minimize possible requests to the service for</span>
+            <span class="c">// its index.  We&#39;ll only assign the task if it&#39;s not null and</span>
+            <span class="c">// anyone who gets year later can wait on it with us.</span>
+            <a href="#0294c25b53ac840e" class="i field">_getKeyFieldAccessorTask</a> ??= <a href="#dc3e0e6403336fd7" class="i method">GetKeyFieldAccessorAsync</a>(<span class="r4 r">async</span>, <span class="r5 r">cancellationToken</span>);
+            <b>if</b> (<span class="r4 r">async</span>)
+            {
+                <b>await</b> <a href="#0294c25b53ac840e" class="i field">_getKeyFieldAccessorTask</a>.<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+            }
+            <b>else</b>
+            {
+                <span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">AZC0102</span> <span class="c">// Do not use GetAwaiter().GetResult().</span>
+                <span class="c">// We&#39;re potentially doing sync-over-async if somebody enters</span>
+                <span class="c">// on an async code path first and follows up from a sync code</span>
+                <span class="c">// path.</span>
+                <a href="#0294c25b53ac840e" class="i field">_getKeyFieldAccessorTask</a>.<a href="@1@netstandard/A.html#9865ec4fb8abca74" class="i method">GetAwaiter</a>().<a href="@1@netstandard/A.html#fac5be2731353aa8" class="i method">GetResult</a>();
+                <span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">AZC0102</span> <span class="c">// Do not use GetAwaiter().GetResult().</span>
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Get a function to access the key field of a search document.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">async</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Whether to run sync or async.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The cancellation token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A Task representing the operation.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="dc3e0e6403336fd7" href="../R/dc3e0e6403336fd7.html" target="n" data-glyph="76,1" class="i method">GetKeyFieldAccessorAsync</a>(<b>bool</b> <span id="r6 rd" class="r6 r">async</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r7 rd" class="r7 r">cancellationToken</span>)
+        {
+            <span class="c">// Case 1: The user provided an explicit accessor and we&#39;re done</span>
+            <b>if</b> (<a href="#452c31e5f59d9d5e" class="i property">KeyFieldAccessor</a> != <b>null</b>) { <b>return</b>; }
+ 
+            <span class="c">// Case 2: Infer the accessor from FieldBuilder</span>
+            <b>try</b>
+            {
+                <a href="../Indexes/FieldBuilder.cs.html#734e34bcf27e0426" class="t t">FieldBuilder</a> <span id="r8 rd" class="r8 r">builder</span> = <b>new</b> <a href="../Indexes/FieldBuilder.cs.html#1a4c560ad5a2ed3c" class="t constructor">FieldBuilder</a> { <a href="../Indexes/FieldBuilder.cs.html#885d85241025992c" class="i property">Serializer</a> = <a href="#7a558ac743b24d17" class="i property">SearchClient</a>.<a href="../SearchClient.cs.html#b894705794b9ac36" class="i property">Serializer</a> };
+                <a href="@1@netstandard/A.html#20343df0c96b629b" class="t t">IDictionary</a>&lt;<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="../P/300967c5b1d8637c.html#300967c5b1d8637c" class="t t">SearchField</a>&gt; <span id="r9 rd" class="r9 r">fields</span> = <span class="r8 r">builder</span>.<a href="../Indexes/FieldBuilder.cs.html#4f0d02ec8ca932f1" class="i method">BuildMapping</a>(<b>typeof</b>(<span class="r0 r t">T</span>));
+                <a href="@1@netstandard/A.html#8585965bb176a426" class="t t">KeyValuePair</a>&lt;<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="../P/300967c5b1d8637c.html#300967c5b1d8637c" class="t t">SearchField</a>&gt; <span id="r10 rd" class="r10 r">keyField</span> = <span class="r9 r">fields</span>.<a href="@1@netstandard/A.html#b7e5965cab68b1cf" class="i method">FirstOrDefault</a>(<span id="r11 rd" class="r11 r">pair</span> =&gt; <span class="r11 r">pair</span>.<a href="@1@netstandard/A.html#38c0e86cc4b30170" class="i property">Value</a>.<a href="../Indexes/Models/SearchField.cs.html#8d0148ce53055a06" class="i property">IsKey</a> == <b>true</b>);
+                <b>if</b> (!<span class="r10 r">keyField</span>.<a href="@1@netstandard/A.html#d8b9b308e644b983" class="i method">Equals</a>(<b>default</b>(<a href="@1@netstandard/A.html#8585965bb176a426" class="t t">KeyValuePair</a>&lt;<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="../P/300967c5b1d8637c.html#300967c5b1d8637c" class="t t">SearchField</a>&gt;)))
+                {
+                    <a href="#452c31e5f59d9d5e" class="i property">KeyFieldAccessor</a> = <a href="#982964c4d73d6688" class="i method">CompileAccessor</a>(<span class="r10 r">keyField</span>.<a href="@1@netstandard/A.html#f9d1c04feb1af032" class="i property">Key</a>);
+                    <b>return</b>;
+                }
+            }
+            <b>catch</b>
+            {
+                <span class="c">// Ignore any errors because this type might not have been</span>
+                <span class="c">// designed with FieldBuilder in mind</span>
+            }
+ 
+            <span class="c">// Case 3: Fetch the index to find the key</span>
+            <a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r12 rd" class="r12 r">failure</span> = <b>null</b>;
+            <b>try</b>
+            {
+                <span class="c">// Call the service to find the name of the key</span>
+                <a href="../Indexes/SearchIndexClient.cs.html#a345935bc4c27d00" class="t t">SearchIndexClient</a> <span id="r13 rd" class="r13 r">indexClient</span> = <a href="#7a558ac743b24d17" class="i property">SearchClient</a>.<a href="../SearchClient.cs.html#6ec35aeae17d5085" class="i method">GetSearchIndexClient</a>();
+                <a href="../P/4ddfbec02f9471fa.html#4ddfbec02f9471fa" class="t t">SearchIndex</a> <span id="r14 rd" class="r14 r">index</span> = <span class="r6 r">async</span> ?
+                    <b>await</b> <span class="r13 r">indexClient</span>.<a href="../Indexes/SearchIndexClient.cs.html#d1d6ee49bf9e4e58" class="i method">GetIndexAsync</a>(<a href="#428eb6919883285f" class="i property">IndexName</a>, <span class="r7 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>) :
+                    <span class="r13 r">indexClient</span>.<a href="../Indexes/SearchIndexClient.cs.html#d6a64e921614cb41" class="i method">GetIndex</a>(<a href="#428eb6919883285f" class="i property">IndexName</a>, <span class="r7 r">cancellationToken</span>);
+                <a href="../P/300967c5b1d8637c.html#300967c5b1d8637c" class="t t">SearchField</a> <span id="r15 rd" class="r15 r">keyField</span> = <span class="r14 r">index</span>.<a href="../Indexes/Models/SearchIndex.cs.html#c94063e669ad413a" class="i property">Fields</a>.<a href="@1@netstandard/A.html#226beadd4e521229" class="i method">Single</a>(<span id="r16 rd" class="r16 r">f</span> =&gt; <span class="r16 r">f</span>.<a href="../Indexes/Models/SearchField.cs.html#8d0148ce53055a06" class="i property">IsKey</a> == <b>true</b>);
+                <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r17 rd" class="r17 r">key</span> = <span class="r15 r">keyField</span>.<a href="../Indexes/Models/SearchField.cs.html#71c220096d7527bc" class="i property">Name</a>;
+ 
+                <b>if</b> (<b>typeof</b>(<span class="r0 r t">T</span>).<a href="@1@netstandard/A.html#ba0cffea035fe210" class="i method">IsAssignableFrom</a>(<b>typeof</b>(<a href="../P/5b8083eede53810d.html#5b8083eede53810d" class="t t">SearchDocument</a>)))
+                {
+                    <span class="c">// Case 3a: If it&#39;s a dynamic SearchDocument, lookup</span>
+                    <span class="c">// the name of the key in the dictionary</span>
+                    <a href="#452c31e5f59d9d5e" class="i property">KeyFieldAccessor</a> = (<span class="r0 r t">T</span> <span id="r18 rd" class="r18 r">doc</span>) =&gt; (<span class="r18 r">doc</span> <b>as</b> <a href="../P/5b8083eede53810d.html#5b8083eede53810d" class="t t">SearchDocument</a>)?.<a href="../SearchDocument/SearchDocument.cs.html#7a4813530594f224" class="i method">GetString</a>(<span class="r17 r">key</span>);
+                    <b>return</b>;
+                }
+                <b>else</b>
+                {
+                    <span class="c">// Case 3b: We&#39;ll see if there&#39;s a property with the</span>
+                    <span class="c">// same name and use that as the accessor</span>
+                    <b>if</b> (<b>typeof</b>(<span class="r0 r t">T</span>).<a href="@1@netstandard/A.html#fabf683030a6ad8d" class="i method">GetProperty</a>(<span class="r17 r">key</span>) != <b>null</b> ||
+                        <b>typeof</b>(<span class="r0 r t">T</span>).<a href="@1@netstandard/A.html#31ecddf2e1a221ae" class="i method">GetField</a>(<span class="r17 r">key</span>) != <b>null</b>)
+                    {
+                        <a href="#452c31e5f59d9d5e" class="i property">KeyFieldAccessor</a> = <a href="#982964c4d73d6688" class="i method">CompileAccessor</a>(<span class="r17 r">key</span>);
+                        <b>return</b>;
+                    }
+                }
+            }
+            <b>catch</b> (<a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r19 rd" class="r19 r">ex</span>)
+            {
+                <span class="c">// We&#39;ll provide any exceptions as a hint because it could</span>
+                <span class="c">// be something like using the wrong API Key type when</span>
+                <span class="c">// moving from SearchClient up to SearchIndexClient that</span>
+                <span class="c">// potentially could be addressed if the user really wanted</span>
+                <span class="r12 r">failure</span> = <span class="r19 r">ex</span>;
+            }
+ 
+            <span class="c">// Case 4: Throw and tell the user to provide an explicit accessor.</span>
+            <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#34e9967ccd840525" class="t constructor">InvalidOperationException</a>(
+                <span class="s">$&quot;</span><span class="s">Failed to discover the Key field of document type </span>{<b>typeof</b>(<span class="r0 r t">T</span>).<a href="@1@netstandard/A.html#aa4f112f79364b6e" class="i property">Name</a>}<span class="s"> for Azure Cognitive Search index </span>{<a href="#428eb6919883285f" class="i property">IndexName</a>}<span class="s">.  </span><span class="s">&quot;</span> +
+                <span class="s">$&quot;</span><span class="s">Please set </span>{<b>typeof</b>(<a href="SearchIndexingBufferedSenderOptions.cs.html#f508777539c2f3a5" class="t t">SearchIndexingBufferedSenderOptions</a>&lt;<span class="r0 r t">T</span>&gt;).<a href="@1@netstandard/A.html#aa4f112f79364b6e" class="i property">Name</a>}<span class="s">.</span>{<b>nameof</b>(<a href="SearchIndexingBufferedSenderOptions.cs.html#f508777539c2f3a5" class="t t">SearchIndexingBufferedSenderOptions</a>&lt;<span class="r0 r t">T</span>&gt;.<a href="SearchIndexingBufferedSenderOptions.cs.html#4efe7f28de3750ba" class="i property">KeyFieldAccessor</a>)}<span class="s"> explicitly.</span><span class="s">&quot;</span>,
+                <span class="r12 r">failure</span>);
+ 
+            <span class="c">// Build an accessor for a property named key on type T.  Compiling</span>
+            <span class="c">// is kind of heavyweight, but we&#39;ll be calling this so many times</span>
+            <span class="c">// it&#39;s worth it.</span>
+            <b>static</b> <a href="@1@netstandard/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<span class="r0 r t">T</span>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="982964c4d73d6688" href="../R/982964c4d73d6688.html" target="n" data-glyph="76,2" class="i method">CompileAccessor</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r20 rd" class="r20 r">key</span>)
+            {
+                <a href="@1@netstandard/A.html#f4308bded2e9d66a" class="t t">ParameterExpression</a> <span id="r21 rd" class="r21 r">param</span> = <a href="@1@netstandard/A.html#39a9b098482b765d" class="t t">Expression</a>.<a href="@1@netstandard/A.html#f33e409059e36577" class="i method">Parameter</a>(<b>typeof</b>(<span class="r0 r t">T</span>), <span class="s">&quot;doc&quot;</span>);
+                <a href="@1@netstandard/A.html#51d6d604b8c53dc8" class="t t">Expression</a>&lt;<a href="@1@netstandard/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<span class="r0 r t">T</span>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>&gt;&gt; <span id="r22 rd" class="r22 r">accessor</span> = <a href="@1@netstandard/A.html#39a9b098482b765d" class="t t">Expression</a>.<a href="@1@netstandard/A.html#23094e18bae0345d" class="i method">Lambda</a>&lt;<a href="@1@netstandard/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<span class="r0 r t">T</span>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>&gt;&gt;(
+                    <a href="@1@netstandard/A.html#39a9b098482b765d" class="t t">Expression</a>.<a href="@1@netstandard/A.html#a5141399255a5b10" class="i method">PropertyOrField</a>(<span class="r21 r">param</span>, <span class="r20 r">key</span>),
+                    <span class="r21 r">param</span>);
+                <b>return</b> <span class="r22 r">accessor</span>.<a href="@1@netstandard/A.html#9d4912c02133de4e" class="i method">Compile</a>();
+            }
+        }
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span> Get Key Field
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Notifications
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Raise the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#8f881702e0227c97" class="i">ActionAddedAsync</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> event.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r23 r">action</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The action being added.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r24 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Cancellation token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A task that will not complete until every handler does.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>internal async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="72c94e6a721e8f50" href="../R/72c94e6a721e8f50.html" target="n" data-glyph="74,1" class="i method">RaiseActionAddedAsync</a>(
+            <a href="../Models/IndexDocumentsAction.cs.html#da0a147b704a3aa4" class="t t">IndexDocumentsAction</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r23 rd" class="r23 r">action</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r24 rd" class="r24 r">cancellationToken</span>)
+        {
+            <b>try</b>
+            {
+                <b>await</b> <a href="#8f881702e0227c97" class="i">ActionAddedAsync</a>
+                    .<a href="AsyncEventExtensions.cs.html#e99d7dd245a8947c" class="i method">RaiseAsync</a>(<span class="r23 r">action</span>, <span class="r24 r">cancellationToken</span>)
+                    .<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+            }
+            <b>catch</b>
+            {
+                <span class="c">// TODO: #16706 - Log any exceptions raised from async events</span>
+                <span class="c">// we can&#39;t let bubble out because they&#39;d tear down the process</span>
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Raise the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#928943251469532c" class="i">ActionSentAsync</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> event.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r25 r">action</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The action being added.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r26 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Cancellation token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A task that will not complete until every handler does.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>internal async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="8382211e16d687e5" href="../R/8382211e16d687e5.html" target="n" data-glyph="74,1" class="i method">RaiseActionSentAsync</a>(
+            <a href="../Models/IndexDocumentsAction.cs.html#da0a147b704a3aa4" class="t t">IndexDocumentsAction</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r25 rd" class="r25 r">action</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r26 rd" class="r26 r">cancellationToken</span>)
+        {
+            <b>try</b>
+            {
+                <b>await</b> <a href="#928943251469532c" class="i">ActionSentAsync</a>
+                    .<a href="AsyncEventExtensions.cs.html#e99d7dd245a8947c" class="i method">RaiseAsync</a>(<span class="r25 r">action</span>, <span class="r26 r">cancellationToken</span>)
+                    .<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+            }
+            <b>catch</b>
+            {
+                <span class="c">// TODO: #16706 - Log any exceptions raised from async events</span>
+                <span class="c">// we can&#39;t let bubble out because they&#39;d tear down the process</span>
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Raise the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#82d4c3a83b2e41ce" class="i">ActionCompletedAsync</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> event.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r27 r">action</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The action being added.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r28 r">result</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The result of indexing.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r29 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Cancellation token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A task that will not complete until every handler does.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>internal async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="8998b5d8e334a703" href="../R/8998b5d8e334a703.html" target="n" data-glyph="74,1" class="i method">RaiseActionCompletedAsync</a>(
+            <a href="../Models/IndexDocumentsAction.cs.html#da0a147b704a3aa4" class="t t">IndexDocumentsAction</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r27 rd" class="r27 r">action</span>,
+            <a href="../P/e09ca5837453d57c.html#e09ca5837453d57c" class="t t">IndexingResult</a> <span id="r28 rd" class="r28 r">result</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r29 rd" class="r29 r">cancellationToken</span>)
+        {
+            <b>try</b>
+            {
+                <b>await</b> <a href="#82d4c3a83b2e41ce" class="i">ActionCompletedAsync</a>
+                    .<a href="AsyncEventExtensions.cs.html#366cc33cb7b82d5b" class="i method">RaiseAsync</a>(<span class="r27 r">action</span>, <span class="r28 r">result</span>, <span class="r29 r">cancellationToken</span>)
+                    .<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+            }
+            <b>catch</b>
+            {
+                <span class="c">// TODO: #16706 - Log any exceptions raised from async events</span>
+                <span class="c">// we can&#39;t let bubble out because they&#39;d tear down the process</span>
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Raise the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#6bd21377ffe2fd68" class="i">ActionFailedAsync</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> event.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r30 r">action</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The action being added.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r31 r">result</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The result of indexing.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r32 r">exception</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An exception that was thrown.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r33 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Cancellation token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A task that will not complete until every handler does.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>internal async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="c7f185bd4bd9b0e9" href="../R/c7f185bd4bd9b0e9.html" target="n" data-glyph="74,1" class="i method">RaiseActionFailedAsync</a>(
+            <a href="../Models/IndexDocumentsAction.cs.html#da0a147b704a3aa4" class="t t">IndexDocumentsAction</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r30 rd" class="r30 r">action</span>,
+            <a href="../P/e09ca5837453d57c.html#e09ca5837453d57c" class="t t">IndexingResult</a> <span id="r31 rd" class="r31 r">result</span>,
+            <a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r32 rd" class="r32 r">exception</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r33 rd" class="r33 r">cancellationToken</span>)
+        {
+            <b>try</b>
+            {
+                <b>await</b> <a href="#6bd21377ffe2fd68" class="i">ActionFailedAsync</a>
+                    .<a href="AsyncEventExtensions.cs.html#9b34632d846c0d2b" class="i method">RaiseAsync</a>(<span class="r30 r">action</span>, <span class="r31 r">result</span>, <span class="r32 r">exception</span>, <span class="r33 r">cancellationToken</span>)
+                    .<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+            }
+            <b>catch</b>
+            {
+                <span class="c">// TODO: #16706 - Log any exceptions raised from async events</span>
+                <span class="c">// we can&#39;t let bubble out because they&#39;d tear down the process</span>
+            }
+        }
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Index Documents
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Send documents to the publisher.  All the public APIs run through</span>
+        <span class="c">///</span><span class="c"> this method.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r34 r">batch</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The batch to send.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r35 r">async</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Whether to run sync or async.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r36 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to propagate notifications</span>
+        <span class="c">///</span><span class="c"> that the operation should be canceled.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A Task that will complete after the batch is added.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="3cf473284ec59216" href="../R/3cf473284ec59216.html" target="n" data-glyph="76,1" class="i method">AddIndexingActionsInternal</a>(
+            <a href="../Models/IndexDocumentsBatch.cs.html#0534ae1a265b0c36" class="t t">IndexDocumentsBatch</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r34 rd" class="r34 r">batch</span>,
+            <b>bool</b> <span id="r35 rd" class="r35 r">async</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r36 rd" class="r36 r">cancellationToken</span>)
+        {
+            <a href="#8436016eaea3eb81" class="i method">EnsureNotDisposed</a>();
+            <b>if</b> (<span class="r34 r">batch</span>?.<a href="../Models/IndexDocumentsBatch.cs.html#ad3f6234953b3735" class="i property">Actions</a> != <b>null</b>)
+            {
+                <b>await</b> <a href="#ba45529bbd119159" class="i method">EnsureKeyFieldAccessorAsync</a>(<span class="r35 r">async</span>, <span class="r36 r">cancellationToken</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+                <b>await</b> <a href="#74e91230c1f27a2a" class="i field">_publisher</a>.<a href="Publisher.cs.html#0d281465f663f676" class="i method">AddDocumentsAsync</a>(
+                    <span class="r34 r">batch</span>.<a href="../Models/IndexDocumentsBatch.cs.html#ad3f6234953b3735" class="i property">Actions</a>,
+                    <span class="r35 r">async</span>,
+                    <span class="r36 r">cancellationToken</span>)
+                    .<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Adds a batch of upload, merge, and/or delete actions to eventually</span>
+        <span class="c">///</span><span class="c"> send to the search index.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r37 r">batch</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The batch of document index actions.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r38 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to propagate notifications</span>
+        <span class="c">///</span><span class="c"> that the operation should be canceled.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public virtual void</b> <a id="03f54b691d453984" href="../R/03f54b691d453984.html" target="n" data-glyph="72,1" class="i method">IndexDocuments</a>(
+            <a href="../Models/IndexDocumentsBatch.cs.html#0534ae1a265b0c36" class="t t">IndexDocumentsBatch</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r37 rd" class="r37 r">batch</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r38 rd" class="r38 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <a href="#3cf473284ec59216" class="i method">AddIndexingActionsInternal</a>(<span class="r37 r">batch</span>, <span class="r35 r">async</span>: <b>false</b>, <span class="r38 r">cancellationToken</span>).<a href="../Shared/TaskExtensions.cs.html#9a35b0afd931dc48" class="i method">EnsureCompleted</a>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Adds a batch of upload, merge, and/or delete actions to eventually</span>
+        <span class="c">///</span><span class="c"> send to the search index.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r39 r">batch</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The batch of document index actions.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r40 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to propagate notifications</span>
+        <span class="c">///</span><span class="c"> that the operation should be canceled.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A task that completes when the indexing actions have been added but</span>
+        <span class="c">///</span><span class="c"> not yet sent.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public virtual async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="d04daf71a809ad73" href="../R/d04daf71a809ad73.html" target="n" data-glyph="72,1" class="i method">IndexDocumentsAsync</a>(
+            <a href="../Models/IndexDocumentsBatch.cs.html#0534ae1a265b0c36" class="t t">IndexDocumentsBatch</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r39 rd" class="r39 r">batch</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r40 rd" class="r40 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <b>await</b> <a href="#3cf473284ec59216" class="i method">AddIndexingActionsInternal</a>(<span class="r39 r">batch</span>, <span class="r35 r">async</span>: <b>true</b>, <span class="r40 r">cancellationToken</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Adds a batch of upload actions to eventually send to the search</span>
+        <span class="c">///</span><span class="c"> index.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r41 r">documents</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The documents to upload.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r42 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to propagate notifications</span>
+        <span class="c">///</span><span class="c"> that the operation should be canceled.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public virtual void</b> <a id="28cc824d02e40579" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">UploadDocuments</a>(
+            <a href="@1@netstandard/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r41 rd" class="r41 r">documents</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r42 rd" class="r42 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <a href="#03f54b691d453984" class="i method">IndexDocuments</a>(
+                <a href="../Models/IndexDocumentsBatch.cs.html#929ca9fa6d8c4027" class="t t">IndexDocumentsBatch</a>.<a href="../Models/IndexDocumentsBatch.cs.html#e6cde39f818940b1" class="i method">Upload</a>&lt;<span class="r0 r t">T</span>&gt;(<span class="r41 r">documents</span>),
+                <span class="r42 r">cancellationToken</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Adds a batch of upload actions to eventually send to the search</span>
+        <span class="c">///</span><span class="c"> index.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r43 r">documents</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The documents to upload.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r44 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to propagate notifications</span>
+        <span class="c">///</span><span class="c"> that the operation should be canceled.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A task that completes when the indexing actions have been added but</span>
+        <span class="c">///</span><span class="c"> not yet sent.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public virtual async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="9daf17065acb2871" href="../R/9daf17065acb2871.html" target="n" data-glyph="72,1" class="i method">UploadDocumentsAsync</a>(
+            <a href="@1@netstandard/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r43 rd" class="r43 r">documents</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r44 rd" class="r44 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <b>await</b> <a href="#d04daf71a809ad73" class="i method">IndexDocumentsAsync</a>(
+                <a href="../Models/IndexDocumentsBatch.cs.html#929ca9fa6d8c4027" class="t t">IndexDocumentsBatch</a>.<a href="../Models/IndexDocumentsBatch.cs.html#e6cde39f818940b1" class="i method">Upload</a>&lt;<span class="r0 r t">T</span>&gt;(<span class="r43 r">documents</span>),
+                <span class="r44 r">cancellationToken</span>)
+                .<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Adds a batch of merge actions to eventually send to the search</span>
+        <span class="c">///</span><span class="c"> index.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r45 r">documents</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The documents to merge.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r46 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to propagate notifications</span>
+        <span class="c">///</span><span class="c"> that the operation should be canceled.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public virtual void</b> <a id="7301b044b6725c50" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">MergeDocuments</a>(
+            <a href="@1@netstandard/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r45 rd" class="r45 r">documents</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r46 rd" class="r46 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <a href="#03f54b691d453984" class="i method">IndexDocuments</a>(
+                <a href="../Models/IndexDocumentsBatch.cs.html#929ca9fa6d8c4027" class="t t">IndexDocumentsBatch</a>.<a href="../Models/IndexDocumentsBatch.cs.html#7debba0587f50f0a" class="i method">Merge</a>&lt;<span class="r0 r t">T</span>&gt;(<span class="r45 r">documents</span>),
+                <span class="r46 r">cancellationToken</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Adds a batch of merge actions to eventually send to the search</span>
+        <span class="c">///</span><span class="c"> index.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r47 r">documents</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The documents to merge.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r48 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to propagate notifications</span>
+        <span class="c">///</span><span class="c"> that the operation should be canceled.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A task that completes when the indexing actions have been added but</span>
+        <span class="c">///</span><span class="c"> not yet sent.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public virtual async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="2d0d31b1d28e8a30" href="../R/2d0d31b1d28e8a30.html" target="n" data-glyph="72,1" class="i method">MergeDocumentsAsync</a>(
+            <a href="@1@netstandard/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r47 rd" class="r47 r">documents</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r48 rd" class="r48 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <b>await</b> <a href="#d04daf71a809ad73" class="i method">IndexDocumentsAsync</a>(
+                <a href="../Models/IndexDocumentsBatch.cs.html#929ca9fa6d8c4027" class="t t">IndexDocumentsBatch</a>.<a href="../Models/IndexDocumentsBatch.cs.html#7debba0587f50f0a" class="i method">Merge</a>&lt;<span class="r0 r t">T</span>&gt;(<span class="r47 r">documents</span>),
+                <span class="r48 r">cancellationToken</span>)
+                .<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Adds a batch of merge or upload actions to eventually send to the</span>
+        <span class="c">///</span><span class="c"> search index.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r49 r">documents</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The documents to merge or upload.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r50 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to propagate notifications</span>
+        <span class="c">///</span><span class="c"> that the operation should be canceled.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public virtual void</b> <a id="bc81b9d93378bae9" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">MergeOrUploadDocuments</a>(
+            <a href="@1@netstandard/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r49 rd" class="r49 r">documents</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r50 rd" class="r50 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <a href="#03f54b691d453984" class="i method">IndexDocuments</a>(
+                <a href="../Models/IndexDocumentsBatch.cs.html#929ca9fa6d8c4027" class="t t">IndexDocumentsBatch</a>.<a href="../Models/IndexDocumentsBatch.cs.html#fc1323650bc4f9fa" class="i method">MergeOrUpload</a>&lt;<span class="r0 r t">T</span>&gt;(<span class="r49 r">documents</span>),
+                <span class="r50 r">cancellationToken</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Adds a batch of merge or upload actions to eventually send to the</span>
+        <span class="c">///</span><span class="c"> search index.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r51 r">documents</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The documents to merge or upload.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r52 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to propagate notifications</span>
+        <span class="c">///</span><span class="c"> that the operation should be canceled.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A task that completes when the indexing actions have been added but</span>
+        <span class="c">///</span><span class="c"> not yet sent.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public virtual async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="e054f3689bbd390b" href="../R/e054f3689bbd390b.html" target="n" data-glyph="72,1" class="i method">MergeOrUploadDocumentsAsync</a>(
+            <a href="@1@netstandard/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r51 rd" class="r51 r">documents</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r52 rd" class="r52 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <b>await</b> <a href="#d04daf71a809ad73" class="i method">IndexDocumentsAsync</a>(
+                <a href="../Models/IndexDocumentsBatch.cs.html#929ca9fa6d8c4027" class="t t">IndexDocumentsBatch</a>.<a href="../Models/IndexDocumentsBatch.cs.html#fc1323650bc4f9fa" class="i method">MergeOrUpload</a>&lt;<span class="r0 r t">T</span>&gt;(<span class="r51 r">documents</span>),
+                <span class="r52 r">cancellationToken</span>)
+                .<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Adds a batch of delete actions to eventually send to the search</span>
+        <span class="c">///</span><span class="c"> index.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r53 r">documents</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The documents to delete.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r54 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to propagate notifications</span>
+        <span class="c">///</span><span class="c"> that the operation should be canceled.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public virtual void</b> <a id="3a278bd5dfea93d4" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">DeleteDocuments</a>(
+            <a href="@1@netstandard/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r53 rd" class="r53 r">documents</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r54 rd" class="r54 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <a href="#03f54b691d453984" class="i method">IndexDocuments</a>(
+                <a href="../Models/IndexDocumentsBatch.cs.html#929ca9fa6d8c4027" class="t t">IndexDocumentsBatch</a>.<a href="../Models/IndexDocumentsBatch.cs.html#a8abc12aee385658" class="i method">Delete</a>&lt;<span class="r0 r t">T</span>&gt;(<span class="r53 r">documents</span>),
+                <span class="r54 r">cancellationToken</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Adds a batch of delete actions to eventually send to the search</span>
+        <span class="c">///</span><span class="c"> index.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r55 r">documents</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The documents to delete.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r56 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to propagate notifications</span>
+        <span class="c">///</span><span class="c"> that the operation should be canceled.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A task that completes when the indexing actions have been added but</span>
+        <span class="c">///</span><span class="c"> not yet sent.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public virtual async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="302bb82da30a7e83" href="../R/302bb82da30a7e83.html" target="n" data-glyph="72,1" class="i method">DeleteDocumentsAsync</a>(
+            <a href="@1@netstandard/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r55 rd" class="r55 r">documents</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r56 rd" class="r56 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <b>await</b> <a href="#d04daf71a809ad73" class="i method">IndexDocumentsAsync</a>(
+                <a href="../Models/IndexDocumentsBatch.cs.html#929ca9fa6d8c4027" class="t t">IndexDocumentsBatch</a>.<a href="../Models/IndexDocumentsBatch.cs.html#a8abc12aee385658" class="i method">Delete</a>&lt;<span class="r0 r t">T</span>&gt;(<span class="r55 r">documents</span>),
+                <span class="r56 r">cancellationToken</span>)
+                .<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span> Index Documents
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Flush
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Flush any pending indexing actions.  This will wait until</span>
+        <span class="c">///</span><span class="c"> everything has been sent before returning.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r57 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to propagate notifications</span>
+        <span class="c">///</span><span class="c"> that the operation should be canceled.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public void</b> <a id="8cccb652192dcc8c" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Flush</a>(<a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r57 rd" class="r57 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <a href="#74e91230c1f27a2a" class="i field">_publisher</a>.<a href="Publisher.cs.html#8cc1e8c523876a98" class="i method">FlushAsync</a>(<span class="r58 r">async</span>: <b>false</b>, <span class="r57 r">cancellationToken</span>).<a href="../Shared/TaskExtensions.cs.html#9a35b0afd931dc48" class="i method">EnsureCompleted</a>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Flush any pending indexing actions.  This will wait until</span>
+        <span class="c">///</span><span class="c"> everything has been sent before returning.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r59 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to propagate notifications</span>
+        <span class="c">///</span><span class="c"> that the operation should be canceled.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A Task that will complete after flushing.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="3392200aa375b8ce" href="../R/3392200aa375b8ce.html" target="n" data-glyph="72,1" class="i method">FlushAsync</a>(<a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r59 rd" class="r59 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <b>await</b> <a href="#74e91230c1f27a2a" class="i field">_publisher</a>.<a href="Publisher.cs.html#8cc1e8c523876a98" class="i method">FlushAsync</a>(<span class="r58 r">async</span>: <b>true</b>, <span class="r59 r">cancellationToken</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span> Flush
+    }
+}
+</pre></td></tr></table></div></body></html>

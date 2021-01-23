@@ -1,0 +1,192 @@
+﻿<!DOCTYPE html>
+<html><head><title>VisualStudioAccessTokenProvider.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(183);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.Services.AppAuthentication/TokenProviders/VisualStudioAccessTokenProvider.cs" target="_top">TokenProviders\VisualStudioAccessTokenProvider.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.Services.AppAuthentication" target="_top">Azure.Services.AppAuthentication\Microsoft.Azure.Services.AppAuthentication.csproj</a> (Microsoft.Azure.Services.AppAuthentication)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Services</span>.<span class="i n">AppAuthentication</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Gets a token using Visual Studio key chain for local development scenarios. </span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="e0c173e6f2d1c26e" href="../R/e0c173e6f2d1c26e.html" target="n" data-glyph="2,0" class="t t">VisualStudioAccessTokenProvider</a> : <a href="NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="t t">NonInteractiveAzureServiceTokenProviderBase</a>
+    {
+        <span class="c">// Represents the token provider file, which has information about executable to call to get token.</span>
+        <b>private</b> <a href="../VisualStudioTokenProviderFile.cs.html#b1bc989ab357078f" class="t t">VisualStudioTokenProviderFile</a> <a id="590600fe7f39e561" href="../R/590600fe7f39e561.html" target="n" data-glyph="46,1" class="i field">_visualStudioTokenProviderFile</a>;
+ 
+        <span class="c">// Allows for unit testing, by mocking IProcessManager or using non-default file path for token provider file</span>
+        <b>private readonly</b> <a href="../Clients/IProcessManager.cs.html#665e2360e5cab16f" class="t t">IProcessManager</a> <a id="4e6e510327dd543e" href="../R/4e6e510327dd543e.html" target="n" data-glyph="46,1" class="i field">_processManager</a>;
+ 
+        <b>private const string</b> <a id="cbc76d072725ab03" href="../R/cbc76d072725ab03.html" target="n" data-glyph="10,1" class="i field">ResourceArgumentName</a> = <span class="s">&quot;--resource&quot;</span>;
+        <b>private const string</b> <a id="f17861f7acdce04d" href="../R/f17861f7acdce04d.html" target="n" data-glyph="10,1" class="i field">TenantArgumentName</a> = <span class="s">&quot;--tenant&quot;</span>;
+        <b>private const string</b> <a id="52fba8c82cb4ef02" href="../R/52fba8c82cb4ef02.html" target="n" data-glyph="10,1" class="i field">LocalAppDataPathEnv</a> = <span class="s">&quot;LOCALAPPDATA&quot;</span>;
+        <b>private const string</b> <a id="5896088409ec50d0" href="../R/5896088409ec50d0.html" target="n" data-glyph="10,1" class="i field">NoAppDataEnvironmentVariableError</a> = <span class="s">&quot;Environment variable LOCALAPPDATA not set.&quot;</span>;
+        <b>private const string</b> <a id="ebec0c4dcb2f74b1" href="../R/ebec0c4dcb2f74b1.html" target="n" data-glyph="10,1" class="i field">TokenProviderFilePath</a> = <span class="s">&quot;.IdentityService\\AzureServiceAuth\\tokenprovider.json&quot;</span>;
+ 
+        <b>internal const string</b> <a id="98b084a689e36e70" href="../R/98b084a689e36e70.html" target="n" data-glyph="8,1" class="i field">TokenProviderGenericError</a> = <span class="s">&quot;Exception for Visual Studio token provider&quot;</span>;
+        <b>internal const string</b> <a id="e1cbfcdadbff564b" href="../R/e1cbfcdadbff564b.html" target="n" data-glyph="8,1" class="i field">TokenProviderFileNotFound</a> = <span class="s">&quot;Visual Studio token provider file not found at&quot;</span>;
+        <b>internal const string</b> <a id="40d7e8f98a2b4dad" href="../R/40d7e8f98a2b4dad.html" target="n" data-glyph="8,1" class="i field">TokenProvidersNotFound</a> = <span class="s">&quot;No valid Visual Studio token providers were found in the Visual Studio token provider file&quot;</span>;
+ 
+        <b>internal</b> <a id="5a2bb68d9d598234" href="../R/5a2bb68d9d598234.html" target="n" data-glyph="74,1" class="t constructor">VisualStudioAccessTokenProvider</a>(<a href="../Clients/IProcessManager.cs.html#665e2360e5cab16f" class="t t">IProcessManager</a> <span id="r0 rd" class="r0 r">processManager</span>, <a href="../VisualStudioTokenProviderFile.cs.html#b1bc989ab357078f" class="t t">VisualStudioTokenProviderFile</a> <span id="r1 rd" class="r1 r">visualStudioTokenProviderFile</span> = <b>null</b>)
+        {
+            <a href="#590600fe7f39e561" class="i field">_visualStudioTokenProviderFile</a> = <span class="r1 r">visualStudioTokenProviderFile</span>;
+            <a href="#4e6e510327dd543e" class="i field">_processManager</a> = <span class="r0 r">processManager</span>;
+            <a href="NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a> = <b>new</b> <a href="../Principal.cs.html#ee98ea95591837a0" class="t constructor">Principal</a> { <a href="../Principal.cs.html#d9e4b09403dc585a" class="i field">Type</a> = <span class="s">&quot;User&quot;</span> };
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the token provider file from user&#39;s local appdata folder.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private</b> <a href="../VisualStudioTokenProviderFile.cs.html#b1bc989ab357078f" class="t t">VisualStudioTokenProviderFile</a> <a id="a4f47fce93de94e1" href="../R/a4f47fce93de94e1.html" target="n" data-glyph="76,1" class="i method">GetTokenProviderFile</a>()
+        {
+            <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<a href="../Helpers/EnvironmentHelper.cs.html#bf463f028e93a98e" class="t t">EnvironmentHelper</a>.<a href="../Helpers/EnvironmentHelper.cs.html#396b4b5d7cfcb4a0" class="i method">GetEnvironmentVariable</a>(<a href="#52fba8c82cb4ef02" class="i field">LocalAppDataPathEnv</a>)))
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#df2d82d91ca29e40" class="t constructor">Exception</a>(<a href="#5896088409ec50d0" class="i field">NoAppDataEnvironmentVariableError</a>);
+            }
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r2 rd" class="r2 r">tokenProviderPath</span> = <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#2d7263f86a526264" class="i method">Combine</a>(<a href="../Helpers/EnvironmentHelper.cs.html#bf463f028e93a98e" class="t t">EnvironmentHelper</a>.<a href="../Helpers/EnvironmentHelper.cs.html#396b4b5d7cfcb4a0" class="i method">GetEnvironmentVariable</a>(<a href="#52fba8c82cb4ef02" class="i field">LocalAppDataPathEnv</a>),
+                <a href="#ebec0c4dcb2f74b1" class="i field">TokenProviderFilePath</a>);
+ 
+            <b>if</b> (!<a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#3360368484a9f131" class="i method">Exists</a>(<span class="r2 r">tokenProviderPath</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#df2d82d91ca29e40" class="t constructor">Exception</a>(<span class="s">$&quot;</span>{<a href="#e1cbfcdadbff564b" class="i field">TokenProviderFileNotFound</a>}<span class="s"> \&quot;</span>{<span class="r2 r">tokenProviderPath</span>}\&quot;<span class="s">&quot;</span>);
+            }
+ 
+            <b>return</b> <a href="../VisualStudioTokenProviderFile.cs.html#b1bc989ab357078f" class="t t">VisualStudioTokenProviderFile</a>.<a href="../VisualStudioTokenProviderFile.cs.html#537ad366e555acfb" class="i method">Load</a>(<span class="r2 r">tokenProviderPath</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets a list of token provider executables to call to get token.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">visualStudioTokenProviderFile</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Visual Studio Token provider file</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">resource</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">tenant</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private</b> <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="@0@System/A.html#7caf1ab108119a18" class="t t">ProcessStartInfo</a>&gt; <a id="9d6d2fc22426edcb" href="../R/9d6d2fc22426edcb.html" target="n" data-glyph="76,1" class="i method">GetProcessStartInfos</a>(<a href="../VisualStudioTokenProviderFile.cs.html#b1bc989ab357078f" class="t t">VisualStudioTokenProviderFile</a> <span id="r3 rd" class="r3 r">visualStudioTokenProviderFile</span>, 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r4 rd" class="r4 r">resource</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r5 rd" class="r5 r">tenant</span> = <b>default</b>)
+        {
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="@0@System/A.html#7caf1ab108119a18" class="t t">ProcessStartInfo</a>&gt; <span id="r6 rd" class="r6 r">processStartInfos</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="@0@System/A.html#7caf1ab108119a18" class="t t">ProcessStartInfo</a>&gt;();
+ 
+            <b>foreach</b> (<a href="../VisualStudioTokenProvider.cs.html#a8506552efcd9803" class="k">var</a> <span id="r7 rd" class="r7 r">tokenProvider</span> <b>in</b> <span class="r3 r">visualStudioTokenProviderFile</span>.<a href="../VisualStudioTokenProviderFile.cs.html#533d68ab120a5ebe" class="i field">TokenProviders</a>)
+            {
+                <span class="c">// If file does not exist, the version of Visual Studio that set the token provider may be uninstalled. </span>
+                <b>if</b> (<a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#3360368484a9f131" class="i method">Exists</a>(<span class="r7 r">tokenProvider</span>.<a href="../VisualStudioTokenProvider.cs.html#8e3cccc07a59723d" class="i field">Path</a>))
+                {
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r8 rd" class="r8 r">arguments</span> = <span class="s">$&quot;</span>{<a href="#cbc76d072725ab03" class="i field">ResourceArgumentName</a>}<span class="s"> </span>{<span class="r4 r">resource</span>}<span class="s"> </span><span class="s">&quot;</span>;
+ 
+                    <b>if</b> (<span class="r5 r">tenant</span> != <b>default</b>)
+                    {
+                        <span class="r8 r">arguments</span> += <span class="s">$&quot;</span>{<a href="#f17861f7acdce04d" class="i field">TenantArgumentName</a>}<span class="s"> </span>{<span class="r5 r">tenant</span>}<span class="s"> </span><span class="s">&quot;</span>;
+                    }
+ 
+                    <span class="c">// Add the arguments set in the token provider file.</span>
+                    <b>if</b> (<span class="r7 r">tokenProvider</span>.<a href="../VisualStudioTokenProvider.cs.html#f0fbdb805ad155b5" class="i field">Arguments</a>?.<a href="@0@mscorlib/A.html#78a69d857716bc68" class="i property">Count</a> &gt; 0)
+                    {
+                        <span class="r8 r">arguments</span> += <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#fa961ce440526a4d" class="i method">Join</a>(<span class="s">&quot; &quot;</span>, <span class="r7 r">tokenProvider</span>.<a href="../VisualStudioTokenProvider.cs.html#f0fbdb805ad155b5" class="i field">Arguments</a>);
+                    }
+               
+                    <a href="@0@System/A.html#7caf1ab108119a18" class="k">var</a> <span id="r9 rd" class="r9 r">startInfo</span> = <b>new</b> <a href="@0@System/A.html#c9102a49613227be" class="t constructor">ProcessStartInfo</a>
+                    {
+                        <a href="@0@System/A.html#b5b64f6ecc2f77fd" class="i property">FileName</a> = <span class="r7 r">tokenProvider</span>.<a href="../VisualStudioTokenProvider.cs.html#8e3cccc07a59723d" class="i field">Path</a>,
+                        <a href="@0@System/A.html#a0c4508e0c3df23b" class="i property">Arguments</a> = <span class="r8 r">arguments</span>
+                    };
+ 
+                    <span class="r6 r">processStartInfos</span>.<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r9 r">startInfo</span>);
+                }
+            }
+ 
+            <b>if</b> (<span class="r6 r">processStartInfos</span>.<a href="@0@mscorlib/A.html#78a69d857716bc68" class="i property">Count</a> == 0)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#df2d82d91ca29e40" class="t constructor">Exception</a>(<span class="s">$&quot;</span>{<a href="#40d7e8f98a2b4dad" class="i field">TokenProvidersNotFound</a>}<span class="s"> \&quot;</span>{<span class="r3 r">visualStudioTokenProviderFile</span>.<a href="../VisualStudioTokenProviderFile.cs.html#ec4ce1282975e224" class="i field">FilePath</a>}\&quot;<span class="s">&quot;</span>);
+            }
+ 
+            <b>return</b> <span class="r6 r">processStartInfos</span>;
+        }
+ 
+        <b>public override async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="../AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="t t">AppAuthenticationResult</a>&gt; <a id="93bdcb598f527621" href="../R/93bdcb598f527621.html" target="n" data-glyph="72,1" class="i method">GetAuthResultAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r10 rd" class="r10 r">resource</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r11 rd" class="r11 r">authority</span>,
+            <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r12 rd" class="r12 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>try</b>
+            {
+                <span class="c">// Validate resource, since it gets sent as a command line argument to Visual Studio token provider.</span>
+                <a href="../Helpers/ValidationHelper.cs.html#cf510ca41c1c0515" class="t t">ValidationHelper</a>.<a href="../Helpers/ValidationHelper.cs.html#ad4f265a7a2850d8" class="i method">ValidateResource</a>(<span class="r10 r">resource</span>);
+ 
+                <a href="#590600fe7f39e561" class="i field">_visualStudioTokenProviderFile</a> = <a href="#590600fe7f39e561" class="i field">_visualStudioTokenProviderFile</a> ?? <a href="#a4f47fce93de94e1" class="i method">GetTokenProviderFile</a>();
+ 
+                <span class="c">// Get process start infos based on Visual Studio token providers</span>
+                <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r13 rd" class="r13 r">processStartInfos</span> = <a href="#9d6d2fc22426edcb" class="i method">GetProcessStartInfos</a>(<a href="#590600fe7f39e561" class="i field">_visualStudioTokenProviderFile</a>, <span class="r10 r">resource</span>, <a href="../Helpers/UriHelper.cs.html#27b8882e673a9c1b" class="t t">UriHelper</a>.<a href="../Helpers/UriHelper.cs.html#2f84abfb0f3b4d98" class="i method">GetTenantByAuthority</a>(<span class="r11 r">authority</span>));
+ 
+                <span class="c">// To hold reason why token could not be acquired per token provider tried. </span>
+                <a href="@0@mscorlib/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <span id="r14 rd" class="r14 r">exceptionDictionary</span> = <b>new</b> <a href="@0@mscorlib/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;();
+ 
+                <b>foreach</b> (<a href="@0@System/A.html#7caf1ab108119a18" class="k">var</a> <span id="r15 rd" class="r15 r">startInfo</span> <b>in</b> <span class="r13 r">processStartInfos</span>)
+                {
+                    <b>try</b>
+                    {
+                        <span class="c">// For each of them, try to get token</span>
+                        <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r16 rd" class="r16 r">response</span> = <b>await</b> <a href="#4e6e510327dd543e" class="i field">_processManager</a>
+                            .<a href="../Clients/IProcessManager.cs.html#295a83169dbaf0a1" class="i method">ExecuteAsync</a>(<b>new</b> <a href="@0@System/A.html#47660cba985bdf77" class="t constructor">Process</a> {<a href="@0@System/A.html#b0417e5300dc5565" class="i property">StartInfo</a> = <span class="r15 r">startInfo</span>}, <span class="r12 r">cancellationToken</span>)
+                            .<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                        <a href="../TokenResponse.cs.html#e4a748da6aaba4d8" class="t t">TokenResponse</a> <span id="r17 rd" class="r17 r">tokenResponse</span> = <a href="../TokenResponse.cs.html#e4a748da6aaba4d8" class="t t">TokenResponse</a>.<a href="../TokenResponse.cs.html#d9d834fc9b291968" class="i method">Parse</a>(<span class="r16 r">response</span>);
+ 
+                        <a href="../AccessToken.cs.html#4bf4fd515869512d" class="t t">AccessToken</a> <span id="r18 rd" class="r18 r">token</span> = <a href="../AccessToken.cs.html#4bf4fd515869512d" class="t t">AccessToken</a>.<a href="../AccessToken.cs.html#6c1ca005586c3862" class="i method">Parse</a>(<span class="r17 r">tokenResponse</span>.<a href="../TokenResponse.cs.html#c00db2133be4e9a5" class="i property">AccessToken</a>);
+ 
+                        <a href="NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a>.<a href="../Principal.cs.html#409d9406f1d3c582" class="i field">IsAuthenticated</a> = <b>true</b>;
+ 
+                        <b>if</b> (<span class="r18 r">token</span> != <b>null</b>)
+                        {
+                            <span class="c">// Set principal used based on the claims in the access token. </span>
+                            <a href="NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a>.<a href="../Principal.cs.html#c3eb3045f9426620" class="i field">UserPrincipalName</a> =
+                                !<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r18 r">token</span>.<a href="../AccessToken.cs.html#3f65a298f81520a5" class="i property">Upn</a>) ? <span class="r18 r">token</span>.<a href="../AccessToken.cs.html#3f65a298f81520a5" class="i property">Upn</a> : <span class="r18 r">token</span>.<a href="../AccessToken.cs.html#9277c8c1ede67f75" class="i property">Email</a>;
+ 
+                            <a href="NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a>.<a href="../Principal.cs.html#64e7621ee7fb4766" class="i field">TenantId</a> = <span class="r18 r">token</span>.<a href="../AccessToken.cs.html#665b479704e13887" class="i property">TenantId</a>;
+                        }
+ 
+                        <b>return</b> <a href="../AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="t t">AppAuthenticationResult</a>.<a href="../AppAuthenticationResult.cs.html#d3763f80b01ec6b9" class="i method">Create</a>(<span class="r17 r">tokenResponse</span>);
+ 
+                    }
+                    <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r19 rd" class="r19 r">exp</span>)
+                    {
+                        <span class="c">// If token cannot be acquired using a token provider, try the next one</span>
+                        <span class="r14 r">exceptionDictionary</span><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#95facc58d06cadd0" class="i method">GetFileName</a>(<span class="r15 r">startInfo</span>.<a href="@0@System/A.html#b5b64f6ecc2f77fd" class="i property">FileName</a>)] = <span class="r19 r">exp</span>.<a href="@0@mscorlib/A.html#5fba0e16215b42a3" class="i property">Message</a>;
+                    }
+                }
+ 
+                <span class="c">// Could not acquire access token, throw exception</span>
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r20 rd" class="r20 r">message</span> = <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#c9f70a27facb27cf" class="i field">Empty</a>;
+ 
+                <span class="c">// Include exception details for each token provider that was tried</span>
+                <b>foreach</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r21 rd" class="r21 r">key</span> <b>in</b> <span class="r14 r">exceptionDictionary</span>.<a href="@0@mscorlib/A.html#9a3c0cb5c149c9f7" class="i property">Keys</a>)
+                {
+                    <span class="r20 r">message</span> += <a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a> +
+                               <span class="s">$&quot;</span>{<a href="#98b084a689e36e70" class="i field">TokenProviderGenericError</a>}<span class="s"> </span>{<span class="r21 r">key</span>}<span class="s"> : </span>{<span class="r14 r">exceptionDictionary</span><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="r21 r">key</span>]}<span class="s"> </span><span class="s">&quot;</span>;
+                }
+ 
+                <span class="c">// Throw exception if none of the token providers worked</span>
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#df2d82d91ca29e40" class="t constructor">Exception</a>(<span class="r20 r">message</span>);
+                
+            }
+            <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r22 rd" class="r22 r">exp</span>)
+            {
+                <b>throw</b> <b>new</b> <a href="../AzureServiceTokenProviderException.cs.html#70a0a38c19f200fb" class="t constructor">AzureServiceTokenProviderException</a>(<a href="NonInteractiveAccessTokenProviderBase.cs.html#24367a95c4c1012b" class="i field">ConnectionString</a>, <span class="r10 r">resource</span>, <span class="r11 r">authority</span>,
+                    <span class="s">$&quot;</span>{<a href="../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a>.<a href="../AzureServiceTokenProviderException.cs.html#b1003b3d8c0604f6" class="i field">VisualStudioUsed</a>}<span class="s"> </span>{<a href="../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a>.<a href="../AzureServiceTokenProviderException.cs.html#74c51a6320d16d98" class="i field">GenericErrorMessage</a>}<span class="s"> </span>{<span class="r22 r">exp</span>.<a href="@0@mscorlib/A.html#5fba0e16215b42a3" class="i property">Message</a>}<span class="s">&quot;</span>);
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

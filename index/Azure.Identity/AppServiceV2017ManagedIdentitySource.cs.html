@@ -1,0 +1,85 @@
+﻿<!DOCTYPE html>
+<html><head><title>AppServiceV2017ManagedIdentitySource.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(76);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Identity/AppServiceV2017ManagedIdentitySource.cs" target="_top">AppServiceV2017ManagedIdentitySource.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Identity" target="_top">..\..\identity\Azure.Identity\src\Azure.Identity.csproj</a> (Azure.Identity)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Globalization</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>.<span class="i n">Json</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Identity</span>
+{
+    <b>internal class</b> <a id="5571bd70163372e1" href="R/5571bd70163372e1.html" target="n" data-glyph="2,0" class="t t">AppServiceV2017ManagedIdentitySource</a> : <a href="ManagedIdentitySource.cs.html#56166eaff4308374" class="t t">ManagedIdentitySource</a>
+    {
+        <span class="c">// MSI Constants. Docs for MSI are available here https://docs.microsoft.com/en-us/azure/app-service/overview-managed-identity</span>
+        <b>private const string</b> <a id="381a49d9b7a9763a" href="R/381a49d9b7a9763a.html" target="n" data-glyph="10,1" class="i field">AppServiceMsiApiVersion</a> = <span class="s">&quot;2017-09-01&quot;</span>;
+        <b>private const string</b> <a id="b89cf4be7fcb6190" href="R/b89cf4be7fcb6190.html" target="n" data-glyph="10,1" class="i field">MsiEndpointInvalidUriError</a> = <span class="s">&quot;The environment variable MSI_ENDPOINT contains an invalid Uri.&quot;</span>;
+ 
+        <b>private readonly</b> <a href="@1@netstandard/A.html#991565dd25f47c90" class="t t">Uri</a> <a id="466d9a32de672f5b" href="R/466d9a32de672f5b.html" target="n" data-glyph="46,1" class="i field">_endpoint</a>;
+        <b>private readonly string</b> <a id="f66fce19deb30765" href="R/f66fce19deb30765.html" target="n" data-glyph="46,1" class="i field">_secret</a>;
+        <b>private readonly string</b> <a id="3b055a82ac70949b" href="R/3b055a82ac70949b.html" target="n" data-glyph="46,1" class="i field">_clientId</a>;
+ 
+        <b>public static</b> <a href="ManagedIdentitySource.cs.html#56166eaff4308374" class="t t">ManagedIdentitySource</a> <a id="219b3dfd299aa03b" href="R/219b3dfd299aa03b.html" target="n" data-glyph="72,1" class="i method">TryCreate</a>(<a href="ManagedIdentityClientOptions.cs.html#6d8b26e7f064d1bf" class="t t">ManagedIdentityClientOptions</a> <span id="r0 rd" class="r0 r">options</span>)
+        {
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r1 rd" class="r1 r">msiEndpoint</span> = <a href="EnvironmentVariables.cs.html#c2ba6c1998ea65d9" class="t t">EnvironmentVariables</a>.<a href="EnvironmentVariables.cs.html#9d47d2155f86982a" class="i property">MsiEndpoint</a>;
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r2 rd" class="r2 r">msiSecret</span> = <a href="EnvironmentVariables.cs.html#c2ba6c1998ea65d9" class="t t">EnvironmentVariables</a>.<a href="EnvironmentVariables.cs.html#64d58f725962de52" class="i property">MsiSecret</a>;
+ 
+            <span class="c">// if BOTH the env vars MSI_ENDPOINT and MSI_SECRET are set the MsiType is AppService</span>
+            <b>if</b> (<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@netstandard/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r1 r">msiEndpoint</span>) || <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@netstandard/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r2 r">msiSecret</span>))
+            {
+                <b>return</b> <b>default</b>;
+            }
+ 
+            <a href="@1@netstandard/A.html#991565dd25f47c90" class="t t">Uri</a> <span id="r3 rd" class="r3 r">endpointUri</span>;
+            <b>try</b>
+            {
+                <span class="r3 r">endpointUri</span> = <b>new</b> <a href="@1@netstandard/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<span class="r1 r">msiEndpoint</span>);
+            }
+            <b>catch</b> (<a href="@1@netstandard/A.html#80a470d64a9b80ef" class="t t">FormatException</a> <span id="r4 rd" class="r4 r">ex</span>)
+            {
+                <b>throw</b> <b>new</b> <a href="AuthenticationFailedException.cs.html#2d5d634c87181126" class="t constructor">AuthenticationFailedException</a>(<a href="#b89cf4be7fcb6190" class="i field">MsiEndpointInvalidUriError</a>, <span class="r4 r">ex</span>);
+            }
+ 
+            <b>return</b> <b>new</b> <a href="#17e1d5fc1be0763a" class="t constructor">AppServiceV2017ManagedIdentitySource</a>(<span class="r0 r">options</span>.<a href="ManagedIdentityClientOptions.cs.html#40faea45885c391a" class="i property">Pipeline</a>, <span class="r3 r">endpointUri</span>, <span class="r2 r">msiSecret</span>, <span class="r0 r">options</span>.<a href="ManagedIdentityClientOptions.cs.html#4958969e78e3e0d8" class="i property">ClientId</a>);
+        }
+ 
+        <b>private</b> <a id="17e1d5fc1be0763a" href="R/17e1d5fc1be0763a.html" target="n" data-glyph="76,1" class="t constructor">AppServiceV2017ManagedIdentitySource</a>(<a href="CredentialPipeline.cs.html#c499b392d2e1b5fb" class="t t">CredentialPipeline</a> <span id="r5 rd" class="r5 r">pipeline</span>, <a href="@1@netstandard/A.html#991565dd25f47c90" class="t t">Uri</a> <span id="r6 rd" class="r6 r">endpoint</span>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r7 rd" class="r7 r">secret</span>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r8 rd" class="r8 r">clientId</span>) : <a href="ManagedIdentitySource.cs.html#edace3126b4078cf" class="k">base</a>(<span class="r5 r">pipeline</span>)
+        {
+            <a href="#466d9a32de672f5b" class="i field">_endpoint</a> = <span class="r6 r">endpoint</span>;
+            <a href="#f66fce19deb30765" class="i field">_secret</a> = <span class="r7 r">secret</span>;
+            <a href="#3b055a82ac70949b" class="i field">_clientId</a> = <span class="r8 r">clientId</span>;
+        }
+ 
+        <b>protected override</b> <a href="/Azure.Core/A.html#a519adbefba2e288" class="t t">Request</a> <a id="b28c3f6c211c0cec" href="R/b28c3f6c211c0cec.html" target="n" data-glyph="75,1" class="i method">CreateRequest</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>[] <span id="r9 rd" class="r9 r">scopes</span>)
+        {
+            <span class="c">// covert the scopes to a resource string</span>
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r10 rd" class="r10 r">resource</span> = <a href="ScopeUtilities.cs.html#65eff6769481ceb6" class="t t">ScopeUtilities</a>.<a href="ScopeUtilities.cs.html#472c79fe4d466ac8" class="i method">ScopesToResource</a>(<span class="r9 r">scopes</span>);
+ 
+            <a href="/Azure.Core/A.html#a519adbefba2e288" class="t t">Request</a> <span id="r11 rd" class="r11 r">request</span> = <a href="ManagedIdentitySource.cs.html#3ac6b239e722e77a" class="i property">Pipeline</a>.<a href="CredentialPipeline.cs.html#f970784bc1812f80" class="i property">HttpPipeline</a>.<a href="/Azure.Core/A.html#6751a95ec456ee31" class="i method">CreateRequest</a>();
+ 
+            <span class="r11 r">request</span>.<a href="/Azure.Core/A.html#38781a2f20c88339" class="i property">Method</a> = <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#c1939eaa5920682f" class="i property">Get</a>;
+            <span class="r11 r">request</span>.<a href="/Azure.Core/A.html#e6c474e362de2358" class="i property">Headers</a>.<a href="/Azure.Core/A.html#c446fa86f8d3ef04" class="i method">Add</a>(<span class="s">&quot;secret&quot;</span>, <a href="#f66fce19deb30765" class="i field">_secret</a>);
+            <span class="r11 r">request</span>.<a href="/Azure.Core/A.html#a3954f29cb1a883c" class="i property">Uri</a>.<a href="/Azure.Core/A.html#79e001a52a92afbe" class="i method">Reset</a>(<a href="#466d9a32de672f5b" class="i field">_endpoint</a>);
+            <span class="r11 r">request</span>.<a href="/Azure.Core/A.html#a3954f29cb1a883c" class="i property">Uri</a>.<a href="/Azure.Core/A.html#6fa915bdbe4ddf27" class="i method">AppendQuery</a>(<span class="s">&quot;api-version&quot;</span>, <a href="#381a49d9b7a9763a" class="i field">AppServiceMsiApiVersion</a>);
+            <span class="r11 r">request</span>.<a href="/Azure.Core/A.html#a3954f29cb1a883c" class="i property">Uri</a>.<a href="/Azure.Core/A.html#6fa915bdbe4ddf27" class="i method">AppendQuery</a>(<span class="s">&quot;resource&quot;</span>, <span class="r10 r">resource</span>);
+ 
+            <b>if</b> (!<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@netstandard/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<a href="#3b055a82ac70949b" class="i field">_clientId</a>))
+            {
+                <span class="r11 r">request</span>.<a href="/Azure.Core/A.html#a3954f29cb1a883c" class="i property">Uri</a>.<a href="/Azure.Core/A.html#6fa915bdbe4ddf27" class="i method">AppendQuery</a>(<span class="s">&quot;clientid&quot;</span>, <a href="#3b055a82ac70949b" class="i field">_clientId</a>);
+            }
+ 
+            <b>return</b> <span class="r11 r">request</span>;
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

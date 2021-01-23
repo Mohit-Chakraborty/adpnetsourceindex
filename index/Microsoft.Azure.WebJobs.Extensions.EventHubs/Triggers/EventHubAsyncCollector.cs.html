@@ -1,0 +1,131 @@
+﻿<!DOCTYPE html>
+<html><head><title>EventHubAsyncCollector.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(122);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.EventHubs/Triggers/EventHubAsyncCollector.cs" target="_top">Triggers\EventHubAsyncCollector.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.EventHubs" target="_top">src\Microsoft.Azure.WebJobs.Extensions.EventHubs.csproj</a> (Microsoft.Azure.WebJobs.Extensions.EventHubs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) .NET Foundation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>;
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Globalization</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Linq</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">EventHubs</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Core object to send events to EventHub.</span>
+    <span class="c">///</span><span class="c"> Any user parameter that sends EventHub events will eventually get bound to this object.</span>
+    <span class="c">///</span><span class="c"> This will queue events and send in batches, also keeping under the 1024kb event hub limit per batch.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="70969cf3e33822cc" href="../R/70969cf3e33822cc.html" target="n" data-glyph="2,0" class="t t">EventHubAsyncCollector</a> : <span class="i">IAsyncCollector</span>&lt;<a href="/Azure.Messaging.EventHubs/A.html#557aa370d1369b89" class="t t">EventData</a>&gt;, <span class="i">IDisposable</span>
+    {
+        <b>private readonly</b> <a href="../IEventHubProducerClient.cs.html#3bf84b673bec9606" class="t t">IEventHubProducerClient</a> <a id="e7026e1319fd191d" href="../R/e7026e1319fd191d.html" target="n" data-glyph="46,1" class="i field">_client</a>;
+        <b>private readonly</b> <span class="i">SemaphoreSlim</span> <a id="09070ef3f0128932" href="../R/09070ef3f0128932.html" target="n" data-glyph="46,1" class="i field">_batchSemaphore</a>;
+        <b>private readonly</b> <span class="i">Dictionary</span>&lt;<b>string</b>, <a href="../IEventDataBatch.cs.html#371fe782ca9a033f" class="t t">IEventDataBatch</a>&gt; <a id="da60d95f01b97cf1" href="../R/da60d95f01b97cf1.html" target="n" data-glyph="46,1" class="i field">_batches</a> = <b>new</b> <span class="i">Dictionary</span>&lt;<b>string</b>, <a href="../IEventDataBatch.cs.html#371fe782ca9a033f" class="t t">IEventDataBatch</a>&gt;();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Create a sender around the given client.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">client</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="88bbeebd2ab3c63a" href="../R/88bbeebd2ab3c63a.html" target="n" data-glyph="72,1" class="t constructor">EventHubAsyncCollector</a>(<a href="../IEventHubProducerClient.cs.html#3bf84b673bec9606" class="t t">IEventHubProducerClient</a> <span id="r0 rd" class="r0 r">client</span>)
+        {
+            <b>if</b> (<span class="r0 r">client</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r0 r">client</span>));
+            }
+ 
+            <a href="#09070ef3f0128932" class="i field">_batchSemaphore</a> = <b>new</b> <span class="i">SemaphoreSlim</span>(1, 1);
+            <a href="#e7026e1319fd191d" class="i field">_client</a> = <span class="r0 r">client</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Add an event.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">item</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The event to add</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">a cancellation token. </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public async</b> <span class="i">Task</span> <a id="9028a50f70d3b460" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">AddAsync</a>(<a href="/Azure.Messaging.EventHubs/A.html#557aa370d1369b89" class="t t">EventData</a> <span id="r1 rd" class="r1 r">item</span>, <span class="i">CancellationToken</span> <span id="r2 rd" class="r2 r">cancellationToken</span> = <b>default</b>(<span class="i">CancellationToken</span>))
+        {
+            <b>if</b> (<span class="r1 r">item</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r1 r">item</span>));
+            }
+ 
+            <b>string</b> <span id="r3 rd" class="r3 r">key</span> = <span class="r1 r">item</span>.<a href="/Azure.Messaging.EventHubs/A.html#ea38956a292fbc2a" class="i property">PartitionKey</a> ?? <b>string</b>.<span class="i">Empty</span>;
+ 
+            <b>while</b> (<b>true</b>)
+            {
+                <b>await</b> <a href="#09070ef3f0128932" class="i field">_batchSemaphore</a>.<span class="i">WaitAsync</span>(<span class="r2 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <a href="../IEventDataBatch.cs.html#371fe782ca9a033f" class="t t">IEventDataBatch</a> <span id="r4 rd" class="r4 r">batchToSend</span>;
+                <b>try</b>
+                {
+                    <b>if</b> (!<a href="#da60d95f01b97cf1" class="i field">_batches</a>.<span class="i">TryGetValue</span>(<span class="r3 r">key</span>, <b>out</b> <a href="../IEventDataBatch.cs.html#371fe782ca9a033f" class="t t">IEventDataBatch</a> <span id="r5 rd" class="r5 r">batch</span>))
+                    {
+                        <span class="r5 r">batch</span> = <b>await</b> <a href="#e7026e1319fd191d" class="i field">_client</a>.<a href="../IEventHubProducerClient.cs.html#024fb37b48cd23ec" class="i method">CreateBatchAsync</a>(<span class="r2 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        <a href="#da60d95f01b97cf1" class="i field">_batches</a>[<span class="r3 r">key</span>] = <span class="r5 r">batch</span>;
+                    }
+ 
+                    <b>if</b> (<span class="r5 r">batch</span>.<a href="../IEventDataBatch.cs.html#6dcdd3bab46f1bdf" class="i method">TryAdd</a>(<span class="r1 r">item</span>))
+                    {
+                        <b>return</b>;
+                    }
+ 
+                    <span class="c">// If we reach this point, the new item won&#39;t fit in the batch. If there are no other items in the batch it means this event will never fit</span>
+                    <span class="c">// and we should error. If there are already some items in the batch, we should publish the batched items and then</span>
+                    <span class="c">// try publishing this one again to see if it will fit.</span>
+                    <b>if</b> (<span class="r5 r">batch</span>.<a href="../IEventDataBatch.cs.html#9a3995f652aa5bcd" class="i property">Count</a> == 0)
+                    {
+                        <span class="c">// Single event is too large to add.</span>
+                        <b>string</b> <span id="r6 rd" class="r6 r">msg</span> = <b>string</b>.<span class="i">Format</span>(<span class="i">CultureInfo</span>.<span class="i">InvariantCulture</span>, <span class="s">&quot;Event is too large. Event is approximately {0}b and max size is {1}b&quot;</span>, <span class="r1 r">item</span>.<a href="/Azure.Messaging.EventHubs/A.html#17bf1aeb32d2b43c" class="i property">Body</a>.<span class="i">Length</span>, <span class="r5 r">batch</span>.<a href="../IEventDataBatch.cs.html#90be6977c9e04669" class="i property">MaximumSizeInBytes</a>);
+                        <b>throw</b> <b>new</b> <span class="i">InvalidOperationException</span>(<span class="r6 r">msg</span>);
+                    }
+ 
+                    <a href="#da60d95f01b97cf1" class="i field">_batches</a>.<span class="i">Remove</span>(<span class="r3 r">key</span>);
+                    <span class="r4 r">batchToSend</span> = <span class="r5 r">batch</span>;
+                }
+                <b>finally</b>
+                {
+                    <a href="#09070ef3f0128932" class="i field">_batchSemaphore</a>.<span class="i">Release</span>();
+                }
+ 
+                <b>await</b> <a href="#e7026e1319fd191d" class="i field">_client</a>.<a href="../IEventHubProducerClient.cs.html#87cd27d6ed19f374" class="i method">SendAsync</a>(<span class="r4 r">batchToSend</span>, <span class="r2 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> synchronously flush events that have been queued up via AddAsync.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">a cancellation token</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public async</b> <span class="i">Task</span> <a id="b11b46846362dd9d" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">FlushAsync</a>(<span class="i">CancellationToken</span> <span id="r7 rd" class="r7 r">cancellationToken</span> = <b>default</b>(<span class="i">CancellationToken</span>))
+        {
+            <b>await</b> <a href="#09070ef3f0128932" class="i field">_batchSemaphore</a>.<span class="i">WaitAsync</span>(<span class="r7 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+            <b>try</b>
+            {
+                <b>foreach</b> (<b>var</b> <span id="r8 rd" class="r8 r">eventDataBatch</span> <b>in</b> <a href="#da60d95f01b97cf1" class="i field">_batches</a>.<span class="i">ToArray</span>())
+                {
+                    <b>await</b> <a href="#e7026e1319fd191d" class="i field">_client</a>.<span class="i">SendAsync</span>(<span class="r8 r">eventDataBatch</span>.<span class="i">Value</span>, <span class="r7 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    <a href="#da60d95f01b97cf1" class="i field">_batches</a>.<span class="i">Remove</span>(<span class="r8 r">eventDataBatch</span>.<span class="i">Key</span>);
+                }
+            }
+            <b>finally</b>
+            {
+                <a href="#09070ef3f0128932" class="i field">_batchSemaphore</a>.<span class="i">Release</span>();
+            }
+        }
+ 
+        <b>public void</b> <a id="ce5161f2c4648444" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Dispose</a>()
+        {
+            <a href="#09070ef3f0128932" class="i field">_batchSemaphore</a>.<span class="i">Dispose</span>();
+        }
+    }
+}</pre></td></tr></table></div></body></html>

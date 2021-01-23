@@ -1,0 +1,215 @@
+﻿<!DOCTYPE html>
+<html><head><title>AmqpEventBatch.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(206);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Messaging.EventHubs/Amqp/AmqpEventBatch.cs" target="_top">Amqp\AmqpEventBatch.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Messaging.EventHubs" target="_top">src\Azure.Messaging.EventHubs.csproj</a> (Azure.Messaging.EventHubs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Globalization</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Linq</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Producer</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">Azure</span>.<span class="i">Amqp</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Amqp</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">   A set of events with known size constraints, based on messages to be sent</span>
+    <span class="c">///</span><span class="c">   using an AMQP-based transport.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <b>internal class</b> <a id="0864ff5fa5cc1db5" href="../R/0864ff5fa5cc1db5.html" target="n" data-glyph="2,0" class="t t">AmqpEventBatch</a> : <a href="../Core/TransportEventBatch.cs.html#d626c58b5be68e2d" class="t t">TransportEventBatch</a>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The amount of bytes to reserve as overhead for a small message.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const byte</b> <a id="3644f3e8071517f5" href="../R/3644f3e8071517f5.html" target="n" data-glyph="10,1" class="i field">OverheadBytesSmallMessage</a> = 5;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The amount of bytes to reserve as overhead for a large message.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const byte</b> <a id="628985959d4111f2" href="../R/628985959d4111f2.html" target="n" data-glyph="10,1" class="i field">OverheadBytesLargeMessage</a> = 8;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The maximum number of bytes that a message may be to be considered small.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const byte</b> <a id="e5d970dffb35db37" href="../R/e5d970dffb35db37.html" target="n" data-glyph="10,1" class="i field">MaximumBytesSmallMessage</a> = 255;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The size of the batch, in bytes, to reserve for the AMQP message overhead.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly long</b> <a id="52db3256dddf88ab" href="../R/52db3256dddf88ab.html" target="n" data-glyph="46,1" class="i field">ReservedSize</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">A flag that indicates whether or not the instance has been disposed.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private volatile bool</b> <a id="76c6a9a0dc5bb69c" href="../R/76c6a9a0dc5bb69c.html" target="n" data-glyph="46,1" class="i field">_disposed</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The size of the batch, in bytes, as it will be sent via the AMQP transport.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private long</b> <a id="b3596c0d4feac517" href="../R/b3596c0d4feac517.html" target="n" data-glyph="46,1" class="i field">_sizeBytes</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The maximum size allowed for the batch, in bytes.  This includes the events in the batch as</span>
+        <span class="c">///</span><span class="c">   well as any overhead for the batch itself when sent to the Event Hubs service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override long</b> <a id="007f86736062111f" href="../R/007f86736062111f.html" target="n" data-glyph="102,1" class="i property">MaximumSizeInBytes</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The size of the batch, in bytes, as it will be sent to the Event Hubs</span>
+        <span class="c">///</span><span class="c">   service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override long</b> <a id="00bc466c7d395a50" href="../R/00bc466c7d395a50.html" target="n" data-glyph="102,1" class="i property">SizeInBytes</a> =&gt; <a href="#b3596c0d4feac517" class="i field">_sizeBytes</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The flags specifying the set of special transport features that have been opted-into.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override</b> <a href="../Core/TransportProducerFeatures.cs.html#012a1c2da3174f00" class="t t">TransportProducerFeatures</a> <a id="37a431fceac9a1de" href="../R/37a431fceac9a1de.html" target="n" data-glyph="102,1" class="i property">ActiveFeatures</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The count of events contained in the batch.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override int</b> <a id="74eee06c55b78b26" href="../R/74eee06c55b78b26.html" target="n" data-glyph="102,1" class="i property">Count</a> =&gt; <a href="#59a9107935630ea4" class="i property">BatchEvents</a>.<span class="i">Count</span>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The converter to use for translating </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> into the corresponding AMQP message.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <a href="AmqpMessageConverter.cs.html#4d1b857e8b567cc4" class="t t">AmqpMessageConverter</a> <a id="5ba8c2e1bb05f1cc" href="../R/5ba8c2e1bb05f1cc.html" target="n" data-glyph="106,1" class="i property">MessageConverter</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The set of options to apply to the batch.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <a href="../Producer/CreateBatchOptions.cs.html#efa8982626004b5d" class="t t">CreateBatchOptions</a> <a id="b0a6df6cd241ed3f" href="../R/b0a6df6cd241ed3f.html" target="n" data-glyph="106,1" class="i property">Options</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The set of events that have been added to the batch.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <span class="i">List</span>&lt;<a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a>&gt; <a id="59a9107935630ea4" href="../R/59a9107935630ea4.html" target="n" data-glyph="106,1" class="i property">BatchEvents</a> { <b>get</b>; } = <b>new</b> <span class="i">List</span>&lt;<a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a>&gt;();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#0864ff5fa5cc1db5" class="t t">AmqpEventBatch</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">messageConverter</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The converter to use for translating </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> into the corresponding AMQP message.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">options</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The set of options to apply to the batch.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">activeFeatures</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The flags specifying the set of special transport features have been opted-into.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="59d7616f894d9ec0" href="../R/59d7616f894d9ec0.html" target="n" data-glyph="72,1" class="t constructor">AmqpEventBatch</a>(<a href="AmqpMessageConverter.cs.html#4d1b857e8b567cc4" class="t t">AmqpMessageConverter</a> <span id="r0 rd" class="r0 r">messageConverter</span>,
+                              <a href="../Producer/CreateBatchOptions.cs.html#efa8982626004b5d" class="t t">CreateBatchOptions</a> <span id="r1 rd" class="r1 r">options</span>,
+                              <a href="../Core/TransportProducerFeatures.cs.html#012a1c2da3174f00" class="t t">TransportProducerFeatures</a> <span id="r2 rd" class="r2 r">activeFeatures</span>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r0 r">messageConverter</span>, <b>nameof</b>(<span class="r0 r">messageConverter</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r1 r">options</span>, <b>nameof</b>(<span class="r1 r">options</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<span class="i">AssertNotNull</span>(<span class="r1 r">options</span>.<a href="../Producer/CreateBatchOptions.cs.html#eccd10c79558085a" class="i property">MaximumSizeInBytes</a>, <b>nameof</b>(<span class="r1 r">options</span>.<a href="../Producer/CreateBatchOptions.cs.html#eccd10c79558085a" class="i property">MaximumSizeInBytes</a>));
+ 
+            <a href="#5ba8c2e1bb05f1cc" class="i property">MessageConverter</a> = <span class="r0 r">messageConverter</span>;
+            <a href="#b0a6df6cd241ed3f" class="i property">Options</a> = <span class="r1 r">options</span>;
+            <a href="#007f86736062111f" class="i property">MaximumSizeInBytes</a> = <span class="r1 r">options</span>.<a href="../Producer/CreateBatchOptions.cs.html#eccd10c79558085a" class="i property">MaximumSizeInBytes</a>.<span class="i">Value</span>;
+            <a href="#37a431fceac9a1de" class="i property">ActiveFeatures</a> = <span class="r2 r">activeFeatures</span>;
+ 
+            <span class="c">// Initialize the size by reserving space for the batch envelope.</span>
+ 
+            <b>using</b> <span class="i">AmqpMessage</span> <span id="r3 rd" class="r3 r">envelope</span> = <span class="r0 r">messageConverter</span>.<span class="i">CreateBatchFromEvents</span>(<span class="i">Enumerable</span>.<span class="i">Empty</span>&lt;<a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a>&gt;(), <span class="r1 r">options</span>.<a href="../Producer/SendEventOptions.cs.html#971b0419619f9e72" class="i property">PartitionKey</a>);
+            <a href="#52db3256dddf88ab" class="i field">ReservedSize</a> = <span class="r3 r">envelope</span>.<span class="i">SerializedMessageSize</span>;
+            <a href="#b3596c0d4feac517" class="i field">_sizeBytes</a> = <a href="#52db3256dddf88ab" class="i field">ReservedSize</a>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Attempts to add an event to the batch, ensuring that the size</span>
+        <span class="c">///</span><span class="c">   of the batch does not exceed its maximum.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">eventData</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The event to attempt to add to the batch.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the event was added; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override bool</b> <a id="c741fe5b4f239095" href="../R/c741fe5b4f239095.html" target="n" data-glyph="72,1" class="i method">TryAdd</a>(<a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a> <span id="r4 rd" class="r4 r">eventData</span>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r4 r">eventData</span>, <b>nameof</b>(<span class="r4 r">eventData</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Core/Argument.cs.html#ad31cdc7051f5f26" class="i method">AssertNotDisposed</a>(<a href="#76c6a9a0dc5bb69c" class="i field">_disposed</a>, <b>nameof</b>(<a href="../Producer/EventDataBatch.cs.html#c992a211bbcf6874" class="t t">EventDataBatch</a>));
+ 
+            <span class="c">// Reserve space for producer-owned fields that correspond to special</span>
+            <span class="c">// features, if enabled.</span>
+ 
+            <b>if</b> ((<a href="#37a431fceac9a1de" class="i property">ActiveFeatures</a> &amp; <a href="../Core/TransportProducerFeatures.cs.html#012a1c2da3174f00" class="t t">TransportProducerFeatures</a>.<a href="../Core/TransportProducerFeatures.cs.html#930363b45b29ad9b" class="i field">IdempotentPublishing</a>) != 0)
+            {
+                <span class="r4 r">eventData</span>.<a href="../EventData.cs.html#505046d1fa2e7e55" class="i property">PendingPublishSequenceNumber</a> = <b>int</b>.<span class="i">MaxValue</span>;
+                <span class="r4 r">eventData</span>.<a href="../EventData.cs.html#e9d0a727951ec4ed" class="i property">PendingProducerGroupId</a> = <b>long</b>.<span class="i">MaxValue</span>;
+                <span class="r4 r">eventData</span>.<a href="../EventData.cs.html#555cc5e6b915f091" class="i property">PendingProducerOwnerLevel</a> = <b>short</b>.<span class="i">MaxValue</span>;
+            }
+ 
+            <b>try</b>
+            {
+                <b>using</b> <b>var</b> <span id="r5 rd" class="r5 r">eventMessage</span> = <a href="#5ba8c2e1bb05f1cc" class="i property">MessageConverter</a>.<a href="AmqpMessageConverter.cs.html#7656842d1a18f6ac" class="i method">CreateMessageFromEvent</a>(<span class="r4 r">eventData</span>, <a href="#b0a6df6cd241ed3f" class="i property">Options</a>.<a href="../Producer/SendEventOptions.cs.html#971b0419619f9e72" class="i property">PartitionKey</a>);
+ 
+                <span class="c">// Calculate the size for the event, based on the AMQP message size and accounting for a</span>
+                <span class="c">// bit of reserved overhead size.</span>
+ 
+                <b>var</b> <span id="r6 rd" class="r6 r">size</span> = <a href="#b3596c0d4feac517" class="i field">_sizeBytes</a>
+                    + <span class="r5 r">eventMessage</span>.<span class="i">SerializedMessageSize</span>
+                    + (<span class="r5 r">eventMessage</span>.<span class="i">SerializedMessageSize</span> &lt;= <a href="#e5d970dffb35db37" class="i field">MaximumBytesSmallMessage</a>
+                        ? <a href="#3644f3e8071517f5" class="i field">OverheadBytesSmallMessage</a>
+                        : <a href="#628985959d4111f2" class="i field">OverheadBytesLargeMessage</a>);
+ 
+                <b>if</b> (<span class="r6 r">size</span> &gt; <a href="#007f86736062111f" class="i property">MaximumSizeInBytes</a>)
+                {
+                    <b>return</b> <b>false</b>;
+                }
+ 
+                <a href="#b3596c0d4feac517" class="i field">_sizeBytes</a> = <span class="r6 r">size</span>;
+                <a href="#59a9107935630ea4" class="i property">BatchEvents</a>.<span class="i">Add</span>(<span class="r4 r">eventData</span>);
+ 
+                <b>return</b> <b>true</b>;
+            }
+            <b>finally</b>
+            {
+                <span class="r4 r">eventData</span>.<a href="../EventData.cs.html#3527cb400f3f18a9" class="i method">ClearPublishingState</a>();
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Clears the batch, removing all events and resetting the</span>
+        <span class="c">///</span><span class="c">   available size.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override void</b> <a id="f046e965a2e6d98c" href="../R/f046e965a2e6d98c.html" target="n" data-glyph="72,1" class="i method">Clear</a>()
+        {
+            <a href="#59a9107935630ea4" class="i property">BatchEvents</a>.<span class="i">Clear</span>();
+            <a href="#b3596c0d4feac517" class="i field">_sizeBytes</a> = <a href="#52db3256dddf88ab" class="i field">ReservedSize</a>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Represents the batch as an enumerable set of transport-specific</span>
+        <span class="c">///</span><span class="c">   representations of an event.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r t">T</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The transport-specific event representation being requested.</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The set of events as an enumerable of the requested type.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override</b> <span class="i">IEnumerable</span>&lt;<span class="r7 r t">T</span>&gt; <a id="61d86253b6b7cc03" href="../R/61d86253b6b7cc03.html" target="n" data-glyph="72,1" class="i method">AsEnumerable</a>&lt;<span id="r7 rd t" class="r7 r t">T</span>&gt;()
+        {
+            <b>if</b> (<b>typeof</b>(<span class="r7 r t">T</span>) != <b>typeof</b>(<a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a>))
+            {
+                <b>throw</b> <b>new</b> <span class="i">FormatException</span>(<b>string</b>.<span class="i">Format</span>(<span class="i">CultureInfo</span>.<span class="i">CurrentCulture</span>, <a href="../Resources.Designer.cs.html#0f60eafa1a3b4f36" class="t t">Resources</a>.<a href="../Resources.Designer.cs.html#8531811694742a23" class="i property">UnsupportedTransportEventType</a>, <b>typeof</b>(<span class="r7 r t">T</span>).<span class="i">Name</span>));
+            }
+ 
+            <b>return</b> (<span class="i">IEnumerable</span>&lt;<span class="r7 r t">T</span>&gt;)<a href="#59a9107935630ea4" class="i property">BatchEvents</a>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Performs the task needed to clean up resources used by the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#0864ff5fa5cc1db5" class="t t">AmqpEventBatch</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override void</b> <a id="4418cd2d75cf6389" href="../R/4418cd2d75cf6389.html" target="n" data-glyph="72,1" class="i method">Dispose</a>()
+        {
+            <a href="#76c6a9a0dc5bb69c" class="i field">_disposed</a> = <b>true</b>;
+            <a href="#f046e965a2e6d98c" class="i method">Clear</a>();
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

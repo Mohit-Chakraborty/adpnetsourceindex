@@ -1,0 +1,248 @@
+﻿<!DOCTYPE html>
+<html><head><title>AsyncExecution.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(239);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Rest.ClientRuntime/TransientFaultHandling/AsyncExecution.cs" target="_top">TransientFaultHandling\AsyncExecution.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Rest.ClientRuntime" target="_top">..\..\ClientRuntime\ClientRuntime\Microsoft.Rest.ClientRuntime.csproj</a> (Microsoft.Rest.ClientRuntime)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Globalization</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Rest</span>.<span class="i n">ClientRuntime</span>.<span class="i n">Properties</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Rest</span>.<span class="i n">TransientFaultHandling</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Handles the execution and retries of the user-initiated task.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r t">TResult</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The result type of the user-initiated task.</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="f19c9b0ba80d45bf" href="../R/f19c9b0ba80d45bf.html" target="n" data-glyph="2,0" class="t t">AsyncExecution</a>&lt;<span id="r0 rd t" class="r0 r t">TResult</span>&gt;
+    {
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <a id="7acad399a21e8efe" href="../R/7acad399a21e8efe.html" target="n" data-glyph="46,1" class="i field">_cancellationToken</a>;
+        <b>private readonly bool</b> <a id="0777932bec8620f8" href="../R/0777932bec8620f8.html" target="n" data-glyph="46,1" class="i field">_fastFirstRetry</a>;
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>, <b>bool</b>&gt; <a id="0211cdc0317cb03b" href="../R/0211cdc0317cb03b.html" target="n" data-glyph="46,1" class="i field">_isTransient</a>;
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#28d0bef62ddfa8c8" class="t t">Action</a>&lt;<b>int</b>, <a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>, <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>&gt; <a id="7244e18ca9940552" href="../R/7244e18ca9940552.html" target="n" data-glyph="46,1" class="i field">_onRetrying</a>;
+        <b>private readonly</b> <a href="RetryStrategy.cs.html#6665e8cd55a3df0d" class="t t">ShouldRetryHandler</a> <a id="c304113401a785b2" href="../R/c304113401a785b2.html" target="n" data-glyph="46,1" class="i field">_shouldRetryHandler</a>;
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#87d60abb7092d5a4" class="t t">Func</a>&lt;<a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="r0 r t">TResult</span>&gt;&gt; <a id="46624f9110a8f206" href="../R/46624f9110a8f206.html" target="n" data-glyph="46,1" class="i field">_taskFunc</a>;
+ 
+        <b>private</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="r0 r t">TResult</span>&gt; <a id="f1ff86bb74764d23" href="../R/f1ff86bb74764d23.html" target="n" data-glyph="46,1" class="i field">_previousTask</a>;
+        <b>private int</b> <a id="58120a6a7cb7e729" href="../R/58120a6a7cb7e729.html" target="n" data-glyph="46,1" class="i field">_retryCount</a>;
+ 
+        <b>public</b> <a id="672194c97e42eddb" href="../R/672194c97e42eddb.html" target="n" data-glyph="72,1" class="t constructor">AsyncExecution</a>(
+            <a href="@0@mscorlib/A.html#87d60abb7092d5a4" class="t t">Func</a>&lt;<a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="r0 r t">TResult</span>&gt;&gt; <span id="r1 rd" class="r1 r">taskFunc</span>,
+            <a href="RetryStrategy.cs.html#6665e8cd55a3df0d" class="t t">ShouldRetryHandler</a> <span id="r2 rd" class="r2 r">shouldRetryHandler</span>,
+            <a href="@0@mscorlib/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>, <b>bool</b>&gt; <span id="r3 rd" class="r3 r">isTransient</span>,
+            <a href="@0@mscorlib/A.html#28d0bef62ddfa8c8" class="t t">Action</a>&lt;<b>int</b>, <a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>, <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>&gt; <span id="r4 rd" class="r4 r">onRetrying</span>,
+            <b>bool</b> <span id="r5 rd" class="r5 r">fastFirstRetry</span>,
+            <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r6 rd" class="r6 r">cancellationToken</span>)
+        {
+            <a href="#46624f9110a8f206" class="i field">_taskFunc</a> = <span class="r1 r">taskFunc</span>;
+            <a href="#c304113401a785b2" class="i field">_shouldRetryHandler</a> = <span class="r2 r">shouldRetryHandler</span>;
+            <a href="#0211cdc0317cb03b" class="i field">_isTransient</a> = <span class="r3 r">isTransient</span>;
+            <a href="#7244e18ca9940552" class="i field">_onRetrying</a> = <span class="r4 r">onRetrying</span>;
+            <a href="#0777932bec8620f8" class="i field">_fastFirstRetry</a> = <span class="r5 r">fastFirstRetry</span>;
+            <a href="#7acad399a21e8efe" class="i field">_cancellationToken</a> = <span class="r6 r">cancellationToken</span>;
+        }
+ 
+        <b>internal</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="r0 r t">TResult</span>&gt; <a id="d77215e88c478615" href="../R/d77215e88c478615.html" target="n" data-glyph="74,1" class="i method">ExecuteAsync</a>()
+        {
+            <b>return</b> <a href="#1cc584a5a35994ae" class="i method">ExecuteAsyncImpl</a>(<b>null</b>);
+        }
+ 
+        <b>private</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="r0 r t">TResult</span>&gt; <a id="1cc584a5a35994ae" href="../R/1cc584a5a35994ae.html" target="n" data-glyph="76,1" class="i method">ExecuteAsyncImpl</a>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <span id="r7 rd" class="r7 r">ignore</span>)
+        {
+            <b>if</b> (<a href="#7acad399a21e8efe" class="i field">_cancellationToken</a>.<a href="@0@mscorlib/A.html#f32abbe8e2f1f6c1" class="i property">IsCancellationRequested</a>)
+            {
+                <span class="c">// if retry was canceled before retrying after a failure, return the failed task.</span>
+                <b>if</b> (<a href="#f1ff86bb74764d23" class="i field">_previousTask</a> != <b>null</b>)
+                {
+                    <b>return</b> <a href="#f1ff86bb74764d23" class="i field">_previousTask</a>;
+                }
+                <b>else</b>
+                {
+                    <a href="@0@mscorlib/A.html#94bf04047d6bd325" class="k">var</a> <span id="r8 rd" class="r8 r">tcs</span> = <b>new</b> <a href="@0@mscorlib/A.html#4aca22f9388e0ac8" class="t constructor">TaskCompletionSource</a>&lt;<span class="r0 r t">TResult</span>&gt;();
+                    <span class="r8 r">tcs</span>.<a href="@0@mscorlib/A.html#2ad1d0e86fe6c98d" class="i method">TrySetCanceled</a>();
+                    <b>return</b> <span class="r8 r">tcs</span>.<a href="@0@mscorlib/A.html#14fe3876fba4607a" class="i property">Task</a>;
+                }
+            }
+ 
+            <span class="c">// This is a little different from ExecuteAction using APM. If an exception occurs synchronously when</span>
+            <span class="c">// starting the task, then the exception is checked for transient errors and if the exception is not</span>
+            <span class="c">// transient, it will bubble up synchronously. Otherwise it will be retried. The reason for bubbling up</span>
+            <span class="c">// synchronously -instead of returning a failed task- is that TAP design guidelines dictate that task </span>
+            <span class="c">// creation should only fail synchronously in response to a usage error, which can be avoided by changing </span>
+            <span class="c">// the code that calls the method, and hence should not be considered transient. Nevertheless, as this is</span>
+            <span class="c">// a general purpose transient error detection library, we cannot guarantee that other libraries or user</span>
+            <span class="c">// code will follow the design guidelines.</span>
+            <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="r0 r t">TResult</span>&gt; <span id="r9 rd" class="r9 r">task</span>;
+            <b>try</b>
+            {
+                <span class="r9 r">task</span> = <a href="#46624f9110a8f206" class="i field">_taskFunc</a>.<a href="@0@mscorlib/A.html#a7843bf4f3b2d594" class="i method">Invoke</a>();
+            }
+            <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r10 rd" class="r10 r">ex</span>)
+            {
+                <b>if</b> (<a href="#0211cdc0317cb03b" class="i field">_isTransient</a>(<span class="r10 r">ex</span>))
+                {
+                    <a href="@0@mscorlib/A.html#94bf04047d6bd325" class="k">var</a> <span id="r11 rd" class="r11 r">tcs</span> = <b>new</b> <a href="@0@mscorlib/A.html#4aca22f9388e0ac8" class="t constructor">TaskCompletionSource</a>&lt;<span class="r0 r t">TResult</span>&gt;();
+                    <span class="r11 r">tcs</span>.<a href="@0@mscorlib/A.html#b720aae245222572" class="i method">TrySetException</a>(<span class="r10 r">ex</span>);
+                    <span class="r9 r">task</span> = <span class="r11 r">tcs</span>.<a href="@0@mscorlib/A.html#14fe3876fba4607a" class="i property">Task</a>;
+                }
+                <b>else</b>
+                {
+                    <b>throw</b>;
+                }
+            }
+ 
+            <span class="c">// Fast path if the user-initiated task is already completed.</span>
+            <b>if</b> (<span class="r9 r">task</span>.<a href="@0@mscorlib/A.html#771e3c39534a4177" class="i property">Status</a> == <a href="@0@mscorlib/A.html#79588e534a82b826" class="t t">TaskStatus</a>.<a href="@0@mscorlib/A.html#72e69fc0e811b3d2" class="i field">RanToCompletion</a>)
+            {
+                <b>return</b> <span class="r9 r">task</span>;
+            }
+ 
+            <b>if</b> (<span class="r9 r">task</span>.<a href="@0@mscorlib/A.html#771e3c39534a4177" class="i property">Status</a> == <a href="@0@mscorlib/A.html#79588e534a82b826" class="t t">TaskStatus</a>.<a href="@0@mscorlib/A.html#4545abd6d5790891" class="i field">Created</a>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#691a34e179b91fdb" class="i method">Format</a>(<a href="@0@mscorlib/A.html#e319c6636909012f" class="t t">CultureInfo</a>.<a href="@0@mscorlib/A.html#26ef1c020f0dbb7a" class="i property">InvariantCulture</a>, <a href="../Properties/Resources.Designer.cs.html#d97cc3180db6ce23" class="t t">Resources</a>.<a href="../Properties/Resources.Designer.cs.html#ed888e2ac77aed04" class="i property">TaskMustBeScheduled</a>, <span class="s">&quot;taskFunc&quot;</span>));
+            }
+ 
+            <b>return</b> <span class="r9 r">task</span>
+                .<a href="@0@mscorlib/A.html#6f828f711c242571" class="i method">ContinueWith</a>&lt;<a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="r0 r t">TResult</span>&gt;&gt;(<a href="#742bb4ce96f3c985" class="i method">ExecuteAsyncContinueWith</a>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>,
+                    <a href="@0@mscorlib/A.html#a13039cb7befff52" class="t t">TaskContinuationOptions</a>.<a href="@0@mscorlib/A.html#2dd80c4cf8651fce" class="i field">ExecuteSynchronously</a>, <a href="@0@mscorlib/A.html#b76a4a6f77962f28" class="t t">TaskScheduler</a>.<a href="@0@mscorlib/A.html#d4a38cb3e3085518" class="i property">Default</a>)
+                .<a href="@0@System.Core/A.html#e4f7cc9af0c22301" class="i method">Unwrap</a>();
+        }
+ 
+        <b>private</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="r0 r t">TResult</span>&gt; <a id="742bb4ce96f3c985" href="../R/742bb4ce96f3c985.html" target="n" data-glyph="76,1" class="i method">ExecuteAsyncContinueWith</a>(<a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="r0 r t">TResult</span>&gt; <span id="r12 rd" class="r12 r">runningTask</span>)
+        {
+            <b>if</b> (!<span class="r12 r">runningTask</span>.<a href="@0@mscorlib/A.html#e9c0495c4af4d4df" class="i property">IsFaulted</a> || <a href="#7acad399a21e8efe" class="i field">_cancellationToken</a>.<a href="@0@mscorlib/A.html#f32abbe8e2f1f6c1" class="i property">IsCancellationRequested</a>)
+            {
+                <b>return</b> <span class="r12 r">runningTask</span>;
+            }
+ 
+            <a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r13 rd" class="r13 r">lastError</span> = <span class="r12 r">runningTask</span>.<a href="@0@mscorlib/A.html#0bdc783f2cd45895" class="i property">Exception</a>.<a href="@0@mscorlib/A.html#89c20b39fb04108b" class="i property">InnerException</a>;
+ 
+            <b>if</b> (!(<a href="#0211cdc0317cb03b" class="i field">_isTransient</a>(<span class="r13 r">lastError</span>)))
+            {
+                <span class="c">// if not transient, return the faulted running task.</span>
+                <b>return</b> <span class="r12 r">runningTask</span>;
+            }
+ 
+            <a href="RetryCondition.cs.html#c975335eca208c01" class="t t">RetryCondition</a> <span id="r14 rd" class="r14 r">condition</span> = <a href="#c304113401a785b2" class="i field">_shouldRetryHandler</a>(<a href="#58120a6a7cb7e729" class="i field">_retryCount</a>++, <span class="r13 r">lastError</span>);
+            <b>if</b> (!<span class="r14 r">condition</span>.<a href="RetryCondition.cs.html#1f1dcc448ee21877" class="i property">RetryAllowed</a>)
+            {
+                <b>return</b> <span class="r12 r">runningTask</span>;
+            }
+            <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r15 rd" class="r15 r">delay</span> = <span class="r14 r">condition</span>.<a href="RetryCondition.cs.html#9da6e966e407069e" class="i property">DelayBeforeRetry</a>;
+ 
+            <span class="c">// Perform an extra check in the delay interval.</span>
+            <b>if</b> (<span class="r15 r">delay</span> &lt; <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#225346b4cd3a8300" class="i field">Zero</a>)
+            {
+                <span class="r15 r">delay</span> = <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#225346b4cd3a8300" class="i field">Zero</a>;
+            }
+ 
+            <a href="#7244e18ca9940552" class="i field">_onRetrying</a>(<a href="#58120a6a7cb7e729" class="i field">_retryCount</a>, <span class="r13 r">lastError</span>, <span class="r15 r">delay</span>);
+ 
+            <a href="#f1ff86bb74764d23" class="i field">_previousTask</a> = <span class="r12 r">runningTask</span>;
+            <b>if</b> (<span class="r15 r">delay</span> &gt; <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#225346b4cd3a8300" class="i field">Zero</a> &amp;&amp; (<a href="#58120a6a7cb7e729" class="i field">_retryCount</a> &gt; 1 || !<a href="#0777932bec8620f8" class="i field">_fastFirstRetry</a>))
+            {
+                <b>return</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#87a671fb5b9b4384" class="i method">Delay</a>(<span class="r15 r">delay</span>)
+                    .<a href="@0@mscorlib/A.html#80f8c2f9bdcfb440" class="i method">ContinueWith</a>&lt;<a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="r0 r t">TResult</span>&gt;&gt;(<a href="#1cc584a5a35994ae" class="i method">ExecuteAsyncImpl</a>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>,
+                        <a href="@0@mscorlib/A.html#a13039cb7befff52" class="t t">TaskContinuationOptions</a>.<a href="@0@mscorlib/A.html#2dd80c4cf8651fce" class="i field">ExecuteSynchronously</a>, <a href="@0@mscorlib/A.html#b76a4a6f77962f28" class="t t">TaskScheduler</a>.<a href="@0@mscorlib/A.html#d4a38cb3e3085518" class="i property">Default</a>)
+                    .<a href="@0@System.Core/A.html#e4f7cc9af0c22301" class="i method">Unwrap</a>();
+            }
+ 
+            <b>return</b> <a href="#1cc584a5a35994ae" class="i method">ExecuteAsyncImpl</a>(<b>null</b>);
+        }
+    }
+ 
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Provides a wrapper for a non-generic </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> and calls into the pipeline</span>
+    <span class="c">///</span><span class="c"> to retry only the generic version of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="aa5e32f3d9df327e" href="../R/aa5e32f3d9df327e.html" target="n" data-glyph="2,0" class="t t">AsyncExecution</a> : <a href="#f19c9b0ba80d45bf" class="t t">AsyncExecution</a>&lt;<b>bool</b>&gt;
+    {
+        <b>private static</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>bool</b>&gt; <a id="94e57fb04fae6e16" href="../R/94e57fb04fae6e16.html" target="n" data-glyph="46,1" class="i field">_cachedBoolTask</a>;
+ 
+        <b>public</b> <a id="0611703cd6f05ce4" href="../R/0611703cd6f05ce4.html" target="n" data-glyph="72,1" class="t constructor">AsyncExecution</a>(
+            <a href="@0@mscorlib/A.html#87d60abb7092d5a4" class="t t">Func</a>&lt;<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>&gt; <span id="r16 rd" class="r16 r">taskAction</span>,
+            <a href="RetryStrategy.cs.html#6665e8cd55a3df0d" class="t t">ShouldRetryHandler</a> <span id="r17 rd" class="r17 r">shouldRetryHandler</span>,
+            <a href="@0@mscorlib/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>, <b>bool</b>&gt; <span id="r18 rd" class="r18 r">isTransient</span>,
+            <a href="@0@mscorlib/A.html#28d0bef62ddfa8c8" class="t t">Action</a>&lt;<b>int</b>, <a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>, <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>&gt; <span id="r19 rd" class="r19 r">onRetrying</span>,
+            <b>bool</b> <span id="r20 rd" class="r20 r">fastFirstRetry</span>,
+            <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r21 rd" class="r21 r">cancellationToken</span>)
+            : <a href="#672194c97e42eddb" class="k">base</a>(
+                () =&gt; <a href="#9316df7cb65f5c8d" class="i method">StartAsGenericTask</a>(<span class="r16 r">taskAction</span>), 
+                <span class="r17 r">shouldRetryHandler</span>, 
+                <span class="r18 r">isTransient</span>, 
+                <span class="r19 r">onRetrying</span>, 
+                <span class="r20 r">fastFirstRetry</span>,
+                <span class="r21 r">cancellationToken</span>)
+        {
+        }
+ 
+        <b>private static</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>bool</b>&gt; <a id="012b548334ee4c0b" href="../R/012b548334ee4c0b.html" target="n" data-glyph="76,1" class="i method">GetCachedTask</a>()
+        {
+            <b>if</b> (<a href="#94e57fb04fae6e16" class="i field">_cachedBoolTask</a> == <b>null</b>)
+            {
+                <a href="@0@mscorlib/A.html#94bf04047d6bd325" class="k">var</a> <span id="r22 rd" class="r22 r">tcs</span> = <b>new</b> <a href="@0@mscorlib/A.html#4aca22f9388e0ac8" class="t constructor">TaskCompletionSource</a>&lt;<b>bool</b>&gt;();
+                <span class="r22 r">tcs</span>.<a href="@0@mscorlib/A.html#f58e440930617bf6" class="i method">TrySetResult</a>(<b>true</b>);
+                <a href="#94e57fb04fae6e16" class="i field">_cachedBoolTask</a> = <span class="r22 r">tcs</span>.<a href="@0@mscorlib/A.html#14fe3876fba4607a" class="i property">Task</a>;
+            }
+ 
+            <b>return</b> <a href="#94e57fb04fae6e16" class="i field">_cachedBoolTask</a>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Wraps the non-generic </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> into a generic </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r23 r">taskAction</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The task to wrap.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that wraps the non-generic </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private static</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>bool</b>&gt; <a id="9316df7cb65f5c8d" href="../R/9316df7cb65f5c8d.html" target="n" data-glyph="76,1" class="i method">StartAsGenericTask</a>(<a href="@0@mscorlib/A.html#87d60abb7092d5a4" class="t t">Func</a>&lt;<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>&gt; <span id="r23 rd" class="r23 r">taskAction</span>)
+        {
+            <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="k">var</a> <span id="r24 rd" class="r24 r">task</span> = <span class="r23 r">taskAction</span>.<a href="@0@mscorlib/A.html#a7843bf4f3b2d594" class="i method">Invoke</a>();
+            <b>if</b> (<span class="r24 r">task</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#4b20cd3790b6426a" class="t constructor">ArgumentException</a>(
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#691a34e179b91fdb" class="i method">Format</a>(<a href="@0@mscorlib/A.html#e319c6636909012f" class="t t">CultureInfo</a>.<a href="@0@mscorlib/A.html#26ef1c020f0dbb7a" class="i property">InvariantCulture</a>, <a href="../Properties/Resources.Designer.cs.html#d97cc3180db6ce23" class="t t">Resources</a>.<a href="../Properties/Resources.Designer.cs.html#710c9ff08c62b592" class="i property">TaskCannotBeNull</a>, <span class="s">&quot;taskAction&quot;</span>),
+                    <span class="s">&quot;taskAction&quot;</span>);
+            }
+ 
+            <b>if</b> (<span class="r24 r">task</span>.<a href="@0@mscorlib/A.html#771e3c39534a4177" class="i property">Status</a> == <a href="@0@mscorlib/A.html#79588e534a82b826" class="t t">TaskStatus</a>.<a href="@0@mscorlib/A.html#72e69fc0e811b3d2" class="i field">RanToCompletion</a>)
+            {
+                <span class="c">// Fast path if the user-initiated task is already completed.</span>
+                <b>return</b> <a href="#012b548334ee4c0b" class="i method">GetCachedTask</a>();
+            }
+ 
+            <b>if</b> (<span class="r24 r">task</span>.<a href="@0@mscorlib/A.html#771e3c39534a4177" class="i property">Status</a> == <a href="@0@mscorlib/A.html#79588e534a82b826" class="t t">TaskStatus</a>.<a href="@0@mscorlib/A.html#4545abd6d5790891" class="i field">Created</a>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#4b20cd3790b6426a" class="t constructor">ArgumentException</a>(
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#691a34e179b91fdb" class="i method">Format</a>(<a href="@0@mscorlib/A.html#e319c6636909012f" class="t t">CultureInfo</a>.<a href="@0@mscorlib/A.html#26ef1c020f0dbb7a" class="i property">InvariantCulture</a>, <a href="../Properties/Resources.Designer.cs.html#d97cc3180db6ce23" class="t t">Resources</a>.<a href="../Properties/Resources.Designer.cs.html#ed888e2ac77aed04" class="i property">TaskMustBeScheduled</a>, <span class="s">&quot;taskAction&quot;</span>),
+                    <span class="s">&quot;taskAction&quot;</span>);
+            }
+ 
+            <a href="@0@mscorlib/A.html#94bf04047d6bd325" class="k">var</a> <span id="r25 rd" class="r25 r">tcs</span> = <b>new</b> <a href="@0@mscorlib/A.html#4aca22f9388e0ac8" class="t constructor">TaskCompletionSource</a>&lt;<b>bool</b>&gt;();
+            <span class="r24 r">task</span>.<a href="@0@mscorlib/A.html#91a913fe5247e878" class="i method">ContinueWith</a>(<span id="r26 rd" class="r26 r">t</span> =&gt;
+            {
+                <b>if</b> (<span class="r26 r">t</span>.<a href="@0@mscorlib/A.html#e9c0495c4af4d4df" class="i property">IsFaulted</a>)
+                {
+                    <span class="r25 r">tcs</span>.<a href="@0@mscorlib/A.html#4da85e9e37e59e0b" class="i method">TrySetException</a>(<span class="r26 r">t</span>.<a href="@0@mscorlib/A.html#0bdc783f2cd45895" class="i property">Exception</a>.<a href="@0@mscorlib/A.html#e9d864767768da2b" class="i property">InnerExceptions</a>);
+                }
+                <b>else</b> <b>if</b> (<span class="r26 r">t</span>.<a href="@0@mscorlib/A.html#37cd1e11bb77b197" class="i property">IsCanceled</a>)
+                {
+                    <span class="r25 r">tcs</span>.<a href="@0@mscorlib/A.html#2ad1d0e86fe6c98d" class="i method">TrySetCanceled</a>();
+                }
+                <b>else</b>
+                {
+                    <span class="r25 r">tcs</span>.<a href="@0@mscorlib/A.html#f58e440930617bf6" class="i method">TrySetResult</a>(<b>true</b>);
+                }
+            }, <a href="@0@mscorlib/A.html#a13039cb7befff52" class="t t">TaskContinuationOptions</a>.<a href="@0@mscorlib/A.html#2dd80c4cf8651fce" class="i field">ExecuteSynchronously</a>);
+            <b>return</b> <span class="r25 r">tcs</span>.<a href="@0@mscorlib/A.html#14fe3876fba4607a" class="i property">Task</a>;
+        }
+ 
+    }
+}</pre></td></tr></table></div></body></html>

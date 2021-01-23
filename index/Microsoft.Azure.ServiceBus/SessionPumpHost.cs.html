@@ -1,0 +1,147 @@
+﻿<!DOCTYPE html>
+<html><head><title>SessionPumpHost.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(138);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.ServiceBus/SessionPumpHost.cs" target="_top">SessionPumpHost.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.ServiceBus" target="_top">src\Microsoft.Azure.ServiceBus.csproj</a> (Microsoft.Azure.ServiceBus)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft. All rights reserved.</span>
+<span class="c">// Licensed under the MIT license. See LICENSE file in the project root for full license information.</span>
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">ServiceBus</span>
+{
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">ServiceBus</span>.<span class="i n">Primitives</span>;
+    <b>using</b> <span class="i">System</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+ 
+    <b>internal sealed class</b> <a id="c8868839ab3f54cb" href="R/c8868839ab3f54cb.html" target="n" data-glyph="2,0" class="t t">SessionPumpHost</a>
+    {
+        <b>readonly object</b> <a id="7e0a86a3b92e48c1" href="R/7e0a86a3b92e48c1.html" target="n" data-glyph="46,1" class="i field">syncLock</a>;
+        <a href="SessionReceivePump.cs.html#17f50eaa1ce352f4" class="t t">SessionReceivePump</a> <a id="ddbad2cbbb7a9057" href="R/ddbad2cbbb7a9057.html" target="n" data-glyph="46,1" class="i field">sessionReceivePump</a>;
+        <span class="i">CancellationTokenSource</span> <a id="f1f10c93dbd2956d" href="R/f1f10c93dbd2956d.html" target="n" data-glyph="46,1" class="i field">sessionPumpCancellationTokenSource</a>;
+        <span class="i">CancellationTokenSource</span> <a id="f06a988bfa1e4039" href="R/f06a988bfa1e4039.html" target="n" data-glyph="46,1" class="i field">runningTaskCancellationTokenSource</a>;
+        <b>readonly</b> <span class="i">Uri</span> <a id="8c65149923bd999c" href="R/8c65149923bd999c.html" target="n" data-glyph="46,1" class="i field">endpoint</a>;
+ 
+        <b>public</b> <a id="e89e1a6915220ed5" href="R/e89e1a6915220ed5.html" target="n" data-glyph="72,1" class="t constructor">SessionPumpHost</a>(<b>string</b> <span id="r0 rd" class="r0 r">clientId</span>, <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a> <span id="r1 rd" class="r1 r">receiveMode</span>, <a href="ISessionClient.cs.html#ec1e03f734d1bf10" class="t t">ISessionClient</a> <span id="r2 rd" class="r2 r">sessionClient</span>, <span class="i">Uri</span> <span id="r3 rd" class="r3 r">endpoint</span>)
+        {
+            <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#7e0a86a3b92e48c1" class="i field">syncLock</a> = <b>new</b> <b>object</b>();
+            <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#32428d02c707df8e" class="i property">ClientId</a> = <span class="r0 r">clientId</span>;
+            <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#5d3c1c696c767dd4" class="i property">ReceiveMode</a> = <span class="r1 r">receiveMode</span>;
+            <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#c2f9c1ce8599e0a8" class="i property">SessionClient</a> = <span class="r2 r">sessionClient</span>;
+            <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#8c65149923bd999c" class="i field">endpoint</a> = <span class="r3 r">endpoint</span>;
+        }
+ 
+        <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a> <a id="5d3c1c696c767dd4" href="R/5d3c1c696c767dd4.html" target="n" data-glyph="106,1" class="i property">ReceiveMode</a> { <b>get</b>; }
+ 
+        <a href="ISessionClient.cs.html#ec1e03f734d1bf10" class="t t">ISessionClient</a> <a id="c2f9c1ce8599e0a8" href="R/c2f9c1ce8599e0a8.html" target="n" data-glyph="106,1" class="i property">SessionClient</a> { <b>get</b>; }
+ 
+        <b>string</b> <a id="32428d02c707df8e" href="R/32428d02c707df8e.html" target="n" data-glyph="106,1" class="i property">ClientId</a> { <b>get</b>; }
+ 
+        <b>public void</b> <a id="a48e14b7de3cefe8" href="R/a48e14b7de3cefe8.html" target="n" data-glyph="72,1" class="i method">Close</a>()
+        {
+            <b>if</b> (<a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#ddbad2cbbb7a9057" class="i field">sessionReceivePump</a> != <b>null</b>)
+            {
+                <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#f1f10c93dbd2956d" class="i field">sessionPumpCancellationTokenSource</a>?.<span class="i">Cancel</span>();
+                <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#f1f10c93dbd2956d" class="i field">sessionPumpCancellationTokenSource</a>?.<span class="i">Dispose</span>();
+                <span class="c">// For back-compatibility </span>
+                <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#f06a988bfa1e4039" class="i field">runningTaskCancellationTokenSource</a>?.<span class="i">Cancel</span>();
+                <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#f06a988bfa1e4039" class="i field">runningTaskCancellationTokenSource</a>?.<span class="i">Dispose</span>();
+                <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#ddbad2cbbb7a9057" class="i field">sessionReceivePump</a> = <b>null</b>;
+            }
+        }
+ 
+        <b>public void</b> <a id="9f2cc10a117fef6b" href="R/9f2cc10a117fef6b.html" target="n" data-glyph="72,1" class="i method">OnSessionHandler</a>(
+            <span class="i">Func</span>&lt;<a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a>, <a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>, <span class="i">CancellationToken</span>, <span class="i">Task</span>&gt; <span id="r4 rd" class="r4 r">callback</span>,
+            <a href="SessionHandlerOptions.cs.html#6626e016a3aac115" class="t t">SessionHandlerOptions</a> <span id="r5 rd" class="r5 r">sessionHandlerOptions</span>)
+        {
+            <a href="MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="MessagingEventSource.cs.html#528f4af94b3ac8c4" class="i method">RegisterOnSessionHandlerStart</a>(<a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#32428d02c707df8e" class="i property">ClientId</a>, <span class="r5 r">sessionHandlerOptions</span>);
+ 
+            <b>lock</b> (<a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#7e0a86a3b92e48c1" class="i field">syncLock</a>)
+            {
+                <b>if</b> (<a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#ddbad2cbbb7a9057" class="i field">sessionReceivePump</a> != <b>null</b>)
+                {
+                    <b>throw</b> <b>new</b> <span class="i">InvalidOperationException</span>(<a href="Resources.Designer.cs.html#8e0563579d43c165" class="t t">Resources</a>.<a href="Resources.Designer.cs.html#4376ab7193a0b08e" class="i property">SessionHandlerAlreadyRegistered</a>);
+                }
+ 
+                <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#f1f10c93dbd2956d" class="i field">sessionPumpCancellationTokenSource</a> = <b>new</b> <span class="i">CancellationTokenSource</span>();
+ 
+                <span class="c">// Running task cancellation token source can be reused if previously UnregisterSessionHandlerAsync was called</span>
+                <b>if</b> (<a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#f06a988bfa1e4039" class="i field">runningTaskCancellationTokenSource</a> == <b>null</b>)
+                {
+                    <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#f06a988bfa1e4039" class="i field">runningTaskCancellationTokenSource</a> = <b>new</b> <span class="i">CancellationTokenSource</span>();
+                }
+ 
+                <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#ddbad2cbbb7a9057" class="i field">sessionReceivePump</a> = <b>new</b> <span class="t">SessionReceivePump</span>(
+                    <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#32428d02c707df8e" class="i property">ClientId</a>,
+                    <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#c2f9c1ce8599e0a8" class="i property">SessionClient</a>,
+                    <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#5d3c1c696c767dd4" class="i property">ReceiveMode</a>,
+                    <span class="r5 r">sessionHandlerOptions</span>,
+                    <span class="r4 r">callback</span>,
+                    <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#8c65149923bd999c" class="i field">endpoint</a>,
+                    <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#f1f10c93dbd2956d" class="i field">sessionPumpCancellationTokenSource</a>.<span class="i">Token</span>,
+                    <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#f06a988bfa1e4039" class="i field">runningTaskCancellationTokenSource</a>.<span class="i">Token</span>);
+            }
+ 
+            <b>try</b>
+            {
+                <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#ddbad2cbbb7a9057" class="i field">sessionReceivePump</a>.<a href="SessionReceivePump.cs.html#03863f53d5e668c7" class="i method">StartPump</a>();
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r6 rd" class="r6 r">exception</span>)
+            {
+                <a href="MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="MessagingEventSource.cs.html#d72f51da7ddaee91" class="i method">RegisterOnSessionHandlerException</a>(<a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#32428d02c707df8e" class="i property">ClientId</a>, <span class="r6 r">exception</span>);
+                <b>if</b> (<a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#ddbad2cbbb7a9057" class="i field">sessionReceivePump</a> != <b>null</b>)
+                {
+                    <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#f1f10c93dbd2956d" class="i field">sessionPumpCancellationTokenSource</a>.<span class="i">Cancel</span>();
+                    <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#f1f10c93dbd2956d" class="i field">sessionPumpCancellationTokenSource</a>.<span class="i">Dispose</span>();
+                    <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#ddbad2cbbb7a9057" class="i field">sessionReceivePump</a> = <b>null</b>;
+                }
+ 
+                <b>throw</b>;
+            }
+ 
+            <a href="MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="MessagingEventSource.cs.html#b8aca8a555e9adf5" class="i method">RegisterOnSessionHandlerStop</a>(<a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#32428d02c707df8e" class="i property">ClientId</a>);
+        }
+ 
+        <b>public async</b> <span class="i">Task</span> <a id="81a24adc5b0d9a75" href="R/81a24adc5b0d9a75.html" target="n" data-glyph="72,1" class="i method">UnregisterSessionHandlerAsync</a>(<span class="i">TimeSpan</span> <span id="r7 rd" class="r7 r">inflightSessionHandlerTasksWaitTimeout</span>)
+        {
+            <b>if</b> (<span class="r7 r">inflightSessionHandlerTasksWaitTimeout</span> &lt;= <span class="i">TimeSpan</span>.<span class="i">Zero</span>)
+            {
+                <b>throw</b> <a href="Primitives/Fx.cs.html#c01e8844709e19c1" class="t t">Fx</a>.<a href="Primitives/Fx.cs.html#0793cb830fb5b201" class="i property">Exception</a>.<span class="i">ArgumentOutOfRange</span>(<b>nameof</b>(<span class="r7 r">inflightSessionHandlerTasksWaitTimeout</span>), <span class="r7 r">inflightSessionHandlerTasksWaitTimeout</span>, <a href="Resources.Designer.cs.html#8e0563579d43c165" class="t t">Resources</a>.<a href="Resources.Designer.cs.html#c17e05f005d2baa6" class="i property">TimeoutMustBePositiveNonZero</a>.<span class="i">FormatForUser</span>(<b>nameof</b>(<span class="r7 r">inflightSessionHandlerTasksWaitTimeout</span>), <span class="r7 r">inflightSessionHandlerTasksWaitTimeout</span>));
+            }
+ 
+            <a href="MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="MessagingEventSource.cs.html#c1433eea459e6a27" class="i method">UnregisterSessionHandlerStart</a>(<a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#32428d02c707df8e" class="i property">ClientId</a>);
+            <b>lock</b> (<a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#7e0a86a3b92e48c1" class="i field">syncLock</a>)
+            {
+                <b>if</b> (<a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#ddbad2cbbb7a9057" class="i field">sessionReceivePump</a> == <b>null</b> || <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#f1f10c93dbd2956d" class="i field">sessionPumpCancellationTokenSource</a>.<span class="i">IsCancellationRequested</span>)
+                {
+                    <span class="c">// Silently return if handler has already been unregistered. </span>
+                    <b>return</b>;
+                }
+ 
+                <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#f1f10c93dbd2956d" class="i field">sessionPumpCancellationTokenSource</a>.<span class="i">Cancel</span>();
+                <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#f1f10c93dbd2956d" class="i field">sessionPumpCancellationTokenSource</a>.<span class="i">Dispose</span>();
+            }
+ 
+            <span class="i">Stopwatch</span> <span id="r8 rd" class="r8 r">stopWatch</span> = <span class="i">Stopwatch</span>.<span class="i">StartNew</span>();
+            <b>while</b> (<a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#ddbad2cbbb7a9057" class="i field">sessionReceivePump</a> != <b>null</b>
+                &amp;&amp; <span class="r8 r">stopWatch</span>.<span class="i">Elapsed</span> &lt; <span class="r7 r">inflightSessionHandlerTasksWaitTimeout</span>
+                &amp;&amp; (<a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#ddbad2cbbb7a9057" class="i field">sessionReceivePump</a>.<a href="SessionReceivePump.cs.html#9b83452a02b3eec4" class="i field">maxConcurrentSessionsSemaphoreSlim</a>.<span class="i">CurrentCount</span> &lt; 
+                    <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#ddbad2cbbb7a9057" class="i field">sessionReceivePump</a>.<a href="SessionReceivePump.cs.html#29f4764b3eb5b645" class="i field">sessionHandlerOptions</a>.<a href="SessionHandlerOptions.cs.html#93d2275f2d2da2d0" class="i property">MaxConcurrentSessions</a>
+                || <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#ddbad2cbbb7a9057" class="i field">sessionReceivePump</a>.<a href="SessionReceivePump.cs.html#76a9290d4f2c1e61" class="i field">maxPendingAcceptSessionsSemaphoreSlim</a>.<span class="i">CurrentCount</span> &lt;           
+                <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#ddbad2cbbb7a9057" class="i field">sessionReceivePump</a>.<a href="SessionReceivePump.cs.html#29f4764b3eb5b645" class="i field">sessionHandlerOptions</a>.<a href="SessionHandlerOptions.cs.html#137ab55911a6cd9f" class="i property">MaxConcurrentAcceptSessionCalls</a>))
+            {
+                <b>await</b> <span class="i">Task</span>.<span class="i">Delay</span>(10).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+ 
+            <b>lock</b> (<a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#f1f10c93dbd2956d" class="i field">sessionPumpCancellationTokenSource</a>)
+            {
+                <a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#ddbad2cbbb7a9057" class="i field">sessionReceivePump</a> = <b>null</b>;
+            }
+            <a href="MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="MessagingEventSource.cs.html#e5c95f6a786055ab" class="i method">UnregisterSessionHandlerStop</a>(<a href="#c8868839ab3f54cb" class="k">this</a>.<a href="#32428d02c707df8e" class="i property">ClientId</a>);
+        }
+    }
+}</pre></td></tr></table></div></body></html>

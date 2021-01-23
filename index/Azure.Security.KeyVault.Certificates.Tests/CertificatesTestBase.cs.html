@@ -1,0 +1,324 @@
+﻿<!DOCTYPE html>
+<html><head><title>CertificatesTestBase.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(315);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Security.KeyVault.Certificates.Tests/CertificatesTestBase.cs" target="_top">CertificatesTestBase.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Security.KeyVault.Certificates.Tests" target="_top">Azure.Security.KeyVault.Certificates\tests\Azure.Security.KeyVault.Certificates.Tests.csproj</a> (Azure.Security.KeyVault.Certificates.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Concurrent</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">TestFramework</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Security</span>.<span class="i n">KeyVault</span>.<span class="i n">Tests</span>;
+<b>using</b> <span class="i">NUnit</span>.<span class="i">Framework</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Security</span>.<span class="i n">KeyVault</span>.<span class="i n">Certificates</span>.<span class="i n">Tests</span>
+{
+    [<span class="i">ClientTestFixture</span>(
+        <a href="/Azure.Security.KeyVault.Certificates/A.html#762d0a9714ec1233" class="t t">CertificateClientOptions</a>.<a href="/Azure.Security.KeyVault.Certificates/A.html#368f84852d7f7020" class="t t">ServiceVersion</a>.<a href="/Azure.Security.KeyVault.Certificates/A.html#90bfd64372c753eb" class="i field">V7_0</a>,
+        <a href="/Azure.Security.KeyVault.Certificates/A.html#762d0a9714ec1233" class="t t">CertificateClientOptions</a>.<a href="/Azure.Security.KeyVault.Certificates/A.html#368f84852d7f7020" class="t t">ServiceVersion</a>.<a href="/Azure.Security.KeyVault.Certificates/A.html#791aedd3bd222110" class="i field">V7_1</a>)]
+    [<span class="i">NonParallelizable</span>]
+    <b>public abstract class</b> <a id="b64c1a21345ca081" href="R/b64c1a21345ca081.html" target="n" data-glyph="0,0" class="t t">CertificatesTestBase</a> : <a href="/Azure.Core.TestFramework/A.html#2d2d9cc2c3882f17" class="t t">RecordedTestBase</a>&lt;<a href="KeyVaultTestEnvironment.cs.html#f679cb5f8515771f" class="t t">KeyVaultTestEnvironment</a>&gt;
+    {
+        <b>protected readonly</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="0a9b51c5fb01175f" href="R/0a9b51c5fb01175f.html" target="n" data-glyph="45,1" class="i field">PollingInterval</a> = <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(5);
+        <b>private readonly</b> <a href="/Azure.Security.KeyVault.Certificates/A.html#762d0a9714ec1233" class="t t">CertificateClientOptions</a>.<a href="/Azure.Security.KeyVault.Certificates/A.html#368f84852d7f7020" class="t t">ServiceVersion</a> <a id="61523340ff0ec3e1" href="R/61523340ff0ec3e1.html" target="n" data-glyph="46,1" class="i field">_serviceVersion</a>;
+ 
+        <b>public</b> <a href="/Azure.Security.KeyVault.Certificates/A.html#a66d1243f42a3d40" class="t t">CertificateClient</a> <a id="53a1dcda843ad360" href="R/53a1dcda843ad360.html" target="n" data-glyph="102,1" class="i property">Client</a> { <b>get</b>; <b>set</b>; }
+ 
+        <b>public</b> <a href="@0@System/A.html#991565dd25f47c90" class="t t">Uri</a> <a id="9b468840ea425c40" href="R/9b468840ea425c40.html" target="n" data-glyph="102,1" class="i property">VaultUri</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">// Queue deletes, but poll on the top of the purge stack to increase likelihood of others being purged by then.</span>
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#18bcbcbdddbcfdcb" class="t t">ConcurrentQueue</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="6fd98ce13a3a2b12" href="R/6fd98ce13a3a2b12.html" target="n" data-glyph="46,1" class="i field">_certificatesToDelete</a> = <b>new</b> <a href="@0@mscorlib/A.html#a773570b1b021cff" class="t constructor">ConcurrentQueue</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;();
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#de91cdef3f389289" class="t t">ConcurrentStack</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="2618cbe649e45247" href="R/2618cbe649e45247.html" target="n" data-glyph="46,1" class="i field">_certificatesToPurge</a> = <b>new</b> <a href="@0@mscorlib/A.html#839d4b9393fa2a50" class="t constructor">ConcurrentStack</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;();
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#18bcbcbdddbcfdcb" class="t t">ConcurrentQueue</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="f0fed5c397ace641" href="R/f0fed5c397ace641.html" target="n" data-glyph="46,1" class="i field">_issuerToDelete</a> = <b>new</b> <a href="@0@mscorlib/A.html#a773570b1b021cff" class="t constructor">ConcurrentQueue</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;();
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#18bcbcbdddbcfdcb" class="t t">ConcurrentQueue</a>&lt;<a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="/Azure.Security.KeyVault.Certificates/A.html#4f004d5d087dc380" class="t t">CertificateContact</a>&gt;&gt; <a id="2b03f7c4f0ad59d6" href="R/2b03f7c4f0ad59d6.html" target="n" data-glyph="46,1" class="i field">_contactsToDelete</a> = <b>new</b> <a href="@0@mscorlib/A.html#a773570b1b021cff" class="t constructor">ConcurrentQueue</a>&lt;<a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="/Azure.Security.KeyVault.Certificates/A.html#4f004d5d087dc380" class="t t">CertificateContact</a>&gt;&gt;();
+ 
+        <b>private</b> <a href="KeyVaultTestEventListener.cs.html#edee2f3c63e820c5" class="t t">KeyVaultTestEventListener</a> <a id="45cff2272ec065cf" href="R/45cff2272ec065cf.html" target="n" data-glyph="46,1" class="i field">_listener</a>;
+ 
+        <b>public</b> <a id="cbfd7860c7c2d1fb" href="R/cbfd7860c7c2d1fb.html" target="n" data-glyph="72,1" class="t constructor">CertificatesTestBase</a>(<b>bool</b> <span id="r0 rd" class="r0 r">isAsync</span>, <a href="/Azure.Security.KeyVault.Certificates/A.html#762d0a9714ec1233" class="t t">CertificateClientOptions</a>.<a href="/Azure.Security.KeyVault.Certificates/A.html#368f84852d7f7020" class="t t">ServiceVersion</a> <span id="r1 rd" class="r1 r">serviceVersion</span>, <a href="/Azure.Core.TestFramework/A.html#d7d5cc97dd76217f" class="t t">RecordedTestMode</a>? <span id="r2 rd" class="r2 r">mode</span>)
+            : <a href="/Azure.Core.TestFramework/A.html#6c85f9f9d83d6090" class="k">base</a>(<span class="r0 r">isAsync</span>, <span class="r2 r">mode</span> ?? <a href="/Azure.Core.TestFramework/A.html#690df1c0bd3cbc0b" class="t t">RecordedTestUtilities</a>.<a href="/Azure.Core.TestFramework/A.html#2e41f249ca30b26e" class="i method">GetModeFromEnvironment</a>())
+        {
+            <a href="#61523340ff0ec3e1" class="i field">_serviceVersion</a> = <span class="r1 r">serviceVersion</span>;
+        }
+ 
+        <b>internal</b> <a href="/Azure.Security.KeyVault.Certificates/A.html#a66d1243f42a3d40" class="t t">CertificateClient</a> <a id="4e013fdcefeef9f9" href="R/4e013fdcefeef9f9.html" target="n" data-glyph="74,1" class="i method">GetClient</a>()
+        {
+            <a href="/Azure.Security.KeyVault.Certificates/A.html#762d0a9714ec1233" class="t t">CertificateClientOptions</a> <span id="r3 rd" class="r3 r">options</span> = <b>new</b> <span class="t">CertificateClientOptions</span>(<a href="#61523340ff0ec3e1" class="i field">_serviceVersion</a>)
+            {
+                <span class="i">Diagnostics</span> =
+                {
+                    <span class="i">IsLoggingContentEnabled</span> = <a href="@0@mscorlib/A.html#0652ef6f5bf8d78b" class="t t">Debugger</a>.<a href="@0@mscorlib/A.html#c70d3a0fb6f77726" class="i property">IsAttached</a>,
+                }
+            };
+ 
+            <b>return</b> <a href="/Azure.Core.TestFramework/A.html#11829fdeef1b6d51" class="i method">InstrumentClient</a>
+                (<b>new</b> <span class="t">CertificateClient</span>(
+                    <b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<a href="/Azure.Core.TestFramework/A.html#9185092834304053" class="i property">TestEnvironment</a>.<a href="KeyVaultTestEnvironment.cs.html#0cecae78739510ab" class="i property">KeyVaultUrl</a>),
+                    <a href="/Azure.Core.TestFramework/A.html#9185092834304053" class="i property">TestEnvironment</a>.<a href="/Azure.Core.TestFramework/A.html#7a52cec375a4970c" class="i property">Credential</a>,
+                    <span class="i">InstrumentClientOptions</span>(<span class="r3 r">options</span>)));
+        }
+ 
+        <b>public override void</b> <a id="3b87c563fad8a2f7" href="R/3b87c563fad8a2f7.html" target="n" data-glyph="72,1" class="i method">StartTestRecording</a>()
+        {
+            <a href="/Azure.Core.TestFramework/A.html#2d2d9cc2c3882f17" class="k">base</a>.<a href="/Azure.Core.TestFramework/A.html#1280f896beedbece" class="i method">StartTestRecording</a>();
+ 
+            <a href="#45cff2272ec065cf" class="i field">_listener</a> = <b>new</b> <a href="KeyVaultTestEventListener.cs.html#ca42a21927a50548" class="t constructor">KeyVaultTestEventListener</a>();
+ 
+            <a href="#53a1dcda843ad360" class="i property">Client</a> = <a href="#4e013fdcefeef9f9" class="i method">GetClient</a>();
+            <a href="#9b468840ea425c40" class="i property">VaultUri</a> = <b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<a href="/Azure.Core.TestFramework/A.html#9185092834304053" class="i property">TestEnvironment</a>.<a href="KeyVaultTestEnvironment.cs.html#0cecae78739510ab" class="i property">KeyVaultUrl</a>);
+        }
+ 
+        <b>public override void</b> <a id="4e487ed0b0f94982" href="R/4e487ed0b0f94982.html" target="n" data-glyph="72,1" class="i method">StopTestRecording</a>()
+        {
+            <a href="#45cff2272ec065cf" class="i field">_listener</a>?.<a href="KeyVaultTestEventListener.cs.html#f377ac4a9e65233f" class="i method">Dispose</a>();
+ 
+            <a href="/Azure.Core.TestFramework/A.html#2d2d9cc2c3882f17" class="k">base</a>.<a href="/Azure.Core.TestFramework/A.html#9db6015400e012e1" class="i method">StopTestRecording</a>();
+        }
+ 
+        [<span class="i">TearDown</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="9f947c12c101e993" href="R/9f947c12c101e993.html" target="n" data-glyph="72,1" class="i method">Cleanup</a>()
+        {
+            <span class="c">// Start deleting resources as soon as possible.</span>
+            <b>while</b> (<a href="#6fd98ce13a3a2b12" class="i field">_certificatesToDelete</a>.<a href="@0@mscorlib/A.html#88b9f17c9182267f" class="i method">TryDequeue</a>(<b>out string</b> <span id="r4 rd" class="r4 r">name</span>))
+            {
+                <b>await</b> <a href="#dbf2bdb0f585dc89" class="i method">DeleteCertificate</a>(<span class="r4 r">name</span>);
+ 
+                <a href="#2618cbe649e45247" class="i field">_certificatesToPurge</a>.<a href="@0@mscorlib/A.html#098d3d1d1dcf32fe" class="i method">Push</a>(<span class="r4 r">name</span>);
+            }
+ 
+            <b>while</b> (<a href="#f0fed5c397ace641" class="i field">_issuerToDelete</a>.<a href="@0@mscorlib/A.html#88b9f17c9182267f" class="i method">TryDequeue</a>(<b>out string</b> <span id="r5 rd" class="r5 r">name</span>))
+            {
+                <b>await</b> <a href="#49265eb2d074b6cf" class="i method">DeleteIssuer</a>(<span class="r5 r">name</span>);
+            }
+ 
+            <b>while</b> (<a href="#2b03f7c4f0ad59d6" class="i field">_contactsToDelete</a>.<a href="@0@mscorlib/A.html#88b9f17c9182267f" class="i method">TryDequeue</a>(<b>out</b> <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="/Azure.Security.KeyVault.Certificates/A.html#4f004d5d087dc380" class="t t">CertificateContact</a>&gt; <span id="r6 rd" class="r6 r">contacts</span>))
+            {
+                <b>await</b> <a href="#7b38c45fb62efca2" class="i method">DeleteContacts</a>();
+            }
+        }
+ 
+        [<span class="i">OneTimeTearDown</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="08aa5fb06983a4e5" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">CleanupAll</a>()
+        {
+            <span class="c">// Make sure the delete queue is empty.</span>
+            <b>await</b> <a href="#9f947c12c101e993" class="i method">Cleanup</a>();
+ 
+            <b>while</b> (<a href="#2618cbe649e45247" class="i field">_certificatesToPurge</a>.<a href="@0@mscorlib/A.html#5d5267a60408c616" class="i method">TryPop</a>(<b>out string</b> <span id="r7 rd" class="r7 r">name</span>))
+            {
+                <b>await</b> <a href="#11dc384abfdda19b" class="i method">PurgeCertificate</a>(<span class="r7 r">name</span>).<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+            }
+ 
+            <b>while</b> (<a href="#f0fed5c397ace641" class="i field">_issuerToDelete</a>.<a href="@0@mscorlib/A.html#88b9f17c9182267f" class="i method">TryDequeue</a>(<b>out string</b> <span id="r8 rd" class="r8 r">name</span>))
+            {
+                <b>await</b> <a href="#49265eb2d074b6cf" class="i method">DeleteIssuer</a>(<span class="r8 r">name</span>);
+            }
+        }
+ 
+        <b>protected async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="7b38c45fb62efca2" href="R/7b38c45fb62efca2.html" target="n" data-glyph="75,1" class="i method">DeleteContacts</a>()
+        {
+            <b>if</b> (<a href="/Azure.Core.TestFramework/A.html#eb077c11a09b6b1e" class="i property">Mode</a> == <a href="/Azure.Core.TestFramework/A.html#d7d5cc97dd76217f" class="t t">RecordedTestMode</a>.<a href="/Azure.Core.TestFramework/A.html#bde4663b03b59b85" class="i field">Playback</a>)
+            {
+                <b>return</b>;
+            }
+ 
+            <b>try</b>
+            {
+                <b>using</b> (<a href="/Azure.Core.TestFramework/A.html#9fc34d8f596ca70c" class="i property">Recording</a>.<a href="/Azure.Core.TestFramework/A.html#200d2998c7a3c313" class="i method">DisableRecording</a>())
+                {
+                    <b>await</b> <a href="#53a1dcda843ad360" class="i property">Client</a>.<span class="i">DeleteContactsAsync</span>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+            }
+            <b>catch</b> (<span class="i">RequestFailedException</span> <span id="r9 rd" class="r9 r">ex</span>) <b>when</b> (<span class="r9 r">ex</span>.<span class="i">Status</span> == 404)
+            {
+            }
+        }
+ 
+        <b>protected async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="49265eb2d074b6cf" href="R/49265eb2d074b6cf.html" target="n" data-glyph="75,1" class="i method">DeleteIssuer</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r10 rd" class="r10 r">name</span>)
+        {
+            <b>if</b> (<a href="/Azure.Core.TestFramework/A.html#eb077c11a09b6b1e" class="i property">Mode</a> == <a href="/Azure.Core.TestFramework/A.html#d7d5cc97dd76217f" class="t t">RecordedTestMode</a>.<a href="/Azure.Core.TestFramework/A.html#bde4663b03b59b85" class="i field">Playback</a>)
+            {
+                <b>return</b>;
+            }
+ 
+            <b>try</b>
+            {
+                <b>using</b> (<a href="/Azure.Core.TestFramework/A.html#9fc34d8f596ca70c" class="i property">Recording</a>.<a href="/Azure.Core.TestFramework/A.html#200d2998c7a3c313" class="i method">DisableRecording</a>())
+                {
+                    <b>await</b> <a href="#53a1dcda843ad360" class="i property">Client</a>.<span class="i">DeleteIssuerAsync</span>(<span class="r10 r">name</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+            }
+            <b>catch</b> (<span class="i">RequestFailedException</span> <span id="r11 rd" class="r11 r">ex</span>) <b>when</b> (<span class="r11 r">ex</span>.<span class="i">Status</span> == 404)
+            {
+            }
+        }
+ 
+        <b>protected async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="dbf2bdb0f585dc89" href="R/dbf2bdb0f585dc89.html" target="n" data-glyph="75,1" class="i method">DeleteCertificate</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r12 rd" class="r12 r">name</span>)
+        {
+            <b>if</b> (<a href="/Azure.Core.TestFramework/A.html#eb077c11a09b6b1e" class="i property">Mode</a> == <a href="/Azure.Core.TestFramework/A.html#d7d5cc97dd76217f" class="t t">RecordedTestMode</a>.<a href="/Azure.Core.TestFramework/A.html#bde4663b03b59b85" class="i field">Playback</a>)
+            {
+                <b>return</b>;
+            }
+ 
+            <b>try</b>
+            {
+                <b>using</b> (<a href="/Azure.Core.TestFramework/A.html#9fc34d8f596ca70c" class="i property">Recording</a>.<a href="/Azure.Core.TestFramework/A.html#200d2998c7a3c313" class="i method">DisableRecording</a>())
+                {
+                    <b>await</b> <a href="#53a1dcda843ad360" class="i property">Client</a>.<span class="i">StartDeleteCertificateAsync</span>(<span class="r12 r">name</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+            }
+            <b>catch</b> (<span class="i">RequestFailedException</span> <span id="r13 rd" class="r13 r">ex</span>) <b>when</b> (<span class="r13 r">ex</span>.<span class="i">Status</span> == 404)
+            {
+            }
+        }
+ 
+        <b>protected async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="11dc384abfdda19b" href="R/11dc384abfdda19b.html" target="n" data-glyph="75,1" class="i method">PurgeCertificate</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r14 rd" class="r14 r">name</span>)
+        {
+            <b>try</b>
+            {
+                <b>await</b> <a href="#5a2600c25703007f" class="i method">WaitForDeletedCertificate</a>(<span class="r14 r">name</span>).<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+            }
+            <b>catch</b> (<span class="i">RequestFailedException</span> <span id="r15 rd" class="r15 r">ex</span>) <b>when</b> (<span class="r15 r">ex</span>.<span class="i">Status</span> == 404)
+            {
+            }
+ 
+            <b>if</b> (<a href="/Azure.Core.TestFramework/A.html#eb077c11a09b6b1e" class="i property">Mode</a> == <a href="/Azure.Core.TestFramework/A.html#d7d5cc97dd76217f" class="t t">RecordedTestMode</a>.<a href="/Azure.Core.TestFramework/A.html#bde4663b03b59b85" class="i field">Playback</a>)
+            {
+                <b>return</b>;
+            }
+ 
+            <b>try</b>
+            {
+                <b>using</b> (<a href="/Azure.Core.TestFramework/A.html#9fc34d8f596ca70c" class="i property">Recording</a>.<a href="/Azure.Core.TestFramework/A.html#200d2998c7a3c313" class="i method">DisableRecording</a>())
+                {
+                    <b>await</b> <a href="#53a1dcda843ad360" class="i property">Client</a>.<span class="i">PurgeDeletedCertificateAsync</span>(<span class="r14 r">name</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+            }
+            <b>catch</b> (<span class="i">RequestFailedException</span> <span id="r16 rd" class="r16 r">ex</span>) <b>when</b> (<span class="r16 r">ex</span>.<span class="i">Status</span> == 404)
+            {
+            }
+        }
+ 
+        <b>protected async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="/Azure.Security.KeyVault.Certificates/A.html#343cee45d286d156" class="t t">KeyVaultCertificateWithPolicy</a>&gt; <a id="26027d4401f3a3ca" href="R/26027d4401f3a3ca.html" target="n" data-glyph="75,1" class="i method">WaitForCompletion</a>(<a href="/Azure.Security.KeyVault.Certificates/A.html#11aaa51cf3eedfbc" class="t t">CertificateOperation</a> <span id="r17 rd" class="r17 r">operation</span>)
+        {
+            <b>using</b> <a href="@0@mscorlib/A.html#130a9536ac96b392" class="t t">CancellationTokenSource</a> <span id="r18 rd" class="r18 r">cts</span> = <b>new</b> <a href="@0@mscorlib/A.html#2f4ad148fd857d6f" class="t constructor">CancellationTokenSource</a>(<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#ae74be5264df78d8" class="i method">FromMinutes</a>(1));
+            <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r19 rd" class="r19 r">pollingInterval</span> = <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>((<a href="/Azure.Core.TestFramework/A.html#eb077c11a09b6b1e" class="i property">Mode</a> == <a href="/Azure.Core.TestFramework/A.html#d7d5cc97dd76217f" class="t t">RecordedTestMode</a>.<a href="/Azure.Core.TestFramework/A.html#bde4663b03b59b85" class="i field">Playback</a>) ? 0 : 1);
+ 
+            <b>try</b>
+            {
+                <b>if</b> (<a href="/Azure.Core.TestFramework/A.html#c206b0a1b37aaeec" class="i property">IsAsync</a>)
+                {
+                    <b>await</b> <span class="r17 r">operation</span>.<span class="i">WaitForCompletionAsync</span>(<span class="r19 r">pollingInterval</span>, <span class="r18 r">cts</span>.<a href="@0@mscorlib/A.html#9e22b9c8995bf195" class="i property">Token</a>);
+                }
+                <b>else</b>
+                {
+                    <b>while</b> (!<span class="r17 r">operation</span>.<a href="/Azure.Security.KeyVault.Certificates/A.html#d93281662f391a73" class="i property">HasCompleted</a>)
+                    {
+                        <span class="r17 r">operation</span>.<span class="i">UpdateStatus</span>(<span class="r18 r">cts</span>.<a href="@0@mscorlib/A.html#9e22b9c8995bf195" class="i property">Token</a>);
+ 
+                        <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#b070ae859dd3f7b7" class="i method">Delay</a>(<span class="r19 r">pollingInterval</span>, <span class="r18 r">cts</span>.<a href="@0@mscorlib/A.html#9e22b9c8995bf195" class="i property">Token</a>);
+                    }
+                }
+            }
+            <b>catch</b> (<a href="@0@mscorlib/A.html#30edb7a318d221fa" class="t t">TaskCanceledException</a>)
+            {
+                <span class="i">Assert</span>.<span class="i">Inconclusive</span>(<span class="s">&quot;Timed out while waiting for operation {0}&quot;</span>, <span class="r17 r">operation</span>.<a href="/Azure.Security.KeyVault.Certificates/A.html#b0da1994a25e5e57" class="i property">Id</a>);
+            }
+ 
+            <b>return</b> <span class="r17 r">operation</span>.<a href="/Azure.Security.KeyVault.Certificates/A.html#bbe1f1658e09dbe2" class="i property">Value</a>;
+        }
+ 
+        <b>protected</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="5a2600c25703007f" href="R/5a2600c25703007f.html" target="n" data-glyph="75,1" class="i method">WaitForDeletedCertificate</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r20 rd" class="r20 r">name</span>)
+        {
+            <b>if</b> (<a href="/Azure.Core.TestFramework/A.html#eb077c11a09b6b1e" class="i property">Mode</a> == <a href="/Azure.Core.TestFramework/A.html#d7d5cc97dd76217f" class="t t">RecordedTestMode</a>.<a href="/Azure.Core.TestFramework/A.html#bde4663b03b59b85" class="i field">Playback</a>)
+            {
+                <b>return</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>;
+            }
+ 
+            <b>using</b> (<a href="/Azure.Core.TestFramework/A.html#9fc34d8f596ca70c" class="i property">Recording</a>.<a href="/Azure.Core.TestFramework/A.html#200d2998c7a3c313" class="i method">DisableRecording</a>())
+            {
+                <b>return</b> <a href="/Azure.Core.TestFramework/A.html#5f76210a4af1cf41" class="t t">TestRetryHelper</a>.<span class="i">RetryAsync</span>(<b>async</b> () =&gt; <b>await</b> <a href="#53a1dcda843ad360" class="i property">Client</a>.<span class="i">GetDeletedCertificateAsync</span>(<span class="r20 r">name</span>), <span class="i">delay</span>: <a href="#0a9b51c5fb01175f" class="i field">PollingInterval</a>);
+            }
+        }
+ 
+        <b>protected</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="df5cae1b1f10f7cb" href="R/df5cae1b1f10f7cb.html" target="n" data-glyph="75,1" class="i method">WaitForPurgedCertificate</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r21 rd" class="r21 r">name</span>)
+        {
+            <b>if</b> (<a href="/Azure.Core.TestFramework/A.html#eb077c11a09b6b1e" class="i property">Mode</a> == <a href="/Azure.Core.TestFramework/A.html#d7d5cc97dd76217f" class="t t">RecordedTestMode</a>.<a href="/Azure.Core.TestFramework/A.html#bde4663b03b59b85" class="i field">Playback</a>)
+            {
+                <b>return</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>;
+            }
+ 
+            <b>using</b> (<a href="/Azure.Core.TestFramework/A.html#9fc34d8f596ca70c" class="i property">Recording</a>.<a href="/Azure.Core.TestFramework/A.html#200d2998c7a3c313" class="i method">DisableRecording</a>())
+            {
+                <b>return</b> <a href="/Azure.Core.TestFramework/A.html#5f76210a4af1cf41" class="t t">TestRetryHelper</a>.<span class="i">RetryAsync</span>(<b>async</b> () =&gt;
+                {
+                    <b>try</b>
+                    {
+                        <b>await</b> <a href="#53a1dcda843ad360" class="i property">Client</a>.<span class="i">GetDeletedCertificateAsync</span>(<span class="r21 r">name</span>);
+                        <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;Key still exists&quot;</span>);
+                    }
+                    <b>catch</b>
+                    {
+                        <b>return</b> (<span class="i">Response</span>)<b>null</b>;
+                    }
+                }, <span class="i">delay</span>: <a href="#0a9b51c5fb01175f" class="i field">PollingInterval</a>);
+            }
+        }
+ 
+        <b>protected</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="d81932dca8389f6b" href="R/d81932dca8389f6b.html" target="n" data-glyph="75,1" class="i method">PollForCertificate</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r22 rd" class="r22 r">name</span>)
+        {
+            <b>if</b> (<a href="/Azure.Core.TestFramework/A.html#eb077c11a09b6b1e" class="i property">Mode</a> == <a href="/Azure.Core.TestFramework/A.html#d7d5cc97dd76217f" class="t t">RecordedTestMode</a>.<a href="/Azure.Core.TestFramework/A.html#bde4663b03b59b85" class="i field">Playback</a>)
+            {
+                <b>return</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>;
+            }
+ 
+            <b>using</b> (<a href="/Azure.Core.TestFramework/A.html#9fc34d8f596ca70c" class="i property">Recording</a>.<a href="/Azure.Core.TestFramework/A.html#200d2998c7a3c313" class="i method">DisableRecording</a>())
+            {
+                <b>return</b> <a href="/Azure.Core.TestFramework/A.html#5f76210a4af1cf41" class="t t">TestRetryHelper</a>.<span class="i">RetryAsync</span>(<b>async</b> () =&gt; <b>await</b> <a href="#53a1dcda843ad360" class="i property">Client</a>.<span class="i">GetCertificateAsync</span>(<span class="r22 r">name</span>), <span class="i">delay</span>: <a href="#0a9b51c5fb01175f" class="i field">PollingInterval</a>);
+            }
+        }
+ 
+        <b>protected void</b> <a id="97071ddc8d352f99" href="R/97071ddc8d352f99.html" target="n" data-glyph="75,1" class="i method">RegisterForCleanup</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r23 rd" class="r23 r">certificateName</span>)
+        {
+            <a href="#6fd98ce13a3a2b12" class="i field">_certificatesToDelete</a>.<a href="@0@mscorlib/A.html#62bea3a8141ed2a9" class="i method">Enqueue</a>(<span class="r23 r">certificateName</span>);
+        }
+ 
+        <b>protected void</b> <a id="7a7e3feaea76f2af" href="R/7a7e3feaea76f2af.html" target="n" data-glyph="75,1" class="i method">RegisterForCleanupIssuer</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r24 rd" class="r24 r">issuerName</span>)
+        {
+            <a href="#f0fed5c397ace641" class="i field">_issuerToDelete</a>.<a href="@0@mscorlib/A.html#62bea3a8141ed2a9" class="i method">Enqueue</a>(<span class="r24 r">issuerName</span>);
+        }
+ 
+        <b>protected void</b> <a id="58fc406860b0ebb1" href="R/58fc406860b0ebb1.html" target="n" data-glyph="75,1" class="i method">RegisterForCleanUpContacts</a>(<a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="/Azure.Security.KeyVault.Certificates/A.html#4f004d5d087dc380" class="t t">CertificateContact</a>&gt; <span id="r25 rd" class="r25 r">contacts</span>)
+        {
+            <a href="#2b03f7c4f0ad59d6" class="i field">_contactsToDelete</a>.<a href="@0@mscorlib/A.html#62bea3a8141ed2a9" class="i method">Enqueue</a>(<span class="r25 r">contacts</span>);
+        }
+ 
+        <b>protected</b> <span class="i">IAsyncDisposable</span> <a id="1bf82f6a3a8233e7" href="R/1bf82f6a3a8233e7.html" target="n" data-glyph="75,1" class="i method">EnsureDeleted</a>(<a href="/Azure.Security.KeyVault.Certificates/A.html#11aaa51cf3eedfbc" class="t t">CertificateOperation</a> <span id="r26 rd" class="r26 r">operation</span>) =&gt; <b>new</b> <a href="#b1d007cd55faf51d" class="t constructor">CertificateOperationDeleter</a>(<span class="r26 r">operation</span>);
+ 
+        <b>private class</b> <a id="c5225590904e473f" href="R/c5225590904e473f.html" target="n" data-glyph="4,1" class="t t">CertificateOperationDeleter</a> : <span class="i">IAsyncDisposable</span>
+        {
+            <b>private readonly</b> <a href="/Azure.Security.KeyVault.Certificates/A.html#11aaa51cf3eedfbc" class="t t">CertificateOperation</a> <a id="143e88bab62c70f5" href="R/143e88bab62c70f5.html" target="n" data-glyph="46,2" class="i field">_operation</a>;
+ 
+            <b>public</b> <a id="b1d007cd55faf51d" href="R/b1d007cd55faf51d.html" target="n" data-glyph="72,2" class="t constructor">CertificateOperationDeleter</a>(<a href="/Azure.Security.KeyVault.Certificates/A.html#11aaa51cf3eedfbc" class="t t">CertificateOperation</a> <span id="r27 rd" class="r27 r">operation</span>)
+            {
+                <a href="#143e88bab62c70f5" class="i field">_operation</a> = <span class="r27 r">operation</span>;
+            }
+ 
+            <b>public async</b> <span class="i">ValueTask</span> <a id="3f09aa002a44865c" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">DisposeAsync</a>()
+            {
+                <b>if</b> (!<a href="#143e88bab62c70f5" class="i field">_operation</a>.<a href="/Azure.Security.KeyVault.Certificates/A.html#d93281662f391a73" class="i property">HasCompleted</a>)
+                {
+                    <b>await</b> <a href="#143e88bab62c70f5" class="i field">_operation</a>.<span class="i">DeleteAsync</span>();
+                }
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

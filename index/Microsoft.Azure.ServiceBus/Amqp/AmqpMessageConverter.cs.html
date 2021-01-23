@@ -1,0 +1,712 @@
+﻿<!DOCTYPE html>
+<html><head><title>AmqpMessageConverter.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(703);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.ServiceBus/Amqp/AmqpMessageConverter.cs" target="_top">Amqp\AmqpMessageConverter.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.ServiceBus" target="_top">src\Microsoft.Azure.ServiceBus.csproj</a> (Microsoft.Azure.ServiceBus)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft. All rights reserved.</span>
+<span class="c">// Licensed under the MIT license. See LICENSE file in the project root for full license information.</span>
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">ServiceBus</span>.<span class="i n">Amqp</span>
+{
+    <b>using</b> <span class="i">System</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Collections</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">IO</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Runtime</span>.<span class="i">Serialization</span>;
+    <b>using</b> <span class="i n">Azure</span>.<span class="i">Amqp</span>;
+    <b>using</b> <span class="i n">Azure</span>.<span class="i">Amqp</span>.<span class="i">Encoding</span>;
+    <b>using</b> <span class="i n">Azure</span>.<span class="i">Amqp</span>.<span class="i">Framing</span>;
+    <b>using</b> <span class="i n">Framing</span>;
+    <b>using</b> <span class="i n">Primitives</span>;
+    <b>using</b> <span class="t">SBMessage</span> = <a href="../Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>;
+ 
+    <b>static class</b> <a id="062369f8adb48536" href="../R/062369f8adb48536.html" target="n" data-glyph="2,0" class="t t">AmqpMessageConverter</a>
+    {
+        <b>const string</b> <a id="6125d249311d45d8" href="../R/6125d249311d45d8.html" target="n" data-glyph="10,1" class="i field">EnqueuedTimeUtcName</a> = <span class="s">&quot;x-opt-enqueued-time&quot;</span>;
+        <b>const string</b> <a id="5151a99f39035f95" href="../R/5151a99f39035f95.html" target="n" data-glyph="10,1" class="i field">ScheduledEnqueueTimeUtcName</a> = <span class="s">&quot;x-opt-scheduled-enqueue-time&quot;</span>;
+        <b>const string</b> <a id="4a66d734b3f3e6c6" href="../R/4a66d734b3f3e6c6.html" target="n" data-glyph="10,1" class="i field">SequenceNumberName</a> = <span class="s">&quot;x-opt-sequence-number&quot;</span>;
+        <b>const string</b> <a id="39c5ee154da1a7e7" href="../R/39c5ee154da1a7e7.html" target="n" data-glyph="10,1" class="i field">EnqueueSequenceNumberName</a> = <span class="s">&quot;x-opt-enqueue-sequence-number&quot;</span>;
+        <b>const string</b> <a id="706cb9d29bcf2d26" href="../R/706cb9d29bcf2d26.html" target="n" data-glyph="10,1" class="i field">LockedUntilName</a> = <span class="s">&quot;x-opt-locked-until&quot;</span>;
+        <b>const string</b> <a id="3927b64eeb7d5975" href="../R/../../0000000000.html" target="n" data-glyph="10,1" class="i field">PublisherName</a> = <span class="s">&quot;x-opt-publisher&quot;</span>;
+        <b>const string</b> <a id="c8bec0e6e80ac664" href="../R/c8bec0e6e80ac664.html" target="n" data-glyph="10,1" class="i field">PartitionKeyName</a> = <span class="s">&quot;x-opt-partition-key&quot;</span>;
+        <b>const string</b> <a id="cb7501bfb1a9e0af" href="../R/cb7501bfb1a9e0af.html" target="n" data-glyph="10,1" class="i field">PartitionIdName</a> = <span class="s">&quot;x-opt-partition-id&quot;</span>;
+        <b>const string</b> <a id="aa3bead5c09b1d17" href="../R/aa3bead5c09b1d17.html" target="n" data-glyph="10,1" class="i field">ViaPartitionKeyName</a> = <span class="s">&quot;x-opt-via-partition-key&quot;</span>;
+        <b>const string</b> <a id="bbfc1c310e0683a6" href="../R/bbfc1c310e0683a6.html" target="n" data-glyph="10,1" class="i field">DeadLetterSourceName</a> = <span class="s">&quot;x-opt-deadletter-source&quot;</span>;
+        <b>const string</b> <a id="65cb917518060560" href="../R/65cb917518060560.html" target="n" data-glyph="10,1" class="i field">TimeSpanName</a> = <span class="i">AmqpConstants</span>.<span class="i">Vendor</span> + <span class="s">&quot;:timespan&quot;</span>;
+        <b>const string</b> <a id="1d67e2424330dbea" href="../R/1d67e2424330dbea.html" target="n" data-glyph="10,1" class="i field">UriName</a> = <span class="i">AmqpConstants</span>.<span class="i">Vendor</span> + <span class="s">&quot;:uri&quot;</span>;
+        <b>const string</b> <a id="cac2771f4edb700d" href="../R/cac2771f4edb700d.html" target="n" data-glyph="10,1" class="i field">DateTimeOffsetName</a> = <span class="i">AmqpConstants</span>.<span class="i">Vendor</span> + <span class="s">&quot;:datetime-offset&quot;</span>;
+        <b>const int</b> <a id="efc90dd52da7b071" href="../R/efc90dd52da7b071.html" target="n" data-glyph="10,1" class="i field">GuidSize</a> = 16;
+ 
+        <b>public static</b> <span class="i">AmqpMessage</span> <a id="c7426b06e23f6e68" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">BatchSBMessagesAsAmqpMessage</a>(<span class="i">IEnumerable</span>&lt;<a href="../Message.cs.html#74fc1aa4fea2b013" class="t t">SBMessage</a>&gt; <span id="r0 rd" class="r0 r">sbMessages</span>)
+        {
+            <b>if</b> (<span class="r0 r">sbMessages</span> == <b>null</b>)
+            {
+                <b>throw</b> <a href="../Primitives/Fx.cs.html#c01e8844709e19c1" class="t t">Fx</a>.<a href="../Primitives/Fx.cs.html#0793cb830fb5b201" class="i property">Exception</a>.<a href="../Primitives/ExceptionUtility.cs.html#ca1f689c31b7d5d8" class="i method">ArgumentNull</a>(<b>nameof</b>(<span class="r0 r">sbMessages</span>));
+            }
+ 
+            <span class="i">AmqpMessage</span> <span id="r1 rd" class="r1 r">amqpMessage</span>;
+            <span class="i">AmqpMessage</span> <span id="r2 rd" class="r2 r">firstAmqpMessage</span> = <b>null</b>;
+            <a href="../Message.cs.html#74fc1aa4fea2b013" class="t t">SBMessage</a> <span id="r3 rd" class="r3 r">firstMessage</span> = <b>null</b>;
+            <span class="i">List</span>&lt;<span class="i">Data</span>&gt; <span id="r4 rd" class="r4 r">dataList</span> = <b>null</b>;
+            <b>var</b> <span id="r5 rd" class="r5 r">messageCount</span> = 0;
+            <b>foreach</b> (<b>var</b> <span id="r6 rd" class="r6 r">sbMessage</span> <b>in</b> <span class="r0 r">sbMessages</span>)
+            {
+                <span class="r5 r">messageCount</span>++;
+ 
+                <span class="r1 r">amqpMessage</span> = <a href="#062369f8adb48536" class="t t">AmqpMessageConverter</a>.<span class="i">SBMessageToAmqpMessage</span>(<span class="r6 r">sbMessage</span>);
+                <b>if</b> (<span class="r2 r">firstAmqpMessage</span> == <b>null</b>)
+                {
+                    <span class="r2 r">firstAmqpMessage</span> = <span class="r1 r">amqpMessage</span>;
+                    <span class="r3 r">firstMessage</span> = <span class="r6 r">sbMessage</span>;
+                    <b>continue</b>;
+                }
+ 
+                <b>if</b> (<span class="r4 r">dataList</span> == <b>null</b>)
+                {
+                    <span class="r4 r">dataList</span> = <b>new</b> <span class="i">List</span>&lt;<span class="i">Data</span>&gt; { <a href="#9c42a780d770242f" class="i method">ToData</a>(<span class="r2 r">firstAmqpMessage</span>) };
+                }
+ 
+                <span class="r4 r">dataList</span>.<span class="i">Add</span>(<a href="#9c42a780d770242f" class="i method">ToData</a>(<span class="r1 r">amqpMessage</span>));
+            }
+ 
+            <b>if</b> (<span class="r5 r">messageCount</span> == 1 &amp;&amp; <span class="r2 r">firstAmqpMessage</span> != <b>null</b>)
+            {
+                <span class="r2 r">firstAmqpMessage</span>.<span class="i">Batchable</span> = <b>true</b>;
+                <b>return</b> <span class="r2 r">firstAmqpMessage</span>;
+            }
+ 
+            <span class="r1 r">amqpMessage</span> = <span class="i">AmqpMessage</span>.<span class="i">Create</span>(<span class="r4 r">dataList</span>);
+            <span class="r1 r">amqpMessage</span>.<span class="i">MessageFormat</span> = <span class="i">AmqpConstants</span>.<span class="i">AmqpBatchedMessageFormat</span>;
+ 
+            <b>if</b> (<span class="r3 r">firstMessage</span>.<a href="../Message.cs.html#6b02c9ff5b03ba9c" class="i property">MessageId</a> != <b>null</b>)
+            {
+                <span class="r1 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">MessageId</span> = <span class="r3 r">firstMessage</span>.<a href="../Message.cs.html#6b02c9ff5b03ba9c" class="i property">MessageId</a>;
+            }
+            <b>if</b> (<span class="r3 r">firstMessage</span>.<a href="../Message.cs.html#688c80d5d9a7e2b3" class="i property">SessionId</a> != <b>null</b>)
+            {
+                <span class="r1 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">GroupId</span> = <span class="r3 r">firstMessage</span>.<a href="../Message.cs.html#688c80d5d9a7e2b3" class="i property">SessionId</a>;
+            }
+ 
+            <b>if</b> (<span class="r3 r">firstMessage</span>.<a href="../Message.cs.html#99fb27efd92a94d4" class="i property">PartitionKey</a> != <b>null</b>)
+            {
+                <span class="r1 r">amqpMessage</span>.<span class="i">MessageAnnotations</span>.<span class="i">Map</span>[<a href="#062369f8adb48536" class="t t">AmqpMessageConverter</a>.<a href="#c8bec0e6e80ac664" class="i field">PartitionKeyName</a>] =
+                    <span class="r3 r">firstMessage</span>.<a href="../Message.cs.html#99fb27efd92a94d4" class="i property">PartitionKey</a>;
+            }
+ 
+            <b>if</b> (<span class="r3 r">firstMessage</span>.<a href="../Message.cs.html#187ce45c7e8dca5c" class="i property">ViaPartitionKey</a> != <b>null</b>)
+            {
+                <span class="r1 r">amqpMessage</span>.<span class="i">MessageAnnotations</span>.<span class="i">Map</span>[<a href="#062369f8adb48536" class="t t">AmqpMessageConverter</a>.<a href="#aa3bead5c09b1d17" class="i field">ViaPartitionKeyName</a>] =
+                    <span class="r3 r">firstMessage</span>.<a href="../Message.cs.html#187ce45c7e8dca5c" class="i property">ViaPartitionKey</a>;
+            }
+ 
+            <span class="r1 r">amqpMessage</span>.<span class="i">Batchable</span> = <b>true</b>;
+            <b>return</b> <span class="r1 r">amqpMessage</span>;
+        }
+ 
+        <b>public static</b> <span class="i">AmqpMessage</span> <a id="673d584a4ecff536" href="../R/673d584a4ecff536.html" target="n" data-glyph="72,1" class="i method">SBMessageToAmqpMessage</a>(<a href="../Message.cs.html#74fc1aa4fea2b013" class="t t">SBMessage</a> <span id="r7 rd" class="r7 r">sbMessage</span>)
+        {
+            <b>var</b> <span id="r8 rd" class="r8 r">amqpMessage</span> = <span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#9112b84aac32afc0" class="i property">Body</a> == <b>null</b> ? <span class="i">AmqpMessage</span>.<span class="i">Create</span>() : <span class="i">AmqpMessage</span>.<span class="i">Create</span>(<b>new</b> <span class="i">Data</span> { <span class="i">Value</span> = <b>new</b> <span class="i">ArraySegment</span>&lt;<b>byte</b>&gt;(<span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#9112b84aac32afc0" class="i property">Body</a>) });
+ 
+            <span class="r8 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">MessageId</span> = <span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#6b02c9ff5b03ba9c" class="i property">MessageId</a>;
+            <span class="r8 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">CorrelationId</span> = <span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#650c824825def993" class="i property">CorrelationId</a>;
+            <span class="r8 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">ContentType</span> = <span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#b7770525137dd253" class="i property">ContentType</a>;
+            <span class="r8 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">Subject</span> = <span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#754634e7bae5f519" class="i property">Label</a>;
+            <span class="r8 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">To</span> = <span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#968d4b82bf35f6fa" class="i property">To</a>;
+            <span class="r8 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">ReplyTo</span> = <span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#8c13af32acaa929e" class="i property">ReplyTo</a>;
+            <span class="r8 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">GroupId</span> = <span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#688c80d5d9a7e2b3" class="i property">SessionId</a>;
+            <span class="r8 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">ReplyToGroupId</span> = <span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#4a2665cd09957cda" class="i property">ReplyToSessionId</a>;
+ 
+            <b>if</b> (<span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#2cbf67727511a1ad" class="i property">TimeToLive</a> != <span class="i">TimeSpan</span>.<span class="i">MaxValue</span>)
+            {
+                <span class="r8 r">amqpMessage</span>.<span class="i">Header</span>.<span class="i">Ttl</span> = <span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#2cbf67727511a1ad" class="i property">TimeToLive</a>.<span class="i">TotalMilliseconds</span> &lt; <span class="i">UInt32</span>.<span class="i">MaxValue</span> ? (<b>uint</b>)<span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#2cbf67727511a1ad" class="i property">TimeToLive</a>.<span class="i">TotalMilliseconds</span> : <span class="i">UInt32</span>.<span class="i">MaxValue</span>;
+                <span class="r8 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">CreationTime</span> = <span class="i">DateTime</span>.<span class="i">UtcNow</span>;
+ 
+                <b>if</b> (<span class="i">AmqpConstants</span>.<span class="i">MaxAbsoluteExpiryTime</span> - <span class="r8 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">CreationTime</span>.<span class="i">Value</span> &gt; <span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#2cbf67727511a1ad" class="i property">TimeToLive</a>)
+                {
+                    <span class="r8 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">AbsoluteExpiryTime</span> = <span class="r8 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">CreationTime</span>.<span class="i">Value</span> + <span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#2cbf67727511a1ad" class="i property">TimeToLive</a>;
+                }
+                <b>else</b>
+                {
+                    <span class="r8 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">AbsoluteExpiryTime</span> = <span class="i">AmqpConstants</span>.<span class="i">MaxAbsoluteExpiryTime</span>;
+                }
+            }
+ 
+            <b>if</b> ((<span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#aacdc857896898c5" class="i property">ScheduledEnqueueTimeUtc</a> != <b>null</b>) &amp;&amp; <span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#aacdc857896898c5" class="i property">ScheduledEnqueueTimeUtc</a> &gt; <span class="i">DateTime</span>.<span class="i">MinValue</span>)
+            {
+                <span class="r8 r">amqpMessage</span>.<span class="i">MessageAnnotations</span>.<span class="i">Map</span>.<span class="i">Add</span>(<a href="#5151a99f39035f95" class="i field">ScheduledEnqueueTimeUtcName</a>, <span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#aacdc857896898c5" class="i property">ScheduledEnqueueTimeUtc</a>);
+            }
+ 
+            <b>if</b> (<span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#99fb27efd92a94d4" class="i property">PartitionKey</a> != <b>null</b>)
+            {
+                <span class="r8 r">amqpMessage</span>.<span class="i">MessageAnnotations</span>.<span class="i">Map</span>.<span class="i">Add</span>(<a href="#c8bec0e6e80ac664" class="i field">PartitionKeyName</a>, <span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#99fb27efd92a94d4" class="i property">PartitionKey</a>);
+            }
+ 
+            <b>if</b> (<span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#187ce45c7e8dca5c" class="i property">ViaPartitionKey</a> != <b>null</b>)
+            {
+                <span class="r8 r">amqpMessage</span>.<span class="i">MessageAnnotations</span>.<span class="i">Map</span>.<span class="i">Add</span>(<a href="#aa3bead5c09b1d17" class="i field">ViaPartitionKeyName</a>, <span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#187ce45c7e8dca5c" class="i property">ViaPartitionKey</a>);
+            }
+ 
+            <b>if</b> (<span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#f726ec22859aa013" class="i property">UserProperties</a> != <b>null</b> &amp;&amp; <span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#f726ec22859aa013" class="i property">UserProperties</a>.<span class="i">Count</span> &gt; 0)
+            {
+                <b>if</b> (<span class="r8 r">amqpMessage</span>.<span class="i">ApplicationProperties</span> == <b>null</b>)
+                {
+                    <span class="r8 r">amqpMessage</span>.<span class="i">ApplicationProperties</span> = <b>new</b> <span class="i">ApplicationProperties</span>();
+                }
+ 
+                <b>foreach</b> (<b>var</b> <span id="r9 rd" class="r9 r">pair</span> <b>in</b> <span class="r7 r">sbMessage</span>.<a href="../Message.cs.html#f726ec22859aa013" class="i property">UserProperties</a>)
+                {
+                    <b>if</b> (<span class="i">TryGetAmqpObjectFromNetObject</span>(<span class="r9 r">pair</span>.<span class="i">Value</span>, <a href="MappingType.cs.html#8be619203a027a33" class="t t">MappingType</a>.<a href="MappingType.cs.html#74ff8b553b453a16" class="i field">ApplicationProperty</a>, <b>out</b> <b>var</b> <span id="r10 rd" class="r10 r">amqpObject</span>))
+                    {
+                        <span class="r8 r">amqpMessage</span>.<span class="i">ApplicationProperties</span>.<span class="i">Map</span>.<span class="i">Add</span>(<span class="r9 r">pair</span>.<span class="i">Key</span>, <span class="r10 r">amqpObject</span>);
+                    }
+                    <b>else</b>
+                    {
+                        <b>throw</b> <b>new</b> <span class="i">NotSupportedException</span>(<a href="../Resources.Designer.cs.html#8e0563579d43c165" class="t t">Resources</a>.<a href="../Resources.Designer.cs.html#f664a5af9c2c3b1d" class="i property">InvalidAmqpMessageProperty</a>.<span class="i">FormatForUser</span>(<span class="r9 r">pair</span>.<span class="i">Key</span>.<span class="i">GetType</span>()));
+                    }
+                }
+            }
+ 
+            <b>return</b> <span class="r8 r">amqpMessage</span>;
+        }
+ 
+        <b>public static</b> <a href="../Message.cs.html#74fc1aa4fea2b013" class="t t">SBMessage</a> <a id="9cd0611793a1349c" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">AmqpMessageToSBMessage</a>(<span class="i">AmqpMessage</span> <span id="r11 rd" class="r11 r">amqpMessage</span>, <b>bool</b> <span id="r12 rd" class="r12 r">isPeeked</span> = <b>false</b>)
+        {
+            <b>if</b> (<span class="r11 r">amqpMessage</span> == <b>null</b>)
+            {
+                <b>throw</b> <a href="../Primitives/Fx.cs.html#c01e8844709e19c1" class="t t">Fx</a>.<a href="../Primitives/Fx.cs.html#0793cb830fb5b201" class="i property">Exception</a>.<a href="../Primitives/ExceptionUtility.cs.html#ca1f689c31b7d5d8" class="i method">ArgumentNull</a>(<b>nameof</b>(<span class="r11 r">amqpMessage</span>));
+            }
+ 
+            <a href="../Message.cs.html#74fc1aa4fea2b013" class="t t">SBMessage</a> <span id="r13 rd" class="r13 r">sbMessage</span>;
+ 
+            <b>if</b> ((<span class="r11 r">amqpMessage</span>.<span class="i">BodyType</span> &amp; <span class="i">SectionFlag</span>.<span class="i">AmqpValue</span>) != 0
+                &amp;&amp; <span class="r11 r">amqpMessage</span>.<span class="i">ValueBody</span>.<span class="i">Value</span> != <b>null</b>)
+            {
+                <span class="r13 r">sbMessage</span> = <b>new</b> <a href="../Message.cs.html#379f568509e4e751" class="t constructor">SBMessage</a>();
+ 
+                <b>if</b> (<span class="i">TryGetNetObjectFromAmqpObject</span>(<span class="r11 r">amqpMessage</span>.<span class="i">ValueBody</span>.<span class="i">Value</span>, <a href="MappingType.cs.html#8be619203a027a33" class="t t">MappingType</a>.<a href="MappingType.cs.html#71e070f6714a5148" class="i field">MessageBody</a>, <b>out</b> <b>var</b> <span id="r14 rd" class="r14 r">dotNetObject</span>))
+                {
+                    <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#5b973fca03337aea" class="i property">SystemProperties</a>.<a href="../Message.cs.html#58017714256a1c78" class="i property">BodyObject</a> = <span class="r14 r">dotNetObject</span>;
+                }
+                <b>else</b>
+                {
+                    <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#5b973fca03337aea" class="i property">SystemProperties</a>.<a href="../Message.cs.html#58017714256a1c78" class="i property">BodyObject</a> = <span class="r11 r">amqpMessage</span>.<span class="i">ValueBody</span>.<span class="i">Value</span>;
+                }
+            }
+            <b>else</b> <b>if</b> ((<span class="r11 r">amqpMessage</span>.<span class="i">BodyType</span> &amp; <span class="i">SectionFlag</span>.<span class="i">Data</span>) != 0
+                &amp;&amp; <span class="r11 r">amqpMessage</span>.<span class="i">DataBody</span> != <b>null</b>)
+            {
+                <b>var</b> <span id="r15 rd" class="r15 r">dataSegments</span> = <b>new</b> <span class="i">List</span>&lt;<b>byte</b>&gt;();
+                <b>foreach</b> (<b>var</b> <span id="r16 rd" class="r16 r">data</span> <b>in</b> <span class="r11 r">amqpMessage</span>.<span class="i">DataBody</span>)
+                {
+                    <b>if</b> (<span class="r16 r">data</span>.<span class="i">Value</span> <b>is byte</b>[] <span id="r17 rd" class="r17 r">byteArrayValue</span>)
+                    {
+                        <span class="r15 r">dataSegments</span>.<span class="i">AddRange</span>(<span class="r17 r">byteArrayValue</span>);
+                    }
+                    <b>else</b> <b>if</b> (<span class="r16 r">data</span>.<span class="i">Value</span> <b>is</b> <span class="i">ArraySegment</span>&lt;<b>byte</b>&gt; <span id="r18 rd" class="r18 r">arraySegmentValue</span>)
+                    {
+                        <b>byte</b>[] <span id="r19 rd" class="r19 r">byteArray</span>;
+                        <b>if</b> (<span class="r18 r">arraySegmentValue</span>.<span class="i">Count</span> == <span class="r18 r">arraySegmentValue</span>.<span class="i">Array</span>.<span class="i">Length</span>)
+                        {
+                            <span class="r19 r">byteArray</span> = <span class="r18 r">arraySegmentValue</span>.<span class="i">Array</span>;
+                        }
+                        <b>else</b>
+                        {
+                            <span class="r19 r">byteArray</span> = <b>new</b> <b>byte</b>[<span class="r18 r">arraySegmentValue</span>.<span class="i">Count</span>];
+                            <span class="i">Array</span>.<span class="i">ConstrainedCopy</span>(<span class="r18 r">arraySegmentValue</span>.<span class="i">Array</span>, <span class="r18 r">arraySegmentValue</span>.<span class="i">Offset</span>, <span class="r19 r">byteArray</span>, 0, <span class="r18 r">arraySegmentValue</span>.<span class="i">Count</span>);
+                        }
+                        <span class="r15 r">dataSegments</span>.<span class="i">AddRange</span>(<span class="r19 r">byteArray</span>);
+                    }
+                }
+                <span class="r13 r">sbMessage</span> = <b>new</b> <span class="t">SBMessage</span>(<span class="r15 r">dataSegments</span>.<span class="i">ToArray</span>());
+            }
+            <b>else</b>
+            {
+                <span class="r13 r">sbMessage</span> = <b>new</b> <a href="../Message.cs.html#379f568509e4e751" class="t constructor">SBMessage</a>();
+            }
+ 
+            <b>var</b> <span id="r20 rd" class="r20 r">sections</span> = <span class="r11 r">amqpMessage</span>.<span class="i">Sections</span>;
+            <b>if</b> ((<span class="r20 r">sections</span> &amp; <span class="i">SectionFlag</span>.<span class="i">Header</span>) != 0)
+            {
+                <b>if</b> (<span class="r11 r">amqpMessage</span>.<span class="i">Header</span>.<span class="i">Ttl</span> != <b>null</b>)
+                {
+                    <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#2cbf67727511a1ad" class="i property">TimeToLive</a> = <span class="i">TimeSpan</span>.<span class="i">FromMilliseconds</span>(<span class="r11 r">amqpMessage</span>.<span class="i">Header</span>.<span class="i">Ttl</span>.<span class="i">Value</span>);
+                }
+ 
+                <b>if</b> (<span class="r11 r">amqpMessage</span>.<span class="i">Header</span>.<span class="i">DeliveryCount</span> != <b>null</b>)
+                {
+                    <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#5b973fca03337aea" class="i property">SystemProperties</a>.<a href="../Message.cs.html#622acff6cf015d07" class="i property">DeliveryCount</a> = <span class="r12 r">isPeeked</span> ? (<b>int</b>)(<span class="r11 r">amqpMessage</span>.<span class="i">Header</span>.<span class="i">DeliveryCount</span>.<span class="i">Value</span>) : (<b>int</b>)(<span class="r11 r">amqpMessage</span>.<span class="i">Header</span>.<span class="i">DeliveryCount</span>.<span class="i">Value</span> + 1);
+                }
+            }
+ 
+            <b>if</b> ((<span class="r20 r">sections</span> &amp; <span class="i">SectionFlag</span>.<span class="i">Properties</span>) != 0)
+            {
+                <b>if</b> (<span class="r11 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">MessageId</span> != <b>null</b>)
+                {
+                    <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#6b02c9ff5b03ba9c" class="i property">MessageId</a> = <span class="r11 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">MessageId</span>.<span class="i">ToString</span>();
+                }
+ 
+                <b>if</b> (<span class="r11 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">CorrelationId</span> != <b>null</b>)
+                {
+                    <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#650c824825def993" class="i property">CorrelationId</a> = <span class="r11 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">CorrelationId</span>.<span class="i">ToString</span>();
+                }
+ 
+                <b>if</b> (<span class="r11 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">ContentType</span>.<span class="i">Value</span> != <b>null</b>)
+                {
+                    <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#b7770525137dd253" class="i property">ContentType</a> = <span class="r11 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">ContentType</span>.<span class="i">Value</span>;
+                }
+ 
+                <b>if</b> (<span class="r11 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">Subject</span> != <b>null</b>)
+                {
+                    <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#754634e7bae5f519" class="i property">Label</a> = <span class="r11 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">Subject</span>;
+                }
+ 
+                <b>if</b> (<span class="r11 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">To</span> != <b>null</b>)
+                {
+                    <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#968d4b82bf35f6fa" class="i property">To</a> = <span class="r11 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">To</span>.<span class="i">ToString</span>();
+                }
+ 
+                <b>if</b> (<span class="r11 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">ReplyTo</span> != <b>null</b>)
+                {
+                    <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#8c13af32acaa929e" class="i property">ReplyTo</a> = <span class="r11 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">ReplyTo</span>.<span class="i">ToString</span>();
+                }
+ 
+                <b>if</b> (<span class="r11 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">GroupId</span> != <b>null</b>)
+                {
+                    <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#688c80d5d9a7e2b3" class="i property">SessionId</a> = <span class="r11 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">GroupId</span>;
+                }
+ 
+                <b>if</b> (<span class="r11 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">ReplyToGroupId</span> != <b>null</b>)
+                {
+                    <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#4a2665cd09957cda" class="i property">ReplyToSessionId</a> = <span class="r11 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">ReplyToGroupId</span>;
+                }
+ 
+                <b>if</b> (<span class="r11 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">CreationTime</span>.<span class="i">HasValue</span> &amp;&amp; <span class="r11 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">AbsoluteExpiryTime</span>.<span class="i">HasValue</span>)
+                {
+                    <span class="c">// Overwrite TimeToLive from AbsoluteExpiryTime</span>
+                    <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#2cbf67727511a1ad" class="i property">TimeToLive</a> = <span class="r11 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">AbsoluteExpiryTime</span>.<span class="i">Value</span> - <span class="r11 r">amqpMessage</span>.<span class="i">Properties</span>.<span class="i">CreationTime</span>.<span class="i">Value</span>;
+                }
+            }
+ 
+            <span class="c">// Do application properties before message annotations, because the application properties</span>
+            <span class="c">// can be updated by entries from message annotation.</span>
+            <b>if</b> ((<span class="r20 r">sections</span> &amp; <span class="i">SectionFlag</span>.<span class="i">ApplicationProperties</span>) != 0)
+            {
+                <b>foreach</b> (<b>var</b> <span id="r21 rd" class="r21 r">pair</span> <b>in</b> <span class="r11 r">amqpMessage</span>.<span class="i">ApplicationProperties</span>.<span class="i">Map</span>)
+                {
+                    <b>if</b> (<span class="i">TryGetNetObjectFromAmqpObject</span>(<span class="r21 r">pair</span>.<span class="i">Value</span>, <a href="MappingType.cs.html#8be619203a027a33" class="t t">MappingType</a>.<a href="MappingType.cs.html#74ff8b553b453a16" class="i field">ApplicationProperty</a>, <b>out</b> <b>var</b> <span id="r22 rd" class="r22 r">netObject</span>))
+                    {
+                        <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#f726ec22859aa013" class="i property">UserProperties</a>[<span class="r21 r">pair</span>.<span class="i">Key</span>.<span class="i">ToString</span>()] = <span class="r22 r">netObject</span>;
+                    }
+                }
+            }
+ 
+            <b>if</b> ((<span class="r20 r">sections</span> &amp; <span class="i">SectionFlag</span>.<span class="i">MessageAnnotations</span>) != 0)
+            {
+                <b>foreach</b> (<b>var</b> <span id="r23 rd" class="r23 r">pair</span> <b>in</b> <span class="r11 r">amqpMessage</span>.<span class="i">MessageAnnotations</span>.<span class="i">Map</span>)
+                {
+                    <b>var</b> <span id="r24 rd" class="r24 r">key</span> = <span class="r23 r">pair</span>.<span class="i">Key</span>.<span class="i">ToString</span>();
+                    <b>switch</b> (<span class="r24 r">key</span>)
+                    {
+                        <b>case</b> <a href="#6125d249311d45d8" class="i field">EnqueuedTimeUtcName</a>:
+                            <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#5b973fca03337aea" class="i property">SystemProperties</a>.<a href="../Message.cs.html#38b823078b10edb6" class="i property">EnqueuedTimeUtc</a> = (<span class="i">DateTime</span>)<span class="r23 r">pair</span>.<span class="i">Value</span>;
+                            <b>break</b>;
+                        <b>case</b> <a href="#5151a99f39035f95" class="i field">ScheduledEnqueueTimeUtcName</a>:
+                            <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#aacdc857896898c5" class="i property">ScheduledEnqueueTimeUtc</a> = (<span class="i">DateTime</span>)<span class="r23 r">pair</span>.<span class="i">Value</span>;
+                            <b>break</b>;
+                        <b>case</b> <a href="#4a66d734b3f3e6c6" class="i field">SequenceNumberName</a>:
+                            <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#5b973fca03337aea" class="i property">SystemProperties</a>.<a href="../Message.cs.html#205df32693f7a775" class="i property">SequenceNumber</a> = (<b>long</b>)<span class="r23 r">pair</span>.<span class="i">Value</span>;
+                            <b>break</b>;
+                        <b>case</b> <a href="#39c5ee154da1a7e7" class="i field">EnqueueSequenceNumberName</a>:
+                            <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#5b973fca03337aea" class="i property">SystemProperties</a>.<a href="../Message.cs.html#738529f92d545a99" class="i property">EnqueuedSequenceNumber</a> = (<b>long</b>)<span class="r23 r">pair</span>.<span class="i">Value</span>;
+                            <b>break</b>;
+                        <b>case</b> <a href="#706cb9d29bcf2d26" class="i field">LockedUntilName</a>:
+                            <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#5b973fca03337aea" class="i property">SystemProperties</a>.<a href="../Message.cs.html#0acddd863bcf3023" class="i property">LockedUntilUtc</a> = (<span class="i">DateTime</span>)<span class="r23 r">pair</span>.<span class="i">Value</span>;
+                            <b>break</b>;
+                        <b>case</b> <a href="#c8bec0e6e80ac664" class="i field">PartitionKeyName</a>:
+                            <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#99fb27efd92a94d4" class="i property">PartitionKey</a> = (<b>string</b>)<span class="r23 r">pair</span>.<span class="i">Value</span>;
+                            <b>break</b>;
+                        <b>case</b> <a href="#cb7501bfb1a9e0af" class="i field">PartitionIdName</a>:
+                            <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#5b973fca03337aea" class="i property">SystemProperties</a>.<a href="../Message.cs.html#965b70f6b1b8b3a8" class="i property">PartitionId</a> = (<b>short</b>)<span class="r23 r">pair</span>.<span class="i">Value</span>;
+                            <b>break</b>;
+                        <b>case</b> <a href="#aa3bead5c09b1d17" class="i field">ViaPartitionKeyName</a>:
+                            <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#187ce45c7e8dca5c" class="i property">ViaPartitionKey</a> = (<b>string</b>)<span class="r23 r">pair</span>.<span class="i">Value</span>;
+                            <b>break</b>;
+                        <b>case</b> <a href="#bbfc1c310e0683a6" class="i field">DeadLetterSourceName</a>:
+                            <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#5b973fca03337aea" class="i property">SystemProperties</a>.<a href="../Message.cs.html#feca7bb28a0bab7a" class="i property">DeadLetterSource</a> = (<b>string</b>)<span class="r23 r">pair</span>.<span class="i">Value</span>;
+                            <b>break</b>;
+                        <b>default</b>:
+                            <b>if</b> (<span class="i">TryGetNetObjectFromAmqpObject</span>(<span class="r23 r">pair</span>.<span class="i">Value</span>, <a href="MappingType.cs.html#8be619203a027a33" class="t t">MappingType</a>.<a href="MappingType.cs.html#74ff8b553b453a16" class="i field">ApplicationProperty</a>, <b>out</b> <b>var</b> <span id="r25 rd" class="r25 r">netObject</span>))
+                            {
+                                <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#f726ec22859aa013" class="i property">UserProperties</a>[<span class="r24 r">key</span>] = <span class="r25 r">netObject</span>;
+                            }
+                            <b>break</b>;
+                    }
+                }
+            }
+ 
+            <b>if</b> (<span class="r11 r">amqpMessage</span>.<span class="i">DeliveryTag</span>.<span class="i">Count</span> == <a href="#efc90dd52da7b071" class="i field">GuidSize</a>)
+            {
+                <b>var</b> <span id="r26 rd" class="r26 r">guidBuffer</span> = <b>new</b> <b>byte</b>[<a href="#efc90dd52da7b071" class="i field">GuidSize</a>];
+                <span class="i">Buffer</span>.<span class="i">BlockCopy</span>(<span class="r11 r">amqpMessage</span>.<span class="i">DeliveryTag</span>.<span class="i">Array</span>, <span class="r11 r">amqpMessage</span>.<span class="i">DeliveryTag</span>.<span class="i">Offset</span>, <span class="r26 r">guidBuffer</span>, 0, <a href="#efc90dd52da7b071" class="i field">GuidSize</a>);
+                <span class="r13 r">sbMessage</span>.<a href="../Message.cs.html#5b973fca03337aea" class="i property">SystemProperties</a>.<a href="../Message.cs.html#d355cdb91572a232" class="i property">LockTokenGuid</a> = <b>new</b> <span class="i">Guid</span>(<span class="r26 r">guidBuffer</span>);
+            }
+ 
+            <span class="r11 r">amqpMessage</span>.<span class="i">Dispose</span>();
+ 
+            <b>return</b> <span class="r13 r">sbMessage</span>;
+        }
+ 
+        <b>public static</b> <span class="i">AmqpMap</span> <a id="8648fe592a41bfbb" href="../R/8648fe592a41bfbb.html" target="n" data-glyph="72,1" class="i method">GetRuleDescriptionMap</a>(<a href="../Filters/RuleDescription.cs.html#6e06f3a663b5cec3" class="t t">RuleDescription</a> <span id="r27 rd" class="r27 r">description</span>)
+        {
+            <b>var</b> <span id="r28 rd" class="r28 r">ruleDescriptionMap</span> = <b>new</b> <span class="i">AmqpMap</span>();
+ 
+            <b>switch</b> (<span class="r27 r">description</span>.<a href="../Filters/RuleDescription.cs.html#699a5cadc1b2bafa" class="i property">Filter</a>)
+            {
+                <b>case</b> <a href="../Filters/SqlFilter.cs.html#e9882df29e2b7381" class="t t">SqlFilter</a> <span id="r29 rd" class="r29 r">sqlFilter</span>:
+                    <b>var</b> <span id="r30 rd" class="r30 r">filterMap</span> = <a href="#e3425a1f1f74a150" class="i method">GetSqlFilterMap</a>(<span class="r29 r">sqlFilter</span>);
+                    <span class="r28 r">ruleDescriptionMap</span>[<a href="ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="ManagementConstants.cs.html#0807f527413e2dc8" class="i field">SqlFilter</a>] = <span class="r30 r">filterMap</span>;
+                    <b>break</b>;
+                <b>case</b> <a href="../Filters/CorrelationFilter.cs.html#c0f494aec2ae2ed6" class="t t">CorrelationFilter</a> <span id="r31 rd" class="r31 r">correlationFilter</span>:
+                    <b>var</b> <span id="r32 rd" class="r32 r">correlationFilterMap</span> = <a href="#1036b6e05617a449" class="i method">GetCorrelationFilterMap</a>(<span class="r31 r">correlationFilter</span>);
+                    <span class="r28 r">ruleDescriptionMap</span>[<a href="ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="ManagementConstants.cs.html#1b3299d74fc72680" class="i field">CorrelationFilter</a>] = <span class="r32 r">correlationFilterMap</span>;
+                    <b>break</b>;
+                <b>default</b>:
+                    <b>throw</b> <b>new</b> <span class="i">NotSupportedException</span>(
+                        <a href="../Resources.Designer.cs.html#8e0563579d43c165" class="t t">Resources</a>.<a href="../Resources.Designer.cs.html#f00732fec1b68420" class="i property">RuleFilterNotSupported</a>.<span class="i">FormatForUser</span>(
+                            <span class="r27 r">description</span>.<a href="../Filters/RuleDescription.cs.html#699a5cadc1b2bafa" class="i property">Filter</a>.<span class="i">GetType</span>(),
+                            <b>nameof</b>(<a href="../Filters/SqlFilter.cs.html#e9882df29e2b7381" class="t t">SqlFilter</a>),
+                            <b>nameof</b>(<a href="../Filters/CorrelationFilter.cs.html#c0f494aec2ae2ed6" class="t t">CorrelationFilter</a>)));
+            }
+ 
+            <b>var</b> <span id="r33 rd" class="r33 r">amqpAction</span> = <a href="#12bd660869657526" class="i method">GetRuleActionMap</a>(<span class="r27 r">description</span>.<a href="../Filters/RuleDescription.cs.html#aafb360c0aa37169" class="i property">Action</a> <b>as</b> <a href="../Filters/SqlRuleAction.cs.html#562c1f764c21abb4" class="t t">SqlRuleAction</a>);
+            <span class="r28 r">ruleDescriptionMap</span>[<a href="ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="ManagementConstants.cs.html#65749df852bcb281" class="i field">SqlRuleAction</a>] = <span class="r33 r">amqpAction</span>;
+            <span class="r28 r">ruleDescriptionMap</span>[<a href="ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="ManagementConstants.cs.html#4e407f4eead87346" class="i field">RuleName</a>] = <span class="r27 r">description</span>.<a href="../Filters/RuleDescription.cs.html#3bf164f4d0c8af8c" class="i property">Name</a>;
+ 
+            <b>return</b> <span class="r28 r">ruleDescriptionMap</span>;
+        }
+ 
+        <b>public static</b> <a href="../Filters/RuleDescription.cs.html#6e06f3a663b5cec3" class="t t">RuleDescription</a> <a id="19b2a52cd381e01d" href="../R/19b2a52cd381e01d.html" target="n" data-glyph="72,1" class="i method">GetRuleDescription</a>(<a href="Framing/AmqpRuleDescriptionCodec.cs.html#e4b6543eaba5b517" class="t t">AmqpRuleDescriptionCodec</a> <span id="r34 rd" class="r34 r">amqpDescription</span>)
+        {
+            <a href="../Filters/Filter.cs.html#d2ef32ea9ffbcf44" class="k">var</a> <span id="r35 rd" class="r35 r">filter</span> = <a href="#9ad5e704bf970a0a" class="i method">GetFilter</a>(<span class="r34 r">amqpDescription</span>.<a href="Framing/AmqpRuleDescriptionCodec.cs.html#82b9a0f386f282b3" class="i property">Filter</a>);
+            <a href="../Filters/RuleAction.cs.html#1b984ec5fcfce7cf" class="k">var</a> <span id="r36 rd" class="r36 r">ruleAction</span> = <a href="#7234600ce4aea2a0" class="i method">GetRuleAction</a>(<span class="r34 r">amqpDescription</span>.<a href="Framing/AmqpRuleDescriptionCodec.cs.html#77907d60e2742195" class="i property">Action</a>);
+ 
+            <a href="../Filters/RuleDescription.cs.html#6e06f3a663b5cec3" class="k">var</a> <span id="r37 rd" class="r37 r">ruleDescription</span> = <b>new</b> <a href="../Filters/RuleDescription.cs.html#df4dbb3a183c1eb6" class="t constructor">RuleDescription</a>(<span class="r34 r">amqpDescription</span>.<a href="Framing/AmqpRuleDescriptionCodec.cs.html#6a0898460779f90e" class="i property">RuleName</a>, <span class="r35 r">filter</span>)
+            {
+                <a href="../Filters/RuleDescription.cs.html#aafb360c0aa37169" class="i property">Action</a> = <span class="r36 r">ruleAction</span>
+            };
+ 
+            <b>return</b> <span class="r37 r">ruleDescription</span>;
+        }
+ 
+        <b>public static</b> <a href="../Filters/Filter.cs.html#d2ef32ea9ffbcf44" class="t t">Filter</a> <a id="9ad5e704bf970a0a" href="../R/9ad5e704bf970a0a.html" target="n" data-glyph="72,1" class="i method">GetFilter</a>(<a href="Framing/AmqpFilterCodec.cs.html#5fad95d0e36c000c" class="t t">AmqpFilterCodec</a> <span id="r38 rd" class="r38 r">amqpFilter</span>)
+        {
+            <a href="../Filters/Filter.cs.html#d2ef32ea9ffbcf44" class="t t">Filter</a> <span id="r39 rd" class="r39 r">filter</span>;
+ 
+            <b>switch</b> (<span class="r38 r">amqpFilter</span>.<span class="i">DescriptorCode</span>)
+            {
+                <b>case</b> <a href="Framing/AmqpSqlFilterCodec.cs.html#91ebe1d3a9988556" class="t t">AmqpSqlFilterCodec</a>.<a href="Framing/AmqpSqlFilterCodec.cs.html#15fd1251360fbad8" class="i field">Code</a>:
+                    <a href="Framing/AmqpSqlFilterCodec.cs.html#91ebe1d3a9988556" class="k">var</a> <span id="r40 rd" class="r40 r">amqpSqlFilter</span> = (<a href="Framing/AmqpSqlFilterCodec.cs.html#91ebe1d3a9988556" class="t t">AmqpSqlFilterCodec</a>)<span class="r38 r">amqpFilter</span>;
+                    <span class="r39 r">filter</span> = <b>new</b> <a href="../Filters/SqlFilter.cs.html#82bd10e56311e156" class="t constructor">SqlFilter</a>(<span class="r40 r">amqpSqlFilter</span>.<a href="Framing/AmqpSqlFilterCodec.cs.html#669786847a40221f" class="i property">Expression</a>);
+                    <b>break</b>;
+ 
+                <b>case</b> <a href="Framing/AmqpTrueFilterCodec.cs.html#3c47284f8ad6e295" class="t t">AmqpTrueFilterCodec</a>.<a href="Framing/AmqpTrueFilterCodec.cs.html#60f65d3f64c4a10c" class="i field">Code</a>:
+                    <span class="r39 r">filter</span> = <b>new</b> <a href="../Filters/TrueFilter.cs.html#69ff5698b64799d7" class="t constructor">TrueFilter</a>();
+                    <b>break</b>;
+ 
+                <b>case</b> <a href="Framing/AmqpFalseFilterCodec.cs.html#22b4b6f5d782bcce" class="t t">AmqpFalseFilterCodec</a>.<a href="Framing/AmqpFalseFilterCodec.cs.html#0e46cdf61fd91db7" class="i field">Code</a>:
+                    <span class="r39 r">filter</span> = <b>new</b> <a href="../Filters/FalseFilter.cs.html#91f058f971dabfbb" class="t constructor">FalseFilter</a>();
+                    <b>break</b>;
+ 
+                <b>case</b> <a href="Framing/AmqpCorrelationFilterCodec.cs.html#babe800e046ad58e" class="t t">AmqpCorrelationFilterCodec</a>.<a href="Framing/AmqpCorrelationFilterCodec.cs.html#24bae44eb91e336f" class="i field">Code</a>:
+                    <a href="Framing/AmqpCorrelationFilterCodec.cs.html#babe800e046ad58e" class="k">var</a> <span id="r41 rd" class="r41 r">amqpCorrelationFilter</span> = (<a href="Framing/AmqpCorrelationFilterCodec.cs.html#babe800e046ad58e" class="t t">AmqpCorrelationFilterCodec</a>)<span class="r38 r">amqpFilter</span>;
+                    <a href="../Filters/CorrelationFilter.cs.html#c0f494aec2ae2ed6" class="k">var</a> <span id="r42 rd" class="r42 r">correlationFilter</span> = <b>new</b> <a href="../Filters/CorrelationFilter.cs.html#7c12bedc13e4c121" class="t constructor">CorrelationFilter</a>
+                    {
+                        <a href="../Filters/CorrelationFilter.cs.html#7de6b0cc96cf0f61" class="i property">CorrelationId</a> = <span class="r41 r">amqpCorrelationFilter</span>.<a href="Framing/AmqpCorrelationFilterCodec.cs.html#cfa5b9e32fb197c5" class="i property">CorrelationId</a>,
+                        <a href="../Filters/CorrelationFilter.cs.html#513a216c15509951" class="i property">MessageId</a> = <span class="r41 r">amqpCorrelationFilter</span>.<a href="Framing/AmqpCorrelationFilterCodec.cs.html#5eb6bd80de1e23ba" class="i property">MessageId</a>,
+                        <a href="../Filters/CorrelationFilter.cs.html#d74693c9b8a26c21" class="i property">To</a> = <span class="r41 r">amqpCorrelationFilter</span>.<a href="Framing/AmqpCorrelationFilterCodec.cs.html#e1bebfedf3eeabac" class="i property">To</a>,
+                        <a href="../Filters/CorrelationFilter.cs.html#7f63738f1246b5c5" class="i property">ReplyTo</a> = <span class="r41 r">amqpCorrelationFilter</span>.<a href="Framing/AmqpCorrelationFilterCodec.cs.html#a30b28947d7f856d" class="i property">ReplyTo</a>,
+                        <a href="../Filters/CorrelationFilter.cs.html#b3cf72df2c15f03d" class="i property">Label</a> = <span class="r41 r">amqpCorrelationFilter</span>.<a href="Framing/AmqpCorrelationFilterCodec.cs.html#e20bdacdd8ac033e" class="i property">Label</a>,
+                        <a href="../Filters/CorrelationFilter.cs.html#3da546d96d182f76" class="i property">SessionId</a> = <span class="r41 r">amqpCorrelationFilter</span>.<a href="Framing/AmqpCorrelationFilterCodec.cs.html#ce398a79bcb4b09c" class="i property">SessionId</a>,
+                        <a href="../Filters/CorrelationFilter.cs.html#d3d8c8bef97cdbc6" class="i property">ReplyToSessionId</a> = <span class="r41 r">amqpCorrelationFilter</span>.<a href="Framing/AmqpCorrelationFilterCodec.cs.html#ebe288f113ee470a" class="i property">ReplyToSessionId</a>,
+                        <a href="../Filters/CorrelationFilter.cs.html#d22522c38a574175" class="i property">ContentType</a> = <span class="r41 r">amqpCorrelationFilter</span>.<a href="Framing/AmqpCorrelationFilterCodec.cs.html#ed947e94eca6bc95" class="i property">ContentType</a>
+                    };
+ 
+                    <b>foreach</b> (<b>var</b> <span id="r43 rd" class="r43 r">property</span> <b>in</b> <span class="r41 r">amqpCorrelationFilter</span>.<a href="Framing/AmqpCorrelationFilterCodec.cs.html#bde6551c62d58cb7" class="i property">Properties</a>)
+                    {
+                        <span class="r42 r">correlationFilter</span>.<a href="../Filters/CorrelationFilter.cs.html#e3d0898dc8fdd683" class="i property">Properties</a>.<span class="i">Add</span>(<span class="r43 r">property</span>.<span class="i">Key</span>.<span class="i">Key</span>.<span class="i">ToString</span>(), <span class="r43 r">property</span>.<span class="i">Value</span>);
+                    }
+ 
+                    <span class="r39 r">filter</span> = <span class="r42 r">correlationFilter</span>;
+                    <b>break</b>;
+ 
+                <b>default</b>:
+                    <b>throw</b> <b>new</b> <span class="i">NotSupportedException</span>(<span class="s">$&quot;</span><span class="s">Unknown filter descriptor code: </span>{<span class="r38 r">amqpFilter</span>.<span class="i">DescriptorCode</span>}<span class="s">&quot;</span>);
+            }
+ 
+            <b>return</b> <span class="r39 r">filter</span>;
+        }
+ 
+        <b>static</b> <a href="../Filters/RuleAction.cs.html#1b984ec5fcfce7cf" class="t t">RuleAction</a> <a id="7234600ce4aea2a0" href="../R/7234600ce4aea2a0.html" target="n" data-glyph="76,1" class="i method">GetRuleAction</a>(<a href="Framing/AmqpRuleActionCodec.cs.html#b335534f3ec2e4e8" class="t t">AmqpRuleActionCodec</a> <span id="r44 rd" class="r44 r">amqpAction</span>)
+        {
+            <a href="../Filters/RuleAction.cs.html#1b984ec5fcfce7cf" class="t t">RuleAction</a> <span id="r45 rd" class="r45 r">action</span>;
+ 
+            <b>if</b> (<span class="r44 r">amqpAction</span>.<span class="i">DescriptorCode</span> == <a href="Framing/AmqpEmptyRuleActionCodec.cs.html#64daba61631e9823" class="t t">AmqpEmptyRuleActionCodec</a>.<a href="Framing/AmqpEmptyRuleActionCodec.cs.html#ddaae58cb20c16d2" class="i field">Code</a>)
+            {
+                <span class="r45 r">action</span> = <b>null</b>;
+            }
+            <b>else</b> <b>if</b> (<span class="r44 r">amqpAction</span>.<span class="i">DescriptorCode</span> == <a href="Framing/AmqpSqlRuleActionCodec.cs.html#362525aba29faa59" class="t t">AmqpSqlRuleActionCodec</a>.<a href="Framing/AmqpSqlRuleActionCodec.cs.html#fdc5bc7a771944ad" class="i field">Code</a>)
+            {
+                <a href="Framing/AmqpSqlRuleActionCodec.cs.html#362525aba29faa59" class="k">var</a> <span id="r46 rd" class="r46 r">amqpSqlAction</span> = (<a href="Framing/AmqpSqlRuleActionCodec.cs.html#362525aba29faa59" class="t t">AmqpSqlRuleActionCodec</a>)<span class="r44 r">amqpAction</span>;
+                <a href="../Filters/SqlRuleAction.cs.html#562c1f764c21abb4" class="k">var</a> <span id="r47 rd" class="r47 r">sqlAction</span> = <b>new</b> <a href="../Filters/SqlRuleAction.cs.html#1c5e2bdf650dbaba" class="t constructor">SqlRuleAction</a>(<span class="r46 r">amqpSqlAction</span>.<a href="Framing/AmqpSqlRuleActionCodec.cs.html#a5248820308e38ed" class="i property">SqlExpression</a>);
+ 
+                <span class="r45 r">action</span> = <span class="r47 r">sqlAction</span>;
+            }
+            <b>else</b>
+            {
+                <b>throw</b> <b>new</b> <span class="i">NotSupportedException</span>(<span class="s">$&quot;</span><span class="s">Unknown action descriptor code: </span>{<span class="r44 r">amqpAction</span>.<span class="i">DescriptorCode</span>}<span class="s">&quot;</span>);
+            }
+ 
+            <b>return</b> <span class="r45 r">action</span>;
+        }
+ 
+        <b>internal static bool</b> <a id="34c8f693da542c73" href="../R/../../0000000000.html" target="n" data-glyph="74,1" class="i method">TryGetAmqpObjectFromNetObject</a>(<b>object</b> <span id="r48 rd" class="r48 r">netObject</span>, <a href="MappingType.cs.html#8be619203a027a33" class="t t">MappingType</a> <span id="r49 rd" class="r49 r">mappingType</span>, <b>out object</b> <span id="r50 rd" class="r50 r">amqpObject</span>)
+        {
+            <span class="r50 r">amqpObject</span> = <b>null</b>;
+            <b>if</b> (<span class="r48 r">netObject</span> == <b>null</b>)
+            {
+                <b>return</b> <b>true</b>;
+            }
+ 
+            <b>switch</b> (<a href="SerializationUtilities.cs.html#ca886111d08cf78e" class="t t">SerializationUtilities</a>.<a href="SerializationUtilities.cs.html#f1213accf922b87b" class="i method">GetTypeId</a>(<span class="r48 r">netObject</span>))
+            {
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#898b389272113f25" class="i field">Byte</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#48ae8437a6d52feb" class="i field">SByte</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#1bbf850570475f3e" class="i field">Int16</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#4ceb63f261298286" class="i field">Int32</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#16b1a274b911b419" class="i field">Int64</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#87fe287c321ff09c" class="i field">UInt16</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#6b6f40af11d750f6" class="i field">UInt32</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#65f61832c561a116" class="i field">UInt64</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#48dbaf650837d3b4" class="i field">Single</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#5aae3ac9bada1bf3" class="i field">Double</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#910bbf162edcbd08" class="i field">Boolean</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#1c94f65e692270d7" class="i field">Decimal</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#32994cc2aabe8ecb" class="i field">Char</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#c086f54703716165" class="i field">Guid</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#cf98892249732265" class="i field">DateTime</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#aa144499a37b0d2d" class="i field">String</a>:
+                    <span class="r50 r">amqpObject</span> = <span class="r48 r">netObject</span>;
+                    <b>break</b>;
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#82fcb8475dcecdb8" class="i field">Stream</a>:
+                    <b>if</b> (<span class="r49 r">mappingType</span> == <a href="MappingType.cs.html#8be619203a027a33" class="t t">MappingType</a>.<a href="MappingType.cs.html#74ff8b553b453a16" class="i field">ApplicationProperty</a>)
+                    {
+                        <span class="r50 r">amqpObject</span> = <a href="#2f60c424fa53f219" class="i method">StreamToBytes</a>((<span class="i">Stream</span>)<span class="r48 r">netObject</span>);
+                    }
+                    <b>break</b>;
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#7ace63daee8fa55d" class="i field">Uri</a>:
+                    <span class="r50 r">amqpObject</span> = <b>new</b> <span class="i">DescribedType</span>((<span class="i">AmqpSymbol</span>)<a href="#1d67e2424330dbea" class="i field">UriName</a>, ((<span class="i">Uri</span>)<span class="r48 r">netObject</span>).<span class="i">AbsoluteUri</span>);
+                    <b>break</b>;
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#c6e1c699ba8e71de" class="i field">DateTimeOffset</a>:
+                    <span class="r50 r">amqpObject</span> = <b>new</b> <span class="i">DescribedType</span>((<span class="i">AmqpSymbol</span>)<a href="#cac2771f4edb700d" class="i field">DateTimeOffsetName</a>, ((<span class="i">DateTimeOffset</span>)<span class="r48 r">netObject</span>).<span class="i">UtcTicks</span>);
+                    <b>break</b>;
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#be53d7d618682bb4" class="i field">TimeSpan</a>:
+                    <span class="r50 r">amqpObject</span> = <b>new</b> <span class="i">DescribedType</span>((<span class="i">AmqpSymbol</span>)<a href="#65cb917518060560" class="i field">TimeSpanName</a>, ((<span class="i">TimeSpan</span>)<span class="r48 r">netObject</span>).<span class="i">Ticks</span>);
+                    <b>break</b>;
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#5607f6024ea5b94b" class="i field">Unknown</a>:
+                    <b>if</b> (<span class="r48 r">netObject</span> <b>is</b> <span class="i">Stream</span> <span id="r51 rd" class="r51 r">netObjectAsStream</span>)
+                    {
+                        <b>if</b> (<span class="r49 r">mappingType</span> == <a href="MappingType.cs.html#8be619203a027a33" class="t t">MappingType</a>.<a href="MappingType.cs.html#74ff8b553b453a16" class="i field">ApplicationProperty</a>)
+                        {
+                            <span class="r50 r">amqpObject</span> = <a href="#2f60c424fa53f219" class="i method">StreamToBytes</a>(<span class="r51 r">netObjectAsStream</span>);
+                        }
+                    }
+                    <b>else</b> <b>if</b> (<span class="r49 r">mappingType</span> == <a href="MappingType.cs.html#8be619203a027a33" class="t t">MappingType</a>.<a href="MappingType.cs.html#74ff8b553b453a16" class="i field">ApplicationProperty</a>)
+                    {
+                        <b>throw</b> <a href="../Primitives/Fx.cs.html#c01e8844709e19c1" class="t t">Fx</a>.<a href="../Primitives/Fx.cs.html#0793cb830fb5b201" class="i property">Exception</a>.<span class="i">AsError</span>(<b>new</b> <span class="i">SerializationException</span>(<a href="../Resources.Designer.cs.html#8e0563579d43c165" class="t t">Resources</a>.<a href="../Resources.Designer.cs.html#e18dadc7961b7d6f" class="i property">FailedToSerializeUnsupportedType</a>.<span class="i">FormatForUser</span>(<span class="r48 r">netObject</span>.<span class="i">GetType</span>().<span class="i">FullName</span>)));
+                    }
+                    <b>else</b> <b>if</b> (<span class="r48 r">netObject</span> <b>is byte</b>[] <span id="r52 rd" class="r52 r">netObjectAsByteArray</span>)
+                    {
+                        <span class="r50 r">amqpObject</span> = <b>new</b> <span class="i">ArraySegment</span>&lt;<b>byte</b>&gt;(<span class="r52 r">netObjectAsByteArray</span>);
+                    }
+                    <b>else</b> <b>if</b> (<span class="r48 r">netObject</span> <b>is</b> <span class="i">IList</span>)
+                    {
+                        <span class="c">// Array is also an IList</span>
+                        <span class="r50 r">amqpObject</span> = <span class="r48 r">netObject</span>;
+                    }
+                    <b>else</b> <b>if</b> (<span class="r48 r">netObject</span> <b>is</b> <span class="i">IDictionary</span> <span id="r53 rd" class="r53 r">netObjectAsDictionary</span>)
+                    {
+                        <span class="r50 r">amqpObject</span> = <b>new</b> <span class="i">AmqpMap</span>(<span class="r53 r">netObjectAsDictionary</span>);
+                    }
+                    <b>break</b>;
+            }
+ 
+            <b>return</b> <span class="r50 r">amqpObject</span> != <b>null</b>;
+        }
+ 
+        <b>static bool</b> <a id="818c210492cd0d52" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">TryGetNetObjectFromAmqpObject</a>(<b>object</b> <span id="r54 rd" class="r54 r">amqpObject</span>, <a href="MappingType.cs.html#8be619203a027a33" class="t t">MappingType</a> <span id="r55 rd" class="r55 r">mappingType</span>, <b>out object</b> <span id="r56 rd" class="r56 r">netObject</span>)
+        {
+            <span class="r56 r">netObject</span> = <b>null</b>;
+            <b>if</b> (<span class="r54 r">amqpObject</span> == <b>null</b>)
+            {
+                <b>return</b> <b>true</b>;
+            }
+ 
+            <b>switch</b> (<a href="SerializationUtilities.cs.html#ca886111d08cf78e" class="t t">SerializationUtilities</a>.<a href="SerializationUtilities.cs.html#f1213accf922b87b" class="i method">GetTypeId</a>(<span class="r54 r">amqpObject</span>))
+            {
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#898b389272113f25" class="i field">Byte</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#48ae8437a6d52feb" class="i field">SByte</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#1bbf850570475f3e" class="i field">Int16</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#4ceb63f261298286" class="i field">Int32</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#16b1a274b911b419" class="i field">Int64</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#87fe287c321ff09c" class="i field">UInt16</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#6b6f40af11d750f6" class="i field">UInt32</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#65f61832c561a116" class="i field">UInt64</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#48dbaf650837d3b4" class="i field">Single</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#5aae3ac9bada1bf3" class="i field">Double</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#910bbf162edcbd08" class="i field">Boolean</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#1c94f65e692270d7" class="i field">Decimal</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#32994cc2aabe8ecb" class="i field">Char</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#c086f54703716165" class="i field">Guid</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#cf98892249732265" class="i field">DateTime</a>:
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#aa144499a37b0d2d" class="i field">String</a>:
+                    <span class="r56 r">netObject</span> = <span class="r54 r">amqpObject</span>;
+                    <b>break</b>;
+                <b>case</b> <a href="SerializationUtilities.cs.html#e81282606230f293" class="t t">PropertyValueType</a>.<a href="SerializationUtilities.cs.html#5607f6024ea5b94b" class="i field">Unknown</a>:
+                    <b>if</b> (<span class="r54 r">amqpObject</span> <b>is</b> <span class="i">AmqpSymbol</span> <span id="r57 rd" class="r57 r">amqpObjectAsAmqpSymbol</span>)
+                    {
+                        <span class="r56 r">netObject</span> = (<span class="r57 r">amqpObjectAsAmqpSymbol</span>).<span class="i">Value</span>;
+                    }
+                    <b>else</b> <b>if</b> (<span class="r54 r">amqpObject</span> <b>is</b> <span class="i">ArraySegment</span>&lt;<b>byte</b>&gt; <span id="r58 rd" class="r58 r">amqpObjectAsArraySegment</span>)
+                    {
+                        <span class="i">ArraySegment</span>&lt;<b>byte</b>&gt; <span id="r59 rd" class="r59 r">binValue</span> = <span class="r58 r">amqpObjectAsArraySegment</span>;
+                        <b>if</b> (<span class="r59 r">binValue</span>.<span class="i">Count</span> == <span class="r59 r">binValue</span>.<span class="i">Array</span>.<span class="i">Length</span>)
+                        {
+                            <span class="r56 r">netObject</span> = <span class="r59 r">binValue</span>.<span class="i">Array</span>;
+                        }
+                        <b>else</b>
+                        {
+                            <b>var</b> <span id="r60 rd" class="r60 r">buffer</span> = <b>new</b> <b>byte</b>[<span class="r59 r">binValue</span>.<span class="i">Count</span>];
+                            <span class="i">Buffer</span>.<span class="i">BlockCopy</span>(<span class="r59 r">binValue</span>.<span class="i">Array</span>, <span class="r59 r">binValue</span>.<span class="i">Offset</span>, <span class="r60 r">buffer</span>, 0, <span class="r59 r">binValue</span>.<span class="i">Count</span>);
+                            <span class="r56 r">netObject</span> = <span class="r60 r">buffer</span>;
+                        }
+                    }
+                    <b>else</b> <b>if</b> (<span class="r54 r">amqpObject</span> <b>is</b> <span class="i">DescribedType</span> <span id="r61 rd" class="r61 r">amqpObjectAsDescribedType</span>)
+                    {
+                        <b>if</b> (<span class="r61 r">amqpObjectAsDescribedType</span>.<span class="i">Descriptor</span> <b>is</b> <span class="i">AmqpSymbol</span>)
+                        {
+                            <b>var</b> <span id="r62 rd" class="r62 r">amqpSymbol</span> = (<span class="i">AmqpSymbol</span>)<span class="r61 r">amqpObjectAsDescribedType</span>.<span class="i">Descriptor</span>;
+                            <b>if</b> (<span class="r62 r">amqpSymbol</span>.<span class="i">Equals</span>((<span class="i">AmqpSymbol</span>)<a href="#1d67e2424330dbea" class="i field">UriName</a>))
+                            {
+                                <span class="r56 r">netObject</span> = <b>new</b> <span class="i">Uri</span>((<b>string</b>)<span class="r61 r">amqpObjectAsDescribedType</span>.<span class="i">Value</span>);
+                            }
+                            <b>else</b> <b>if</b> (<span class="r62 r">amqpSymbol</span>.<span class="i">Equals</span>((<span class="i">AmqpSymbol</span>)<a href="#65cb917518060560" class="i field">TimeSpanName</a>))
+                            {
+                                <span class="r56 r">netObject</span> = <b>new</b> <span class="i">TimeSpan</span>((<b>long</b>)<span class="r61 r">amqpObjectAsDescribedType</span>.<span class="i">Value</span>);
+                            }
+                            <b>else</b> <b>if</b> (<span class="r62 r">amqpSymbol</span>.<span class="i">Equals</span>((<span class="i">AmqpSymbol</span>)<a href="#cac2771f4edb700d" class="i field">DateTimeOffsetName</a>))
+                            {
+                                <span class="r56 r">netObject</span> = <b>new</b> <span class="i">DateTimeOffset</span>(<b>new</b> <span class="i">DateTime</span>((<b>long</b>)<span class="r61 r">amqpObjectAsDescribedType</span>.<span class="i">Value</span>, <span class="i">DateTimeKind</span>.<span class="i">Utc</span>));
+                            }
+                        }
+                    }
+                    <b>else</b> <b>if</b> (<span class="r55 r">mappingType</span> == <a href="MappingType.cs.html#8be619203a027a33" class="t t">MappingType</a>.<a href="MappingType.cs.html#74ff8b553b453a16" class="i field">ApplicationProperty</a>)
+                    {
+                        <b>throw</b> <a href="../Primitives/Fx.cs.html#c01e8844709e19c1" class="t t">Fx</a>.<a href="../Primitives/Fx.cs.html#0793cb830fb5b201" class="i property">Exception</a>.<span class="i">AsError</span>(<b>new</b> <span class="i">SerializationException</span>(<a href="../Resources.Designer.cs.html#8e0563579d43c165" class="t t">Resources</a>.<a href="../Resources.Designer.cs.html#e18dadc7961b7d6f" class="i property">FailedToSerializeUnsupportedType</a>.<span class="i">FormatForUser</span>(<span class="r54 r">amqpObject</span>.<span class="i">GetType</span>().<span class="i">FullName</span>)));
+                    }
+                    <b>else</b> <b>if</b> (<span class="r54 r">amqpObject</span> <b>is</b> <span class="i">AmqpMap</span> <span id="r63 rd" class="r63 r">map</span>)
+                    {
+                        <b>var</b> <span id="r64 rd" class="r64 r">dictionary</span> = <b>new</b> <span class="i">Dictionary</span>&lt;<b>string</b>, <b>object</b>&gt;();
+                        <b>foreach</b> (<b>var</b> <span id="r65 rd" class="r65 r">pair</span> <b>in</b> <span class="r63 r">map</span>)
+                        {
+                            <span class="r64 r">dictionary</span>.<span class="i">Add</span>(<span class="r65 r">pair</span>.<span class="i">Key</span>.<span class="i">ToString</span>(), <span class="r65 r">pair</span>.<span class="i">Value</span>);
+                        }
+ 
+                        <span class="r56 r">netObject</span> = <span class="r64 r">dictionary</span>;
+                    }
+                    <b>else</b>
+                    {
+                        <span class="r56 r">netObject</span> = <span class="r54 r">amqpObject</span>;
+                    }
+                    <b>break</b>;
+            }
+ 
+            <b>return</b> <span class="r56 r">netObject</span> != <b>null</b>;
+        }
+ 
+        <b>static</b> <span class="i">ArraySegment</span>&lt;<b>byte</b>&gt; <a id="2f60c424fa53f219" href="../R/2f60c424fa53f219.html" target="n" data-glyph="76,1" class="i method">StreamToBytes</a>(<span class="i">Stream</span> <span id="r66 rd" class="r66 r">stream</span>)
+        {
+            <span class="i">ArraySegment</span>&lt;<b>byte</b>&gt; <span id="r67 rd" class="r67 r">buffer</span>;
+            <b>if</b> (<span class="r66 r">stream</span> == <b>null</b> || <span class="r66 r">stream</span>.<span class="i">Length</span> &lt; 1)
+            {
+                <span class="r67 r">buffer</span> = <b>default</b>;
+            }
+            <b>else</b>
+            {
+                <b>using</b> (<b>var</b> <span id="r68 rd" class="r68 r">memoryStream</span> = <b>new</b> <span class="i">MemoryStream</span>(512))
+                {
+                    <span class="r66 r">stream</span>.<span class="i">CopyTo</span>(<span class="r68 r">memoryStream</span>, 512);
+                    <span class="r67 r">buffer</span> = <b>new</b> <span class="i">ArraySegment</span>&lt;<b>byte</b>&gt;(<span class="r68 r">memoryStream</span>.<span class="i">ToArray</span>());
+                }
+            }
+ 
+            <b>return</b> <span class="r67 r">buffer</span>;
+        }
+ 
+        <b>private static</b> <span class="i">Data</span> <a id="9c42a780d770242f" href="../R/9c42a780d770242f.html" target="n" data-glyph="76,1" class="i method">ToData</a>(<span class="i">AmqpMessage</span> <span id="r69 rd" class="r69 r">message</span>)
+        {
+            <span class="i">ArraySegment</span>&lt;<b>byte</b>&gt;[] <span id="r70 rd" class="r70 r">payload</span> = <span class="r69 r">message</span>.<span class="i">GetPayload</span>();
+            <b>var</b> <span id="r71 rd" class="r71 r">buffer</span> = <b>new</b> <span class="i">BufferListStream</span>(<span class="r70 r">payload</span>);
+            <span class="i">ArraySegment</span>&lt;<b>byte</b>&gt; <span id="r72 rd" class="r72 r">value</span> = <span class="r71 r">buffer</span>.<span class="i">ReadBytes</span>((<b>int</b>)<span class="r71 r">buffer</span>.<span class="i">Length</span>);
+            <b>return</b> <b>new</b> <span class="i">Data</span> { <span class="i">Value</span> = <span class="r72 r">value</span> };
+        }
+ 
+        <b>static</b> <span class="i">AmqpMap</span> <a id="e3425a1f1f74a150" href="../R/e3425a1f1f74a150.html" target="n" data-glyph="76,1" class="i method">GetSqlFilterMap</a>(<a href="../Filters/SqlFilter.cs.html#e9882df29e2b7381" class="t t">SqlFilter</a> <span id="r73 rd" class="r73 r">sqlFilter</span>)
+        {
+            <b>var</b> <span id="r74 rd" class="r74 r">amqpFilterMap</span> = <b>new</b> <span class="i">AmqpMap</span>
+            {
+                [<a href="ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="ManagementConstants.cs.html#080d61ff9f2f1251" class="i field">Expression</a>] = <span class="r73 r">sqlFilter</span>.<a href="../Filters/SqlFilter.cs.html#9243d4f6a5f19219" class="i property">SqlExpression</a>
+            };
+            <b>return</b> <span class="r74 r">amqpFilterMap</span>;
+        }
+ 
+        <b>static</b> <span class="i">AmqpMap</span> <a id="1036b6e05617a449" href="../R/1036b6e05617a449.html" target="n" data-glyph="76,1" class="i method">GetCorrelationFilterMap</a>(<a href="../Filters/CorrelationFilter.cs.html#c0f494aec2ae2ed6" class="t t">CorrelationFilter</a> <span id="r75 rd" class="r75 r">correlationFilter</span>)
+        {
+            <b>var</b> <span id="r76 rd" class="r76 r">correlationFilterMap</span> = <b>new</b> <span class="i">AmqpMap</span>
+            {
+                [<a href="ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="ManagementConstants.cs.html#364d19709acddab4" class="i field">CorrelationId</a>] = <span class="r75 r">correlationFilter</span>.<a href="../Filters/CorrelationFilter.cs.html#7de6b0cc96cf0f61" class="i property">CorrelationId</a>,
+                [<a href="ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="ManagementConstants.cs.html#a1dc6a9572b59ee3" class="i field">MessageId</a>] = <span class="r75 r">correlationFilter</span>.<a href="../Filters/CorrelationFilter.cs.html#513a216c15509951" class="i property">MessageId</a>,
+                [<a href="ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="ManagementConstants.cs.html#0342c6a2c675e3d4" class="i field">To</a>] = <span class="r75 r">correlationFilter</span>.<a href="../Filters/CorrelationFilter.cs.html#d74693c9b8a26c21" class="i property">To</a>,
+                [<a href="ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="ManagementConstants.cs.html#cbda3c36093ec290" class="i field">ReplyTo</a>] = <span class="r75 r">correlationFilter</span>.<a href="../Filters/CorrelationFilter.cs.html#7f63738f1246b5c5" class="i property">ReplyTo</a>,
+                [<a href="ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="ManagementConstants.cs.html#8d3c868c05ce58a4" class="i field">Label</a>] = <span class="r75 r">correlationFilter</span>.<a href="../Filters/CorrelationFilter.cs.html#b3cf72df2c15f03d" class="i property">Label</a>,
+                [<a href="ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="ManagementConstants.cs.html#5bcf274376236182" class="i field">SessionId</a>] = <span class="r75 r">correlationFilter</span>.<a href="../Filters/CorrelationFilter.cs.html#3da546d96d182f76" class="i property">SessionId</a>,
+                [<a href="ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="ManagementConstants.cs.html#1ebecdca8298cd7c" class="i field">ReplyToSessionId</a>] = <span class="r75 r">correlationFilter</span>.<a href="../Filters/CorrelationFilter.cs.html#d3d8c8bef97cdbc6" class="i property">ReplyToSessionId</a>,
+                [<a href="ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="ManagementConstants.cs.html#214aa29a6357cade" class="i field">ContentType</a>] = <span class="r75 r">correlationFilter</span>.<a href="../Filters/CorrelationFilter.cs.html#d22522c38a574175" class="i property">ContentType</a>
+            };
+ 
+            <b>var</b> <span id="r77 rd" class="r77 r">propertiesMap</span> = <b>new</b> <span class="i">AmqpMap</span>();
+            <b>foreach</b> (<b>var</b> <span id="r78 rd" class="r78 r">property</span> <b>in</b> <span class="r75 r">correlationFilter</span>.<a href="../Filters/CorrelationFilter.cs.html#e3d0898dc8fdd683" class="i property">Properties</a>)
+            {
+                <span class="r77 r">propertiesMap</span>[<b>new</b> <span class="i">MapKey</span>(<span class="r78 r">property</span>.<span class="i">Key</span>)] = <span class="r78 r">property</span>.<span class="i">Value</span>;
+            }
+ 
+            <span class="r76 r">correlationFilterMap</span>[<a href="ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="ManagementConstants.cs.html#00330a23664b4979" class="i field">CorrelationFilterProperties</a>] = <span class="r77 r">propertiesMap</span>;
+ 
+            <b>return</b> <span class="r76 r">correlationFilterMap</span>;
+        }
+ 
+        <b>static</b> <span class="i">AmqpMap</span> <a id="12bd660869657526" href="../R/12bd660869657526.html" target="n" data-glyph="76,1" class="i method">GetRuleActionMap</a>(<a href="../Filters/SqlRuleAction.cs.html#562c1f764c21abb4" class="t t">SqlRuleAction</a> <span id="r79 rd" class="r79 r">sqlRuleAction</span>)
+        {
+            <span class="i">AmqpMap</span> <span id="r80 rd" class="r80 r">ruleActionMap</span> = <b>null</b>;
+            <b>if</b> (<span class="r79 r">sqlRuleAction</span> != <b>null</b>)
+            {
+                <span class="r80 r">ruleActionMap</span> = <b>new</b> <span class="i">AmqpMap</span> { [<a href="ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="ManagementConstants.cs.html#080d61ff9f2f1251" class="i field">Expression</a>] = <span class="r79 r">sqlRuleAction</span>.<a href="../Filters/SqlRuleAction.cs.html#5d3ac6230e5ee2b6" class="i property">SqlExpression</a> };
+            }
+ 
+            <b>return</b> <span class="r80 r">ruleActionMap</span>;
+        }
+    }
+}</pre></td></tr></table></div></body></html>

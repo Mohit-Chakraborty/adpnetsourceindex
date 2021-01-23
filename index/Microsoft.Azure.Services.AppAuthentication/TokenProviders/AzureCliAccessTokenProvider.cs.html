@@ -1,0 +1,143 @@
+﻿<!DOCTYPE html>
+<html><head><title>AzureCliAccessTokenProvider.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(134);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.Services.AppAuthentication/TokenProviders/AzureCliAccessTokenProvider.cs" target="_top">TokenProviders\AzureCliAccessTokenProvider.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.Services.AppAuthentication" target="_top">Azure.Services.AppAuthentication\Microsoft.Azure.Services.AppAuthentication.csproj</a> (Microsoft.Azure.Services.AppAuthentication)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Runtime</span>.<span class="i n">InteropServices</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Services</span>.<span class="i n">AppAuthentication</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Gets a token using Azure CLI 2.0 for local development scenarios. </span>
+    <span class="c">///</span><span class="c"> az account get-access-token --resource</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="39a62be243139361" href="../R/39a62be243139361.html" target="n" data-glyph="2,0" class="t t">AzureCliAccessTokenProvider</a> : <a href="NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="t t">NonInteractiveAzureServiceTokenProviderBase</a>
+    {
+        <span class="c">// Allows for unit testing, by mocking IProcessManager</span>
+        <b>private readonly</b> <a href="../Clients/IProcessManager.cs.html#665e2360e5cab16f" class="t t">IProcessManager</a> <a id="daf862bbe7703e75" href="../R/daf862bbe7703e75.html" target="n" data-glyph="46,1" class="i field">_processManager</a>;
+ 
+        <span class="c">// Constants related to command to execute to get token using Azure CLI</span>
+        <b>private const string</b> <a id="0505a90abe9268f7" href="../R/0505a90abe9268f7.html" target="n" data-glyph="10,1" class="i field">Cmd</a> = <span class="s">&quot;cmd.exe&quot;</span>;
+        <b>private const string</b> <a id="ab8e814454fb403a" href="../R/ab8e814454fb403a.html" target="n" data-glyph="10,1" class="i field">Bash</a> = <span class="s">&quot;/bin/bash&quot;</span>;
+        <b>private const string</b> <a id="fc9af9267354d90d" href="../R/fc9af9267354d90d.html" target="n" data-glyph="10,1" class="i field">GetTokenCommand</a> = <span class="s">&quot;az account get-access-token -o json&quot;</span>;
+        <b>private const string</b> <a id="19d22fc8e36addb0" href="../R/19d22fc8e36addb0.html" target="n" data-glyph="10,1" class="i field">ResourceArgumentName</a> = <span class="s">&quot;--resource&quot;</span>;
+ 
+        <span class="c">// This is the path that a develop can set to tell this class what the install path for Azure CLI is. </span>
+        <b>private const string</b> <a id="9387018a97be29eb" href="../R/9387018a97be29eb.html" target="n" data-glyph="10,1" class="i field">AzureCliPath</a> = <span class="s">&quot;AzureCLIPath&quot;</span>;
+ 
+        <span class="c">// The default install paths are used to find Azure CLI. This is for security, so that any path in the calling program&#39;s Path environment is not used to execute Azure CLI.</span>
+        <b>private readonly string</b> <a id="b8225dd09758cadd" href="../R/b8225dd09758cadd.html" target="n" data-glyph="46,1" class="i field">_azureCliDefaultPathWindows</a> =
+            <span class="s">$&quot;</span>{<a href="../Helpers/EnvironmentHelper.cs.html#bf463f028e93a98e" class="t t">EnvironmentHelper</a>.<a href="../Helpers/EnvironmentHelper.cs.html#396b4b5d7cfcb4a0" class="i method">GetEnvironmentVariable</a>(<span class="s">&quot;ProgramFiles(x86)&quot;</span>)}<span class="s">\\Microsoft SDKs\\Azure\\CLI2\\wbin;</span>{<a href="../Helpers/EnvironmentHelper.cs.html#bf463f028e93a98e" class="t t">EnvironmentHelper</a>.<a href="../Helpers/EnvironmentHelper.cs.html#396b4b5d7cfcb4a0" class="i method">GetEnvironmentVariable</a>(<span class="s">&quot;ProgramFiles&quot;</span>)}<span class="s">\\Microsoft SDKs\\Azure\\CLI2\\wbin</span><span class="s">&quot;</span>
+        ;
+ 
+        <span class="c">// Default path for non-Windows. </span>
+        <b>private const string</b> <a id="7249db1a487577f4" href="../R/7249db1a487577f4.html" target="n" data-glyph="10,1" class="i field">AzureCliDefaultPath</a> = <span class="s">&quot;/usr/bin:/usr/local/bin&quot;</span>;
+ 
+        <b>internal</b> <a id="0815045b687aff66" href="../R/0815045b687aff66.html" target="n" data-glyph="74,1" class="t constructor">AzureCliAccessTokenProvider</a>(<a href="../Clients/IProcessManager.cs.html#665e2360e5cab16f" class="t t">IProcessManager</a> <span id="r0 rd" class="r0 r">processManager</span>)
+        {
+            <a href="#daf862bbe7703e75" class="i field">_processManager</a> = <span class="r0 r">processManager</span>;
+            <a href="NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a> = <b>new</b> <a href="../Principal.cs.html#ee98ea95591837a0" class="t constructor">Principal</a> { <a href="../Principal.cs.html#d9e4b09403dc585a" class="i field">Type</a> = <span class="s">&quot;User&quot;</span> };
+        }
+ 
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">net452</span> || <span class="i">net461</span>
+<span class="e">        // detect when running with Mono on Unix
+        // https://www.mono-project.com/docs/faq/technical/#how-to-detect-the-execution-platform
+        private bool IsUnixPlatform()
+        {
+            int p = (int)Environment.OSVersion.Platform;
+            return p == 4 || p == 6 || p == 128;
+        }
+</span><span class="k preprocess">#</span><span class="k preprocess">endif</span>
+ 
+        <b>private</b> <a href="@0@System/A.html#7caf1ab108119a18" class="t t">ProcessStartInfo</a> <a id="644f0f2a4d8d98f7" href="../R/644f0f2a4d8d98f7.html" target="n" data-glyph="76,1" class="i method">GetProcessStartInfo</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r1 rd" class="r1 r">resource</span>)
+        {
+ 
+            <a href="@0@System/A.html#7caf1ab108119a18" class="t t">ProcessStartInfo</a> <span id="r2 rd" class="r2 r">startInfo</span>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r3 rd" class="r3 r">processPath</span>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r4 rd" class="r4 r">currentPath</span> = <a href="../Helpers/EnvironmentHelper.cs.html#bf463f028e93a98e" class="t t">EnvironmentHelper</a>.<a href="../Helpers/EnvironmentHelper.cs.html#396b4b5d7cfcb4a0" class="i method">GetEnvironmentVariable</a>(<span class="s">&quot;PATH&quot;</span>);
+ 
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">net452</span> || <span class="i">net461</span>
+<span class="e">            if (!IsUnixPlatform())
+</span><span class="k preprocess">#</span><span class="k preprocess">else</span>
+            <b>if</b> (<a href="@0@mscorlib/A.html#f0b94ab083bb10a6" class="t t">RuntimeInformation</a>.<a href="@0@mscorlib/A.html#44d838601b3a8ce9" class="i method">IsOSPlatform</a>(<a href="@0@mscorlib/A.html#26fa53454c093915" class="t t">OSPlatform</a>.<a href="@0@mscorlib/A.html#f9d350ece38e28d6" class="i property">Windows</a>))
+<span class="k preprocess">#</span><span class="k preprocess">endif</span>
+            {
+                <span class="r2 r">startInfo</span> = <b>new</b> <a href="@0@System/A.html#c9102a49613227be" class="t constructor">ProcessStartInfo</a>
+                {
+                    <a href="@0@System/A.html#b5b64f6ecc2f77fd" class="i property">FileName</a> = <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#2d7263f86a526264" class="i method">Combine</a>(<a href="../Helpers/EnvironmentHelper.cs.html#bf463f028e93a98e" class="t t">EnvironmentHelper</a>.<a href="../Helpers/EnvironmentHelper.cs.html#237cbb494fc0a93c" class="i property">SystemDirectory</a>, <a href="#0505a90abe9268f7" class="i field">Cmd</a>),
+                    <a href="@0@System/A.html#a0c4508e0c3df23b" class="i property">Arguments</a> = <span class="s">$&quot;</span><span class="s">/c </span>{<a href="#fc9af9267354d90d" class="i field">GetTokenCommand</a>}<span class="s"> </span>{<a href="#19d22fc8e36addb0" class="i field">ResourceArgumentName</a>}<span class="s"> </span>{<span class="r1 r">resource</span>}<span class="s">&quot;</span>
+                };
+ 
+                <span class="r3 r">processPath</span> = <span class="s">$&quot;</span>{<a href="../Helpers/EnvironmentHelper.cs.html#bf463f028e93a98e" class="t t">EnvironmentHelper</a>.<a href="../Helpers/EnvironmentHelper.cs.html#396b4b5d7cfcb4a0" class="i method">GetEnvironmentVariable</a>(<a href="#9387018a97be29eb" class="i field">AzureCliPath</a>)}<span class="s">;</span>{<a href="#b8225dd09758cadd" class="i field">_azureCliDefaultPathWindows</a>}<span class="s">;</span>{<span class="r4 r">currentPath</span>}<span class="s">&quot;</span>;
+            }
+            <b>else</b>
+            {
+                <span class="r2 r">startInfo</span> = <b>new</b> <a href="@0@System/A.html#c9102a49613227be" class="t constructor">ProcessStartInfo</a>
+                {
+                    <a href="@0@System/A.html#b5b64f6ecc2f77fd" class="i property">FileName</a> = <a href="#ab8e814454fb403a" class="i field">Bash</a>,
+                    <a href="@0@System/A.html#a0c4508e0c3df23b" class="i property">Arguments</a> = <span class="s">$&quot;</span><span class="s">-c \&quot;</span>{<a href="#fc9af9267354d90d" class="i field">GetTokenCommand</a>}<span class="s"> </span>{<a href="#19d22fc8e36addb0" class="i field">ResourceArgumentName</a>}<span class="s"> </span>{<span class="r1 r">resource</span>}\&quot;<span class="s">&quot;</span>
+                };
+ 
+                <span class="r3 r">processPath</span> = <span class="s">$&quot;</span>{<a href="../Helpers/EnvironmentHelper.cs.html#bf463f028e93a98e" class="t t">EnvironmentHelper</a>.<a href="../Helpers/EnvironmentHelper.cs.html#396b4b5d7cfcb4a0" class="i method">GetEnvironmentVariable</a>(<a href="#9387018a97be29eb" class="i field">AzureCliPath</a>)}<span class="s">:</span>{<a href="#7249db1a487577f4" class="i field">AzureCliDefaultPath</a>}<span class="s">:</span>{<span class="r4 r">currentPath</span>}<span class="s">&quot;</span>;
+            }
+ 
+            <span class="c">// Default install location for Az CLI is included. If developer has installed to non-default location, the path can be specified using AzureCliPath variable.</span>
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">FullNetFx</span>
+            <span class="r2 r">startInfo</span>.<a href="@0@System/A.html#5611ad13d0b7376e" class="i property">EnvironmentVariables</a><a href="@0@System/A.html#206c6ead9398b0c7">[</a><span class="s">&quot;PATH&quot;</span>] = <span class="r3 r">processPath</span>;
+<span class="k preprocess">#</span><span class="k preprocess">else</span>
+<span class="e">            startInfo.Environment[&quot;PATH&quot;] = processPath;
+</span><span class="k preprocess">#</span><span class="k preprocess">endif</span>
+            <b>return</b> <span class="r2 r">startInfo</span>;
+        }
+ 
+ 
+        <b>public override async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="../AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="t t">AppAuthenticationResult</a>&gt; <a id="b566c1029907da8d" href="../R/b566c1029907da8d.html" target="n" data-glyph="72,1" class="i method">GetAuthResultAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r5 rd" class="r5 r">resource</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r6 rd" class="r6 r">authority</span>,
+            <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r7 rd" class="r7 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>try</b>
+            {
+                <span class="c">// Validate resource, since it gets sent as a command line argument to Azure CLI</span>
+                <a href="../Helpers/ValidationHelper.cs.html#cf510ca41c1c0515" class="t t">ValidationHelper</a>.<a href="../Helpers/ValidationHelper.cs.html#ad4f265a7a2850d8" class="i method">ValidateResource</a>(<span class="r5 r">resource</span>);
+ 
+                <span class="c">// Execute Azure CLI to get token</span>
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r8 rd" class="r8 r">response</span> = <b>await</b> <a href="#daf862bbe7703e75" class="i field">_processManager</a>.<a href="../Clients/IProcessManager.cs.html#295a83169dbaf0a1" class="i method">ExecuteAsync</a>(<b>new</b> <a href="@0@System/A.html#47660cba985bdf77" class="t constructor">Process</a> { <a href="@0@System/A.html#b0417e5300dc5565" class="i property">StartInfo</a> = <a href="#644f0f2a4d8d98f7" class="i method">GetProcessStartInfo</a>(<span class="r5 r">resource</span>) }, <span class="r7 r">cancellationToken</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                <span class="c">// Parse the response</span>
+                <a href="../TokenResponse.cs.html#e4a748da6aaba4d8" class="t t">TokenResponse</a> <span id="r9 rd" class="r9 r">tokenResponse</span> = <a href="../TokenResponse.cs.html#e4a748da6aaba4d8" class="t t">TokenResponse</a>.<a href="../TokenResponse.cs.html#d9d834fc9b291968" class="i method">Parse</a>(<span class="r8 r">response</span>);
+ 
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r10 rd" class="r10 r">accessToken</span> = <span class="r9 r">tokenResponse</span>.<a href="../TokenResponse.cs.html#92adfa77530b3a62" class="i property">AccessToken2</a>;
+ 
+                <a href="../AccessToken.cs.html#4bf4fd515869512d" class="t t">AccessToken</a> <span id="r11 rd" class="r11 r">token</span> = <a href="../AccessToken.cs.html#4bf4fd515869512d" class="t t">AccessToken</a>.<a href="../AccessToken.cs.html#6c1ca005586c3862" class="i method">Parse</a>(<span class="r10 r">accessToken</span>);
+ 
+                <a href="NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a>.<a href="../Principal.cs.html#409d9406f1d3c582" class="i field">IsAuthenticated</a> = <b>true</b>;
+ 
+                <b>if</b> (<span class="r11 r">token</span> != <b>null</b>)
+                {
+                    <span class="c">// Set principal used based on the claims in the access token. </span>
+                    <a href="NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a>.<a href="../Principal.cs.html#c3eb3045f9426620" class="i field">UserPrincipalName</a> = !<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r11 r">token</span>.<a href="../AccessToken.cs.html#3f65a298f81520a5" class="i property">Upn</a>) ? <span class="r11 r">token</span>.<a href="../AccessToken.cs.html#3f65a298f81520a5" class="i property">Upn</a> : <span class="r11 r">token</span>.<a href="../AccessToken.cs.html#9277c8c1ede67f75" class="i property">Email</a>;
+                    <a href="NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a>.<a href="../Principal.cs.html#64e7621ee7fb4766" class="i field">TenantId</a> = <span class="r11 r">token</span>.<a href="../AccessToken.cs.html#665b479704e13887" class="i property">TenantId</a>;
+                }
+ 
+                <b>return</b> <a href="../AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="t t">AppAuthenticationResult</a>.<a href="../AppAuthenticationResult.cs.html#d3763f80b01ec6b9" class="i method">Create</a>(<span class="r9 r">tokenResponse</span>);
+            }
+            <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r12 rd" class="r12 r">exp</span>)
+            {
+                <b>throw</b> <b>new</b> <a href="../AzureServiceTokenProviderException.cs.html#70a0a38c19f200fb" class="t constructor">AzureServiceTokenProviderException</a>(<a href="NonInteractiveAccessTokenProviderBase.cs.html#24367a95c4c1012b" class="i field">ConnectionString</a>, <span class="r5 r">resource</span>, <span class="r6 r">authority</span>,
+                    <span class="s">$&quot;</span>{<a href="../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a>.<a href="../AzureServiceTokenProviderException.cs.html#b5f1844850504003" class="i field">AzureCliUsed</a>}<span class="s"> </span>{<a href="../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a>.<a href="../AzureServiceTokenProviderException.cs.html#74c51a6320d16d98" class="i field">GenericErrorMessage</a>}<span class="s"> </span>{<span class="r12 r">exp</span>.<a href="@0@mscorlib/A.html#5fba0e16215b42a3" class="i property">Message</a>}<span class="s">&quot;</span>);
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

@@ -1,0 +1,144 @@
+﻿<!DOCTYPE html>
+<html><head><title>Segment.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(135);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Storage.Blobs.ChangeFeed/Segment.cs" target="_top">Segment.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Storage.Blobs.ChangeFeed" target="_top">Azure.Storage.Blobs.ChangeFeed\src\Azure.Storage.Blobs.ChangeFeed.csproj</a> (Azure.Storage.Blobs.ChangeFeed)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>.<span class="i n">Models</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>.<span class="i n">ChangeFeed</span>
+{
+    <b>internal class</b> <a id="5a52debd69b71418" href="R/5a52debd69b71418.html" target="n" data-glyph="2,0" class="t t">Segment</a>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The time (to the nearest hour) associated with this Segment.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a href="@1@netstandard/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a> <a id="451eef991a3ec08e" href="R/451eef991a3ec08e.html" target="n" data-glyph="102,1" class="i property">DateTime</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The path of manifest associated with this Segment.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public string</b> <a id="29cba026b83acee8" href="R/29cba026b83acee8.html" target="n" data-glyph="102,1" class="i property">ManifestPath</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The Shards associated with this Segment.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly</b> <a href="@1@netstandard/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="Shard.cs.html#2725394d5c36e451" class="t t">Shard</a>&gt; <a id="2131e47e4635da1c" href="R/2131e47e4635da1c.html" target="n" data-glyph="46,1" class="i field">_shards</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The Shards we have finished reading from.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly</b> <a href="@1@netstandard/A.html#2d265edc718b158b" class="t t">HashSet</a>&lt;<b>int</b>&gt; <a id="4de7bbf694196051" href="R/4de7bbf694196051.html" target="n" data-glyph="46,1" class="i field">_finishedShards</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The index of the Shard we will return the next event from.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private int</b> <a id="4fda83fe85ff00a4" href="R/4fda83fe85ff00a4.html" target="n" data-glyph="46,1" class="i field">_shardIndex</a>;
+ 
+        <b>public</b> <a id="6fa0a31d49c812a7" href="R/6fa0a31d49c812a7.html" target="n" data-glyph="72,1" class="t constructor">Segment</a>(
+            <a href="@1@netstandard/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="Shard.cs.html#2725394d5c36e451" class="t t">Shard</a>&gt; <span id="r0 rd" class="r0 r">shards</span>,
+            <b>int</b> <span id="r1 rd" class="r1 r">shardIndex</span>,
+            <a href="@1@netstandard/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a> <span id="r2 rd" class="r2 r">dateTime</span>,
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r3 rd" class="r3 r">manifestPath</span>)
+        {
+            <a href="#2131e47e4635da1c" class="i field">_shards</a> = <span class="r0 r">shards</span>;
+            <a href="#4fda83fe85ff00a4" class="i field">_shardIndex</a> = <span class="r1 r">shardIndex</span>;
+            <a href="#451eef991a3ec08e" class="i property">DateTime</a> = <span class="r2 r">dateTime</span>;
+            <a href="#29cba026b83acee8" class="i property">ManifestPath</a> = <span class="r3 r">manifestPath</span>;
+            <a href="#4de7bbf694196051" class="i field">_finishedShards</a> = <b>new</b> <a href="@1@netstandard/A.html#eca9ea30fa3b2c28" class="t constructor">HashSet</a>&lt;<b>int</b>&gt;();
+        }
+ 
+        <b>public virtual</b> <a href="Models/SegmentCursor.cs.html#187a0fb7b207caf1" class="t t">SegmentCursor</a> <a id="5870f31061bef6fa" href="R/5870f31061bef6fa.html" target="n" data-glyph="72,1" class="i method">GetCursor</a>()
+        {
+            <a href="@1@netstandard/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="Models/ShardCursor.cs.html#e1f703f9dbcb8efb" class="t t">ShardCursor</a>&gt; <span id="r4 rd" class="r4 r">shardCursors</span> = <b>new</b> <a href="@1@netstandard/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="Models/ShardCursor.cs.html#e1f703f9dbcb8efb" class="t t">ShardCursor</a>&gt;();
+            <b>foreach</b> (<a href="Shard.cs.html#2725394d5c36e451" class="t t">Shard</a> <span id="r5 rd" class="r5 r">shard</span> <b>in</b> <a href="#2131e47e4635da1c" class="i field">_shards</a>)
+            {
+                <a href="Models/ShardCursor.cs.html#e1f703f9dbcb8efb" class="k">var</a> <span id="r6 rd" class="r6 r">shardCursor</span> = <span class="r5 r">shard</span>.<a href="Shard.cs.html#c96c879922aa3812" class="i method">GetCursor</a>();
+                <b>if</b> (<span class="r6 r">shardCursor</span> != <b>null</b>)
+                {
+                    <span class="r4 r">shardCursors</span>.<a href="@1@netstandard/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r5 r">shard</span>.<a href="Shard.cs.html#c96c879922aa3812" class="i method">GetCursor</a>());
+                }
+            }
+            <b>return</b> <b>new</b> <a href="Models/SegmentCursor.cs.html#326e59ce3a05eee7" class="t constructor">SegmentCursor</a>(
+                <span class="r7 r">segmentPath</span>: <a href="#29cba026b83acee8" class="i property">ManifestPath</a>,
+                <span class="r8 r">shardCursors</span>: <span class="r4 r">shardCursors</span>,
+                <span class="r9 r">currentShardPath</span>: <a href="#2131e47e4635da1c" class="i field">_shards</a><a href="@1@netstandard/A.html#0c65bec4d3fac21e">[</a><a href="#4fda83fe85ff00a4" class="i field">_shardIndex</a>].<a href="Shard.cs.html#a4e0fb61101879ee" class="i property">ShardPath</a>);
+        }
+ 
+        <b>public virtual async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@1@netstandard/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="Models/BlobChangeFeedEvent.cs.html#36615652d54317d6" class="t t">BlobChangeFeedEvent</a>&gt;&gt; <a id="d8a2bdefe11032ea" href="R/d8a2bdefe11032ea.html" target="n" data-glyph="72,1" class="i method">GetPage</a>(
+            <b>bool</b> <span id="r10 rd" class="r10 r">async</span>,
+            <b>int</b>? <span id="r11 rd" class="r11 r">pageSize</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r12 rd" class="r12 r">cancellationToken</span> = <b>default</b>)
+        {
+            <a href="@1@netstandard/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="Models/BlobChangeFeedEvent.cs.html#36615652d54317d6" class="t t">BlobChangeFeedEvent</a>&gt; <span id="r13 rd" class="r13 r">changeFeedEventList</span> = <b>new</b> <a href="@1@netstandard/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="Models/BlobChangeFeedEvent.cs.html#36615652d54317d6" class="t t">BlobChangeFeedEvent</a>&gt;();
+ 
+            <b>if</b> (!<a href="#5d4a62958a75d7a8" class="i method">HasNext</a>())
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;Segment doesn&#39;t have any more events&quot;</span>);
+            }
+ 
+            <b>int</b> <span id="r14 rd" class="r14 r">i</span> = 0;
+            <b>while</b> (<span class="r14 r">i</span> &lt; <span class="r11 r">pageSize</span> &amp;&amp; <a href="#2131e47e4635da1c" class="i field">_shards</a>.<a href="@1@netstandard/A.html#78a69d857716bc68" class="i property">Count</a> &gt; 0)
+            {
+                <span class="c">// If this Shard is finished, skip it.</span>
+                <b>if</b> (<a href="#4de7bbf694196051" class="i field">_finishedShards</a>.<a href="@1@netstandard/A.html#06d905a0ac76e4f5" class="i method">Contains</a>(<a href="#4fda83fe85ff00a4" class="i field">_shardIndex</a>))
+                {
+                    <a href="#4fda83fe85ff00a4" class="i field">_shardIndex</a>++;
+ 
+                    <b>if</b> (<a href="#4fda83fe85ff00a4" class="i field">_shardIndex</a> == <a href="#2131e47e4635da1c" class="i field">_shards</a>.<a href="@1@netstandard/A.html#78a69d857716bc68" class="i property">Count</a>)
+                    {
+                        <a href="#4fda83fe85ff00a4" class="i field">_shardIndex</a> = 0;
+                    }
+ 
+                    <b>continue</b>;
+                }
+ 
+                <a href="Shard.cs.html#2725394d5c36e451" class="t t">Shard</a> <span id="r15 rd" class="r15 r">currentShard</span> = <a href="#2131e47e4635da1c" class="i field">_shards</a><a href="@1@netstandard/A.html#0c65bec4d3fac21e">[</a><a href="#4fda83fe85ff00a4" class="i field">_shardIndex</a>];
+ 
+                <a href="Models/BlobChangeFeedEvent.cs.html#36615652d54317d6" class="t t">BlobChangeFeedEvent</a> <span id="r16 rd" class="r16 r">changeFeedEvent</span> = <b>await</b> <span class="r15 r">currentShard</span>.<a href="Shard.cs.html#066004ace8c34376" class="i method">Next</a>(<span class="r10 r">async</span>, <span class="r12 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                <span class="r13 r">changeFeedEventList</span>.<a href="@1@netstandard/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r16 r">changeFeedEvent</span>);
+ 
+                <span class="c">// If the current shard is completed, remove it from _shards</span>
+                <b>if</b> (!<span class="r15 r">currentShard</span>.<a href="Shard.cs.html#b526f645796fa8aa" class="i method">HasNext</a>())
+                {
+                    <a href="#4de7bbf694196051" class="i field">_finishedShards</a>.<a href="@1@netstandard/A.html#43a2b651926474a7" class="i method">Add</a>(<a href="#4fda83fe85ff00a4" class="i field">_shardIndex</a>);
+                }
+ 
+                <span class="r14 r">i</span>++;
+                <a href="#4fda83fe85ff00a4" class="i field">_shardIndex</a>++;
+                <b>if</b> (<a href="#4fda83fe85ff00a4" class="i field">_shardIndex</a> &gt;= <a href="#2131e47e4635da1c" class="i field">_shards</a>.<a href="@1@netstandard/A.html#78a69d857716bc68" class="i property">Count</a>)
+                {
+                    <a href="#4fda83fe85ff00a4" class="i field">_shardIndex</a> = 0;
+                }
+ 
+                <span class="c">// If all the Shards are finished, we need to break out early.</span>
+                <b>if</b> (<a href="#4de7bbf694196051" class="i field">_finishedShards</a>.<a href="@1@netstandard/A.html#905bec8c22644c82" class="i property">Count</a> == <a href="#2131e47e4635da1c" class="i field">_shards</a>.<a href="@1@netstandard/A.html#78a69d857716bc68" class="i property">Count</a>)
+                {
+                    <b>break</b>;
+                }
+            }
+ 
+            <b>return</b> <span class="r13 r">changeFeedEventList</span>;
+        }
+ 
+        <b>public virtual bool</b> <a id="5d4a62958a75d7a8" href="R/5d4a62958a75d7a8.html" target="n" data-glyph="72,1" class="i method">HasNext</a>()
+            =&gt; <a href="#4de7bbf694196051" class="i field">_finishedShards</a>.<a href="@1@netstandard/A.html#905bec8c22644c82" class="i property">Count</a> &lt; <a href="#2131e47e4635da1c" class="i field">_shards</a>.<a href="@1@netstandard/A.html#78a69d857716bc68" class="i property">Count</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Constructor for mocking.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a id="37c6e42ed2c59f25" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">Segment</a>() { }
+    }
+}
+</pre></td></tr></table></div></body></html>

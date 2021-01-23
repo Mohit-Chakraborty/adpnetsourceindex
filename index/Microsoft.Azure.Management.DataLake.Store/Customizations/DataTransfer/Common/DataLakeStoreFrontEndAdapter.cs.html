@@ -1,0 +1,453 @@
+﻿<!DOCTYPE html>
+<html><head><title>DataLakeStoreFrontEndAdapter.cs</title><link rel="stylesheet" href="../../../../styles.css"><script src="../../../../scripts.js"></script></head>
+<body class="cB" onload="i(444);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.Management.DataLake.Store/Customizations/DataTransfer/Common/DataLakeStoreFrontEndAdapter.cs" target="_top">Customizations\DataTransfer\Common\DataLakeStoreFrontEndAdapter.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.Management.DataLake.Store" target="_top">src\Microsoft.Azure.Management.DataLake.Store.csproj</a> (Microsoft.Azure.Management.DataLake.Store)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Management</span>.<span class="i n">DataLake</span>.<span class="i n">Store</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">Rest</span>.<span class="i">Azure</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Management</span>.<span class="i n">DataLake</span>.<span class="i n">Store</span>.<span class="i n">Models</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">Rest</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Management</span>.<span class="i n">DataLake</span>.<span class="i n">Store</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> A front end adapter that communicates with the DataLake Store.</span>
+    <span class="c">///</span><span class="c"> This is a syncrhonous call adapter, which has certain efficiency limitations.</span>
+    <span class="c">///</span><span class="c"> In the future, new adapters that are created should consider implementing the methods</span>
+    <span class="c">///</span><span class="c"> asynchronously.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>public class</b> <a id="1d3c3772f85addbc" href="../../../R/1d3c3772f85addbc.html" target="n" data-glyph="0,0" class="t t">DataLakeStoreFrontEndAdapter</a> : <a href="IFrontEndAdapter.cs.html#d503d7a60084fa22" class="t t">IFrontEndAdapter</a>
+    {
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Private
+ 
+        <b>private readonly string</b> <a id="a3299f367714ef90" href="../../../R/a3299f367714ef90.html" target="n" data-glyph="46,1" class="i field">_accountName</a>;
+ 
+        <b>private readonly</b> <span class="i">IDataLakeStoreFileSystemManagementClient</span> <a id="307da94ac9036f7f" href="../../../R/307da94ac9036f7f.html" target="n" data-glyph="46,1" class="i field">_client</a>;
+ 
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <a id="5abd50c97d1072a4" href="../../../R/5abd50c97d1072a4.html" target="n" data-glyph="46,1" class="i field">_token</a>;
+ 
+        <b>private const int</b> <a id="ccd4ccd6f9240936" href="../../../R/ccd4ccd6f9240936.html" target="n" data-glyph="10,1" class="i field">PerRequestTimeoutMs</a> = 60000; <span class="c">// 60 seconds and we timeout the request</span>
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Constructor
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#1d3c3772f85addbc" class="t t">DataLakeStoreFrontEndAdapter</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">accountName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Name of the account.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">client</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The client.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="7ea9240e3c500ea6" href="../../../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">DataLakeStoreFrontEndAdapter</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r0 rd" class="r0 r">accountName</span>, <span class="i">IDataLakeStoreFileSystemManagementClient</span> <span id="r1 rd" class="r1 r">client</span>) :
+            <a href="#6fe8cb9be75f5252" class="k">this</a>(<span class="r0 r">accountName</span>, <span class="r1 r">client</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>)
+        {
+ 
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#1d3c3772f85addbc" class="t t">DataLakeStoreFrontEndAdapter</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">accountName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Name of the account.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">client</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The client.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">token</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="6fe8cb9be75f5252" href="../../../R/6fe8cb9be75f5252.html" target="n" data-glyph="72,1" class="t constructor">DataLakeStoreFrontEndAdapter</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r2 rd" class="r2 r">accountName</span>, <span class="i">IDataLakeStoreFileSystemManagementClient</span> <span id="r3 rd" class="r3 r">client</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r4 rd" class="r4 r">token</span>)
+        {
+            <a href="#a3299f367714ef90" class="i field">_accountName</a> = <span class="r2 r">accountName</span>;
+            <a href="#307da94ac9036f7f" class="i field">_client</a> = <span class="r3 r">client</span>;
+            <a href="#5abd50c97d1072a4" class="i field">_token</a> = <span class="r4 r">token</span>;
+        }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> IFrontEndAdapter implementation
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new, empty stream at the given path.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">streamPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The relative path to the stream.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">overwrite</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Whether to overwrite an existing stream.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">data</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The data.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">byteCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The byte count.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>.<a href="@0@mscorlib/A.html#30edb7a318d221fa" class="t t">TaskCanceledException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>public void</b> <a id="fc7582475d755243" href="../../../R/fc7582475d755243.html" target="n" data-glyph="72,1" class="i method">CreateStream</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r5 rd" class="r5 r">streamPath</span>, <b>bool</b> <span id="r6 rd" class="r6 r">overwrite</span>, <b>byte</b>[] <span id="r7 rd" class="r7 r">data</span>, <b>int</b> <span id="r8 rd" class="r8 r">byteCount</span>)
+        {
+            <a href="@0@System/A.html#ceb0ba9cc88de82e" class="k">var</a> <span id="r9 rd" class="r9 r">stopWatch</span> = <b>new</b> <a href="@0@System/A.html#e0a8bcc83e66a717" class="t constructor">Stopwatch</a>();
+            <span class="r9 r">stopWatch</span>.<a href="@0@System/A.html#f56fda03f3c59486" class="i method">Start</a>();
+            <b>using</b> (<a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r10 rd" class="r10 r">toAppend</span> = <span class="r7 r">data</span> != <b>null</b> ? <b>new</b> <a href="@0@mscorlib/A.html#69899d25df5de6e1" class="t constructor">MemoryStream</a>(<span class="r7 r">data</span>, 0, <span class="r8 r">byteCount</span>) : <b>new</b> <a href="@0@mscorlib/A.html#d308091cc690e78d" class="t constructor">MemoryStream</a>())
+            {
+                <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="k">var</a> <span id="r11 rd" class="r11 r">task</span> = <a href="#307da94ac9036f7f" class="i field">_client</a>.<span class="i">FileSystem</span>.<span class="i">CreateAsync</span>(<a href="#a3299f367714ef90" class="i field">_accountName</a>, <span class="r5 r">streamPath</span>, <span class="r10 r">toAppend</span>, <span class="i">overwrite</span>: <span class="r6 r">overwrite</span>, <span class="i">cancellationToken</span>: <a href="#5abd50c97d1072a4" class="i field">_token</a>);
+ 
+                <b>if</b> (!<span class="r11 r">task</span>.<a href="@0@mscorlib/A.html#f8e777a86e28b829" class="i method">Wait</a>(<a href="#ccd4ccd6f9240936" class="i field">PerRequestTimeoutMs</a>))
+                {
+                    <a href="@0@mscorlib/A.html#30edb7a318d221fa" class="k">var</a> <span id="r12 rd" class="r12 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#73e8774c7fe3eb80" class="t constructor">TaskCanceledException</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;Create stream operation did not complete after {0} milliseconds.&quot;</span>, <a href="#ccd4ccd6f9240936" class="i field">PerRequestTimeoutMs</a>));
+                    <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r12 r">ex</span>);
+                    <b>throw</b> <span class="r12 r">ex</span>;
+                }
+ 
+                <span class="r11 r">task</span>.<a href="@0@mscorlib/A.html#e1d639f68b66715a" class="i method">GetAwaiter</a>().<a href="@0@mscorlib/A.html#c2597ba59f71d619" class="i method">GetResult</a>();
+            }
+            <span class="r9 r">stopWatch</span>.<a href="@0@System/A.html#9dd6cac7fc1e2117" class="i method">Stop</a>();
+            <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="TracingHelper.cs.html#d6f22d2fc99e22e6" class="i method">LogInfo</a>(<span class="s">&quot;Op:CREATE,Path:{0},Overwrite:{1},TimeMs:{2}&quot;</span>, <span class="r5 r">streamPath</span>, <span class="r6 r">overwrite</span>, <span class="r9 r">stopWatch</span>.<a href="@0@System/A.html#1cd9247e94fd0142" class="i property">ElapsedMilliseconds</a>);
+            
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Deletes an existing stream at the given path.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">streamPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The relative path to the stream.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r14 r">recurse</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">if set to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> [recurse]. This is used for folder streams only.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">isDownload</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">if set to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> [is download], meaning we will delete a stream on the local machine instead of on the server.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>.<a href="@0@mscorlib/A.html#30edb7a318d221fa" class="t t">TaskCanceledException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>public void</b> <a id="4d862ab1433924f6" href="../../../R/4d862ab1433924f6.html" target="n" data-glyph="72,1" class="i method">DeleteStream</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r13 rd" class="r13 r">streamPath</span>, <b>bool</b> <span id="r14 rd" class="r14 r">recurse</span> = <b>false</b>, <b>bool</b> <span id="r15 rd" class="r15 r">isDownload</span> = <b>false</b>)
+        {
+            <b>if</b> (<span class="r15 r">isDownload</span>)
+            {
+                <b>if</b> (<a href="@0@mscorlib/A.html#b3ad5f0ba800bb28" class="t t">Directory</a>.<a href="@0@mscorlib/A.html#6a2a3bee6b62826f" class="i method">Exists</a>(<span class="r13 r">streamPath</span>))
+                {
+                    <a href="@0@mscorlib/A.html#b3ad5f0ba800bb28" class="t t">Directory</a>.<a href="@0@mscorlib/A.html#7edbf8078ebb7f63" class="i method">Delete</a>(<span class="r13 r">streamPath</span>, <span class="r14 r">recurse</span>);
+                }
+                <b>else</b> <b>if</b> (<a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#3360368484a9f131" class="i method">Exists</a>(<span class="r13 r">streamPath</span>))
+                {
+                    <a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#c4e7406e837331d5" class="i method">Delete</a>(<span class="r13 r">streamPath</span>);
+                }
+            }
+            <b>else</b>
+            {
+                <a href="@0@System/A.html#ceb0ba9cc88de82e" class="k">var</a> <span id="r16 rd" class="r16 r">stopWatch</span> = <b>new</b> <a href="@0@System/A.html#e0a8bcc83e66a717" class="t constructor">Stopwatch</a>();
+                <span class="r16 r">stopWatch</span>.<a href="@0@System/A.html#f56fda03f3c59486" class="i method">Start</a>();
+                <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="k">var</a> <span id="r17 rd" class="r17 r">task</span> = <a href="#307da94ac9036f7f" class="i field">_client</a>.<span class="i">FileSystem</span>.<span class="i">DeleteAsync</span>(<a href="#a3299f367714ef90" class="i field">_accountName</a>, <span class="r13 r">streamPath</span>, <span class="r14 r">recurse</span>, <span class="i">cancellationToken</span>: <a href="#5abd50c97d1072a4" class="i field">_token</a>);
+                <b>if</b> (!<span class="r17 r">task</span>.<a href="@0@mscorlib/A.html#f8e777a86e28b829" class="i method">Wait</a>(<a href="#ccd4ccd6f9240936" class="i field">PerRequestTimeoutMs</a>))
+                {
+                    <a href="@0@mscorlib/A.html#30edb7a318d221fa" class="k">var</a> <span id="r18 rd" class="r18 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#73e8774c7fe3eb80" class="t constructor">TaskCanceledException</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;Delete stream operation did not complete after {0} milliseconds.&quot;</span>, <a href="#ccd4ccd6f9240936" class="i field">PerRequestTimeoutMs</a>));
+                    <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r18 r">ex</span>);
+ 
+                    <b>throw</b> <span class="r18 r">ex</span>;
+                }
+ 
+                <span class="r17 r">task</span>.<a href="@0@mscorlib/A.html#9865ec4fb8abca74" class="i method">GetAwaiter</a>().<a href="@0@mscorlib/A.html#fac5be2731353aa8" class="i method">GetResult</a>();
+                <span class="r16 r">stopWatch</span>.<a href="@0@System/A.html#9dd6cac7fc1e2117" class="i method">Stop</a>();
+                <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="TracingHelper.cs.html#d6f22d2fc99e22e6" class="i method">LogInfo</a>(<span class="s">&quot;Op:DELETE,Path:{0},recurse:{1},TimeMs:{2}&quot;</span>, <span class="r13 r">streamPath</span>, <span class="r14 r">recurse</span>, <span class="r16 r">stopWatch</span>.<a href="@0@System/A.html#1cd9247e94fd0142" class="i property">ElapsedMilliseconds</a>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Appends to stream.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r19 r">streamPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The stream path.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r20 r">data</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The data.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r21 r">offset</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The offset.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r22 r">byteCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The byte count.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>.<a href="@0@mscorlib/A.html#30edb7a318d221fa" class="t t">TaskCanceledException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>public void</b> <a id="4f48b11de149e205" href="../../../R/4f48b11de149e205.html" target="n" data-glyph="72,1" class="i method">AppendToStream</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r19 rd" class="r19 r">streamPath</span>, <b>byte</b>[] <span id="r20 rd" class="r20 r">data</span>, <b>long</b> <span id="r21 rd" class="r21 r">offset</span>, <b>int</b> <span id="r22 rd" class="r22 r">byteCount</span>)
+        {
+            <a href="@0@System/A.html#ceb0ba9cc88de82e" class="k">var</a> <span id="r23 rd" class="r23 r">stopWatch</span> = <b>new</b> <a href="@0@System/A.html#e0a8bcc83e66a717" class="t constructor">Stopwatch</a>();
+            <span class="r23 r">stopWatch</span>.<a href="@0@System/A.html#f56fda03f3c59486" class="i method">Start</a>();
+            <b>using</b> (<a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r24 rd" class="r24 r">stream</span> = <b>new</b> <a href="@0@mscorlib/A.html#69899d25df5de6e1" class="t constructor">MemoryStream</a>(<span class="r20 r">data</span>, 0, <span class="r22 r">byteCount</span>))
+            {
+                <b>var</b> <span id="r25 rd" class="r25 r">task</span> = <a href="#307da94ac9036f7f" class="i field">_client</a>.<span class="i">FileSystem</span>.<span class="i">AppendAsync</span>(<a href="#a3299f367714ef90" class="i field">_accountName</a>, <span class="r19 r">streamPath</span>, <span class="r24 r">stream</span>, <span class="r21 r">offset</span>, <span class="i">cancellationToken</span>: <a href="#5abd50c97d1072a4" class="i field">_token</a>);
+ 
+                <b>if</b> (!<span class="r25 r">task</span>.<span class="i">Wait</span>(<a href="#ccd4ccd6f9240936" class="i field">PerRequestTimeoutMs</a>))
+                {
+                    <a href="@0@mscorlib/A.html#30edb7a318d221fa" class="k">var</a> <span id="r26 rd" class="r26 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#73e8774c7fe3eb80" class="t constructor">TaskCanceledException</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;Append to stream operation did not complete after {0} milliseconds.&quot;</span>, <a href="#ccd4ccd6f9240936" class="i field">PerRequestTimeoutMs</a>));
+                    <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r26 r">ex</span>);
+ 
+                    <b>throw</b> <span class="r26 r">ex</span>;
+                }
+ 
+                <span class="r25 r">task</span>.<span class="i">GetAwaiter</span>().<span class="i">GetResult</span>();
+            }
+            <span class="r23 r">stopWatch</span>.<a href="@0@System/A.html#9dd6cac7fc1e2117" class="i method">Stop</a>();
+            <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="TracingHelper.cs.html#d6f22d2fc99e22e6" class="i method">LogInfo</a>(<span class="s">&quot;Op:APPEND,Path:{0},offset:{1},TimeMs:{2}&quot;</span>, <span class="r19 r">streamPath</span>, <span class="r21 r">offset</span>, <span class="r23 r">stopWatch</span>.<a href="@0@System/A.html#1cd9247e94fd0142" class="i property">ElapsedMilliseconds</a>);
+        }
+ 
+        <b>public</b> <a href="@0@mscorlib/A.html#f956b0c07e86df64" class="t t">Stream</a> <a id="861037e78f24a85b" href="../../../R/861037e78f24a85b.html" target="n" data-glyph="72,1" class="i method">ReadStream</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r27 rd" class="r27 r">streamPath</span>, <b>long</b> <span id="r28 rd" class="r28 r">offset</span>, <b>long</b> <span id="r29 rd" class="r29 r">length</span>, <b>bool</b> <span id="r30 rd" class="r30 r">isDownload</span> = <b>false</b>)
+        {
+            <b>if</b> (<span class="r30 r">isDownload</span>)
+            {
+                <a href="@0@System/A.html#ceb0ba9cc88de82e" class="k">var</a> <span id="r31 rd" class="r31 r">stopWatch</span> = <b>new</b> <a href="@0@System/A.html#e0a8bcc83e66a717" class="t constructor">Stopwatch</a>();
+                <span class="r31 r">stopWatch</span>.<a href="@0@System/A.html#f56fda03f3c59486" class="i method">Start</a>();
+                <b>var</b> <span id="r32 rd" class="r32 r">task</span> = <a href="#307da94ac9036f7f" class="i field">_client</a>.<span class="i">FileSystem</span>.<span class="i">OpenWithHttpMessagesAsync</span>(<a href="#a3299f367714ef90" class="i field">_accountName</a>, <span class="r27 r">streamPath</span>, <span class="r29 r">length</span>, <span class="r28 r">offset</span>, <span class="i">cancellationToken</span>: <a href="#5abd50c97d1072a4" class="i field">_token</a>);
+ 
+                <b>if</b> (!<span class="r32 r">task</span>.<span class="i">Wait</span>(<a href="#ccd4ccd6f9240936" class="i field">PerRequestTimeoutMs</a>))
+                {
+                    <a href="@0@mscorlib/A.html#30edb7a318d221fa" class="k">var</a> <span id="r33 rd" class="r33 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#73e8774c7fe3eb80" class="t constructor">TaskCanceledException</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<span class="i">Format</span>(<span class="s">&quot;Reading stream operation did not complete after {0} milliseconds. TraceId: {1}&quot;</span>, <a href="#ccd4ccd6f9240936" class="i field">PerRequestTimeoutMs</a>, <span class="r32 r">task</span>.<span class="i">Result</span>.<span class="i">RequestId</span>));
+                    <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r33 r">ex</span>);
+ 
+                    <b>throw</b> <span class="r33 r">ex</span>;
+                }
+ 
+                <a href="@0@mscorlib/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r34 rd" class="r34 r">toReturn</span> = <span class="r32 r">task</span>.<span class="i">GetAwaiter</span>().<span class="i">GetResult</span>().<span class="i">Body</span>;
+                <span class="r31 r">stopWatch</span>.<a href="@0@System/A.html#9dd6cac7fc1e2117" class="i method">Stop</a>();
+                <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="TracingHelper.cs.html#d6f22d2fc99e22e6" class="i method">LogInfo</a>(<span class="s">&quot;Op:READ,Path:{0},offset:{1},length:{2},TimeMs:{3}&quot;</span>, <span class="r27 r">streamPath</span>, <span class="r28 r">offset</span>, <span class="r29 r">length</span>, <span class="r31 r">stopWatch</span>.<a href="@0@System/A.html#1cd9247e94fd0142" class="i property">ElapsedMilliseconds</a>);
+ 
+                <b>return</b> <span class="r34 r">toReturn</span>;
+            }
+            <b>else</b>
+            {
+                <span class="c">// note that length is not used here since we will automatically stop reading once we reach the end of the stream.</span>
+                <a href="@0@mscorlib/A.html#e23a38af5d11ddd3" class="k">var</a> <span id="r35 rd" class="r35 r">stream</span> = <b>new</b> <a href="@0@mscorlib/A.html#756b978acfa47bc7" class="t constructor">FileStream</a>(<span class="r27 r">streamPath</span>, <a href="@0@mscorlib/A.html#c0cb6ba6af625b3a" class="t t">FileMode</a>.<a href="@0@mscorlib/A.html#f4421e1d202f76fa" class="i field">Open</a>, <a href="@0@mscorlib/A.html#5cc5644ae3acd24b" class="t t">FileAccess</a>.<a href="@0@mscorlib/A.html#0f1c68c756d0636b" class="i field">Read</a>, <a href="@0@mscorlib/A.html#2bfafb4d44a4f126" class="t t">FileShare</a>.<a href="@0@mscorlib/A.html#581aa2ff4e59056b" class="i field">Read</a>);
+ 
+                <b>if</b> (<span class="r28 r">offset</span> &gt;= <span class="r35 r">stream</span>.<a href="@0@mscorlib/A.html#fa88edfdb51ed91c" class="i property">Length</a>)
+                {
+                    <a href="@0@mscorlib/A.html#109b3ef6299ef9df" class="k">var</a> <span id="r36 rd" class="r36 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#4b20cd3790b6426a" class="t constructor">ArgumentException</a>(<span class="s">&quot;StartOffset is beyond the end of the input file&quot;</span>, <span class="s">&quot;StartOffset&quot;</span>);
+                    <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r36 r">ex</span>);
+ 
+                    <b>throw</b> <span class="r36 r">ex</span>;
+                }
+ 
+                <span class="r35 r">stream</span>.<a href="@0@mscorlib/A.html#329c77a859ac60bd" class="i method">Seek</a>(<span class="r28 r">offset</span>, <a href="@0@mscorlib/A.html#2cc1cf6635f00a52" class="t t">SeekOrigin</a>.<a href="@0@mscorlib/A.html#c29481af7c617299" class="i field">Begin</a>);
+                <b>return</b> <span class="r35 r">stream</span>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Determines if the stream with given path exists.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r37 r">streamPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The relative path to the stream.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r38 r">isDownload</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">if set to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> [is download], meaning we will test if the stream exists on the local machine instead of on the server.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> True if the stream exists, false otherwise.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>.<a href="@0@mscorlib/A.html#30edb7a318d221fa" class="t t">TaskCanceledException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>public bool</b> <a id="81bd992f09faa429" href="../../../R/81bd992f09faa429.html" target="n" data-glyph="72,1" class="i method">StreamExists</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r37 rd" class="r37 r">streamPath</span>, <b>bool</b> <span id="r38 rd" class="r38 r">isDownload</span> = <b>false</b>)
+        {
+            <b>if</b> (<span class="r38 r">isDownload</span>)
+            {
+                <b>return</b> <a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#3360368484a9f131" class="i method">Exists</a>(<span class="r37 r">streamPath</span>) || <a href="@0@mscorlib/A.html#b3ad5f0ba800bb28" class="t t">Directory</a>.<a href="@0@mscorlib/A.html#6a2a3bee6b62826f" class="i method">Exists</a>(<span class="r37 r">streamPath</span>);
+            }
+            <b>else</b>
+            {
+                <a href="@0@System/A.html#ceb0ba9cc88de82e" class="k">var</a> <span id="r39 rd" class="r39 r">stopWatch</span> = <b>new</b> <a href="@0@System/A.html#e0a8bcc83e66a717" class="t constructor">Stopwatch</a>();
+                <span class="r39 r">stopWatch</span>.<a href="@0@System/A.html#f56fda03f3c59486" class="i method">Start</a>();
+                <b>try</b>
+                {
+                    <b>var</b> <span id="r40 rd" class="r40 r">task</span> = <a href="#307da94ac9036f7f" class="i field">_client</a>.<span class="i">FileSystem</span>.<span class="i">GetFileStatusAsync</span>(<a href="#a3299f367714ef90" class="i field">_accountName</a>, <span class="r37 r">streamPath</span>, <span class="i">cancellationToken</span>: <a href="#5abd50c97d1072a4" class="i field">_token</a>);
+                    <b>if</b> (!<span class="r40 r">task</span>.<span class="i">Wait</span>(<a href="#ccd4ccd6f9240936" class="i field">PerRequestTimeoutMs</a>))
+                    {
+                        <a href="@0@mscorlib/A.html#30edb7a318d221fa" class="k">var</a> <span id="r41 rd" class="r41 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#73e8774c7fe3eb80" class="t constructor">TaskCanceledException</a>(
+                            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;Get file status operation did not complete after {0} milliseconds.&quot;</span>,
+                                <a href="#ccd4ccd6f9240936" class="i field">PerRequestTimeoutMs</a>));
+                        <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r41 r">ex</span>);
+ 
+                        <b>throw</b> <span class="r41 r">ex</span>;
+                    }
+ 
+                    <span class="r40 r">task</span>.<span class="i">GetAwaiter</span>().<span class="i">GetResult</span>();
+                }
+                <b>catch</b> (<a href="@0@mscorlib/A.html#be77e0a7fbc110e6" class="t t">AggregateException</a> <span id="r42 rd" class="r42 r">ex</span>)
+                {
+                    <b>if</b> (<span class="r42 r">ex</span>.<a href="@0@mscorlib/A.html#e9d864767768da2b" class="i property">InnerExceptions</a> == <b>null</b> || <span class="r42 r">ex</span>.<a href="@0@mscorlib/A.html#e9d864767768da2b" class="i property">InnerExceptions</a>.<a href="@0@mscorlib/A.html#7e2071514968aca1" class="i property">Count</a> != 1)
+                    {
+                        <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r42 r">ex</span>);
+ 
+                        <b>throw</b> <span class="r42 r">ex</span>;
+                    }
+ 
+                    <b>var</b> <span id="r43 rd" class="r43 r">cloudEx</span> = <span class="r42 r">ex</span>.<a href="@0@mscorlib/A.html#e9d864767768da2b" class="i property">InnerExceptions</a>[0] <b>as</b> <span class="i">AdlsErrorException</span>;
+                    <b>if</b> ((<span class="r43 r">cloudEx</span> != <b>null</b> &amp;&amp; <span class="r43 r">cloudEx</span>.<span class="i">Response</span> != <b>null</b> &amp;&amp; <span class="r43 r">cloudEx</span>.<span class="i">Response</span>.<span class="i">StatusCode</span> == <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#35e0ca1b70dbcf0d" class="i field">NotFound</a>) || 
+                        (<span class="r43 r">cloudEx</span>.<span class="i">Body</span> != <b>null</b> &amp;&amp; <span class="r43 r">cloudEx</span>.<span class="i">Body</span>.<span class="i">RemoteException</span> != <b>null</b> &amp;&amp; <span class="r43 r">cloudEx</span>.<span class="i">Body</span>.<span class="i">RemoteException</span> <b>is</b> <span class="i">AdlsFileNotFoundException</span>))
+                    {
+                        <b>return</b> <b>false</b>;
+                    }
+ 
+                    <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r42 r">ex</span>);
+ 
+                    <b>throw</b> <span class="r42 r">ex</span>;
+                }
+                <b>catch</b> (<span class="i">AdlsErrorException</span> <span id="r44 rd" class="r44 r">cloudEx</span>)
+                {
+                    <b>if</b> ((<span class="r44 r">cloudEx</span>.<span class="i">Response</span> != <b>null</b> &amp;&amp; <span class="r44 r">cloudEx</span>.<span class="i">Response</span>.<span class="i">StatusCode</span> == <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#35e0ca1b70dbcf0d" class="i field">NotFound</a>) || 
+                        (<span class="r44 r">cloudEx</span>.<span class="i">Body</span> != <b>null</b> &amp;&amp; <span class="r44 r">cloudEx</span>.<span class="i">Body</span>.<span class="i">RemoteException</span> != <b>null</b> &amp;&amp; <span class="r44 r">cloudEx</span>.<span class="i">Body</span>.<span class="i">RemoteException</span> <b>is</b> <span class="i">AdlsFileNotFoundException</span>))
+                    {
+                        <b>return</b> <b>false</b>;
+                    }
+ 
+                    <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<span class="i">LogError</span>(<span class="r44 r">cloudEx</span>);
+ 
+                    <b>throw</b> <span class="r44 r">cloudEx</span>;
+                }
+                <b>finally</b>
+                {
+                    <span class="r39 r">stopWatch</span>.<a href="@0@System/A.html#9dd6cac7fc1e2117" class="i method">Stop</a>();
+                    <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="TracingHelper.cs.html#d6f22d2fc99e22e6" class="i method">LogInfo</a>(<span class="s">&quot;Op:GETFILESTATUS,Path:{0},TestStream,TimeMs:{1}&quot;</span>, <span class="r37 r">streamPath</span>, <span class="r39 r">stopWatch</span>.<a href="@0@System/A.html#1cd9247e94fd0142" class="i property">ElapsedMilliseconds</a>);
+                }
+ 
+                <b>return</b> <b>true</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets a value indicating the length of a stream, in bytes.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r45 r">streamPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The relative path to the stream.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r46 r">isDownload</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">if set to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> [is download], meaning we will get the stream length on the local machine instead of on the server.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The length of the stream, in bytes.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>.<a href="@0@mscorlib/A.html#30edb7a318d221fa" class="t t">TaskCanceledException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>public long</b> <a id="b403a4e84f9ad2a7" href="../../../R/b403a4e84f9ad2a7.html" target="n" data-glyph="72,1" class="i method">GetStreamLength</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r45 rd" class="r45 r">streamPath</span>, <b>bool</b> <span id="r46 rd" class="r46 r">isDownload</span> = <b>false</b>)
+        {
+            <b>if</b> (<span class="r46 r">isDownload</span>)
+            {
+                <b>return</b> <b>new</b> <a href="@0@mscorlib/A.html#1fe2c3953ba2a577" class="t constructor">FileInfo</a>(<span class="r45 r">streamPath</span>).<a href="@0@mscorlib/A.html#0ab84ec3507f6ed4" class="i property">Length</a>;
+            }
+            <b>else</b>
+            {
+                <a href="@0@System/A.html#ceb0ba9cc88de82e" class="k">var</a> <span id="r47 rd" class="r47 r">stopWatch</span> = <b>new</b> <a href="@0@System/A.html#e0a8bcc83e66a717" class="t constructor">Stopwatch</a>();
+                <span class="r47 r">stopWatch</span>.<a href="@0@System/A.html#f56fda03f3c59486" class="i method">Start</a>();
+                <b>var</b> <span id="r48 rd" class="r48 r">task</span> = <a href="#307da94ac9036f7f" class="i field">_client</a>.<span class="i">FileSystem</span>.<span class="i">GetFileStatusAsync</span>(<a href="#a3299f367714ef90" class="i field">_accountName</a>, <span class="r45 r">streamPath</span>, <span class="i">cancellationToken</span>: <a href="#5abd50c97d1072a4" class="i field">_token</a>);
+ 
+                <b>if</b> (!<span class="r48 r">task</span>.<span class="i">Wait</span>(<a href="#ccd4ccd6f9240936" class="i field">PerRequestTimeoutMs</a>))
+                {
+                    <a href="@0@mscorlib/A.html#30edb7a318d221fa" class="k">var</a> <span id="r49 rd" class="r49 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#73e8774c7fe3eb80" class="t constructor">TaskCanceledException</a>(
+                        <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;Get file status operation did not complete after {0} milliseconds.&quot;</span>,
+                            <a href="#ccd4ccd6f9240936" class="i field">PerRequestTimeoutMs</a>));
+ 
+                    <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r49 r">ex</span>);
+ 
+                    <b>throw</b> <span class="r49 r">ex</span>;
+                }
+ 
+                <b>var</b> <span id="r50 rd" class="r50 r">fileInfoResponse</span> = <span class="r48 r">task</span>.<span class="i">Result</span>;
+                <span class="r47 r">stopWatch</span>.<a href="@0@System/A.html#9dd6cac7fc1e2117" class="i method">Stop</a>();
+                <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="TracingHelper.cs.html#d6f22d2fc99e22e6" class="i method">LogInfo</a>(<span class="s">&quot;Op:GETFILESTATUS,Path:{0},GetLength,TimeMs:{1}&quot;</span>, <span class="r45 r">streamPath</span>, <span class="r47 r">stopWatch</span>.<a href="@0@System/A.html#1cd9247e94fd0142" class="i property">ElapsedMilliseconds</a>);
+ 
+                <b>return</b> (<b>long</b>)<span class="r50 r">fileInfoResponse</span>.<span class="i">FileStatus</span>.<span class="i">Length</span>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Determines if the stream with given path on the server is a directory or a terminating file.</span>
+        <span class="c">///</span><span class="c"> This is used exclusively for download.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r51 r">streamPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The relative path to the stream.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> True if the stream is a directory, false otherwise.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>.<a href="@0@mscorlib/A.html#30edb7a318d221fa" class="t t">TaskCanceledException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>public bool</b> <a id="70a65796bd1371ed" href="../../../R/70a65796bd1371ed.html" target="n" data-glyph="72,1" class="i method">IsDirectory</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r51 rd" class="r51 r">streamPath</span>)
+        {
+            <a href="@0@System/A.html#ceb0ba9cc88de82e" class="k">var</a> <span id="r52 rd" class="r52 r">stopWatch</span> = <b>new</b> <a href="@0@System/A.html#e0a8bcc83e66a717" class="t constructor">Stopwatch</a>();
+            <span class="r52 r">stopWatch</span>.<a href="@0@System/A.html#f56fda03f3c59486" class="i method">Start</a>();
+            <b>var</b> <span id="r53 rd" class="r53 r">task</span> = <a href="#307da94ac9036f7f" class="i field">_client</a>.<span class="i">FileSystem</span>.<span class="i">GetFileStatusAsync</span>(<a href="#a3299f367714ef90" class="i field">_accountName</a>, <span class="r51 r">streamPath</span>, <span class="i">cancellationToken</span>: <a href="#5abd50c97d1072a4" class="i field">_token</a>);
+ 
+            <b>if</b> (!<span class="r53 r">task</span>.<span class="i">Wait</span>(<a href="#ccd4ccd6f9240936" class="i field">PerRequestTimeoutMs</a>))
+            {
+                <a href="@0@mscorlib/A.html#30edb7a318d221fa" class="k">var</a> <span id="r54 rd" class="r54 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#73e8774c7fe3eb80" class="t constructor">TaskCanceledException</a>(
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;Get file status operation did not complete after {0} milliseconds.&quot;</span>,
+                        <a href="#ccd4ccd6f9240936" class="i field">PerRequestTimeoutMs</a>));
+ 
+                <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r54 r">ex</span>);
+ 
+                <b>throw</b> <span class="r54 r">ex</span>;
+            }
+ 
+            <b>var</b> <span id="r55 rd" class="r55 r">fileInfoResponse</span> = <span class="r53 r">task</span>.<span class="i">Result</span>;
+            <span class="r52 r">stopWatch</span>.<a href="@0@System/A.html#9dd6cac7fc1e2117" class="i method">Stop</a>();
+            <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="TracingHelper.cs.html#d6f22d2fc99e22e6" class="i method">LogInfo</a>(<span class="s">&quot;Op:GETFILESTATUS,Path:{0},IsDirectory,TimeMs:{1}&quot;</span>, <span class="r51 r">streamPath</span>, <span class="r52 r">stopWatch</span>.<a href="@0@System/A.html#1cd9247e94fd0142" class="i property">ElapsedMilliseconds</a>);
+ 
+            <b>return</b> <span class="r55 r">fileInfoResponse</span>.<span class="i">FileStatus</span>.<span class="i">Type</span>.<span class="i">GetValueOrDefault</span>() == <span class="i">FileType</span>.<span class="i">DIRECTORY</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Lists the Data Lake Store directory specified.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r56 r">directoryPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The directory path.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r57 r">recursive</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">if set to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> [recursive].</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The list of string paths and their corresponding file sizes, in bytes.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public</b> <a href="@0@mscorlib/A.html#20343df0c96b629b" class="t t">IDictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <b>long</b>&gt; <a id="44d96d5ebd0ba415" href="../../../R/44d96d5ebd0ba415.html" target="n" data-glyph="72,1" class="i method">ListDirectory</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r56 rd" class="r56 r">directoryPath</span>, <b>bool</b> <span id="r57 rd" class="r57 r">recursive</span>)
+        {
+            <a href="@0@mscorlib/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <b>long</b>&gt; <span id="r58 rd" class="r58 r">toReturn</span> = <b>new</b> <a href="@0@mscorlib/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <b>long</b>&gt;();
+            <b>var</b> <span id="r59 rd" class="r59 r">files</span> = <a href="#307da94ac9036f7f" class="i field">_client</a>.<span class="i">FileSystem</span>.<span class="i">ListFileStatus</span>(<a href="#a3299f367714ef90" class="i field">_accountName</a>, <span class="r56 r">directoryPath</span>).<span class="i">FileStatuses</span>.<span class="i">FileStatus</span>;
+            <b>foreach</b> (<b>var</b> <span id="r60 rd" class="r60 r">file</span> <b>in</b> <span class="r59 r">files</span>)
+            {
+                <b>if</b> (<span class="r60 r">file</span>.<span class="i">Type</span> == <span class="i">FileType</span>.<span class="i">FILE</span>)
+                {
+                    <span class="r58 r">toReturn</span>.<span class="i">Add</span>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<span class="i">Format</span>(<span class="s">&quot;{0}/{1}&quot;</span>, <span class="r56 r">directoryPath</span>, <span class="r60 r">file</span>.<span class="i">PathSuffix</span>), <span class="r60 r">file</span>.<span class="i">Length</span>.<span class="i">GetValueOrDefault</span>());
+                }
+                <b>else</b> <b>if</b> (<span class="r57 r">recursive</span>)
+                {
+                    <b>foreach</b> (<a href="@0@mscorlib/A.html#8585965bb176a426" class="k">var</a> <span id="r61 rd" class="r61 r">entry</span> <b>in</b> <a href="#44d96d5ebd0ba415" class="i method">ListDirectory</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<span class="i">Format</span>(<span class="s">&quot;{0}/{1}&quot;</span>, <span class="r56 r">directoryPath</span>, <span class="r60 r">file</span>.<span class="i">PathSuffix</span>), <b>true</b>))
+                    {
+                        <span class="r58 r">toReturn</span>.<a href="@0@mscorlib/A.html#a7861da7aaa500fe" class="i method">Add</a>(<span class="r61 r">entry</span>.<a href="@0@mscorlib/A.html#f9d1c04feb1af032" class="i property">Key</a>, <span class="r61 r">entry</span>.<a href="@0@mscorlib/A.html#38c0e86cc4b30170" class="i property">Value</a>);
+                    }
+                }
+            }
+ 
+            <b>return</b> <span class="r58 r">toReturn</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Concatenates the given input streams (in order) into the given target stream.</span>
+        <span class="c">///</span><span class="c"> At the end of this operation, input streams will be deleted.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r62 r">targetStreamPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The relative path to the target stream.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r63 r">inputStreamPaths</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An ordered array of paths to the input streams.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r64 r">isDownload</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">if set to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> [is download], meaning we will concatenate the streams on the local machine instead of on the server.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>.<a href="@0@mscorlib/A.html#30edb7a318d221fa" class="t t">TaskCanceledException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>public void</b> <a id="be509d45659ee082" href="../../../R/be509d45659ee082.html" target="n" data-glyph="72,1" class="i method">Concatenate</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r62 rd" class="r62 r">targetStreamPath</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>[] <span id="r63 rd" class="r63 r">inputStreamPaths</span>, <b>bool</b> <span id="r64 rd" class="r64 r">isDownload</span> = <b>false</b>)
+        {
+            <b>if</b> (<span class="r64 r">isDownload</span>)
+            {
+                <b>if</b> (<span class="r63 r">inputStreamPaths</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a> != 2)
+                {
+                    <a href="@0@mscorlib/A.html#beac22dfca574cd4" class="k">var</a> <span id="r65 rd" class="r65 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;Invalid list of stream paths for download finalization. Expected Paths: 2. Actual paths: {0}&quot;</span>, <span class="r63 r">inputStreamPaths</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>));
+                    <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r65 r">ex</span>);
+ 
+                    <b>throw</b> <span class="r65 r">ex</span>;
+                }
+ 
+                <a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#9635b474663856ac" class="i method">Move</a>(<span class="r63 r">inputStreamPaths</span>[0], <span class="r63 r">inputStreamPaths</span>[1]);
+            }
+            <b>else</b>
+            {
+                <span class="c">// this is required for the current version of the microsoft concatenate</span>
+                <span class="c">// TODO: Improve WebHDFS concatenate to take in the list of paths to concatenate</span>
+                <span class="c">// in the request body.</span>
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r66 rd" class="r66 r">paths</span> = <span class="s">&quot;sources=&quot;</span> + <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#881354baa56fc358" class="i method">Join</a>(<span class="s">&quot;,&quot;</span>, <span class="r63 r">inputStreamPaths</span>);
+ 
+                <a href="@0@System/A.html#ceb0ba9cc88de82e" class="k">var</a> <span id="r67 rd" class="r67 r">stopWatch</span> = <b>new</b> <a href="@0@System/A.html#e0a8bcc83e66a717" class="t constructor">Stopwatch</a>();
+                <span class="r67 r">stopWatch</span>.<a href="@0@System/A.html#f56fda03f3c59486" class="i method">Start</a>();
+                <span class="c">// For the current implementation, we require UTF8 encoding.</span>
+                <b>using</b> (<a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r68 rd" class="r68 r">stream</span> = <b>new</b> <a href="@0@mscorlib/A.html#f92fa270fda9a82b" class="t constructor">MemoryStream</a>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<span class="r66 r">paths</span>)))
+                {
+                    <b>var</b> <span id="r69 rd" class="r69 r">task</span> = <a href="#307da94ac9036f7f" class="i field">_client</a>.<span class="i">FileSystem</span>.<span class="i">MsConcatAsync</span>(<a href="#a3299f367714ef90" class="i field">_accountName</a>, <span class="r62 r">targetStreamPath</span>, <span class="r68 r">stream</span>, <b>true</b>, <span class="i">cancellationToken</span>: <a href="#5abd50c97d1072a4" class="i field">_token</a>);
+ 
+                    <b>if</b> (!<span class="r69 r">task</span>.<span class="i">Wait</span>(<a href="#ccd4ccd6f9240936" class="i field">PerRequestTimeoutMs</a>))
+                    {
+                        <a href="@0@mscorlib/A.html#30edb7a318d221fa" class="k">var</a> <span id="r70 rd" class="r70 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#73e8774c7fe3eb80" class="t constructor">TaskCanceledException</a>(
+                            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;Concatenate operation did not complete after {0} milliseconds.&quot;</span>,
+                                <a href="#ccd4ccd6f9240936" class="i field">PerRequestTimeoutMs</a>));
+ 
+                        <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r70 r">ex</span>);
+ 
+                        <b>throw</b> <span class="r70 r">ex</span>;
+                    }
+ 
+                    <span class="r69 r">task</span>.<span class="i">GetAwaiter</span>().<span class="i">GetResult</span>();
+                    <span class="r67 r">stopWatch</span>.<a href="@0@System/A.html#9dd6cac7fc1e2117" class="i method">Stop</a>();
+                    <a href="TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="TracingHelper.cs.html#d6f22d2fc99e22e6" class="i method">LogInfo</a>(<span class="s">&quot;Op:MSCONCAT,Path:{0},NumberOfStreams:{1},TimeMs:{2}&quot;</span>, <span class="r62 r">targetStreamPath</span>, <span class="r63 r">inputStreamPaths</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>, <span class="r67 r">stopWatch</span>.<a href="@0@System/A.html#1cd9247e94fd0142" class="i property">ElapsedMilliseconds</a>);
+                }
+            }
+        }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+    }
+}
+</pre></td></tr></table></div></body></html>

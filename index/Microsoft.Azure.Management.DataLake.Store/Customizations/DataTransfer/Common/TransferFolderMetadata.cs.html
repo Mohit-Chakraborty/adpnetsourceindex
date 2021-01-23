@@ -1,0 +1,385 @@
+﻿<!DOCTYPE html>
+<html><head><title>TransferFolderMetadata.cs</title><link rel="stylesheet" href="../../../../styles.css"><script src="../../../../scripts.js"></script></head>
+<body class="cB" onload="i(376);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.Management.DataLake.Store/Customizations/DataTransfer/Common/TransferFolderMetadata.cs" target="_top">Customizations\DataTransfer\Common\TransferFolderMetadata.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.Management.DataLake.Store" target="_top">src\Microsoft.Azure.Management.DataLake.Store.csproj</a> (Microsoft.Azure.Management.DataLake.Store)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i">Newtonsoft</span>.<span class="i">Json</span>;
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Concurrent</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Runtime</span>.<span class="i n">Serialization</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Management</span>.<span class="i n">DataLake</span>.<span class="i n">Store</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Represents general metadata pertaining to a transfer.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    [<a href="@0@mscorlib/A.html#761078d4519dc54e" class="t constructor">DebuggerDisplay</a>(<span class="s">&quot;FileCount = {FileCount}, TransferId = {TransferId}, IsRecursive = {IsRecursive}&quot;</span>)]
+    <b>public class</b> <a id="e4a782a6b9f2d42c" href="../../../R/e4a782a6b9f2d42c.html" target="n" data-glyph="0,0" class="t t">TransferFolderMetadata</a>
+    {
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Private
+ 
+        <b>private static readonly</b> <span class="i">JsonSerializer</span> <a id="75c07aa028aaa033" href="../../../R/75c07aa028aaa033.html" target="n" data-glyph="46,1" class="i field">MetadataSerializer</a> = <b>new</b> <span class="i">JsonSerializer</span>();
+        <b>private static readonly object</b> <a id="1c823dc39aadadd2" href="../../../R/1c823dc39aadadd2.html" target="n" data-glyph="46,1" class="i field">SaveSync</a> = <b>new</b> <b>object</b>();
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Constructor
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Required by JsonSerializer.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        [<span class="i">JsonConstructor</span>]
+        <b>internal</b> <a id="73f3f62cdb41fc00" href="../../../R/../../0000000000.html" target="n" data-glyph="74,1" class="t constructor">TransferFolderMetadata</a>()
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Constructs a new TransferFolderMetadata object from the given parameters.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">metadataFilePath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The file path to assign to this metadata file (for saving purposes).</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">transferParameters</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The parameters to use for constructing this metadata.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">frontend</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The frontend to use when generating per file metadata.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="a873b6e3bc2758a1" href="../../../R/a873b6e3bc2758a1.html" target="n" data-glyph="72,1" class="t constructor">TransferFolderMetadata</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r0 rd" class="r0 r">metadataFilePath</span>, <a href="TransferParameters.cs.html#9d54476a1d8187dd" class="t t">TransferParameters</a> <span id="r1 rd" class="r1 r">transferParameters</span>, <a href="IFrontEndAdapter.cs.html#d503d7a60084fa22" class="t t">IFrontEndAdapter</a> <span id="r2 rd" class="r2 r">frontend</span>)
+        {
+            <a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#27b1b695eacce334" class="i property">MetadataFilePath</a> = <span class="r0 r">metadataFilePath</span>;
+           
+            <a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#a208107e07da04f9" class="i property">TransferId</a> = <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#8015cb30da6ca742" class="i method">ToString</a>(<span class="s">&quot;N&quot;</span>);
+            <a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#b73f76db507ab6b0" class="i property">InputFolderPath</a> = <span class="r1 r">transferParameters</span>.<a href="TransferParameters.cs.html#13433c7d7aa99dc0" class="i property">InputFilePath</a>;
+            <a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#ea3e60e93666f87a" class="i property">TargetStreamFolderPath</a> = <span class="r1 r">transferParameters</span>.<a href="TransferParameters.cs.html#71c8ba3b11d5aeee" class="i property">TargetStreamPath</a>.<a href="@0@mscorlib/A.html#fc988fb267590f98" class="i method">TrimEnd</a>(<span class="s">&#39;/&#39;</span>);
+            <a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#313438379c862aca" class="i property">IsRecursive</a> = <span class="r1 r">transferParameters</span>.<a href="TransferParameters.cs.html#c8c24ab47037c15d" class="i property">IsRecursive</a>;
+            <span class="c">// get this list of all files in the source directory, depending on if this is recursive or not.</span>
+            <a href="@0@mscorlib/A.html#18bcbcbdddbcfdcb" class="t t">ConcurrentQueue</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <span id="r3 rd" class="r3 r">allFiles</span>;
+            <a href="@0@mscorlib/A.html#18bcbcbdddbcfdcb" class="t t">ConcurrentQueue</a>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt; <span id="r4 rd" class="r4 r">exceptions</span> = <b>new</b> <a href="@0@mscorlib/A.html#a773570b1b021cff" class="t constructor">ConcurrentQueue</a>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt;();
+ 
+            <a href="@0@mscorlib/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <b>long</b>&gt; <span id="r5 rd" class="r5 r">downloadFiles</span> = <b>new</b> <a href="@0@mscorlib/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <b>long</b>&gt;();
+            <b>if</b> (<span class="r1 r">transferParameters</span>.<a href="TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>)
+            {
+                <b>foreach</b> (<a href="@0@mscorlib/A.html#8585965bb176a426" class="k">var</a> <span id="r6 rd" class="r6 r">entry</span> <b>in</b> <span class="r2 r">frontend</span>.<a href="IFrontEndAdapter.cs.html#d5f8e33a90b70382" class="i method">ListDirectory</a>(<span class="r1 r">transferParameters</span>.<a href="TransferParameters.cs.html#13433c7d7aa99dc0" class="i property">InputFilePath</a>, <span class="r1 r">transferParameters</span>.<a href="TransferParameters.cs.html#c8c24ab47037c15d" class="i property">IsRecursive</a>))
+                {
+                    <span class="r5 r">downloadFiles</span>.<a href="@0@mscorlib/A.html#a7861da7aaa500fe" class="i method">Add</a>(<span class="r6 r">entry</span>.<a href="@0@mscorlib/A.html#f9d1c04feb1af032" class="i property">Key</a>, <span class="r6 r">entry</span>.<a href="@0@mscorlib/A.html#38c0e86cc4b30170" class="i property">Value</a>);
+                }
+ 
+                <span class="r3 r">allFiles</span> = <b>new</b> <a href="@0@mscorlib/A.html#50871c13ec8cfd35" class="t constructor">ConcurrentQueue</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="r5 r">downloadFiles</span>.<a href="@0@mscorlib/A.html#9a3c0cb5c149c9f7" class="i property">Keys</a>);
+                <a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#eddd4b4292178025" class="i property">TotalFileBytes</a> = <span class="r5 r">downloadFiles</span>.<a href="@0@mscorlib/A.html#4367dd1e300ae797" class="i property">Values</a>.<a href="@0@System.Core/A.html#0dc58a3881980fa9" class="i method">Sum</a>();
+            }
+            <b>else</b>
+            {
+                <span class="r3 r">allFiles</span> = <b>new</b> <a href="@0@mscorlib/A.html#50871c13ec8cfd35" class="t constructor">ConcurrentQueue</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#313438379c862aca" class="i property">IsRecursive</a> ? <a href="@0@mscorlib/A.html#b3ad5f0ba800bb28" class="t t">Directory</a>.<a href="@0@mscorlib/A.html#d457657110c37ddd" class="i method">EnumerateFiles</a>(<a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#b73f76db507ab6b0" class="i property">InputFolderPath</a>, <span class="s">&quot;*.*&quot;</span>, <a href="@0@mscorlib/A.html#2cb8f758d1188030" class="t t">SearchOption</a>.<a href="@0@mscorlib/A.html#189c2c97fce85a03" class="i field">AllDirectories</a>) :
+                    <a href="@0@mscorlib/A.html#b3ad5f0ba800bb28" class="t t">Directory</a>.<a href="@0@mscorlib/A.html#d457657110c37ddd" class="i method">EnumerateFiles</a>(<a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#b73f76db507ab6b0" class="i property">InputFolderPath</a>, <span class="s">&quot;*.*&quot;</span>, <a href="@0@mscorlib/A.html#2cb8f758d1188030" class="t t">SearchOption</a>.<a href="@0@mscorlib/A.html#db04cd5083907c24" class="i field">TopDirectoryOnly</a>));
+ 
+                <a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#eddd4b4292178025" class="i property">TotalFileBytes</a> = <a href="#dc84fd20b2f635c6" class="i method">GetByteCountFromFileList</a>(<span class="r3 r">allFiles</span>);
+            }
+ 
+            <a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#cd91bae708e4eea3" class="i property">FileCount</a> = <span class="r3 r">allFiles</span>.<a href="@0@System.Core/A.html#41ef9e39e54d0d0b" class="i method">Count</a>();
+            <a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#9a427422bf099d1c" class="i property">Files</a> = <b>new</b> <a href="TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a>[<a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#cd91bae708e4eea3" class="i property">FileCount</a>];
+            <span class="c">// explicitly set the thread pool start amount to at most 500</span>
+            <b>int</b> <span id="r7 rd" class="r7 r">threadCount</span> = <a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#f441d55c88d635ad" class="i method">Min</a>(<a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#cd91bae708e4eea3" class="i property">FileCount</a>, 500);
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r8 rd" class="r8 r">threads</span> = <b>new</b> <a href="@0@mscorlib/A.html#b65c1a07c4e5b13a" class="t constructor">List</a>&lt;<a href="@0@mscorlib/A.html#3980e012bae82e96" class="t t">Thread</a>&gt;(<span class="r7 r">threadCount</span>);
+ 
+            <span class="c">//start a bunch of new threads that will create the metadata and ensure a protected index.</span>
+            <b>int</b> <span id="r9 rd" class="r9 r">currentIndex</span> = 0;
+            <b>object</b> <span id="r10 rd" class="r10 r">indexIncrementLock</span> = <b>new</b> <b>object</b>();
+            <b>for</b> (<b>int</b> <span id="r11 rd" class="r11 r">i</span> = 0; <span class="r11 r">i</span> &lt; <span class="r7 r">threadCount</span>; <span class="r11 r">i</span>++)
+            {
+                <a href="@0@mscorlib/A.html#3980e012bae82e96" class="k">var</a> <span id="r12 rd" class="r12 r">t</span> = <b>new</b> <a href="@0@mscorlib/A.html#76f340c84df6da8d" class="t constructor">Thread</a>(() =&gt; {
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r13 rd" class="r13 r">curFile</span>;
+                    <b>while</b> (<span class="r3 r">allFiles</span>.<a href="@0@mscorlib/A.html#88b9f17c9182267f" class="i method">TryDequeue</a>(<b>out</b> <span class="r13 r">curFile</span>))
+                    {
+                        <b>try</b>
+                        {
+                            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r14 rd" class="r14 r">relativeFilePath</span> = <span class="r13 r">curFile</span>.<a href="@0@mscorlib/A.html#69fc1d0aa6df8a90" class="i method">Replace</a>(<a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#b73f76db507ab6b0" class="i property">InputFolderPath</a>, <span class="s">&quot;&quot;</span>).<a href="@0@mscorlib/A.html#5137a6065a1c1234" class="i method">TrimStart</a>(<span class="s">&#39;\\&#39;</span>).<a href="@0@mscorlib/A.html#5137a6065a1c1234" class="i method">TrimStart</a>(<span class="s">&#39;/&#39;</span>);
+                            <a href="TransferParameters.cs.html#9d54476a1d8187dd" class="k">var</a> <span id="r15 rd" class="r15 r">paramsPerFile</span> = <b>new</b> <a href="TransferParameters.cs.html#270628b86ab2d1da" class="t constructor">TransferParameters</a>
+                            (
+                                <span class="r13 r">curFile</span>,
+                                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="t t">String</a>.<a href="@0@mscorlib/A.html#6e5f254563fed78e" class="i method">Format</a>(<span class="s">&quot;{0}{1}{2}&quot;</span>, <a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#ea3e60e93666f87a" class="i property">TargetStreamFolderPath</a>, <span class="r1 r">transferParameters</span>.<a href="TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a> ? <span class="s">&quot;\\&quot;</span> : <span class="s">&quot;/&quot;</span>, <span class="r14 r">relativeFilePath</span>),
+                                <span class="r1 r">transferParameters</span>.<a href="TransferParameters.cs.html#e11736f0f95191a4" class="i property">AccountName</a>,
+                                <span class="r1 r">transferParameters</span>.<a href="TransferParameters.cs.html#770374bbad546898" class="i property">PerFileThreadCount</a>,
+                                <span class="r1 r">transferParameters</span>.<a href="TransferParameters.cs.html#f9997ab4908f86f1" class="i property">ConcurrentFileCount</a>,
+                                <span class="r1 r">transferParameters</span>.<a href="TransferParameters.cs.html#186ef3dac2d4eb47" class="i property">IsOverwrite</a>,
+                                <span class="r1 r">transferParameters</span>.<a href="TransferParameters.cs.html#43f272b5b7cdb14c" class="i property">IsResume</a>,
+                                <span class="r1 r">transferParameters</span>.<a href="TransferParameters.cs.html#ebfa48b5610ab87e" class="i property">IsBinary</a>,
+                                <span class="r1 r">transferParameters</span>.<a href="TransferParameters.cs.html#c8c24ab47037c15d" class="i property">IsRecursive</a>,
+                                <span class="r1 r">transferParameters</span>.<a href="TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>,
+                                <span class="r1 r">transferParameters</span>.<a href="TransferParameters.cs.html#c51c389eb8642a8c" class="i property">MaxSegementLength</a>,
+                                <span class="r1 r">transferParameters</span>.<a href="TransferParameters.cs.html#60f5c0708b77212d" class="i property">LocalMetadataLocation</a>
+                            );
+ 
+                            <b>long</b> <span id="r16 rd" class="r16 r">size</span> = -1;
+                            <b>if</b> (<span class="r1 r">transferParameters</span>.<a href="TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a> &amp;&amp; <span class="r5 r">downloadFiles</span> != <b>null</b>)
+                            {
+                                <span class="r16 r">size</span> = <span class="r5 r">downloadFiles</span><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="r13 r">curFile</span>];
+                            }
+                            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r17 rd" class="r17 r">transferMetadataPath</span> = <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#2d7263f86a526264" class="i method">Combine</a>(<span class="r1 r">transferParameters</span>.<a href="TransferParameters.cs.html#60f5c0708b77212d" class="i property">LocalMetadataLocation</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;{0}.transfer.xml&quot;</span>, <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#95facc58d06cadd0" class="i method">GetFileName</a>(<span class="r13 r">curFile</span>)));
+                            <a href="TransferMetadata.cs.html#3c08d873a58fc637" class="k">var</a> <span id="r18 rd" class="r18 r">eachFileMetadata</span> = <b>new</b> <a href="TransferMetadata.cs.html#4f6ab963e7073440" class="t constructor">TransferMetadata</a>(<span class="r17 r">transferMetadataPath</span>, <span class="r15 r">paramsPerFile</span>, <span class="r2 r">frontend</span>, <span class="r16 r">size</span>);
+                            <b>lock</b> (<span class="r10 r">indexIncrementLock</span>)
+                            {
+                                <a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#9a427422bf099d1c" class="i property">Files</a>[<span class="r9 r">currentIndex</span>] = <span class="r18 r">eachFileMetadata</span>;
+                                <span class="r9 r">currentIndex</span>++;
+                            }
+                        }
+                        <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r19 rd" class="r19 r">e</span>)
+                        {
+                            <span class="r4 r">exceptions</span>.<a href="@0@mscorlib/A.html#62bea3a8141ed2a9" class="i method">Enqueue</a>(<span class="r19 r">e</span>);
+                        }
+                    }
+                });
+                <span class="r12 r">t</span>.<a href="@0@mscorlib/A.html#cd2144b8dd6f4373" class="i method">Start</a>();
+                <span class="r8 r">threads</span>.<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r12 r">t</span>);
+            }
+ 
+            <b>foreach</b> (<a href="@0@mscorlib/A.html#3980e012bae82e96" class="k">var</a> <span id="r20 rd" class="r20 r">t</span> <b>in</b> <span class="r8 r">threads</span>)
+            {
+                <span class="r20 r">t</span>.<a href="@0@mscorlib/A.html#6f7bed56e0efe767" class="i method">Join</a>();
+            }
+ 
+            <b>if</b> (<span class="r4 r">exceptions</span>.<a href="@0@mscorlib/A.html#f36684fa5c19fdfb" class="i property">Count</a> &gt; 0)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#a0d05fcdd509b0ab" class="t constructor">AggregateException</a>(<span class="s">&quot;At least one file failed to have metadata generated&quot;</span>, <span class="r4 r">exceptions</span>.<a href="@0@mscorlib/A.html#956829c6ddc21632" class="i method">ToArray</a>());
+            }
+        }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Properties
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets a value indicating the unique identifier associated with this transfer.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The transfer identifier.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        [<span class="i">JsonProperty</span>(<span class="i">PropertyName</span> = <span class="s">&quot;TransferId&quot;</span>)]
+        <b>public string</b> <a id="a208107e07da04f9" href="../../../R/a208107e07da04f9.html" target="n" data-glyph="102,1" class="i property">TransferId</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets a value indicating the full path to the file to be transferred.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The input file path.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        [<span class="i">JsonProperty</span>(<span class="i">PropertyName</span> = <span class="s">&quot;InputFolderPath&quot;</span>)]
+        <b>public string</b> <a id="b73f76db507ab6b0" href="../../../R/b73f76db507ab6b0.html" target="n" data-glyph="102,1" class="i property">InputFolderPath</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets a value indicating the full stream folder path that will be used as the root folder for all files and folders being transferred.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The target stream path.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        [<span class="i">JsonProperty</span>(<span class="i">PropertyName</span> = <span class="s">&quot;TargetStreamFolderPath&quot;</span>)]
+        <b>public string</b> <a id="ea3e60e93666f87a" href="../../../R/ea3e60e93666f87a.html" target="n" data-glyph="102,1" class="i property">TargetStreamFolderPath</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets a value indicating the number of files in this transfer.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The segment count.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        [<span class="i">JsonProperty</span>(<span class="i">PropertyName</span> = <span class="s">&quot;FileCount&quot;</span>)]
+        <b>public int</b> <a id="cd91bae708e4eea3" href="../../../R/cd91bae708e4eea3.html" target="n" data-glyph="102,1" class="i property">FileCount</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets the total bytes for all the files.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The total bytes for all the files.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        [<span class="i">JsonProperty</span>(<span class="i">PropertyName</span> = <span class="s">&quot;TotalFileBytes&quot;</span>)]
+        <b>public long</b> <a id="eddd4b4292178025" href="../../../R/eddd4b4292178025.html" target="n" data-glyph="102,1" class="i property">TotalFileBytes</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets a value indicating whether this is recurisve directory transfer or a flat directory transfer</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if this instance is recursive; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        [<span class="i">JsonProperty</span>(<span class="i">PropertyName</span> = <span class="s">&quot;IsRecursive&quot;</span>)]
+        <b>public bool</b> <a id="313438379c862aca" href="../../../R/313438379c862aca.html" target="n" data-glyph="102,1" class="i property">IsRecursive</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets a pointer to an array of file transfer metadata. This is used for each file that is being transferred.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The segments.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        [<span class="i">JsonProperty</span>(<span class="i">PropertyName</span> = <span class="s">&quot;Files&quot;</span>)]
+        <b>public</b> <a href="TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a>[] <a id="9a427422bf099d1c" href="../../../R/9a427422bf099d1c.html" target="n" data-glyph="102,1" class="i property">Files</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets a value indicating the path where this metadata file is located.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The metadata file path.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        <b>internal string</b> <a id="27b1b695eacce334" href="../../../R/27b1b695eacce334.html" target="n" data-glyph="104,1" class="i property">MetadataFilePath</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> File Operations
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Attempts to load an TransferFolderMetadata object from the given file.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r21 r">filePath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The full path to the file where to load the metadata from</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r22 r">threadCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The number of threads to use while populating the metadata. This is determined by the concurrent file count</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">System</span>.<span class="i n">IO</span>.<a href="@0@mscorlib/A.html#fd582974d1f75ac7" class="t t">FileNotFoundException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Could not find metadata file</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Management</span>.<span class="i n">DataLake</span>.<span class="i n">Store</span>.<a href="InvalidMetadataException.cs.html#9dfcbe20582bb796" class="t t">InvalidMetadataException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Unable to parse metadata file</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>internal static</b> <a href="#e4a782a6b9f2d42c" class="t t">TransferFolderMetadata</a> <a id="31bd48758ecd77c6" href="../../../R/31bd48758ecd77c6.html" target="n" data-glyph="74,1" class="i method">LoadFrom</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r21 rd" class="r21 r">filePath</span>, <b>int</b> <span id="r22 rd" class="r22 r">threadCount</span>)
+        {
+            <b>if</b> (!<a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#3360368484a9f131" class="i method">Exists</a>(<span class="r21 r">filePath</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#e49034af96bf20b2" class="t constructor">FileNotFoundException</a>(<span class="s">&quot;Could not find metadata file&quot;</span>, <span class="r21 r">filePath</span>);
+            }
+ 
+            <b>try</b>
+            {
+                <a href="#e4a782a6b9f2d42c" class="t t">TransferFolderMetadata</a> <span id="r23 rd" class="r23 r">result</span> = <span class="i">JsonConvert</span>.<span class="i">DeserializeObject</span>&lt;<a href="#e4a782a6b9f2d42c" class="t t">TransferFolderMetadata</a>&gt;(<a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#8a84c56a62fd8d45" class="i method">ReadAllText</a>(<span class="r21 r">filePath</span>));
+                <b>if</b> (<span class="r23 r">result</span> != <b>null</b>)
+                {
+                    <span class="r23 r">result</span>.<a href="#27b1b695eacce334" class="i property">MetadataFilePath</a> = <span class="r21 r">filePath</span>;
+ 
+                    <span class="c">// in the case where thread count is the default, explicitly set it to the ideal file/folder count for loading</span>
+                    <span class="c">// the metadata. Note that this value may be changed once the metadata is loaded when the ideal is re-computed</span>
+                    <span class="c">// based on:</span>
+                    <span class="c">// 1. Total files remaining (since this is a resume)</span>
+                    <span class="c">// 2. Total remaining file size.</span>
+                    <b>if</b> (<span class="r22 r">threadCount</span> &lt; 1)
+                    {
+                        <span class="r22 r">threadCount</span> = <a href="../DataLakeStoreTransferClient.cs.html#976b7e4d8dc73b48" class="t t">DataLakeStoreTransferClient</a>.<a href="../DataLakeStoreTransferClient.cs.html#53967306239c2691" class="i field">DefaultIdealPerFileThreadCountForFolders</a>;
+                    }
+ 
+                    <span class="c">// populate all child metadata file paths as well</span>
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r24 rd" class="r24 r">localMetadataFolder</span> = <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#f9128b02ffd0d3ea" class="i method">GetDirectoryName</a>(<span class="r21 r">filePath</span>);
+                    <b>int</b> <span id="r25 rd" class="r25 r">updatesPerThread</span> = (<b>int</b>)<a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#1841a5ce24ed9fb3" class="i method">Ceiling</a>((<b>double</b>)<span class="r23 r">result</span>.<a href="#9a427422bf099d1c" class="i property">Files</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a> / <span class="r22 r">threadCount</span>);
+ 
+                    <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r26 rd" class="r26 r">threads</span> = <b>new</b> <a href="@0@mscorlib/A.html#b65c1a07c4e5b13a" class="t constructor">List</a>&lt;<a href="@0@mscorlib/A.html#3980e012bae82e96" class="t t">Thread</a>&gt;(<span class="r22 r">threadCount</span>);
+                    <b>for</b>(<b>int</b> <span id="r27 rd" class="r27 r">i</span> = 0; <span class="r27 r">i</span> &lt; <span class="r22 r">threadCount</span>; <span class="r27 r">i</span>++)
+                    {
+                        <a href="@0@mscorlib/A.html#3980e012bae82e96" class="k">var</a> <span id="r28 rd" class="r28 r">t</span> = <b>new</b> <a href="@0@mscorlib/A.html#76f340c84df6da8d" class="t constructor">Thread</a>(() =&gt;
+                        {
+                            <b>int</b> <span id="r29 rd" class="r29 r">startIndex</span> = <span class="r27 r">i</span> * <span class="r25 r">updatesPerThread</span>;
+                            <b>int</b> <span id="r30 rd" class="r30 r">endIndex</span> = <span class="r29 r">startIndex</span> + <span class="r25 r">updatesPerThread</span>;
+                            <b>for</b> (<b>int</b> <span id="r31 rd" class="r31 r">j</span> = <span class="r29 r">startIndex</span>; <span class="r31 r">j</span> &lt; <span class="r30 r">endIndex</span>; <span class="r31 r">j</span>++)
+                            {
+                                <b>if</b> (<span class="r31 r">j</span> &gt;= <span class="r23 r">result</span>.<a href="#9a427422bf099d1c" class="i property">Files</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>)
+                                {
+                                    <span class="c">// just in case.</span>
+                                    <b>break</b>;
+                                }
+                                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r32 rd" class="r32 r">transferMetadataPath</span> = <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#2d7263f86a526264" class="i method">Combine</a>(<span class="r24 r">localMetadataFolder</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;{0}.transfer.xml&quot;</span>, <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#95facc58d06cadd0" class="i method">GetFileName</a>(<span class="r23 r">result</span>.<a href="#9a427422bf099d1c" class="i property">Files</a>[<span class="r31 r">j</span>].<a href="TransferMetadata.cs.html#190138f2a84df06b" class="i property">InputFilePath</a>)));
+                                <span class="r23 r">result</span>.<a href="#9a427422bf099d1c" class="i property">Files</a>[<span class="r31 r">j</span>].<a href="TransferMetadata.cs.html#ba793ae1940ac477" class="i property">MetadataFilePath</a> = <span class="r32 r">transferMetadataPath</span>;
+                            }
+                        });
+ 
+                        <span class="r28 r">t</span>.<a href="@0@mscorlib/A.html#cd2144b8dd6f4373" class="i method">Start</a>();
+                        <span class="r26 r">threads</span>.<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r28 r">t</span>);
+                    }
+ 
+                    <b>foreach</b>(<a href="@0@mscorlib/A.html#3980e012bae82e96" class="k">var</a> <span id="r33 rd" class="r33 r">t</span> <b>in</b> <span class="r26 r">threads</span>)
+                    {
+                        <span class="r33 r">t</span>.<a href="@0@mscorlib/A.html#6f7bed56e0efe767" class="i method">Join</a>();
+                    }
+                }
+ 
+                <b>return</b> <span class="r23 r">result</span>;
+            }
+            <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r34 rd" class="r34 r">ex</span>)
+            {
+                <b>throw</b> <b>new</b> <a href="InvalidMetadataException.cs.html#31c4192a650b4c6f" class="t constructor">InvalidMetadataException</a>(<span class="s">&quot;Unable to parse metadata file&quot;</span>, <span class="r34 r">ex</span>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Saves the given metadata to its canonical location. This method is thread-safe.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public void</b> <a id="7f9329b140304dbb" href="../../../R/7f9329b140304dbb.html" target="n" data-glyph="72,1" class="i method">Save</a>()
+        {
+            <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#27b1b695eacce334" class="i property">MetadataFilePath</a>))
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;Null or empty MetadataFilePath. Cannot save metadata until this property is set.&quot;</span>);
+            }
+ 
+            <span class="c">//quick check to ensure that the metadata we constructed is sane</span>
+            <a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#90ddb2dd1f91cec1" class="i method">ValidateConsistency</a>();
+ 
+            <b>lock</b> (<a href="#1c823dc39aadadd2" class="i field">SaveSync</a>)
+            {
+                <b>if</b> (<a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#3360368484a9f131" class="i method">Exists</a>(<a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#27b1b695eacce334" class="i property">MetadataFilePath</a>))
+                {
+                    <a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#c4e7406e837331d5" class="i method">Delete</a>(<a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#27b1b695eacce334" class="i property">MetadataFilePath</a>);
+                }
+ 
+                <b>using</b> (<a href="@0@mscorlib/A.html#9e38cb1c84769eba" class="k">var</a> <span id="r35 rd" class="r35 r">stream</span> = <b>new</b> <a href="@0@mscorlib/A.html#c73af21c3340883d" class="t constructor">StreamWriter</a>(<b>new</b> <a href="@0@mscorlib/A.html#756b978acfa47bc7" class="t constructor">FileStream</a>(<a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#27b1b695eacce334" class="i property">MetadataFilePath</a>, <a href="@0@mscorlib/A.html#c0cb6ba6af625b3a" class="t t">FileMode</a>.<a href="@0@mscorlib/A.html#17684d43e30dc120" class="i field">Create</a>, <a href="@0@mscorlib/A.html#5cc5644ae3acd24b" class="t t">FileAccess</a>.<a href="@0@mscorlib/A.html#4715fa16da583c25" class="i field">Write</a>, <a href="@0@mscorlib/A.html#2bfafb4d44a4f126" class="t t">FileShare</a>.<a href="@0@mscorlib/A.html#4b58afdb477c6bbe" class="i field">None</a>)))
+                {
+                    <a href="#75c07aa028aaa033" class="i field">MetadataSerializer</a>.<span class="i">Serialize</span>(<span class="r35 r">stream</span>, <a href="#e4a782a6b9f2d42c" class="k">this</a>);
+                }
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Deletes the metadata file from disk.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">System</span>.<a href="@0@mscorlib/A.html#beac22dfca574cd4" class="t t">InvalidOperationException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Null or empty MetadataFilePath. Cannot delete metadata until this property is set.</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>public void</b> <a id="c93d7fcc5ed39e4d" href="../../../R/c93d7fcc5ed39e4d.html" target="n" data-glyph="72,1" class="i method">DeleteFile</a>()
+        {
+            <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#27b1b695eacce334" class="i property">MetadataFilePath</a>))
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;Null or empty MetadataFilePath. Cannot delete metadata until this property is set.&quot;</span>);
+            }
+ 
+            <b>if</b> (<a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#3360368484a9f131" class="i method">Exists</a>(<a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#27b1b695eacce334" class="i property">MetadataFilePath</a>))
+            {
+                <a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#c4e7406e837331d5" class="i method">Delete</a>(<a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#27b1b695eacce334" class="i property">MetadataFilePath</a>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Verifies the given metadata for consistency. Checks include, for each file:</span>
+        <span class="c">///</span><span class="c"> * Completeness</span>
+        <span class="c">///</span><span class="c"> * Existence and consistency with local file</span>
+        <span class="c">///</span><span class="c"> * Segment data consistency</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal void</b> <a id="90ddb2dd1f91cec1" href="../../../R/90ddb2dd1f91cec1.html" target="n" data-glyph="74,1" class="i method">ValidateConsistency</a>()
+        {
+            <b>foreach</b>(<a href="TransferMetadata.cs.html#3c08d873a58fc637" class="k">var</a> <span id="r36 rd" class="r36 r">metadata</span> <b>in</b> <a href="#e4a782a6b9f2d42c" class="k">this</a>.<a href="#9a427422bf099d1c" class="i property">Files</a>)
+            {
+                <span class="r36 r">metadata</span>.<a href="TransferMetadata.cs.html#aa80bf2889ef06fc" class="i method">ValidateConsistency</a>();
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the byte count in the given list of files.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r37 r">fileList</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The file list.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The total byte count for the file list</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>internal long</b> <a id="dc84fd20b2f635c6" href="../../../R/dc84fd20b2f635c6.html" target="n" data-glyph="74,1" class="i method">GetByteCountFromFileList</a>(<a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <span id="r37 rd" class="r37 r">fileList</span>)
+        {
+            <b>long</b> <span id="r38 rd" class="r38 r">count</span> = 0;
+            <b>foreach</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r39 rd" class="r39 r">entry</span> <b>in</b> <span class="r37 r">fileList</span>)
+            {
+                <span class="r38 r">count</span> += <b>new</b> <a href="@0@mscorlib/A.html#1fe2c3953ba2a577" class="t constructor">FileInfo</a>(<span class="r39 r">entry</span>).<a href="@0@mscorlib/A.html#0ab84ec3507f6ed4" class="i property">Length</a>;
+            }
+ 
+            <b>return</b> <span class="r38 r">count</span>;
+        }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+    }
+}
+</pre></td></tr></table></div></body></html>

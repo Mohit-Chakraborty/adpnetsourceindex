@@ -1,0 +1,712 @@
+﻿<!DOCTYPE html>
+<html><head><title>EventSourceTests.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(703);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Core.Tests/EventSourceTests.cs" target="_top">EventSourceTests.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Core.Tests" target="_top">tests\Azure.Core.Tests.csproj</a> (Azure.Core.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Diagnostics</span>.<span class="i n">Tracing</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">TestFramework</span>;
+<b>using</b> <span class="i">NUnit</span>.<span class="i">Framework</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Tests</span>
+{
+    <span class="c">// Avoid running these tests in parallel with anything else that&#39;s sharing the event source</span>
+    [<span class="i">NonParallelizable</span>]
+    <b>public class</b> <a id="a87e767a518d07d0" href="R/../../0000000000.html" target="n" data-glyph="0,0" class="t t">EventSourceTests</a> : <a href="/Azure.Core.TestFramework/A.html#3b25b3414af468d4" class="t t">SyncAsyncPolicyTestBase</a>
+    {
+        <b>private const int</b> <a id="b942ac993bd3e2ca" href="R/b942ac993bd3e2ca.html" target="n" data-glyph="10,1" class="i field">BackgroundRefreshFailedEvent</a> = 19;
+        <b>private const int</b> <a id="3721dfb1590e5c02" href="R/3721dfb1590e5c02.html" target="n" data-glyph="10,1" class="i field">RequestEvent</a> = 1;
+        <b>private const int</b> <a id="9f3864c3916a9c62" href="R/9f3864c3916a9c62.html" target="n" data-glyph="10,1" class="i field">RequestContentEvent</a> = 2;
+        <b>private const int</b> <a id="a795d28e03a28704" href="R/a795d28e03a28704.html" target="n" data-glyph="10,1" class="i field">RequestContentTextEvent</a> = 17;
+        <b>private const int</b> <a id="af5bdb78ee9cc026" href="R/af5bdb78ee9cc026.html" target="n" data-glyph="10,1" class="i field">ResponseEvent</a> = 5;
+        <b>private const int</b> <a id="f1f7061d72c86878" href="R/f1f7061d72c86878.html" target="n" data-glyph="10,1" class="i field">ResponseContentEvent</a> = 6;
+        <b>private const int</b> <a id="01ac267a0fa4d3ef" href="R/01ac267a0fa4d3ef.html" target="n" data-glyph="10,1" class="i field">ResponseContentBlockEvent</a> = 11;
+        <b>private const int</b> <a id="67645c3024854df3" href="R/67645c3024854df3.html" target="n" data-glyph="10,1" class="i field">ErrorResponseEvent</a> = 8;
+        <b>private const int</b> <a id="6821a25f37630739" href="R/6821a25f37630739.html" target="n" data-glyph="10,1" class="i field">ErrorResponseContentEvent</a> = 9;
+        <b>private const int</b> <a id="f41be3600f9f6ddc" href="R/f41be3600f9f6ddc.html" target="n" data-glyph="10,1" class="i field">ErrorResponseContentBlockEvent</a> = 12;
+        <b>private const int</b> <a id="5e1ce0af7072dfa8" href="R/5e1ce0af7072dfa8.html" target="n" data-glyph="10,1" class="i field">ResponseContentTextEvent</a> = 13;
+        <b>private const int</b> <a id="bf38e4d1c517cc89" href="R/bf38e4d1c517cc89.html" target="n" data-glyph="10,1" class="i field">ResponseContentTextBlockEvent</a> = 15;
+        <b>private const int</b> <a id="afb4806f9a72af8f" href="R/afb4806f9a72af8f.html" target="n" data-glyph="10,1" class="i field">ErrorResponseContentTextEvent</a> = 14;
+        <b>private const int</b> <a id="15d01de153b5f1d3" href="R/15d01de153b5f1d3.html" target="n" data-glyph="10,1" class="i field">ErrorResponseContentTextBlockEvent</a> = 16;
+        <b>private const int</b> <a id="7b6277c8a810b115" href="R/7b6277c8a810b115.html" target="n" data-glyph="10,1" class="i field">ExceptionResponseEvent</a> = 18;
+ 
+        <b>private</b> <a href="/Azure.Core.TestFramework/A.html#5c8cbc7b9ecad8a5" class="t t">TestEventListener</a> <a id="5348573bc4772648" href="R/5348573bc4772648.html" target="n" data-glyph="46,1" class="i field">_listener</a>;
+ 
+        <b>private string</b>[] <a id="c6417f09018e15a5" href="R/c6417f09018e15a5.html" target="n" data-glyph="46,1" class="i field">s_allowedHeaders</a> = <b>new</b>[] { <span class="s">&quot;Date&quot;</span>, <span class="s">&quot;Custom-Header&quot;</span>, <span class="s">&quot;Custom-Response-Header&quot;</span> };
+        <b>private string</b>[] <a id="d68c7556d3ce2f5a" href="R/d68c7556d3ce2f5a.html" target="n" data-glyph="46,1" class="i field">s_allowedQueryParameters</a> = <b>new</b>[] { <span class="s">&quot;api-version&quot;</span> };
+ 
+        <b>public</b> <a id="b84f6cacbe31ae73" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">EventSourceTests</a>(<b>bool</b> <span id="r0 rd" class="r0 r">isAsync</span>) : <a href="/Azure.Core.TestFramework/A.html#32cc6fcd315c9e1b" class="k">base</a>(<span class="r0 r">isAsync</span>)
+        {
+        }
+ 
+        [<span class="i">SetUp</span>]
+        <b>public void</b> <a id="f76cf3cda49d66f5" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Setup</a>()
+        {
+            <a href="#5348573bc4772648" class="i field">_listener</a> = <b>new</b> <a href="/Azure.Core.TestFramework/A.html#5c8cbc7b9ecad8a5" class="t constructor">TestEventListener</a>();
+            <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="@0@mscorlib/A.html#5e21ae33e3d72714" class="i method">EnableEvents</a>(<a href="/Azure.Core/A.html#01d1d54631cb1734" class="t t">AzureCoreEventSource</a>.<a href="/Azure.Core/A.html#38a38c5956efb2e8" class="i property">Singleton</a>, <a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#238fa91fc75be60e" class="i field">Verbose</a>);
+        }
+ 
+        [<span class="i">TearDown</span>]
+        <b>public void</b> <a id="3b7dbc3d57fe5f26" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">TearDown</a>()
+        {
+            <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#ef28e761dea3d458" class="i method">Dispose</a>();
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public void</b> <a id="e907b4baa4897102" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">MatchesNameAndGuid</a>()
+        {
+            <span class="c">// Arrange &amp; Act</span>
+            <a href="@0@mscorlib/A.html#3d00eeab9feb80f3" class="t t">Type</a> <span id="r1 rd" class="r1 r">eventSourceType</span> = <b>typeof</b>(<a href="/Azure.Core/A.html#01d1d54631cb1734" class="t t">AzureCoreEventSource</a>);
+ 
+            <span class="c">// Assert</span>
+            <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r1 r">eventSourceType</span>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;Azure-Core&quot;</span>, <a href="@0@mscorlib/A.html#70e1bbc6716a8d5d" class="t t">EventSource</a>.<a href="@0@mscorlib/A.html#0373ead62a1e9d99" class="i method">GetName</a>(<span class="r1 r">eventSourceType</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#c0f15e43675529c4" class="i method">Parse</a>(<a href="../GuidAssembly/R/44cbc7c6-6776-5f3c-36c1-75cd3ef19ea9.html" target="n" class="s">&quot;44cbc7c6-6776-5f3c-36c1-75cd3ef19ea9&quot;</a>), <a href="@0@mscorlib/A.html#70e1bbc6716a8d5d" class="t t">EventSource</a>.<a href="@0@mscorlib/A.html#571191fa47072075" class="i method">GetGuid</a>(<span class="r1 r">eventSourceType</span>));
+            <span class="i">Assert</span>.<span class="i">IsNotEmpty</span>(<a href="@0@mscorlib/A.html#70e1bbc6716a8d5d" class="t t">EventSource</a>.<a href="@0@mscorlib/A.html#b33880f17fd8ba1d" class="i method">GenerateManifest</a>(<span class="r1 r">eventSourceType</span>, <span class="s">&quot;assemblyPathToIncludeInManifest&quot;</span>));
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="4b56849f1952d540" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">SendingRequestProducesEvents</a>()
+        {
+            <a href="/Azure.Core.TestFramework/A.html#df767807e2c243e9" class="k">var</a> <span id="r2 rd" class="r2 r">response</span> = <b>new</b> <a href="/Azure.Core.TestFramework/A.html#ef2adc622c2950d8" class="t constructor">MockResponse</a>(200);
+            <span class="r2 r">response</span>.<a href="/Azure.Core.TestFramework/A.html#7d39b242c3bde3ab" class="i method">SetContent</a>(<b>new</b> <b>byte</b>[] { 6, 7, 8, 9, 0 });
+            <span class="r2 r">response</span>.<a href="/Azure.Core.TestFramework/A.html#4ea6c2ac143d5631" class="i method">AddHeader</a>(<b>new</b> <a href="/Azure.Core/A.html#3df78227d19062f7" class="t constructor">HttpHeader</a>(<span class="s">&quot;Custom-Response-Header&quot;</span>, <span class="s">&quot;Improved value&quot;</span>));
+ 
+            <a href="/Azure.Core.TestFramework/A.html#44bcb3ab7dfe168b" class="t t">MockTransport</a> <span id="r3 rd" class="r3 r">mockTransport</span> = <a href="/Azure.Core.TestFramework/A.html#70a80d26a1de0f5e" class="i method">CreateMockTransport</a>(<span class="r2 r">response</span>);
+ 
+            <a href="/Azure.Core/A.html#ce2f2fae396f36c5" class="k">var</a> <span id="r4 rd" class="r4 r">pipeline</span> = <b>new</b> <a href="/Azure.Core/A.html#bf87c612b38d0825" class="t constructor">HttpPipeline</a>(<span class="r3 r">mockTransport</span>, <b>new</b>[] { <b>new</b> <a href="/Azure.Core/A.html#3209d7f8f2a2cfaa" class="t constructor">LoggingPolicy</a>(<span class="r5 r">logContent</span>: <b>true</b>, <b>int</b>.<a href="@0@mscorlib/A.html#c45153c0501d7122" class="i field">MaxValue</a>, <a href="#c6417f09018e15a5" class="i field">s_allowedHeaders</a>, <a href="#d68c7556d3ce2f5a" class="i field">s_allowedQueryParameters</a>, <span class="s">&quot;Test-SDK&quot;</span>) });
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r6 rd" class="r6 r">requestId</span> = <b>null</b>;
+ 
+            <b>await</b> <span class="i">SendRequestAsync</span>(<span class="r4 r">pipeline</span>, <span id="r7 rd" class="r7 r">request</span> =&gt;
+            {
+                <span class="r7 r">request</span>.<a href="/Azure.Core/A.html#38781a2f20c88339" class="i property">Method</a> = <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#c1939eaa5920682f" class="i property">Get</a>;
+                <span class="r7 r">request</span>.<a href="/Azure.Core/A.html#a3954f29cb1a883c" class="i property">Uri</a>.<a href="/Azure.Core/A.html#79e001a52a92afbe" class="i method">Reset</a>(<b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<span class="s">&quot;https://contoso.a.io/api-version=5&quot;</span>));
+                <span class="r7 r">request</span>.<a href="/Azure.Core/A.html#e6c474e362de2358" class="i property">Headers</a>.<a href="/Azure.Core/A.html#c446fa86f8d3ef04" class="i method">Add</a>(<span class="s">&quot;Date&quot;</span>, <span class="s">&quot;3/26/2019&quot;</span>);
+                <span class="r7 r">request</span>.<a href="/Azure.Core/A.html#e6c474e362de2358" class="i property">Headers</a>.<a href="/Azure.Core/A.html#c446fa86f8d3ef04" class="i method">Add</a>(<span class="s">&quot;Custom-Header&quot;</span>, <span class="s">&quot;Value&quot;</span>);
+                <span class="r7 r">request</span>.<a href="/Azure.Core/A.html#1517233642d6c203" class="i property">Content</a> = <a href="/Azure.Core/A.html#81cccf3fb8acf2c9" class="t t">RequestContent</a>.<a href="/Azure.Core/A.html#602bc35226bdb1e4" class="i method">Create</a>(<b>new</b> <b>byte</b>[] { 1, 2, 3, 4, 5 });
+                <span class="r6 r">requestId</span> = <span class="r7 r">request</span>.<a href="/Azure.Core/A.html#b180337469e3b6af" class="i property">ClientRequestId</a>;
+            });
+ 
+            <a href="@0@mscorlib/A.html#9317b6858407017e" class="t t">EventWrittenEventArgs</a> <span id="r8 rd" class="r8 r">e</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#70e400064aab89ab" class="i method">SingleEventById</a>(<a href="#3721dfb1590e5c02" class="i field">RequestEvent</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#3f60527050b58a1a" class="i field">Informational</a>, <span class="r8 r">e</span>.<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;Request&quot;</span>, <span class="r8 r">e</span>.<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r6 r">requestId</span>, <span class="r8 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;https://contoso.a.io/api-version=5&quot;</span>, <span class="r8 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;uri&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;GET&quot;</span>, <span class="r8 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;method&quot;</span>));
+            <span class="i">StringAssert</span>.<span class="i">Contains</span>(<span class="s">$&quot;</span><span class="s">Date:3/26/2019</span>{<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>}<span class="s">&quot;</span>, <span class="r8 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;headers&quot;</span>));
+            <span class="i">StringAssert</span>.<span class="i">Contains</span>(<span class="s">$&quot;</span><span class="s">Custom-Header:Value</span>{<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>}<span class="s">&quot;</span>, <span class="r8 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;headers&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;Test-SDK&quot;</span>, <span class="r8 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;clientAssembly&quot;</span>));
+ 
+            <span class="r8 r">e</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#70e400064aab89ab" class="i method">SingleEventById</a>(<a href="#9f3864c3916a9c62" class="i field">RequestContentEvent</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#238fa91fc75be60e" class="i field">Verbose</a>, <span class="r8 r">e</span>.<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;RequestContent&quot;</span>, <span class="r8 r">e</span>.<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r6 r">requestId</span>, <span class="r8 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">CollectionAssert</span>.<span class="i">AreEqual</span>(<b>new</b> <b>byte</b>[] { 1, 2, 3, 4, 5 }, <span class="r8 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<b>byte</b>[]&gt;(<span class="s">&quot;content&quot;</span>));
+ 
+            <span class="r8 r">e</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#70e400064aab89ab" class="i method">SingleEventById</a>(<a href="#af5bdb78ee9cc026" class="i field">ResponseEvent</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#3f60527050b58a1a" class="i field">Informational</a>, <span class="r8 r">e</span>.<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;Response&quot;</span>, <span class="r8 r">e</span>.<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r6 r">requestId</span>, <span class="r8 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r8 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<b>int</b>&gt;(<span class="s">&quot;status&quot;</span>), 200);
+            <span class="i">StringAssert</span>.<span class="i">Contains</span>(<span class="s">$&quot;</span><span class="s">Custom-Response-Header:Improved value</span>{<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>}<span class="s">&quot;</span>, <span class="r8 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;headers&quot;</span>));
+ 
+            <span class="r8 r">e</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#70e400064aab89ab" class="i method">SingleEventById</a>(<a href="#f1f7061d72c86878" class="i field">ResponseContentEvent</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#238fa91fc75be60e" class="i field">Verbose</a>, <span class="r8 r">e</span>.<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;ResponseContent&quot;</span>, <span class="r8 r">e</span>.<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r6 r">requestId</span>, <span class="r8 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">CollectionAssert</span>.<span class="i">AreEqual</span>(<b>new</b> <b>byte</b>[] { 6, 7, 8, 9, 0 }, <span class="r8 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<b>byte</b>[]&gt;(<span class="s">&quot;content&quot;</span>));
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public void</b> <a id="daa0d10a911767e8" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GettingExceptionResponseProducesEvents</a>()
+        {
+            <a href="@0@mscorlib/A.html#beac22dfca574cd4" class="k">var</a> <span id="r9 rd" class="r9 r">exception</span> = <b>new</b> <a href="@0@mscorlib/A.html#8d6a52a5496ce078" class="t constructor">InvalidOperationException</a>();
+            <a href="/Azure.Core.TestFramework/A.html#44bcb3ab7dfe168b" class="t t">MockTransport</a> <span id="r10 rd" class="r10 r">mockTransport</span> = <a href="/Azure.Core.TestFramework/A.html#b853d279e55ffc66" class="i method">CreateMockTransport</a>(<span id="r11 rd" class="r11 r">_</span> =&gt;
+            {
+                <b>throw</b> <span class="r9 r">exception</span>;
+            });
+ 
+            <a href="/Azure.Core/A.html#ce2f2fae396f36c5" class="k">var</a> <span id="r12 rd" class="r12 r">pipeline</span> = <b>new</b> <a href="/Azure.Core/A.html#bf87c612b38d0825" class="t constructor">HttpPipeline</a>(<span class="r10 r">mockTransport</span>, <b>new</b>[] { <b>new</b> <a href="/Azure.Core/A.html#3209d7f8f2a2cfaa" class="t constructor">LoggingPolicy</a>(<span class="r5 r">logContent</span>: <b>true</b>, <b>int</b>.<a href="@0@mscorlib/A.html#c45153c0501d7122" class="i field">MaxValue</a>, <a href="#c6417f09018e15a5" class="i field">s_allowedHeaders</a>, <a href="#d68c7556d3ce2f5a" class="i field">s_allowedQueryParameters</a>, <span class="s">&quot;Test-SDK&quot;</span>) });
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r13 rd" class="r13 r">requestId</span> = <b>null</b>;
+ 
+            <span class="i">Assert</span>.<span class="i">ThrowsAsync</span>&lt;<a href="@0@mscorlib/A.html#beac22dfca574cd4" class="t t">InvalidOperationException</a>&gt;(<b>async</b> () =&gt; <b>await</b> <a href="/Azure.Core.TestFramework/A.html#c61313e823d173bb" class="i method">SendRequestAsync</a>(<span class="r12 r">pipeline</span>, <span id="r14 rd" class="r14 r">request</span> =&gt;
+            {
+                <span class="r14 r">request</span>.<a href="/Azure.Core/A.html#38781a2f20c88339" class="i property">Method</a> = <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#c1939eaa5920682f" class="i property">Get</a>;
+                <span class="r14 r">request</span>.<a href="/Azure.Core/A.html#a3954f29cb1a883c" class="i property">Uri</a>.<a href="/Azure.Core/A.html#79e001a52a92afbe" class="i method">Reset</a>(<b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<span class="s">&quot;http://example.com&quot;</span>));
+                <span class="r14 r">request</span>.<a href="/Azure.Core/A.html#e6c474e362de2358" class="i property">Headers</a>.<a href="/Azure.Core/A.html#c446fa86f8d3ef04" class="i method">Add</a>(<span class="s">&quot;User-Agent&quot;</span>, <span class="s">&quot;agent&quot;</span>);
+                <span class="r13 r">requestId</span> = <span class="r14 r">request</span>.<a href="/Azure.Core/A.html#b180337469e3b6af" class="i property">ClientRequestId</a>;
+            }));
+ 
+            <a href="@0@mscorlib/A.html#9317b6858407017e" class="t t">EventWrittenEventArgs</a> <span id="r15 rd" class="r15 r">e</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#70e400064aab89ab" class="i method">SingleEventById</a>(<a href="#7b6277c8a810b115" class="i field">ExceptionResponseEvent</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#3f60527050b58a1a" class="i field">Informational</a>, <span class="r15 r">e</span>.<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r13 r">requestId</span>, <span class="r15 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r9 r">exception</span>.<a href="@0@mscorlib/A.html#e2e19f4ed8da81aa" class="i method">ToString</a>().<a href="@0@mscorlib/A.html#1c4a9dc78ba38999" class="i method">Split</a>(<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>.<a href="@0@mscorlib/A.html#81c2d980f5d0ee35" class="i method">ToCharArray</a>())[0],
+                <span class="r15 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;exception&quot;</span>).<a href="@0@mscorlib/A.html#1c4a9dc78ba38999" class="i method">Split</a>(<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>.<a href="@0@mscorlib/A.html#81c2d980f5d0ee35" class="i method">ToCharArray</a>())[0]);
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="d3c414d1b0a3c451" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">FailingAccessTokenBackgroundRefreshProducesEvents</a>()
+        {
+            <a href="@0@mscorlib/A.html#07ccbd30abe2a211" class="k">var</a> <span id="r16 rd" class="r16 r">credentialMre</span> = <b>new</b> <a href="@0@mscorlib/A.html#b33d84d6f673529c" class="t constructor">ManualResetEventSlim</a>(<b>true</b>);
+ 
+            <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="k">var</a> <span id="r17 rd" class="r17 r">currentTime</span> = <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@0@mscorlib/A.html#04abe0cac293ebd0" class="i property">UtcNow</a>;
+            <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r18 rd" class="r18 r">callCount</span> = 0;
+            <a href="@0@mscorlib/A.html#beac22dfca574cd4" class="k">var</a> <span id="r19 rd" class="r19 r">exception</span> = <b>new</b> <a href="@0@mscorlib/A.html#8d6a52a5496ce078" class="t constructor">InvalidOperationException</a>();
+ 
+            <a href="#c8bab4a925d9bfad" class="k">var</a> <span id="r20 rd" class="r20 r">credential</span> = <b>new</b> <a href="#be4196ce1a19a0a2" class="t constructor">TokenCredentialStub</a>((<span id="r21 rd" class="r21 r">r</span>, <span id="r22 rd" class="r22 r">c</span>) =&gt;
+            {
+                <span class="r18 r">callCount</span>++;
+                <span class="r16 r">credentialMre</span>.<a href="@0@mscorlib/A.html#d1b0fd6ea5700b4a" class="i method">Set</a>();
+                <b>return</b> <span class="r18 r">callCount</span> == 1 ? <b>new</b> <a href="/Azure.Core/A.html#68b2c442cd1f3537" class="t constructor">AccessToken</a>(<a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#a6547a472def7796" class="i method">ToString</a>(), <span class="r17 r">currentTime</span>.<a href="@0@mscorlib/A.html#4658bd43b97f915c" class="i method">AddMinutes</a>(2)) : <b>throw</b> <span class="r19 r">exception</span>;
+            }, <a href="/Azure.Core.TestFramework/A.html#9eb76f6583c95900" class="i property">IsAsync</a>);
+ 
+            <a href="/Azure.Core/A.html#f792d5d6b4444a62" class="k">var</a> <span id="r23 rd" class="r23 r">policy</span> = <b>new</b> <a href="/Azure.Core/A.html#91bc5621659120f1" class="t constructor">BearerTokenAuthenticationPolicy</a>(<span class="r20 r">credential</span>, <span class="s">&quot;scope&quot;</span>);
+            <a href="/Azure.Core.TestFramework/A.html#44bcb3ab7dfe168b" class="t t">MockTransport</a> <span id="r24 rd" class="r24 r">mockTransport</span> = <a href="/Azure.Core.TestFramework/A.html#b853d279e55ffc66" class="i method">CreateMockTransport</a>(<span id="r25 rd" class="r25 r">r</span> =&gt;
+            {
+                <span class="r16 r">credentialMre</span>.<a href="@0@mscorlib/A.html#8a17ba6e95765ed8" class="i method">Wait</a>();
+                <b>return</b> <b>new</b> <a href="/Azure.Core.TestFramework/A.html#ef2adc622c2950d8" class="t constructor">MockResponse</a>(200);
+            });
+ 
+            <a href="/Azure.Core/A.html#ce2f2fae396f36c5" class="k">var</a> <span id="r26 rd" class="r26 r">pipeline</span> = <b>new</b> <a href="/Azure.Core/A.html#bf87c612b38d0825" class="t constructor">HttpPipeline</a>(<span class="r24 r">mockTransport</span>, <b>new</b> <a href="/Azure.Core/A.html#afce2b8855e35f1f" class="t t">HttpPipelinePolicy</a>[] { <span class="r23 r">policy</span>, <b>new</b> <a href="/Azure.Core/A.html#3209d7f8f2a2cfaa" class="t constructor">LoggingPolicy</a>(<span class="r5 r">logContent</span>: <b>true</b>, <b>int</b>.<a href="@0@mscorlib/A.html#c45153c0501d7122" class="i field">MaxValue</a>, <a href="#c6417f09018e15a5" class="i field">s_allowedHeaders</a>, <a href="#d68c7556d3ce2f5a" class="i field">s_allowedQueryParameters</a>, <span class="s">&quot;Test-SDK&quot;</span>) });
+            <b>await</b> <a href="/Azure.Core.TestFramework/A.html#c61313e823d173bb" class="i method">SendRequestAsync</a>(<span class="r26 r">pipeline</span>, <span id="r27 rd" class="r27 r">request</span> =&gt;
+            {
+                <span class="r27 r">request</span>.<a href="/Azure.Core/A.html#38781a2f20c88339" class="i property">Method</a> = <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#c1939eaa5920682f" class="i property">Get</a>;
+                <span class="r27 r">request</span>.<a href="/Azure.Core/A.html#a3954f29cb1a883c" class="i property">Uri</a>.<a href="/Azure.Core/A.html#79e001a52a92afbe" class="i method">Reset</a>(<b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<span class="s">&quot;https://example.com/1&quot;</span>));
+                <span class="r27 r">request</span>.<a href="/Azure.Core/A.html#e6c474e362de2358" class="i property">Headers</a>.<a href="/Azure.Core/A.html#c446fa86f8d3ef04" class="i method">Add</a>(<span class="s">&quot;User-Agent&quot;</span>, <span class="s">&quot;agent&quot;</span>);
+            });
+ 
+            <span class="r16 r">credentialMre</span>.<a href="@0@mscorlib/A.html#aaf2ffd747d491d5" class="i method">Reset</a>();
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r28 rd" class="r28 r">requestId</span> = <b>null</b>;
+            <b>await</b> <a href="/Azure.Core.TestFramework/A.html#c61313e823d173bb" class="i method">SendRequestAsync</a>(<span class="r26 r">pipeline</span>, <span id="r29 rd" class="r29 r">request</span> =&gt;
+            {
+                <span class="r29 r">request</span>.<a href="/Azure.Core/A.html#38781a2f20c88339" class="i property">Method</a> = <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#c1939eaa5920682f" class="i property">Get</a>;
+                <span class="r29 r">request</span>.<a href="/Azure.Core/A.html#a3954f29cb1a883c" class="i property">Uri</a>.<a href="/Azure.Core/A.html#79e001a52a92afbe" class="i method">Reset</a>(<b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<span class="s">&quot;https://example.com/2&quot;</span>));
+                <span class="r29 r">request</span>.<a href="/Azure.Core/A.html#e6c474e362de2358" class="i property">Headers</a>.<a href="/Azure.Core/A.html#c446fa86f8d3ef04" class="i method">Add</a>(<span class="s">&quot;User-Agent&quot;</span>, <span class="s">&quot;agent&quot;</span>);
+                <span class="r28 r">requestId</span> = <span class="r29 r">request</span>.<a href="/Azure.Core/A.html#b180337469e3b6af" class="i property">ClientRequestId</a>;
+            });
+ 
+            <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#34b191a243434f6a" class="i method">Delay</a>(1_000);
+ 
+            <a href="@0@mscorlib/A.html#9317b6858407017e" class="t t">EventWrittenEventArgs</a> <span id="r30 rd" class="r30 r">e</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#70e400064aab89ab" class="i method">SingleEventById</a>(<a href="#b942ac993bd3e2ca" class="i field">BackgroundRefreshFailedEvent</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#3f60527050b58a1a" class="i field">Informational</a>, <span class="r30 r">e</span>.<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r28 r">requestId</span>, <span class="r30 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r19 r">exception</span>.<a href="@0@mscorlib/A.html#e2e19f4ed8da81aa" class="i method">ToString</a>().<a href="@0@mscorlib/A.html#1c4a9dc78ba38999" class="i method">Split</a>(<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>.<a href="@0@mscorlib/A.html#81c2d980f5d0ee35" class="i method">ToCharArray</a>())[0], <span class="r30 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;exception&quot;</span>).<a href="@0@mscorlib/A.html#1c4a9dc78ba38999" class="i method">Split</a>(<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>.<a href="@0@mscorlib/A.html#81c2d980f5d0ee35" class="i method">ToCharArray</a>())[0]);
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="f576e21190cc34c8" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GettingErrorRequestProducesEvents</a>()
+        {
+            <a href="/Azure.Core.TestFramework/A.html#df767807e2c243e9" class="k">var</a> <span id="r31 rd" class="r31 r">response</span> = <b>new</b> <a href="/Azure.Core.TestFramework/A.html#ef2adc622c2950d8" class="t constructor">MockResponse</a>(500);
+            <span class="r31 r">response</span>.<a href="/Azure.Core.TestFramework/A.html#7d39b242c3bde3ab" class="i method">SetContent</a>(<b>new</b> <b>byte</b>[] { 6, 7, 8, 9, 0 });
+            <span class="r31 r">response</span>.<a href="/Azure.Core.TestFramework/A.html#4ea6c2ac143d5631" class="i method">AddHeader</a>(<b>new</b> <a href="/Azure.Core/A.html#3df78227d19062f7" class="t constructor">HttpHeader</a>(<span class="s">&quot;Custom-Response-Header&quot;</span>, <span class="s">&quot;Improved value&quot;</span>));
+ 
+            <a href="/Azure.Core.TestFramework/A.html#44bcb3ab7dfe168b" class="t t">MockTransport</a> <span id="r32 rd" class="r32 r">mockTransport</span> = <a href="/Azure.Core.TestFramework/A.html#70a80d26a1de0f5e" class="i method">CreateMockTransport</a>(<span class="r31 r">response</span>);
+ 
+            <a href="/Azure.Core/A.html#ce2f2fae396f36c5" class="k">var</a> <span id="r33 rd" class="r33 r">pipeline</span> = <b>new</b> <a href="/Azure.Core/A.html#bf87c612b38d0825" class="t constructor">HttpPipeline</a>(<span class="r32 r">mockTransport</span>, <b>new</b>[] { <b>new</b> <a href="/Azure.Core/A.html#3209d7f8f2a2cfaa" class="t constructor">LoggingPolicy</a>(<span class="r5 r">logContent</span>: <b>true</b>, <b>int</b>.<a href="@0@mscorlib/A.html#c45153c0501d7122" class="i field">MaxValue</a>, <a href="#c6417f09018e15a5" class="i field">s_allowedHeaders</a>, <a href="#d68c7556d3ce2f5a" class="i field">s_allowedQueryParameters</a>, <span class="s">&quot;Test-SDK&quot;</span>) });
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r34 rd" class="r34 r">requestId</span> = <b>null</b>;
+ 
+            <b>await</b> <span class="i">SendRequestAsync</span>(<span class="r33 r">pipeline</span>, <span id="r35 rd" class="r35 r">request</span> =&gt;
+            {
+                <span class="r35 r">request</span>.<a href="/Azure.Core/A.html#38781a2f20c88339" class="i property">Method</a> = <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#c1939eaa5920682f" class="i property">Get</a>;
+                <span class="r35 r">request</span>.<a href="/Azure.Core/A.html#a3954f29cb1a883c" class="i property">Uri</a>.<a href="/Azure.Core/A.html#79e001a52a92afbe" class="i method">Reset</a>(<b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<span class="s">&quot;https://contoso.a.io&quot;</span>));
+                <span class="r35 r">request</span>.<a href="/Azure.Core/A.html#e6c474e362de2358" class="i property">Headers</a>.<a href="/Azure.Core/A.html#c446fa86f8d3ef04" class="i method">Add</a>(<span class="s">&quot;Date&quot;</span>, <span class="s">&quot;3/26/2019&quot;</span>);
+                <span class="r35 r">request</span>.<a href="/Azure.Core/A.html#e6c474e362de2358" class="i property">Headers</a>.<a href="/Azure.Core/A.html#c446fa86f8d3ef04" class="i method">Add</a>(<span class="s">&quot;Custom-Header&quot;</span>, <span class="s">&quot;Value&quot;</span>);
+                <span class="r35 r">request</span>.<a href="/Azure.Core/A.html#1517233642d6c203" class="i property">Content</a> = <a href="/Azure.Core/A.html#81cccf3fb8acf2c9" class="t t">RequestContent</a>.<a href="/Azure.Core/A.html#602bc35226bdb1e4" class="i method">Create</a>(<b>new</b> <b>byte</b>[] { 1, 2, 3, 4, 5 });
+                <span class="r34 r">requestId</span> = <span class="r35 r">request</span>.<a href="/Azure.Core/A.html#b180337469e3b6af" class="i property">ClientRequestId</a>;
+            });
+ 
+            <a href="@0@mscorlib/A.html#9317b6858407017e" class="t t">EventWrittenEventArgs</a> <span id="r36 rd" class="r36 r">e</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#70e400064aab89ab" class="i method">SingleEventById</a>(<a href="#67645c3024854df3" class="i field">ErrorResponseEvent</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#c09cab3d595581b8" class="i field">Warning</a>, <span class="r36 r">e</span>.<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;ErrorResponse&quot;</span>, <span class="r36 r">e</span>.<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r34 r">requestId</span>, <span class="r36 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r36 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<b>int</b>&gt;(<span class="s">&quot;status&quot;</span>), 500);
+            <span class="i">StringAssert</span>.<span class="i">Contains</span>(<span class="s">$&quot;</span><span class="s">Custom-Response-Header:Improved value</span>{<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>}<span class="s">&quot;</span>, <span class="r36 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;headers&quot;</span>));
+ 
+            <span class="r36 r">e</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#70e400064aab89ab" class="i method">SingleEventById</a>(<a href="#6821a25f37630739" class="i field">ErrorResponseContentEvent</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#3f60527050b58a1a" class="i field">Informational</a>, <span class="r36 r">e</span>.<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;ErrorResponseContent&quot;</span>, <span class="r36 r">e</span>.<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r34 r">requestId</span>, <span class="r36 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">CollectionAssert</span>.<span class="i">AreEqual</span>(<b>new</b> <b>byte</b>[] { 6, 7, 8, 9, 0 }, <span class="r36 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<b>byte</b>[]&gt;(<span class="s">&quot;content&quot;</span>));
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="728822c8b7f040e5" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">RequestContentIsLoggedAsText</a>()
+        {
+            <a href="/Azure.Core.TestFramework/A.html#df767807e2c243e9" class="k">var</a> <span id="r37 rd" class="r37 r">response</span> = <b>new</b> <a href="/Azure.Core.TestFramework/A.html#ef2adc622c2950d8" class="t constructor">MockResponse</a>(500);
+            <a href="/Azure.Core.TestFramework/A.html#44bcb3ab7dfe168b" class="t t">MockTransport</a> <span id="r38 rd" class="r38 r">mockTransport</span> = <a href="/Azure.Core.TestFramework/A.html#70a80d26a1de0f5e" class="i method">CreateMockTransport</a>(<span class="r37 r">response</span>);
+ 
+            <a href="/Azure.Core/A.html#ce2f2fae396f36c5" class="k">var</a> <span id="r39 rd" class="r39 r">pipeline</span> = <b>new</b> <a href="/Azure.Core/A.html#bf87c612b38d0825" class="t constructor">HttpPipeline</a>(<span class="r38 r">mockTransport</span>, <b>new</b>[] { <b>new</b> <a href="/Azure.Core/A.html#3209d7f8f2a2cfaa" class="t constructor">LoggingPolicy</a>(<span class="r5 r">logContent</span>: <b>true</b>, <b>int</b>.<a href="@0@mscorlib/A.html#c45153c0501d7122" class="i field">MaxValue</a>, <a href="#c6417f09018e15a5" class="i field">s_allowedHeaders</a>, <a href="#d68c7556d3ce2f5a" class="i field">s_allowedQueryParameters</a>, <span class="s">&quot;Test-SDK&quot;</span>) });
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r40 rd" class="r40 r">requestId</span> = <b>null</b>;
+ 
+            <b>await</b> <span class="i">SendRequestAsync</span>(<span class="r39 r">pipeline</span>, <span id="r41 rd" class="r41 r">request</span> =&gt;
+            {
+                <span class="r41 r">request</span>.<a href="/Azure.Core/A.html#38781a2f20c88339" class="i property">Method</a> = <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#c1939eaa5920682f" class="i property">Get</a>;
+                <span class="r41 r">request</span>.<a href="/Azure.Core/A.html#a3954f29cb1a883c" class="i property">Uri</a>.<a href="/Azure.Core/A.html#79e001a52a92afbe" class="i method">Reset</a>(<b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<span class="s">&quot;https://contoso.a.io&quot;</span>));
+                <span class="r41 r">request</span>.<a href="/Azure.Core/A.html#1517233642d6c203" class="i property">Content</a> = <a href="/Azure.Core/A.html#81cccf3fb8acf2c9" class="t t">RequestContent</a>.<a href="/Azure.Core/A.html#602bc35226bdb1e4" class="i method">Create</a>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<span class="s">&quot;Hello world&quot;</span>));
+                <span class="r41 r">request</span>.<a href="/Azure.Core/A.html#e6c474e362de2358" class="i property">Headers</a>.<a href="/Azure.Core/A.html#c446fa86f8d3ef04" class="i method">Add</a>(<span class="s">&quot;Content-Type&quot;</span>, <span class="s">&quot;text/json&quot;</span>);
+                <span class="r40 r">requestId</span> = <span class="r41 r">request</span>.<a href="/Azure.Core/A.html#b180337469e3b6af" class="i property">ClientRequestId</a>;
+            });
+ 
+            <a href="@0@mscorlib/A.html#9317b6858407017e" class="t t">EventWrittenEventArgs</a> <span id="r42 rd" class="r42 r">e</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#70e400064aab89ab" class="i method">SingleEventById</a>(<a href="#a795d28e03a28704" class="i field">RequestContentTextEvent</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#238fa91fc75be60e" class="i field">Verbose</a>, <span class="r42 r">e</span>.<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;RequestContentText&quot;</span>, <span class="r42 r">e</span>.<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r40 r">requestId</span>, <span class="r42 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;Hello world&quot;</span>, <span class="r42 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;content&quot;</span>));
+ 
+            <span class="i">CollectionAssert</span>.<span class="i">IsEmpty</span>(<a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#5f3e84ebf7a477ba" class="i method">EventsById</a>(<a href="#f1f7061d72c86878" class="i field">ResponseContentEvent</a>));
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="d26bbc08cc189a2e" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ContentIsNotLoggedAsTextWhenDisabled</a>()
+        {
+            <a href="/Azure.Core.TestFramework/A.html#df767807e2c243e9" class="k">var</a> <span id="r43 rd" class="r43 r">response</span> = <b>new</b> <a href="/Azure.Core.TestFramework/A.html#ef2adc622c2950d8" class="t constructor">MockResponse</a>(500);
+            <span class="r43 r">response</span>.<a href="/Azure.Core.TestFramework/A.html#8af7351edb70bada" class="i property">ContentStream</a> = <b>new</b> <a href="@0@mscorlib/A.html#f92fa270fda9a82b" class="t constructor">MemoryStream</a>(<b>new</b> <b>byte</b>[] { 1, 2, 3 });
+            <span class="r43 r">response</span>.<a href="/Azure.Core.TestFramework/A.html#4ea6c2ac143d5631" class="i method">AddHeader</a>(<b>new</b> <a href="/Azure.Core/A.html#3df78227d19062f7" class="t constructor">HttpHeader</a>(<span class="s">&quot;Content-Type&quot;</span>, <span class="s">&quot;text/json&quot;</span>));
+ 
+            <a href="/Azure.Core.TestFramework/A.html#44bcb3ab7dfe168b" class="t t">MockTransport</a> <span id="r44 rd" class="r44 r">mockTransport</span> = <a href="/Azure.Core.TestFramework/A.html#70a80d26a1de0f5e" class="i method">CreateMockTransport</a>(<span class="r43 r">response</span>);
+ 
+            <a href="/Azure.Core/A.html#ce2f2fae396f36c5" class="k">var</a> <span id="r45 rd" class="r45 r">pipeline</span> = <b>new</b> <a href="/Azure.Core/A.html#bf87c612b38d0825" class="t constructor">HttpPipeline</a>(<span class="r44 r">mockTransport</span>, <b>new</b>[] { <b>new</b> <a href="/Azure.Core/A.html#3209d7f8f2a2cfaa" class="t constructor">LoggingPolicy</a>(<span class="r5 r">logContent</span>: <b>false</b>, <b>int</b>.<a href="@0@mscorlib/A.html#c45153c0501d7122" class="i field">MaxValue</a>, <a href="#c6417f09018e15a5" class="i field">s_allowedHeaders</a>, <a href="#d68c7556d3ce2f5a" class="i field">s_allowedQueryParameters</a>, <span class="s">&quot;Test-SDK&quot;</span>) });
+ 
+            <b>await</b> <span class="i">SendRequestAsync</span>(<span class="r45 r">pipeline</span>, <span id="r46 rd" class="r46 r">request</span> =&gt;
+            {
+                <span class="r46 r">request</span>.<a href="/Azure.Core/A.html#38781a2f20c88339" class="i property">Method</a> = <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#c1939eaa5920682f" class="i property">Get</a>;
+                <span class="r46 r">request</span>.<a href="/Azure.Core/A.html#a3954f29cb1a883c" class="i property">Uri</a>.<a href="/Azure.Core/A.html#79e001a52a92afbe" class="i method">Reset</a>(<b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<span class="s">&quot;https://contoso.a.io&quot;</span>));
+                <span class="r46 r">request</span>.<a href="/Azure.Core/A.html#1517233642d6c203" class="i property">Content</a> = <a href="/Azure.Core/A.html#81cccf3fb8acf2c9" class="t t">RequestContent</a>.<a href="/Azure.Core/A.html#602bc35226bdb1e4" class="i method">Create</a>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<span class="s">&quot;Hello world&quot;</span>));
+                <span class="r46 r">request</span>.<a href="/Azure.Core/A.html#e6c474e362de2358" class="i property">Headers</a>.<a href="/Azure.Core/A.html#c446fa86f8d3ef04" class="i method">Add</a>(<span class="s">&quot;Content-Type&quot;</span>, <span class="s">&quot;text/json&quot;</span>);
+            });
+ 
+            <a href="#6e5a82b721e9bc1b" class="i method">AssertNoContentLogged</a>();
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="c861d0f7dcaa6f4c" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ContentIsNotLoggedWhenDisabled</a>()
+        {
+            <a href="/Azure.Core.TestFramework/A.html#df767807e2c243e9" class="k">var</a> <span id="r47 rd" class="r47 r">response</span> = <b>new</b> <a href="/Azure.Core.TestFramework/A.html#ef2adc622c2950d8" class="t constructor">MockResponse</a>(500);
+            <span class="r47 r">response</span>.<a href="/Azure.Core.TestFramework/A.html#8af7351edb70bada" class="i property">ContentStream</a> = <b>new</b> <a href="/Azure.Core.TestFramework/A.html#5fa99dd061dcf578" class="t constructor">NonSeekableMemoryStream</a>(<b>new</b> <b>byte</b>[] { 1, 2, 3 });
+ 
+            <a href="/Azure.Core.TestFramework/A.html#44bcb3ab7dfe168b" class="t t">MockTransport</a> <span id="r48 rd" class="r48 r">mockTransport</span> = <a href="/Azure.Core.TestFramework/A.html#70a80d26a1de0f5e" class="i method">CreateMockTransport</a>(<span class="r47 r">response</span>);
+ 
+            <a href="/Azure.Core/A.html#ce2f2fae396f36c5" class="k">var</a> <span id="r49 rd" class="r49 r">pipeline</span> = <b>new</b> <a href="/Azure.Core/A.html#bf87c612b38d0825" class="t constructor">HttpPipeline</a>(<span class="r48 r">mockTransport</span>, <b>new</b>[] { <b>new</b> <a href="/Azure.Core/A.html#3209d7f8f2a2cfaa" class="t constructor">LoggingPolicy</a>(<span class="r5 r">logContent</span>: <b>false</b>, <b>int</b>.<a href="@0@mscorlib/A.html#c45153c0501d7122" class="i field">MaxValue</a>, <a href="#c6417f09018e15a5" class="i field">s_allowedHeaders</a>, <a href="#d68c7556d3ce2f5a" class="i field">s_allowedQueryParameters</a>, <span class="s">&quot;Test-SDK&quot;</span>) });
+ 
+            <b>await</b> <span class="i">SendRequestAsync</span>(<span class="r49 r">pipeline</span>, <span id="r50 rd" class="r50 r">request</span> =&gt;
+            {
+                <span class="r50 r">request</span>.<a href="/Azure.Core/A.html#38781a2f20c88339" class="i property">Method</a> = <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#c1939eaa5920682f" class="i property">Get</a>;
+                <span class="r50 r">request</span>.<a href="/Azure.Core/A.html#a3954f29cb1a883c" class="i property">Uri</a>.<a href="/Azure.Core/A.html#79e001a52a92afbe" class="i method">Reset</a>(<b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<span class="s">&quot;https://contoso.a.io&quot;</span>));
+                <span class="r50 r">request</span>.<a href="/Azure.Core/A.html#1517233642d6c203" class="i property">Content</a> = <a href="/Azure.Core/A.html#81cccf3fb8acf2c9" class="t t">RequestContent</a>.<a href="/Azure.Core/A.html#602bc35226bdb1e4" class="i method">Create</a>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<span class="s">&quot;Hello world&quot;</span>));
+            });
+ 
+            <a href="#6e5a82b721e9bc1b" class="i method">AssertNoContentLogged</a>();
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="4d216e59cab52a88" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">RequestContentIsNotLoggedWhenDisabled</a>()
+        {
+            <a href="/Azure.Core.TestFramework/A.html#df767807e2c243e9" class="k">var</a> <span id="r51 rd" class="r51 r">response</span> = <b>new</b> <a href="/Azure.Core.TestFramework/A.html#ef2adc622c2950d8" class="t constructor">MockResponse</a>(500);
+            <span class="r51 r">response</span>.<a href="/Azure.Core.TestFramework/A.html#8af7351edb70bada" class="i property">ContentStream</a> = <b>new</b> <a href="@0@mscorlib/A.html#f92fa270fda9a82b" class="t constructor">MemoryStream</a>(<b>new</b> <b>byte</b>[] { 1, 2, 3 });
+ 
+            <a href="/Azure.Core.TestFramework/A.html#44bcb3ab7dfe168b" class="t t">MockTransport</a> <span id="r52 rd" class="r52 r">mockTransport</span> = <a href="/Azure.Core.TestFramework/A.html#70a80d26a1de0f5e" class="i method">CreateMockTransport</a>(<span class="r51 r">response</span>);
+ 
+            <a href="/Azure.Core/A.html#ce2f2fae396f36c5" class="k">var</a> <span id="r53 rd" class="r53 r">pipeline</span> = <b>new</b> <a href="/Azure.Core/A.html#bf87c612b38d0825" class="t constructor">HttpPipeline</a>(<span class="r52 r">mockTransport</span>, <b>new</b>[] { <b>new</b> <a href="/Azure.Core/A.html#3209d7f8f2a2cfaa" class="t constructor">LoggingPolicy</a>(<span class="r5 r">logContent</span>: <b>false</b>, <b>int</b>.<a href="@0@mscorlib/A.html#c45153c0501d7122" class="i field">MaxValue</a>, <a href="#c6417f09018e15a5" class="i field">s_allowedHeaders</a>, <a href="#d68c7556d3ce2f5a" class="i field">s_allowedQueryParameters</a>, <span class="s">&quot;Test-SDK&quot;</span>) });
+ 
+            <b>await</b> <span class="i">SendRequestAsync</span>(<span class="r53 r">pipeline</span>, <span id="r54 rd" class="r54 r">request</span> =&gt;
+            {
+                <span class="r54 r">request</span>.<a href="/Azure.Core/A.html#38781a2f20c88339" class="i property">Method</a> = <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#c1939eaa5920682f" class="i property">Get</a>;
+                <span class="r54 r">request</span>.<a href="/Azure.Core/A.html#a3954f29cb1a883c" class="i property">Uri</a>.<a href="/Azure.Core/A.html#79e001a52a92afbe" class="i method">Reset</a>(<b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<span class="s">&quot;https://contoso.a.io&quot;</span>));
+                <span class="r54 r">request</span>.<a href="/Azure.Core/A.html#1517233642d6c203" class="i property">Content</a> = <a href="/Azure.Core/A.html#81cccf3fb8acf2c9" class="t t">RequestContent</a>.<a href="/Azure.Core/A.html#602bc35226bdb1e4" class="i method">Create</a>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<span class="s">&quot;Hello world&quot;</span>));
+            });
+ 
+            <a href="#6e5a82b721e9bc1b" class="i method">AssertNoContentLogged</a>();
+        }
+ 
+        <b>private void</b> <a id="6e5a82b721e9bc1b" href="R/6e5a82b721e9bc1b.html" target="n" data-glyph="76,1" class="i method">AssertNoContentLogged</a>()
+        {
+            <span class="i">CollectionAssert</span>.<span class="i">IsEmpty</span>(<a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#5f3e84ebf7a477ba" class="i method">EventsById</a>(<a href="#9f3864c3916a9c62" class="i field">RequestContentEvent</a>));
+            <span class="i">CollectionAssert</span>.<span class="i">IsEmpty</span>(<a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#5f3e84ebf7a477ba" class="i method">EventsById</a>(<a href="#a795d28e03a28704" class="i field">RequestContentTextEvent</a>));
+ 
+            <span class="i">CollectionAssert</span>.<span class="i">IsEmpty</span>(<a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#5f3e84ebf7a477ba" class="i method">EventsById</a>(<a href="#f1f7061d72c86878" class="i field">ResponseContentEvent</a>));
+            <span class="i">CollectionAssert</span>.<span class="i">IsEmpty</span>(<a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#5f3e84ebf7a477ba" class="i method">EventsById</a>(<a href="#01ac267a0fa4d3ef" class="i field">ResponseContentBlockEvent</a>));
+            <span class="i">CollectionAssert</span>.<span class="i">IsEmpty</span>(<a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#5f3e84ebf7a477ba" class="i method">EventsById</a>(<a href="#bf38e4d1c517cc89" class="i field">ResponseContentTextBlockEvent</a>));
+ 
+            <span class="i">CollectionAssert</span>.<span class="i">IsEmpty</span>(<a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#5f3e84ebf7a477ba" class="i method">EventsById</a>(<a href="#6821a25f37630739" class="i field">ErrorResponseContentEvent</a>));
+            <span class="i">CollectionAssert</span>.<span class="i">IsEmpty</span>(<a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#5f3e84ebf7a477ba" class="i method">EventsById</a>(<a href="#afb4806f9a72af8f" class="i field">ErrorResponseContentTextEvent</a>));
+            <span class="i">CollectionAssert</span>.<span class="i">IsEmpty</span>(<a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#5f3e84ebf7a477ba" class="i method">EventsById</a>(<a href="#15d01de153b5f1d3" class="i field">ErrorResponseContentTextBlockEvent</a>));
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="dfa1cc3ab5a25027" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">NonSeekableResponsesAreLoggedInBlocks</a>()
+        {
+            <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a> <span id="r55 rd" class="r55 r">response</span> = <b>await</b> <a href="#20d8b2c0853ca3bb" class="i method">SendRequest</a>(<span class="r56 r">isSeekable</span>: <b>false</b>, <span class="r57 r">isError</span>: <b>false</b>);
+ 
+            <a href="@0@mscorlib/A.html#9317b6858407017e" class="t t">EventWrittenEventArgs</a>[] <span id="r58 rd" class="r58 r">contentEvents</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#5f3e84ebf7a477ba" class="i method">EventsById</a>(<a href="#01ac267a0fa4d3ef" class="i field">ResponseContentBlockEvent</a>).<a href="@0@System.Core/A.html#783a052330e7d48d" class="i method">ToArray</a>();
+ 
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(2, <span class="r58 r">contentEvents</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>);
+ 
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#238fa91fc75be60e" class="i field">Verbose</a>, <span class="r58 r">contentEvents</span>[0].<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;ResponseContentBlock&quot;</span>, <span class="r58 r">contentEvents</span>[0].<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r55 r">response</span>.<a href="/Azure.Core/A.html#0d9a1de2c559a434" class="i property">ClientRequestId</a>, <span class="r58 r">contentEvents</span>[0].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(0, <span class="r58 r">contentEvents</span>[0].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<b>int</b>&gt;(<span class="s">&quot;blockNumber&quot;</span>));
+            <span class="i">CollectionAssert</span>.<span class="i">AreEqual</span>(<b>new</b> <b>byte</b>[] { 72, 101, 108, 108, 111, 32 }, <span class="r58 r">contentEvents</span>[0].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<b>byte</b>[]&gt;(<span class="s">&quot;content&quot;</span>));
+ 
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#238fa91fc75be60e" class="i field">Verbose</a>, <span class="r58 r">contentEvents</span>[1].<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;ResponseContentBlock&quot;</span>, <span class="r58 r">contentEvents</span>[1].<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r55 r">response</span>.<a href="/Azure.Core/A.html#0d9a1de2c559a434" class="i property">ClientRequestId</a>, <span class="r58 r">contentEvents</span>[1].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(1, <span class="r58 r">contentEvents</span>[1].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<b>int</b>&gt;(<span class="s">&quot;blockNumber&quot;</span>));
+            <span class="i">CollectionAssert</span>.<span class="i">AreEqual</span>(<b>new</b> <b>byte</b>[] { 119, 111, 114, 108, 100 }, <span class="r58 r">contentEvents</span>[1].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<b>byte</b>[]&gt;(<span class="s">&quot;content&quot;</span>));
+ 
+            <span class="i">CollectionAssert</span>.<span class="i">IsEmpty</span>(<a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#5f3e84ebf7a477ba" class="i method">EventsById</a>(<a href="#f1f7061d72c86878" class="i field">ResponseContentEvent</a>));
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="8da0cae55ed3784e" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">NonSeekableResponsesErrorsAreLoggedInBlocks</a>()
+        {
+            <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a> <span id="r59 rd" class="r59 r">response</span> = <b>await</b> <a href="#20d8b2c0853ca3bb" class="i method">SendRequest</a>(<span class="r56 r">isSeekable</span>: <b>false</b>, <span class="r57 r">isError</span>: <b>true</b>);
+ 
+            <a href="@0@mscorlib/A.html#9317b6858407017e" class="t t">EventWrittenEventArgs</a>[] <span id="r60 rd" class="r60 r">errorContentEvents</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#5f3e84ebf7a477ba" class="i method">EventsById</a>(<a href="#f41be3600f9f6ddc" class="i field">ErrorResponseContentBlockEvent</a>).<a href="@0@System.Core/A.html#783a052330e7d48d" class="i method">ToArray</a>();
+ 
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(2, <span class="r60 r">errorContentEvents</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>);
+ 
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#3f60527050b58a1a" class="i field">Informational</a>, <span class="r60 r">errorContentEvents</span>[0].<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;ErrorResponseContentBlock&quot;</span>, <span class="r60 r">errorContentEvents</span>[0].<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r59 r">response</span>.<a href="/Azure.Core/A.html#0d9a1de2c559a434" class="i property">ClientRequestId</a>, <span class="r60 r">errorContentEvents</span>[0].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(0, <span class="r60 r">errorContentEvents</span>[0].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<b>int</b>&gt;(<span class="s">&quot;blockNumber&quot;</span>));
+            <span class="i">CollectionAssert</span>.<span class="i">AreEqual</span>(<b>new</b> <b>byte</b>[] { 72, 101, 108, 108, 111, 32 }, <span class="r60 r">errorContentEvents</span>[0].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<b>byte</b>[]&gt;(<span class="s">&quot;content&quot;</span>));
+ 
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#3f60527050b58a1a" class="i field">Informational</a>, <span class="r60 r">errorContentEvents</span>[1].<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;ErrorResponseContentBlock&quot;</span>, <span class="r60 r">errorContentEvents</span>[1].<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r59 r">response</span>.<a href="/Azure.Core/A.html#0d9a1de2c559a434" class="i property">ClientRequestId</a>, <span class="r60 r">errorContentEvents</span>[1].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(1, <span class="r60 r">errorContentEvents</span>[1].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<b>int</b>&gt;(<span class="s">&quot;blockNumber&quot;</span>));
+            <span class="i">CollectionAssert</span>.<span class="i">AreEqual</span>(<b>new</b> <b>byte</b>[] { 119, 111, 114, 108, 100 }, <span class="r60 r">errorContentEvents</span>[1].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<b>byte</b>[]&gt;(<span class="s">&quot;content&quot;</span>));
+ 
+            <span class="i">CollectionAssert</span>.<span class="i">IsEmpty</span>(<a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#5f3e84ebf7a477ba" class="i method">EventsById</a>(<a href="#6821a25f37630739" class="i field">ErrorResponseContentEvent</a>));
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="931251e515b55577" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">NonSeekableResponsesAreLoggedInTextBlocks</a>()
+        {
+            <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a> <span id="r61 rd" class="r61 r">response</span> = <b>await</b> <a href="#20d8b2c0853ca3bb" class="i method">SendRequest</a>(
+                <span class="r56 r">isSeekable</span>: <b>false</b>,
+                <span class="r57 r">isError</span>: <b>false</b>,
+                <span id="r62 rd" class="r62 r">mockResponse</span> =&gt; <span class="r62 r">mockResponse</span>.<a href="/Azure.Core.TestFramework/A.html#4ea6c2ac143d5631" class="i method">AddHeader</a>(<b>new</b> <a href="/Azure.Core/A.html#3df78227d19062f7" class="t constructor">HttpHeader</a>(<span class="s">&quot;Content-Type&quot;</span>, <span class="s">&quot;text/xml&quot;</span>))
+            );
+ 
+            <a href="@0@mscorlib/A.html#9317b6858407017e" class="t t">EventWrittenEventArgs</a>[] <span id="r63 rd" class="r63 r">contentEvents</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#5f3e84ebf7a477ba" class="i method">EventsById</a>(<a href="#bf38e4d1c517cc89" class="i field">ResponseContentTextBlockEvent</a>).<a href="@0@System.Core/A.html#783a052330e7d48d" class="i method">ToArray</a>();
+ 
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(2, <span class="r63 r">contentEvents</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>);
+ 
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#238fa91fc75be60e" class="i field">Verbose</a>, <span class="r63 r">contentEvents</span>[0].<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;ResponseContentTextBlock&quot;</span>, <span class="r63 r">contentEvents</span>[0].<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r61 r">response</span>.<a href="/Azure.Core/A.html#0d9a1de2c559a434" class="i property">ClientRequestId</a>, <span class="r63 r">contentEvents</span>[0].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(0, <span class="r63 r">contentEvents</span>[0].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<b>int</b>&gt;(<span class="s">&quot;blockNumber&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;Hello &quot;</span>, <span class="r63 r">contentEvents</span>[0].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;content&quot;</span>));
+ 
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#238fa91fc75be60e" class="i field">Verbose</a>, <span class="r63 r">contentEvents</span>[1].<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;ResponseContentTextBlock&quot;</span>, <span class="r63 r">contentEvents</span>[1].<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r61 r">response</span>.<a href="/Azure.Core/A.html#0d9a1de2c559a434" class="i property">ClientRequestId</a>, <span class="r63 r">contentEvents</span>[1].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(1, <span class="r63 r">contentEvents</span>[1].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<b>int</b>&gt;(<span class="s">&quot;blockNumber&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;world&quot;</span>, <span class="r63 r">contentEvents</span>[1].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;content&quot;</span>));
+ 
+            <span class="i">CollectionAssert</span>.<span class="i">IsEmpty</span>(<a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#5f3e84ebf7a477ba" class="i method">EventsById</a>(<a href="#f1f7061d72c86878" class="i field">ResponseContentEvent</a>));
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="64269ce8a994e759" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">NonSeekableResponsesErrorsAreLoggedInTextBlocks</a>()
+        {
+            <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a> <span id="r64 rd" class="r64 r">response</span> = <b>await</b> <a href="#20d8b2c0853ca3bb" class="i method">SendRequest</a>(
+                <span class="r56 r">isSeekable</span>: <b>false</b>,
+                <span class="r57 r">isError</span>: <b>true</b>,
+                <span id="r65 rd" class="r65 r">mockResponse</span> =&gt; <span class="r65 r">mockResponse</span>.<a href="/Azure.Core.TestFramework/A.html#4ea6c2ac143d5631" class="i method">AddHeader</a>(<b>new</b> <a href="/Azure.Core/A.html#3df78227d19062f7" class="t constructor">HttpHeader</a>(<span class="s">&quot;Content-Type&quot;</span>, <span class="s">&quot;text/xml&quot;</span>))
+            );
+ 
+            <a href="@0@mscorlib/A.html#9317b6858407017e" class="t t">EventWrittenEventArgs</a>[] <span id="r66 rd" class="r66 r">errorContentEvents</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#5f3e84ebf7a477ba" class="i method">EventsById</a>(<a href="#15d01de153b5f1d3" class="i field">ErrorResponseContentTextBlockEvent</a>).<a href="@0@System.Core/A.html#783a052330e7d48d" class="i method">ToArray</a>();
+ 
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(2, <span class="r66 r">errorContentEvents</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>);
+ 
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#3f60527050b58a1a" class="i field">Informational</a>, <span class="r66 r">errorContentEvents</span>[0].<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;ErrorResponseContentTextBlock&quot;</span>, <span class="r66 r">errorContentEvents</span>[0].<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r64 r">response</span>.<a href="/Azure.Core/A.html#0d9a1de2c559a434" class="i property">ClientRequestId</a>, <span class="r66 r">errorContentEvents</span>[0].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(0, <span class="r66 r">errorContentEvents</span>[0].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<b>int</b>&gt;(<span class="s">&quot;blockNumber&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;Hello &quot;</span>, <span class="r66 r">errorContentEvents</span>[0].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;content&quot;</span>));
+ 
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#3f60527050b58a1a" class="i field">Informational</a>, <span class="r66 r">errorContentEvents</span>[1].<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;ErrorResponseContentTextBlock&quot;</span>, <span class="r66 r">errorContentEvents</span>[1].<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r64 r">response</span>.<a href="/Azure.Core/A.html#0d9a1de2c559a434" class="i property">ClientRequestId</a>, <span class="r66 r">errorContentEvents</span>[1].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(1, <span class="r66 r">errorContentEvents</span>[1].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<b>int</b>&gt;(<span class="s">&quot;blockNumber&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;world&quot;</span>, <span class="r66 r">errorContentEvents</span>[1].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;content&quot;</span>));
+ 
+            <span class="i">CollectionAssert</span>.<span class="i">IsEmpty</span>(<a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#5f3e84ebf7a477ba" class="i method">EventsById</a>(<a href="#6821a25f37630739" class="i field">ErrorResponseContentEvent</a>));
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="09e325a1e383fc0f" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">SeekableTextResponsesAreLoggedInText</a>()
+        {
+            <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a> <span id="r67 rd" class="r67 r">response</span> = <b>await</b> <a href="#20d8b2c0853ca3bb" class="i method">SendRequest</a>(
+                <span class="r56 r">isSeekable</span>: <b>true</b>,
+                <span class="r57 r">isError</span>: <b>false</b>,
+                <span id="r68 rd" class="r68 r">mockResponse</span> =&gt; <span class="r68 r">mockResponse</span>.<a href="/Azure.Core.TestFramework/A.html#4ea6c2ac143d5631" class="i method">AddHeader</a>(<b>new</b> <a href="/Azure.Core/A.html#3df78227d19062f7" class="t constructor">HttpHeader</a>(<span class="s">&quot;Content-Type&quot;</span>, <span class="s">&quot;text/xml&quot;</span>))
+            );
+ 
+            <a href="@0@mscorlib/A.html#9317b6858407017e" class="t t">EventWrittenEventArgs</a> <span id="r69 rd" class="r69 r">contentEvent</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#70e400064aab89ab" class="i method">SingleEventById</a>(<a href="#5e1ce0af7072dfa8" class="i field">ResponseContentTextEvent</a>);
+ 
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#238fa91fc75be60e" class="i field">Verbose</a>, <span class="r69 r">contentEvent</span>.<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;ResponseContentText&quot;</span>, <span class="r69 r">contentEvent</span>.<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r67 r">response</span>.<a href="/Azure.Core/A.html#0d9a1de2c559a434" class="i property">ClientRequestId</a>, <span class="r69 r">contentEvent</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;Hello world&quot;</span>, <span class="r69 r">contentEvent</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;content&quot;</span>));
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="d4529fe34a5c014b" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">SeekableTextResponsesErrorsAreLoggedInText</a>()
+        {
+            <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a> <span id="r70 rd" class="r70 r">response</span> = <b>await</b> <a href="#20d8b2c0853ca3bb" class="i method">SendRequest</a>(
+                <span class="r56 r">isSeekable</span>: <b>true</b>,
+                <span class="r57 r">isError</span>: <b>true</b>,
+                <span id="r71 rd" class="r71 r">mockResponse</span> =&gt; <span class="r71 r">mockResponse</span>.<a href="/Azure.Core.TestFramework/A.html#4ea6c2ac143d5631" class="i method">AddHeader</a>(<b>new</b> <a href="/Azure.Core/A.html#3df78227d19062f7" class="t constructor">HttpHeader</a>(<span class="s">&quot;Content-Type&quot;</span>, <span class="s">&quot;text/xml&quot;</span>)),
+                <span class="r72 r">maxLength</span>: 5
+            );
+ 
+            <a href="@0@mscorlib/A.html#9317b6858407017e" class="t t">EventWrittenEventArgs</a> <span id="r73 rd" class="r73 r">errorContentEvent</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#70e400064aab89ab" class="i method">SingleEventById</a>(<a href="#afb4806f9a72af8f" class="i field">ErrorResponseContentTextEvent</a>);
+ 
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#3f60527050b58a1a" class="i field">Informational</a>, <span class="r73 r">errorContentEvent</span>.<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;ErrorResponseContentText&quot;</span>, <span class="r73 r">errorContentEvent</span>.<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r70 r">response</span>.<a href="/Azure.Core/A.html#0d9a1de2c559a434" class="i property">ClientRequestId</a>, <span class="r73 r">errorContentEvent</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;Hello&quot;</span>, <span class="r73 r">errorContentEvent</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;content&quot;</span>));
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="75e22f1567b1cc2c" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">SeekableTextResponsesAreLimitedInLength</a>()
+        {
+            <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a> <span id="r74 rd" class="r74 r">response</span> = <b>await</b> <a href="#20d8b2c0853ca3bb" class="i method">SendRequest</a>(
+                <span class="r56 r">isSeekable</span>: <b>true</b>,
+                <span class="r57 r">isError</span>: <b>false</b>,
+                <span id="r75 rd" class="r75 r">mockResponse</span> =&gt; <span class="r75 r">mockResponse</span>.<a href="/Azure.Core.TestFramework/A.html#4ea6c2ac143d5631" class="i method">AddHeader</a>(<b>new</b> <a href="/Azure.Core/A.html#3df78227d19062f7" class="t constructor">HttpHeader</a>(<span class="s">&quot;Content-Type&quot;</span>, <span class="s">&quot;text/xml&quot;</span>)),
+                <span class="r72 r">maxLength</span>: 5
+            );
+ 
+            <a href="@0@mscorlib/A.html#9317b6858407017e" class="t t">EventWrittenEventArgs</a> <span id="r76 rd" class="r76 r">contentEvent</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#70e400064aab89ab" class="i method">SingleEventById</a>(<a href="#5e1ce0af7072dfa8" class="i field">ResponseContentTextEvent</a>);
+ 
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#238fa91fc75be60e" class="i field">Verbose</a>, <span class="r76 r">contentEvent</span>.<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;ResponseContentText&quot;</span>, <span class="r76 r">contentEvent</span>.<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r74 r">response</span>.<a href="/Azure.Core/A.html#0d9a1de2c559a434" class="i property">ClientRequestId</a>, <span class="r76 r">contentEvent</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;Hello&quot;</span>, <span class="r76 r">contentEvent</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;content&quot;</span>));
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="39566ea389ede5c2" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">RequestContentLogsAreLimitedInLength</a>()
+        {
+            <a href="/Azure.Core.TestFramework/A.html#df767807e2c243e9" class="k">var</a> <span id="r77 rd" class="r77 r">response</span> = <b>new</b> <a href="/Azure.Core.TestFramework/A.html#ef2adc622c2950d8" class="t constructor">MockResponse</a>(500);
+            <a href="/Azure.Core.TestFramework/A.html#44bcb3ab7dfe168b" class="t t">MockTransport</a> <span id="r78 rd" class="r78 r">mockTransport</span> = <a href="/Azure.Core.TestFramework/A.html#70a80d26a1de0f5e" class="i method">CreateMockTransport</a>(<span class="r77 r">response</span>);
+ 
+            <a href="/Azure.Core/A.html#ce2f2fae396f36c5" class="k">var</a> <span id="r79 rd" class="r79 r">pipeline</span> = <b>new</b> <a href="/Azure.Core/A.html#bf87c612b38d0825" class="t constructor">HttpPipeline</a>(<span class="r78 r">mockTransport</span>, <b>new</b>[] { <b>new</b> <a href="/Azure.Core/A.html#3209d7f8f2a2cfaa" class="t constructor">LoggingPolicy</a>(<span class="r5 r">logContent</span>: <b>true</b>, 5, <a href="#c6417f09018e15a5" class="i field">s_allowedHeaders</a>, <a href="#d68c7556d3ce2f5a" class="i field">s_allowedQueryParameters</a>, <span class="s">&quot;Test-SDK&quot;</span>) });
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r80 rd" class="r80 r">requestId</span> = <b>null</b>;
+ 
+            <b>await</b> <span class="i">SendRequestAsync</span>(<span class="r79 r">pipeline</span>, <span id="r81 rd" class="r81 r">request</span> =&gt;
+            {
+                <span class="r81 r">request</span>.<a href="/Azure.Core/A.html#38781a2f20c88339" class="i property">Method</a> = <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#c1939eaa5920682f" class="i property">Get</a>;
+                <span class="r81 r">request</span>.<a href="/Azure.Core/A.html#a3954f29cb1a883c" class="i property">Uri</a>.<a href="/Azure.Core/A.html#79e001a52a92afbe" class="i method">Reset</a>(<b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<span class="s">&quot;https://contoso.a.io&quot;</span>));
+                <span class="r81 r">request</span>.<a href="/Azure.Core/A.html#1517233642d6c203" class="i property">Content</a> = <a href="/Azure.Core/A.html#81cccf3fb8acf2c9" class="t t">RequestContent</a>.<a href="/Azure.Core/A.html#602bc35226bdb1e4" class="i method">Create</a>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<span class="s">&quot;Hello world&quot;</span>));
+                <span class="r81 r">request</span>.<a href="/Azure.Core/A.html#e6c474e362de2358" class="i property">Headers</a>.<a href="/Azure.Core/A.html#c446fa86f8d3ef04" class="i method">Add</a>(<span class="s">&quot;Content-Type&quot;</span>, <span class="s">&quot;text/json&quot;</span>);
+                <span class="r80 r">requestId</span> = <span class="r81 r">request</span>.<a href="/Azure.Core/A.html#b180337469e3b6af" class="i property">ClientRequestId</a>;
+            });
+ 
+            <a href="@0@mscorlib/A.html#9317b6858407017e" class="t t">EventWrittenEventArgs</a> <span id="r82 rd" class="r82 r">e</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#70e400064aab89ab" class="i method">SingleEventById</a>(<a href="#a795d28e03a28704" class="i field">RequestContentTextEvent</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#238fa91fc75be60e" class="i field">Verbose</a>, <span class="r82 r">e</span>.<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;RequestContentText&quot;</span>, <span class="r82 r">e</span>.<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r80 r">requestId</span>, <span class="r82 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;Hello&quot;</span>, <span class="r82 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;content&quot;</span>));
+ 
+            <span class="i">CollectionAssert</span>.<span class="i">IsEmpty</span>(<a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#5f3e84ebf7a477ba" class="i method">EventsById</a>(<a href="#f1f7061d72c86878" class="i field">ResponseContentEvent</a>));
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="52f59d332024e5ac" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">NonSeekableResponsesAreLimitedInLength</a>()
+        {
+            <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a> <span id="r83 rd" class="r83 r">response</span> = <b>await</b> <a href="#20d8b2c0853ca3bb" class="i method">SendRequest</a>(
+                <span class="r56 r">isSeekable</span>: <b>false</b>,
+                <span class="r57 r">isError</span>: <b>false</b>,
+                <span id="r84 rd" class="r84 r">mockResponse</span> =&gt; <span class="r84 r">mockResponse</span>.<a href="/Azure.Core.TestFramework/A.html#4ea6c2ac143d5631" class="i method">AddHeader</a>(<b>new</b> <a href="/Azure.Core/A.html#3df78227d19062f7" class="t constructor">HttpHeader</a>(<span class="s">&quot;Content-Type&quot;</span>, <span class="s">&quot;text/xml&quot;</span>)),
+                <span class="r72 r">maxLength</span>: 5
+            );
+ 
+            <a href="@0@mscorlib/A.html#9317b6858407017e" class="t t">EventWrittenEventArgs</a>[] <span id="r85 rd" class="r85 r">contentEvents</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#5f3e84ebf7a477ba" class="i method">EventsById</a>(<a href="#bf38e4d1c517cc89" class="i field">ResponseContentTextBlockEvent</a>).<a href="@0@System.Core/A.html#783a052330e7d48d" class="i method">ToArray</a>();
+ 
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(1, <span class="r85 r">contentEvents</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>);
+ 
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#238fa91fc75be60e" class="i field">Verbose</a>, <span class="r85 r">contentEvents</span>[0].<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;ResponseContentTextBlock&quot;</span>, <span class="r85 r">contentEvents</span>[0].<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r83 r">response</span>.<a href="/Azure.Core/A.html#0d9a1de2c559a434" class="i property">ClientRequestId</a>, <span class="r85 r">contentEvents</span>[0].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(0, <span class="r85 r">contentEvents</span>[0].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<b>int</b>&gt;(<span class="s">&quot;blockNumber&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;Hello&quot;</span>, <span class="r85 r">contentEvents</span>[0].<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;content&quot;</span>));
+ 
+            <span class="i">CollectionAssert</span>.<span class="i">IsEmpty</span>(<a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#5f3e84ebf7a477ba" class="i method">EventsById</a>(<a href="#f1f7061d72c86878" class="i field">ResponseContentEvent</a>));
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="520705f9f43aea4f" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">HeadersAndQueryParametersAreSanitized</a>()
+        {
+            <a href="/Azure.Core.TestFramework/A.html#df767807e2c243e9" class="k">var</a> <span id="r86 rd" class="r86 r">response</span> = <b>new</b> <a href="/Azure.Core.TestFramework/A.html#ef2adc622c2950d8" class="t constructor">MockResponse</a>(200);
+            <span class="r86 r">response</span>.<a href="/Azure.Core.TestFramework/A.html#7d39b242c3bde3ab" class="i method">SetContent</a>(<b>new</b> <b>byte</b>[] { 6, 7, 8, 9, 0 });
+            <span class="r86 r">response</span>.<a href="/Azure.Core.TestFramework/A.html#4ea6c2ac143d5631" class="i method">AddHeader</a>(<b>new</b> <a href="/Azure.Core/A.html#3df78227d19062f7" class="t constructor">HttpHeader</a>(<span class="s">&quot;Custom-Response-Header&quot;</span>, <span class="s">&quot;Improved value&quot;</span>));
+            <span class="r86 r">response</span>.<a href="/Azure.Core.TestFramework/A.html#4ea6c2ac143d5631" class="i method">AddHeader</a>(<b>new</b> <a href="/Azure.Core/A.html#3df78227d19062f7" class="t constructor">HttpHeader</a>(<span class="s">&quot;Secret-Response-Header&quot;</span>, <span class="s">&quot;Very secret&quot;</span>));
+ 
+            <a href="/Azure.Core.TestFramework/A.html#44bcb3ab7dfe168b" class="t t">MockTransport</a> <span id="r87 rd" class="r87 r">mockTransport</span> = <a href="/Azure.Core.TestFramework/A.html#70a80d26a1de0f5e" class="i method">CreateMockTransport</a>(<span class="r86 r">response</span>);
+ 
+            <a href="/Azure.Core/A.html#ce2f2fae396f36c5" class="k">var</a> <span id="r88 rd" class="r88 r">pipeline</span> = <b>new</b> <a href="/Azure.Core/A.html#bf87c612b38d0825" class="t constructor">HttpPipeline</a>(<span class="r87 r">mockTransport</span>, <b>new</b>[] { <b>new</b> <a href="/Azure.Core/A.html#3209d7f8f2a2cfaa" class="t constructor">LoggingPolicy</a>(<span class="r5 r">logContent</span>: <b>false</b>, <b>int</b>.<a href="@0@mscorlib/A.html#c45153c0501d7122" class="i field">MaxValue</a>, <a href="#c6417f09018e15a5" class="i field">s_allowedHeaders</a>, <a href="#d68c7556d3ce2f5a" class="i field">s_allowedQueryParameters</a>, <span class="s">&quot;Test-SDK&quot;</span>) });
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r89 rd" class="r89 r">requestId</span> = <b>null</b>;
+ 
+            <b>await</b> <span class="i">SendRequestAsync</span>(<span class="r88 r">pipeline</span>, <span id="r90 rd" class="r90 r">request</span> =&gt;
+            {
+                <span class="r90 r">request</span>.<a href="/Azure.Core/A.html#38781a2f20c88339" class="i property">Method</a> = <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#c1939eaa5920682f" class="i property">Get</a>;
+                <span class="r90 r">request</span>.<a href="/Azure.Core/A.html#a3954f29cb1a883c" class="i property">Uri</a>.<a href="/Azure.Core/A.html#79e001a52a92afbe" class="i method">Reset</a>(<b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<span class="s">&quot;https://contoso.a.io?api-version=5&amp;secret=123&quot;</span>));
+                <span class="r90 r">request</span>.<a href="/Azure.Core/A.html#e6c474e362de2358" class="i property">Headers</a>.<a href="/Azure.Core/A.html#c446fa86f8d3ef04" class="i method">Add</a>(<span class="s">&quot;Date&quot;</span>, <span class="s">&quot;3/26/2019&quot;</span>);
+                <span class="r90 r">request</span>.<a href="/Azure.Core/A.html#e6c474e362de2358" class="i property">Headers</a>.<a href="/Azure.Core/A.html#c446fa86f8d3ef04" class="i method">Add</a>(<span class="s">&quot;Custom-Header&quot;</span>, <span class="s">&quot;Value&quot;</span>);
+                <span class="r90 r">request</span>.<a href="/Azure.Core/A.html#e6c474e362de2358" class="i property">Headers</a>.<a href="/Azure.Core/A.html#c446fa86f8d3ef04" class="i method">Add</a>(<span class="s">&quot;Secret-Custom-Header&quot;</span>, <span class="s">&quot;Value&quot;</span>);
+                <span class="r90 r">request</span>.<a href="/Azure.Core/A.html#1517233642d6c203" class="i property">Content</a> = <a href="/Azure.Core/A.html#81cccf3fb8acf2c9" class="t t">RequestContent</a>.<a href="/Azure.Core/A.html#602bc35226bdb1e4" class="i method">Create</a>(<b>new</b> <b>byte</b>[] { 1, 2, 3, 4, 5 });
+                <span class="r89 r">requestId</span> = <span class="r90 r">request</span>.<a href="/Azure.Core/A.html#b180337469e3b6af" class="i property">ClientRequestId</a>;
+            });
+ 
+            <a href="@0@mscorlib/A.html#9317b6858407017e" class="t t">EventWrittenEventArgs</a> <span id="r91 rd" class="r91 r">e</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#70e400064aab89ab" class="i method">SingleEventById</a>(<a href="#3721dfb1590e5c02" class="i field">RequestEvent</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#3f60527050b58a1a" class="i field">Informational</a>, <span class="r91 r">e</span>.<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;Request&quot;</span>, <span class="r91 r">e</span>.<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r89 r">requestId</span>, <span class="r91 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;https://contoso.a.io/?api-version=5&amp;secret=REDACTED&quot;</span>, <span class="r91 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;uri&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;GET&quot;</span>, <span class="r91 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;method&quot;</span>));
+            <span class="i">StringAssert</span>.<span class="i">Contains</span>(<span class="s">$&quot;</span><span class="s">Date:3/26/2019</span>{<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>}<span class="s">&quot;</span>, <span class="r91 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;headers&quot;</span>));
+            <span class="i">StringAssert</span>.<span class="i">Contains</span>(<span class="s">$&quot;</span><span class="s">Custom-Header:Value</span>{<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>}<span class="s">&quot;</span>, <span class="r91 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;headers&quot;</span>));
+            <span class="i">StringAssert</span>.<span class="i">Contains</span>(<span class="s">$&quot;</span><span class="s">Secret-Custom-Header:REDACTED</span>{<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>}<span class="s">&quot;</span>, <span class="r91 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;headers&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;Test-SDK&quot;</span>, <span class="r91 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;clientAssembly&quot;</span>));
+ 
+            <span class="r91 r">e</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#70e400064aab89ab" class="i method">SingleEventById</a>(<a href="#af5bdb78ee9cc026" class="i field">ResponseEvent</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#3f60527050b58a1a" class="i field">Informational</a>, <span class="r91 r">e</span>.<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;Response&quot;</span>, <span class="r91 r">e</span>.<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r89 r">requestId</span>, <span class="r91 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r91 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<b>int</b>&gt;(<span class="s">&quot;status&quot;</span>), 200);
+            <span class="i">StringAssert</span>.<span class="i">Contains</span>(<span class="s">$&quot;</span><span class="s">Custom-Response-Header:Improved value</span>{<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>}<span class="s">&quot;</span>, <span class="r91 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;headers&quot;</span>));
+            <span class="i">StringAssert</span>.<span class="i">Contains</span>(<span class="s">$&quot;</span><span class="s">Secret-Response-Header:REDACTED</span>{<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>}<span class="s">&quot;</span>, <span class="r91 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;headers&quot;</span>));
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="4154a5a4fe41040f" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">HeadersAndQueryParametersAreNotSanitizedWhenStars</a>()
+        {
+            <a href="/Azure.Core.TestFramework/A.html#df767807e2c243e9" class="k">var</a> <span id="r92 rd" class="r92 r">response</span> = <b>new</b> <a href="/Azure.Core.TestFramework/A.html#ef2adc622c2950d8" class="t constructor">MockResponse</a>(200);
+            <span class="r92 r">response</span>.<a href="/Azure.Core.TestFramework/A.html#7d39b242c3bde3ab" class="i method">SetContent</a>(<b>new</b> <b>byte</b>[] { 6, 7, 8, 9, 0 });
+            <span class="r92 r">response</span>.<a href="/Azure.Core.TestFramework/A.html#4ea6c2ac143d5631" class="i method">AddHeader</a>(<b>new</b> <a href="/Azure.Core/A.html#3df78227d19062f7" class="t constructor">HttpHeader</a>(<span class="s">&quot;Custom-Response-Header&quot;</span>, <span class="s">&quot;Improved value&quot;</span>));
+            <span class="r92 r">response</span>.<a href="/Azure.Core.TestFramework/A.html#4ea6c2ac143d5631" class="i method">AddHeader</a>(<b>new</b> <a href="/Azure.Core/A.html#3df78227d19062f7" class="t constructor">HttpHeader</a>(<span class="s">&quot;Secret-Response-Header&quot;</span>, <span class="s">&quot;Very secret&quot;</span>));
+ 
+            <a href="/Azure.Core.TestFramework/A.html#44bcb3ab7dfe168b" class="t t">MockTransport</a> <span id="r93 rd" class="r93 r">mockTransport</span> = <a href="/Azure.Core.TestFramework/A.html#70a80d26a1de0f5e" class="i method">CreateMockTransport</a>(<span class="r92 r">response</span>);
+ 
+            <a href="/Azure.Core/A.html#ce2f2fae396f36c5" class="k">var</a> <span id="r94 rd" class="r94 r">pipeline</span> = <b>new</b> <a href="/Azure.Core/A.html#bf87c612b38d0825" class="t constructor">HttpPipeline</a>(<span class="r93 r">mockTransport</span>, <b>new</b>[] { <b>new</b> <a href="/Azure.Core/A.html#3209d7f8f2a2cfaa" class="t constructor">LoggingPolicy</a>(<span class="r5 r">logContent</span>: <b>false</b>, <b>int</b>.<a href="@0@mscorlib/A.html#c45153c0501d7122" class="i field">MaxValue</a>, <b>new</b>[] { <span class="s">&quot;*&quot;</span> }, <b>new</b>[] { <span class="s">&quot;*&quot;</span> }, <span class="s">&quot;Test-SDK&quot;</span>) });
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r95 rd" class="r95 r">requestId</span> = <b>null</b>;
+ 
+            <b>await</b> <span class="i">SendRequestAsync</span>(<span class="r94 r">pipeline</span>, <span id="r96 rd" class="r96 r">request</span> =&gt;
+            {
+                <span class="r96 r">request</span>.<a href="/Azure.Core/A.html#38781a2f20c88339" class="i property">Method</a> = <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#c1939eaa5920682f" class="i property">Get</a>;
+                <span class="r96 r">request</span>.<a href="/Azure.Core/A.html#a3954f29cb1a883c" class="i property">Uri</a>.<a href="/Azure.Core/A.html#79e001a52a92afbe" class="i method">Reset</a>(<b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<span class="s">&quot;https://contoso.a.io?api-version=5&amp;secret=123&quot;</span>));
+                <span class="r96 r">request</span>.<a href="/Azure.Core/A.html#e6c474e362de2358" class="i property">Headers</a>.<a href="/Azure.Core/A.html#c446fa86f8d3ef04" class="i method">Add</a>(<span class="s">&quot;Date&quot;</span>, <span class="s">&quot;3/26/2019&quot;</span>);
+                <span class="r96 r">request</span>.<a href="/Azure.Core/A.html#e6c474e362de2358" class="i property">Headers</a>.<a href="/Azure.Core/A.html#c446fa86f8d3ef04" class="i method">Add</a>(<span class="s">&quot;Custom-Header&quot;</span>, <span class="s">&quot;Value&quot;</span>);
+                <span class="r96 r">request</span>.<a href="/Azure.Core/A.html#e6c474e362de2358" class="i property">Headers</a>.<a href="/Azure.Core/A.html#c446fa86f8d3ef04" class="i method">Add</a>(<span class="s">&quot;Secret-Custom-Header&quot;</span>, <span class="s">&quot;Value&quot;</span>);
+                <span class="r96 r">request</span>.<a href="/Azure.Core/A.html#1517233642d6c203" class="i property">Content</a> = <a href="/Azure.Core/A.html#81cccf3fb8acf2c9" class="t t">RequestContent</a>.<a href="/Azure.Core/A.html#602bc35226bdb1e4" class="i method">Create</a>(<b>new</b> <b>byte</b>[] { 1, 2, 3, 4, 5 });
+                <span class="r95 r">requestId</span> = <span class="r96 r">request</span>.<a href="/Azure.Core/A.html#b180337469e3b6af" class="i property">ClientRequestId</a>;
+            });
+ 
+            <a href="@0@mscorlib/A.html#9317b6858407017e" class="t t">EventWrittenEventArgs</a> <span id="r97 rd" class="r97 r">e</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#70e400064aab89ab" class="i method">SingleEventById</a>(<a href="#3721dfb1590e5c02" class="i field">RequestEvent</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#3f60527050b58a1a" class="i field">Informational</a>, <span class="r97 r">e</span>.<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;Request&quot;</span>, <span class="r97 r">e</span>.<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r95 r">requestId</span>, <span class="r97 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;https://contoso.a.io/?api-version=5&amp;secret=123&quot;</span>, <span class="r97 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;uri&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;GET&quot;</span>, <span class="r97 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;method&quot;</span>));
+            <span class="i">StringAssert</span>.<span class="i">Contains</span>(<span class="s">$&quot;</span><span class="s">Date:3/26/2019</span>{<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>}<span class="s">&quot;</span>, <span class="r97 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;headers&quot;</span>));
+            <span class="i">StringAssert</span>.<span class="i">Contains</span>(<span class="s">$&quot;</span><span class="s">Custom-Header:Value</span>{<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>}<span class="s">&quot;</span>, <span class="r97 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;headers&quot;</span>));
+            <span class="i">StringAssert</span>.<span class="i">Contains</span>(<span class="s">$&quot;</span><span class="s">Secret-Custom-Header:Value</span>{<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>}<span class="s">&quot;</span>, <span class="r97 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;headers&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;Test-SDK&quot;</span>, <span class="r97 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;clientAssembly&quot;</span>));
+ 
+            <span class="r97 r">e</span> = <a href="#5348573bc4772648" class="i field">_listener</a>.<a href="/Azure.Core.TestFramework/A.html#70e400064aab89ab" class="i method">SingleEventById</a>(<a href="#af5bdb78ee9cc026" class="i field">ResponseEvent</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="@0@mscorlib/A.html#d492a500d07778e6" class="t t">EventLevel</a>.<a href="@0@mscorlib/A.html#3f60527050b58a1a" class="i field">Informational</a>, <span class="r97 r">e</span>.<a href="@0@mscorlib/A.html#7f285a1bf70d2048" class="i property">Level</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;Response&quot;</span>, <span class="r97 r">e</span>.<a href="@0@mscorlib/A.html#75e1a9860a924283" class="i property">EventName</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r95 r">requestId</span>, <span class="r97 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;requestId&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r97 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<b>int</b>&gt;(<span class="s">&quot;status&quot;</span>), 200);
+            <span class="i">StringAssert</span>.<span class="i">Contains</span>(<span class="s">$&quot;</span><span class="s">Custom-Response-Header:Improved value</span>{<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>}<span class="s">&quot;</span>, <span class="r97 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;headers&quot;</span>));
+            <span class="i">StringAssert</span>.<span class="i">Contains</span>(<span class="s">$&quot;</span><span class="s">Secret-Response-Header:Very secret</span>{<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>}<span class="s">&quot;</span>, <span class="r97 r">e</span>.<a href="/Azure.Core.TestFramework/A.html#8a3a70de26684577" class="i method">GetProperty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="s">&quot;headers&quot;</span>));
+        }
+ 
+        <b>private async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a>&gt; <a id="20d8b2c0853ca3bb" href="R/20d8b2c0853ca3bb.html" target="n" data-glyph="76,1" class="i method">SendRequest</a>(<b>bool</b> <span id="r56 rd" class="r56 r">isSeekable</span>, <b>bool</b> <span id="r57 rd" class="r57 r">isError</span>, <a href="@0@mscorlib/A.html#486d58da4553e12d" class="t t">Action</a>&lt;<a href="/Azure.Core.TestFramework/A.html#df767807e2c243e9" class="t t">MockResponse</a>&gt; <span id="r98 rd" class="r98 r">setupRequest</span> = <b>null</b>, <b>int</b> <span id="r72 rd" class="r72 r">maxLength</span> = <b>int</b>.<a href="@0@mscorlib/A.html#c45153c0501d7122" class="i field">MaxValue</a>)
+        {
+            <a href="/Azure.Core.TestFramework/A.html#df767807e2c243e9" class="k">var</a> <span id="r99 rd" class="r99 r">mockResponse</span> = <b>new</b> <a href="/Azure.Core.TestFramework/A.html#ef2adc622c2950d8" class="t constructor">MockResponse</a>(<span class="r57 r">isError</span> ? 500 : 200);
+            <b>byte</b>[] <span id="r100 rd" class="r100 r">responseContent</span> = <a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<span class="s">&quot;Hello world&quot;</span>);
+            <b>if</b> (<span class="r56 r">isSeekable</span>)
+            {
+                <span class="r99 r">mockResponse</span>.<a href="/Azure.Core.TestFramework/A.html#8af7351edb70bada" class="i property">ContentStream</a> = <b>new</b> <a href="@0@mscorlib/A.html#f92fa270fda9a82b" class="t constructor">MemoryStream</a>(<span class="r100 r">responseContent</span>);
+            }
+            <b>else</b>
+            {
+                <span class="r99 r">mockResponse</span>.<a href="/Azure.Core.TestFramework/A.html#8af7351edb70bada" class="i property">ContentStream</a> = <b>new</b> <a href="/Azure.Core.TestFramework/A.html#5fa99dd061dcf578" class="t constructor">NonSeekableMemoryStream</a>(<span class="r100 r">responseContent</span>);
+            }
+            <span class="r98 r">setupRequest</span>?.<a href="@0@mscorlib/A.html#2d4ce5e8c3a9aa80" class="i method">Invoke</a>(<span class="r99 r">mockResponse</span>);
+ 
+            <a href="/Azure.Core.TestFramework/A.html#44bcb3ab7dfe168b" class="t t">MockTransport</a> <span id="r101 rd" class="r101 r">mockTransport</span> = <a href="/Azure.Core.TestFramework/A.html#70a80d26a1de0f5e" class="i method">CreateMockTransport</a>(<span class="r99 r">mockResponse</span>);
+            <a href="/Azure.Core/A.html#ce2f2fae396f36c5" class="k">var</a> <span id="r102 rd" class="r102 r">pipeline</span> = <b>new</b> <a href="/Azure.Core/A.html#bf87c612b38d0825" class="t constructor">HttpPipeline</a>(<span class="r101 r">mockTransport</span>, <b>new</b>[] { <b>new</b> <a href="/Azure.Core/A.html#3209d7f8f2a2cfaa" class="t constructor">LoggingPolicy</a>(<span class="r5 r">logContent</span>: <b>true</b>, <span class="r72 r">maxLength</span>, <a href="#c6417f09018e15a5" class="i field">s_allowedHeaders</a>, <a href="#d68c7556d3ce2f5a" class="i field">s_allowedQueryParameters</a>, <span class="s">&quot;Test-SDK&quot;</span>) });
+ 
+            <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a> <span id="r103 rd" class="r103 r">response</span> = <b>await</b> <a href="/Azure.Core.TestFramework/A.html#c61313e823d173bb" class="i method">SendRequestAsync</a>(<span class="r102 r">pipeline</span>, <span id="r104 rd" class="r104 r">request</span> =&gt;
+            {
+                <span class="r104 r">request</span>.<a href="/Azure.Core/A.html#38781a2f20c88339" class="i property">Method</a> = <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#c1939eaa5920682f" class="i property">Get</a>;
+                <span class="r104 r">request</span>.<a href="/Azure.Core/A.html#a3954f29cb1a883c" class="i property">Uri</a>.<a href="/Azure.Core/A.html#79e001a52a92afbe" class="i method">Reset</a>(<b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<span class="s">&quot;https://contoso.a.io&quot;</span>));
+            });
+ 
+            <b>var</b> <span id="r105 rd" class="r105 r">buffer</span> = <b>new</b> <b>byte</b>[11];
+ 
+            <b>if</b> (<a href="/Azure.Core.TestFramework/A.html#9eb76f6583c95900" class="i property">IsAsync</a>)
+            {
+                <span class="i">Assert</span>.<span class="i">AreEqual</span>(6, <b>await</b> <span class="r103 r">response</span>.<a href="/Azure.Core/A.html#e05b388d35abae58" class="i property">ContentStream</a>.<a href="@0@mscorlib/A.html#63db0f8d08c54a3e" class="i method">ReadAsync</a>(<span class="r105 r">buffer</span>, 5, 6));
+                <span class="i">Assert</span>.<span class="i">AreEqual</span>(5, <b>await</b> <span class="r103 r">response</span>.<a href="/Azure.Core/A.html#e05b388d35abae58" class="i property">ContentStream</a>.<a href="@0@mscorlib/A.html#63db0f8d08c54a3e" class="i method">ReadAsync</a>(<span class="r105 r">buffer</span>, 6, 5));
+                <span class="i">Assert</span>.<span class="i">AreEqual</span>(0, <b>await</b> <span class="r103 r">response</span>.<a href="/Azure.Core/A.html#e05b388d35abae58" class="i property">ContentStream</a>.<a href="@0@mscorlib/A.html#63db0f8d08c54a3e" class="i method">ReadAsync</a>(<span class="r105 r">buffer</span>, 0, 5));
+            }
+            <b>else</b>
+            {
+                <span class="i">Assert</span>.<span class="i">AreEqual</span>(6, <span class="r103 r">response</span>.<a href="/Azure.Core/A.html#e05b388d35abae58" class="i property">ContentStream</a>.<a href="@0@mscorlib/A.html#6fb9c001d7524ba2" class="i method">Read</a>(<span class="r105 r">buffer</span>, 5, 6));
+                <span class="i">Assert</span>.<span class="i">AreEqual</span>(5, <span class="r103 r">response</span>.<a href="/Azure.Core/A.html#e05b388d35abae58" class="i property">ContentStream</a>.<a href="@0@mscorlib/A.html#6fb9c001d7524ba2" class="i method">Read</a>(<span class="r105 r">buffer</span>, 6, 5));
+                <span class="i">Assert</span>.<span class="i">AreEqual</span>(0, <span class="r103 r">response</span>.<a href="/Azure.Core/A.html#e05b388d35abae58" class="i property">ContentStream</a>.<a href="@0@mscorlib/A.html#6fb9c001d7524ba2" class="i method">Read</a>(<span class="r105 r">buffer</span>, 0, 5));
+            }
+ 
+            <b>return</b> <span class="r99 r">mockResponse</span>;
+        }
+ 
+        <b>private class</b> <a id="c8bab4a925d9bfad" href="R/c8bab4a925d9bfad.html" target="n" data-glyph="4,1" class="t t">TokenCredentialStub</a> : <a href="/Azure.Core/A.html#d93a9ffee404e938" class="t t">TokenCredential</a>
+        {
+            <b>public</b> <a id="be4196ce1a19a0a2" href="R/be4196ce1a19a0a2.html" target="n" data-glyph="72,2" class="t constructor">TokenCredentialStub</a>(<a href="@0@mscorlib/A.html#8adbe0476ca899db" class="t t">Func</a>&lt;<a href="/Azure.Core/A.html#9d9eb2813d5fd899" class="t t">TokenRequestContext</a>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>, <a href="/Azure.Core/A.html#b9cb398886850745" class="t t">AccessToken</a>&gt; <span id="r106 rd" class="r106 r">handler</span>, <b>bool</b> <span id="r107 rd" class="r107 r">isAsync</span>)
+            {
+                <b>if</b> (<span class="r107 r">isAsync</span>)
+                {
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> 1998
+                    <a href="#920f3f3bbd72e2f2" class="i field">_getTokenAsyncHandler</a> = <b>async</b> (<span id="r108 rd" class="r108 r">r</span>, <span id="r109 rd" class="r109 r">c</span>) =&gt; <span class="r106 r">handler</span>(<span class="r108 r">r</span>, <span class="r109 r">c</span>);
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> 1998
+                }
+                <b>else</b>
+                {
+                    <a href="#c2dd3bb834394b0b" class="i field">_getTokenHandler</a> = <span class="r106 r">handler</span>;
+                }
+            }
+ 
+            <b>private readonly</b> <a href="@0@mscorlib/A.html#8adbe0476ca899db" class="t t">Func</a>&lt;<a href="/Azure.Core/A.html#9d9eb2813d5fd899" class="t t">TokenRequestContext</a>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>, <span class="i">ValueTask</span>&lt;<a href="/Azure.Core/A.html#b9cb398886850745" class="t t">AccessToken</a>&gt;&gt; <a id="920f3f3bbd72e2f2" href="R/920f3f3bbd72e2f2.html" target="n" data-glyph="46,2" class="i field">_getTokenAsyncHandler</a>;
+            <b>private readonly</b> <a href="@0@mscorlib/A.html#8adbe0476ca899db" class="t t">Func</a>&lt;<a href="/Azure.Core/A.html#9d9eb2813d5fd899" class="t t">TokenRequestContext</a>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>, <a href="/Azure.Core/A.html#b9cb398886850745" class="t t">AccessToken</a>&gt; <a id="c2dd3bb834394b0b" href="R/c2dd3bb834394b0b.html" target="n" data-glyph="46,2" class="i field">_getTokenHandler</a>;
+ 
+            <b>public override</b> <span class="i">ValueTask</span>&lt;<a href="/Azure.Core/A.html#b9cb398886850745" class="t t">AccessToken</a>&gt; <a id="1945058faf2dc51f" href="R/1945058faf2dc51f.html" target="n" data-glyph="72,2" class="i method">GetTokenAsync</a>(<a href="/Azure.Core/A.html#9d9eb2813d5fd899" class="t t">TokenRequestContext</a> <span id="r110 rd" class="r110 r">requestContext</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r111 rd" class="r111 r">cancellationToken</span>)
+                =&gt; <a href="#920f3f3bbd72e2f2" class="i field">_getTokenAsyncHandler</a>(<span class="r110 r">requestContext</span>, <span class="r111 r">cancellationToken</span>);
+ 
+            <b>public override</b> <a href="/Azure.Core/A.html#b9cb398886850745" class="t t">AccessToken</a> <a id="5908b0e6b736c800" href="R/5908b0e6b736c800.html" target="n" data-glyph="72,2" class="i method">GetToken</a>(<a href="/Azure.Core/A.html#9d9eb2813d5fd899" class="t t">TokenRequestContext</a> <span id="r112 rd" class="r112 r">requestContext</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r113 rd" class="r113 r">cancellationToken</span>)
+                =&gt; <a href="#c2dd3bb834394b0b" class="i field">_getTokenHandler</a>(<span class="r112 r">requestContext</span>, <span class="r113 r">cancellationToken</span>);
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

@@ -1,0 +1,235 @@
+﻿<!DOCTYPE html>
+<html><head><title>QueueProcessor.cs</title><link rel="stylesheet" href="../../../styles.css"><script src="../../../scripts.js"></script></head>
+<body class="cB" onload="i(226);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Queues/Shared/Queues/QueueProcessor.cs" target="_top">Shared\Queues\QueueProcessor.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Queues" target="_top">Microsoft.Azure.WebJobs.Extensions.Storage.Queues\src\Microsoft.Azure.WebJobs.Extensions.Storage.Queues.csproj</a> (Microsoft.Azure.WebJobs.Extensions.Storage.Queues)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Globalization</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Queues</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Queues</span>.<span class="i n">Models</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Common</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Executors</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Logging</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i n">Queues</span>
+{
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">STORAGE_WEBJOBS_PUBLIC_QUEUE_PROCESSOR</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> This class defines a strategy used for processing queue messages.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Custom </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#0d92dbb32568bea4" class="t t">QueueProcessor</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> implementations can be registered by implementing</span>
+    <span class="c">///</span><span class="c"> a custom </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../../IQueueProcessorFactory.cs.html#53188dce1c78e31f" class="t t">IQueueProcessorFactory</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+    <b>public class</b> <a id="0d92dbb32568bea4" href="../../R/0d92dbb32568bea4.html" target="n" data-glyph="0,0" class="t t">QueueProcessor</a>
+<span class="k preprocess">#</span><span class="k preprocess">else</span>
+<span class="e">    internal class QueueProcessor
+</span><span class="k preprocess">#</span><span class="k preprocess">endif</span>
+    {
+        <b>private readonly</b> <a href="/Azure.Storage.Queues/A.html#9deade59b6175965" class="t t">QueueClient</a> <a id="6babece71437a495" href="../../R/6babece71437a495.html" target="n" data-glyph="46,1" class="i field">_queue</a>;
+        <b>private readonly</b> <a href="/Azure.Storage.Queues/A.html#9deade59b6175965" class="t t">QueueClient</a> <a id="eaee22237e536f20" href="../../R/eaee22237e536f20.html" target="n" data-glyph="46,1" class="i field">_poisonQueue</a>;
+        <b>private readonly</b> <span class="i">ILogger</span> <a id="964a3aafed4afcd1" href="../../R/964a3aafed4afcd1.html" target="n" data-glyph="46,1" class="i field">_logger</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Constructs a new instance.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">queueProcessorOptions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The options.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>internal protected</b> <a id="46c76f1f339f38c5" href="../../R/46c76f1f339f38c5.html" target="n" data-glyph="75,1" class="t constructor">QueueProcessor</a>(<a href="QueueProcessorOptions.cs.html#7322725ffb9ba882" class="t t">QueueProcessorOptions</a> <span id="r0 rd" class="r0 r">queueProcessorOptions</span>)
+        {
+            <b>if</b> (<span class="r0 r">queueProcessorOptions</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r0 r">queueProcessorOptions</span>));
+            }
+ 
+            <a href="#6babece71437a495" class="i field">_queue</a> = <span class="r0 r">queueProcessorOptions</span>.<a href="QueueProcessorOptions.cs.html#30537feaf1ee3fef" class="i property">Queue</a>;
+            <a href="#eaee22237e536f20" class="i field">_poisonQueue</a> = <span class="r0 r">queueProcessorOptions</span>.<a href="QueueProcessorOptions.cs.html#8ccbe39d111ea0b8" class="i property">PoisonQueue</a>;
+            <a href="#964a3aafed4afcd1" class="i field">_logger</a> = <span class="r0 r">queueProcessorOptions</span>.<a href="QueueProcessorOptions.cs.html#b340f421f10ad951" class="i property">Logger</a>;
+ 
+            <a href="#47d468c1d7f5a22a" class="i property">QueuesOptions</a> = <span class="r0 r">queueProcessorOptions</span>.<a href="QueueProcessorOptions.cs.html#ddc048c1cea6dac8" class="i property">Options</a>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Event raised when a message is added to the poison queue.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public event</b> <span class="i">EventHandler</span>&lt;<a href="PoisonMessageEventArgs.cs.html#c58a7a94e76e400d" class="t t">PoisonMessageEventArgs</a>&gt; <a id="0fd6c50d6d58ed1d" href="../../R/0fd6c50d6d58ed1d.html" target="n" data-glyph="30,1" class="i">MessageAddedToPoisonQueue</a>;
+ 
+        <b>internal</b> <a href="QueuesOptions.cs.html#10aa607ae6dd925f" class="t t">QueuesOptions</a> <a id="47d468c1d7f5a22a" href="../../R/47d468c1d7f5a22a.html" target="n" data-glyph="104,1" class="i property">QueuesOptions</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> This method is called when there is a new message to process, before the job function is invoked.</span>
+        <span class="c">///</span><span class="c"> This allows any preprocessing to take place on the message before processing begins.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">message</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The message to process.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to use</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">True if the message processing should continue, false otherwise.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>internal protected virtual async</b> <span class="i">Task</span>&lt;<b>bool</b>&gt; <a id="288b9822354bf3c6" href="../../R/288b9822354bf3c6.html" target="n" data-glyph="75,1" class="i method">BeginProcessingMessageAsync</a>(<a href="/Azure.Storage.Queues/A.html#eb02c418d8194406" class="t t">QueueMessage</a> <span id="r1 rd" class="r1 r">message</span>, <span class="i">CancellationToken</span> <span id="r2 rd" class="r2 r">cancellationToken</span>)
+        {
+            <b>if</b> (<span class="r1 r">message</span>.<a href="/Azure.Storage.Queues/A.html#6ee72fbe81e89533" class="i property">DequeueCount</a> &gt; <a href="#47d468c1d7f5a22a" class="i property">QueuesOptions</a>.<a href="QueuesOptions.cs.html#f232ede31d29f8a9" class="i property">MaxDequeueCount</a>)
+            {
+                <b>await</b> <a href="#cec78046275b65f3" class="i method">HandlePoisonMessageAsync</a>(<span class="r1 r">message</span>, <span class="r2 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <b>return</b> <b>await</b> <span class="i">Task</span>.<span class="i">FromResult</span>&lt;<b>bool</b>&gt;(<b>false</b>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>return</b> <b>await</b> <span class="i">Task</span>.<span class="i">FromResult</span>&lt;<b>bool</b>&gt;(<b>true</b>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> This method completes processing of the specified message, after the job function has been invoked.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> If the message was processed successfully, the message should be deleted. If message processing failed, the</span>
+        <span class="c">///</span><span class="c"> message should be release back to the queue, or if the maximum dequeue count has been exceeded, the message</span>
+        <span class="c">///</span><span class="c"> should be moved to the poison queue (if poison queue handling is configured for the queue).</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">message</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The message to complete processing for.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">result</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">FunctionResult</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> from the job invocation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to use.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>internal protected virtual async</b> <span class="i">Task</span> <a id="0dc56b002bcd9a37" href="../../R/../../0000000000.html" target="n" data-glyph="75,1" class="i method">CompleteProcessingMessageAsync</a>(<a href="/Azure.Storage.Queues/A.html#eb02c418d8194406" class="t t">QueueMessage</a> <span id="r3 rd" class="r3 r">message</span>, <span class="i">FunctionResult</span> <span id="r4 rd" class="r4 r">result</span>, <span class="i">CancellationToken</span> <span id="r5 rd" class="r5 r">cancellationToken</span>)
+        {
+            <b>if</b> (<span class="r4 r">result</span>.<span class="i">Succeeded</span>)
+            {
+                <b>await</b> <a href="#4ab3ed5c303c6f4b" class="i method">DeleteMessageAsync</a>(<span class="r3 r">message</span>, <span class="r5 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>else</b> <b>if</b> (<a href="#eaee22237e536f20" class="i field">_poisonQueue</a> != <b>null</b>)
+            {
+                <b>if</b> (<span class="r3 r">message</span>.<a href="/Azure.Storage.Queues/A.html#6ee72fbe81e89533" class="i property">DequeueCount</a> &gt;= <a href="#47d468c1d7f5a22a" class="i property">QueuesOptions</a>.<a href="QueuesOptions.cs.html#f232ede31d29f8a9" class="i property">MaxDequeueCount</a>)
+                {
+                    <b>await</b> <a href="#cec78046275b65f3" class="i method">HandlePoisonMessageAsync</a>(<span class="r3 r">message</span>, <span class="r5 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+                <b>else</b>
+                {
+                    <b>await</b> <a href="#53da9c27ef87aa47" class="i method">ReleaseMessageAsync</a>(<span class="r3 r">message</span>, <span class="r4 r">result</span>, <a href="#47d468c1d7f5a22a" class="i property">QueuesOptions</a>.<a href="QueuesOptions.cs.html#041b8c417212edfa" class="i property">VisibilityTimeout</a>, <span class="r5 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+            }
+            <b>else</b>
+            {
+                <span class="c">// For queues without a corresponding poison queue, leave the message invisible when processing</span>
+                <span class="c">// fails to prevent a fast infinite loop.</span>
+                <span class="c">// Specifically, don&#39;t call ReleaseMessage(message)</span>
+            }
+        }
+ 
+        <b>private async</b> <span class="i">Task</span> <a id="cec78046275b65f3" href="../../R/cec78046275b65f3.html" target="n" data-glyph="76,1" class="i method">HandlePoisonMessageAsync</a>(<a href="/Azure.Storage.Queues/A.html#eb02c418d8194406" class="t t">QueueMessage</a> <span id="r6 rd" class="r6 r">message</span>, <span class="i">CancellationToken</span> <span id="r7 rd" class="r7 r">cancellationToken</span>)
+        {
+            <b>if</b> (<a href="#eaee22237e536f20" class="i field">_poisonQueue</a> != <b>null</b>)
+            {
+                <b>await</b> <a href="#e36939e3f6a2bd91" class="i method">CopyMessageToPoisonQueueAsync</a>(<span class="r6 r">message</span>, <a href="#eaee22237e536f20" class="i field">_poisonQueue</a>, <span class="r7 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <b>await</b> <a href="#4ab3ed5c303c6f4b" class="i method">DeleteMessageAsync</a>(<span class="r6 r">message</span>, <span class="r7 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Moves the specified message to the poison queue.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">message</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The poison message.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">poisonQueue</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The poison queue to copy the message to.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r10 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to use.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>protected virtual async</b> <span class="i">Task</span> <a id="e36939e3f6a2bd91" href="../../R/e36939e3f6a2bd91.html" target="n" data-glyph="75,1" class="i method">CopyMessageToPoisonQueueAsync</a>(<a href="/Azure.Storage.Queues/A.html#eb02c418d8194406" class="t t">QueueMessage</a> <span id="r8 rd" class="r8 r">message</span>, <a href="/Azure.Storage.Queues/A.html#9deade59b6175965" class="t t">QueueClient</a> <span id="r9 rd" class="r9 r">poisonQueue</span>, <span class="i">CancellationToken</span> <span id="r10 rd" class="r10 r">cancellationToken</span>)
+        {
+            <b>string</b> <span id="r11 rd" class="r11 r">msg</span> = <b>string</b>.<span class="i">Format</span>(<span class="i">CultureInfo</span>.<span class="i">InvariantCulture</span>, <span class="s">&quot;Message has reached MaxDequeueCount of {0}. Moving message to queue &#39;{1}&#39;.&quot;</span>, <a href="#47d468c1d7f5a22a" class="i property">QueuesOptions</a>.<a href="QueuesOptions.cs.html#f232ede31d29f8a9" class="i property">MaxDequeueCount</a>, <span class="r9 r">poisonQueue</span>.<a href="/Azure.Storage.Queues/A.html#d1847b1478db81e4" class="i property">Name</a>);
+            <a href="#964a3aafed4afcd1" class="i field">_logger</a>?.<span class="i">LogWarning</span>(<span class="r11 r">msg</span>);
+ 
+            <b>await</b> <span class="r9 r">poisonQueue</span>.<span class="i">AddMessageAndCreateIfNotExistsAsync</span>(<span class="r8 r">message</span>.<a href="/Azure.Storage.Queues/A.html#ca6ccb0de2843484" class="i property">Body</a>, <span class="r10 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+            <a href="PoisonMessageEventArgs.cs.html#c58a7a94e76e400d" class="k">var</a> <span id="r12 rd" class="r12 r">eventArgs</span> = <b>new</b> <a href="PoisonMessageEventArgs.cs.html#e0eee934a8fbabe3" class="t constructor">PoisonMessageEventArgs</a>(<span class="r8 r">message</span>, <span class="r9 r">poisonQueue</span>);
+            <a href="#018b171565de4066" class="i method">OnMessageAddedToPoisonQueue</a>(<span class="r12 r">eventArgs</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Release the specified failed message back to the queue.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">message</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The message to release</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r14 r">result</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">FunctionResult</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> from the job invocation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">visibilityTimeout</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The visibility timeout to set for the message.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r16 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to use.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>protected virtual async</b> <span class="i">Task</span> <a id="53da9c27ef87aa47" href="../../R/53da9c27ef87aa47.html" target="n" data-glyph="75,1" class="i method">ReleaseMessageAsync</a>(<a href="/Azure.Storage.Queues/A.html#eb02c418d8194406" class="t t">QueueMessage</a> <span id="r13 rd" class="r13 r">message</span>, <span class="i">FunctionResult</span> <span id="r14 rd" class="r14 r">result</span>, <span class="i">TimeSpan</span> <span id="r15 rd" class="r15 r">visibilityTimeout</span>, <span class="i">CancellationToken</span> <span id="r16 rd" class="r16 r">cancellationToken</span>)
+        {
+            <b>try</b>
+            {
+                <span class="c">// We couldn&#39;t process the message. Let someone else try.</span>
+                <b>await</b> <a href="#6babece71437a495" class="i field">_queue</a>.<span class="i">UpdateMessageAsync</span>(<span class="r13 r">message</span>.<a href="/Azure.Storage.Queues/A.html#19218602eec807e8" class="i property">MessageId</a>, <span class="r13 r">message</span>.<a href="/Azure.Storage.Queues/A.html#93c530edee4e3735" class="i property">PopReceipt</a>, <span class="i">visibilityTimeout</span>: <span class="r15 r">visibilityTimeout</span>, <span class="i">cancellationToken</span>: <span class="r16 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>catch</b> (<span class="i">RequestFailedException</span> <span id="r17 rd" class="r17 r">exception</span>)
+            {
+                <b>if</b> (<span class="r17 r">exception</span>.<a href="../RequestFailedExceptionExtensions.cs.html#6b724012d65c4303" class="i method">IsBadRequestPopReceiptMismatch</a>())
+                {
+                    <span class="c">// Someone else already took over the message; no need to do anything.</span>
+                    <b>return</b>;
+                }
+                <b>else</b> <b>if</b> (<span class="r17 r">exception</span>.<a href="../RequestFailedExceptionExtensions.cs.html#85d9be76af2d440c" class="i method">IsNotFoundMessageOrQueueNotFound</a>() ||
+                         <span class="r17 r">exception</span>.<a href="../RequestFailedExceptionExtensions.cs.html#61397ad582828081" class="i method">IsConflictQueueBeingDeletedOrDisabled</a>())
+                {
+                    <span class="c">// The message or queue is gone, or the queue is down; no need to release the message.</span>
+                    <b>return</b>;
+                }
+                <b>else</b>
+                {
+                    <b>throw</b>;
+                }
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Delete the specified message.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r18 r">message</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The message to delete.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r19 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to use.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>protected virtual async</b> <span class="i">Task</span> <a id="4ab3ed5c303c6f4b" href="../../R/4ab3ed5c303c6f4b.html" target="n" data-glyph="75,1" class="i method">DeleteMessageAsync</a>(<a href="/Azure.Storage.Queues/A.html#eb02c418d8194406" class="t t">QueueMessage</a> <span id="r18 rd" class="r18 r">message</span>, <span class="i">CancellationToken</span> <span id="r19 rd" class="r19 r">cancellationToken</span>)
+        {
+            <b>try</b>
+            {
+                <b>await</b> <a href="#6babece71437a495" class="i field">_queue</a>.<span class="i">DeleteMessageAsync</span>(<span class="r18 r">message</span>.<a href="/Azure.Storage.Queues/A.html#19218602eec807e8" class="i property">MessageId</a>, <span class="r18 r">message</span>.<a href="/Azure.Storage.Queues/A.html#93c530edee4e3735" class="i property">PopReceipt</a>, <span class="r19 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>catch</b> (<span class="i">RequestFailedException</span> <span id="r20 rd" class="r20 r">exception</span>)
+            {
+                <span class="c">// For consistency, the exceptions handled here should match UpdateQueueMessageVisibilityCommand.</span>
+                <b>if</b> (<span class="r20 r">exception</span>.<a href="../RequestFailedExceptionExtensions.cs.html#6b724012d65c4303" class="i method">IsBadRequestPopReceiptMismatch</a>())
+                {
+                    <span class="c">// If someone else took over the message; let them delete it.</span>
+                    <b>string</b> <span id="r21 rd" class="r21 r">msg</span> = <span class="s">$&quot;</span><span class="s">Unable to delete queue message &#39;</span>{<span class="r18 r">message</span>.<a href="/Azure.Storage.Queues/A.html#19218602eec807e8" class="i property">MessageId</a>}<span class="s">&#39; because the </span>{<b>nameof</b>(<a href="/Azure.Storage.Queues/A.html#eb02c418d8194406" class="t t">QueueMessage</a>.<a href="/Azure.Storage.Queues/A.html#93c530edee4e3735" class="i property">PopReceipt</a>)}<span class="s"> did not match. This could indicate that the function has modified the message and may be expected.</span><span class="s">&quot;</span>;
+                    <a href="#964a3aafed4afcd1" class="i field">_logger</a>.<span class="i">LogDebug</span>(<span class="r21 r">msg</span>);
+                    <b>return</b>;
+                }
+                <b>else</b> <b>if</b> (<span class="r20 r">exception</span>.<a href="../RequestFailedExceptionExtensions.cs.html#85d9be76af2d440c" class="i method">IsNotFoundMessageOrQueueNotFound</a>())
+                {
+                    <b>string</b> <span id="r22 rd" class="r22 r">msg</span> = <span class="s">$&quot;</span><span class="s">Unable to delete queue message &#39;</span>{<span class="r18 r">message</span>.<a href="/Azure.Storage.Queues/A.html#19218602eec807e8" class="i property">MessageId</a>}<span class="s">&#39; because either the message or the queue &#39;</span>{<a href="#6babece71437a495" class="i field">_queue</a>.<a href="/Azure.Storage.Queues/A.html#d1847b1478db81e4" class="i property">Name</a>}<span class="s">&#39; was not found.</span><span class="s">&quot;</span>;
+                    <a href="#964a3aafed4afcd1" class="i field">_logger</a>.<span class="i">LogDebug</span>(<span class="r22 r">msg</span>);
+                }
+                <b>else</b> <b>if</b> (<span class="r20 r">exception</span>.<a href="../RequestFailedExceptionExtensions.cs.html#61397ad582828081" class="i method">IsConflictQueueBeingDeletedOrDisabled</a>())
+                {
+                    <span class="c">// The message or queue is gone, or the queue is down; no need to delete the message.</span>
+                    <b>string</b> <span id="r23 rd" class="r23 r">msg</span> = <span class="s">$&quot;</span><span class="s">Unable to delete queue message &#39;</span>{<span class="r18 r">message</span>.<a href="/Azure.Storage.Queues/A.html#19218602eec807e8" class="i property">MessageId</a>}<span class="s">&#39; because the queue `</span>{<a href="#6babece71437a495" class="i field">_queue</a>.<a href="/Azure.Storage.Queues/A.html#d1847b1478db81e4" class="i property">Name</a>}<span class="s">` is either disabled or being deleted.</span><span class="s">&quot;</span>;
+                    <a href="#964a3aafed4afcd1" class="i field">_logger</a>.<span class="i">LogDebug</span>(<span class="r23 r">msg</span>);
+                    <b>return</b>;
+                }
+                <b>else</b>
+                {
+                    <b>throw</b>;
+                }
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Called to raise the MessageAddedToPoisonQueue event.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r24 r">e</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The event arguments.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>protected internal virtual void</b> <a id="018b171565de4066" href="../../R/018b171565de4066.html" target="n" data-glyph="75,1" class="i method">OnMessageAddedToPoisonQueue</a>(<a href="PoisonMessageEventArgs.cs.html#c58a7a94e76e400d" class="t t">PoisonMessageEventArgs</a> <span id="r24 rd" class="r24 r">e</span>)
+        {
+            <a href="#0fd6c50d6d58ed1d" class="i">MessageAddedToPoisonQueue</a>?.<span class="i">Invoke</span>(<a href="#0d92dbb32568bea4" class="k">this</a>, <span class="r24 r">e</span>);
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

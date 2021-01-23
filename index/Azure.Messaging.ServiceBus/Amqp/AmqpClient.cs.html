@@ -1,0 +1,277 @@
+﻿<!DOCTYPE html>
+<html><head><title>AmqpClient.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(268);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Messaging.ServiceBus/Amqp/AmqpClient.cs" target="_top">Amqp\AmqpClient.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Messaging.ServiceBus" target="_top">src\Azure.Messaging.ServiceBus.csproj</a> (Azure.Messaging.ServiceBus)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Security</span>.<span class="i">Authentication</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>.<span class="i n">Authorization</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>.<span class="i n">Core</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>.<span class="i n">Amqp</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">   A transport client abstraction responsible for brokering operations for AMQP-based connections.</span>
+    <span class="c">///</span><span class="c">   It is intended that the public </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Primitives/ServiceBusConnection.cs.html#5fc67fb7b5056bea" class="t t">ServiceBusConnection</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> make use of an instance via containment</span>
+    <span class="c">///</span><span class="c">   and delegate operations to it.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>.<span class="i n">Core</span>.<a href="../Core/TransportClient.cs.html#1e482fe9c3dcc163" class="t t">TransportClient</a><span class="c">&quot;</span> <span class="c">/&gt;</span>
+    <span class="c">///</span>
+    <b>internal class</b> <a id="9f0f1c6c2e39b9c2" href="../R/9f0f1c6c2e39b9c2.html" target="n" data-glyph="2,0" class="t t">AmqpClient</a> : <a href="../Core/TransportClient.cs.html#1e482fe9c3dcc163" class="t t">TransportClient</a>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The buffer to apply when considering refreshing; credentials that expire less than this duration will be refreshed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static</b> <span class="i">TimeSpan</span> <a id="8c899f8cd6d2e26a" href="../R/8c899f8cd6d2e26a.html" target="n" data-glyph="106,1" class="i property">CredentialRefreshBuffer</a> { <b>get</b>; } = <span class="i">TimeSpan</span>.<span class="i">FromMinutes</span>(5);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">Indicates whether or not this instance has been closed.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private bool</b> <a id="24199e07f87bb651" href="../R/24199e07f87bb651.html" target="n" data-glyph="46,1" class="i field">_closed</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The currently active token to use for authorization with the Service Bus service.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private</b> <span class="i">AccessToken</span> <a id="eec4a989f8cce9e3" href="../R/eec4a989f8cce9e3.html" target="n" data-glyph="46,1" class="i field">_accessToken</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Indicates whether or not this client has been closed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the client is closed; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override bool</b> <a id="aacc17441431ec45" href="../R/aacc17441431ec45.html" target="n" data-glyph="102,1" class="i property">IsClosed</a> =&gt; <a href="#24199e07f87bb651" class="i field">_closed</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The endpoint for the Service Bus service to which the client is associated.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override</b> <span class="i">Uri</span> <a id="513326bb12e96584" href="../R/513326bb12e96584.html" target="n" data-glyph="102,1" class="i property">ServiceEndpoint</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Gets the credential to use for authorization with the Service Bus service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <a href="../Authorization/ServiceBusTokenCredential.cs.html#e09f4bf6aa653648" class="t t">ServiceBusTokenCredential</a> <a id="9dbd7b9176970ec7" href="../R/9dbd7b9176970ec7.html" target="n" data-glyph="106,1" class="i property">Credential</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The AMQP connection scope responsible for managing transport constructs for this instance.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <a href="AmqpConnectionScope.cs.html#58b30bb4c5b0d61d" class="t t">AmqpConnectionScope</a> <a id="ab8cfde6048380f7" href="../R/ab8cfde6048380f7.html" target="n" data-glyph="106,1" class="i property">ConnectionScope</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#9f0f1c6c2e39b9c2" class="t t">AmqpClient</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">host</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The fully qualified host name for the Service Bus namespace.  This is likely to be similar to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">{yournamespace}.servicebus.windows.net</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">credential</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The Azure managed identity credential to use for authorization.  Access controls may be specified by the Service Bus namespace or the requested Service Bus entity, depending on Azure configuration.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">options</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A set of options to apply when configuring the client.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   As an internal type, this class performs only basic sanity checks against its arguments.  It</span>
+        <span class="c">///</span><span class="c">   is assumed that callers are trusted and have performed deep validation.</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c">   Any parameters passed are assumed to be owned by this instance and safe to mutate or dispose;</span>
+        <span class="c">///</span><span class="c">   creation of clones or otherwise protecting the parameters is assumed to be the purview of the</span>
+        <span class="c">///</span><span class="c">   caller.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal</b> <a id="245773fd39821bba" href="../R/245773fd39821bba.html" target="n" data-glyph="74,1" class="t constructor">AmqpClient</a>(
+            <b>string</b> <span id="r0 rd" class="r0 r">host</span>,
+            <a href="../Authorization/ServiceBusTokenCredential.cs.html#e09f4bf6aa653648" class="t t">ServiceBusTokenCredential</a> <span id="r1 rd" class="r1 r">credential</span>,
+            <a href="../Client/ServiceBusClientOptions.cs.html#5281daacdf25ac92" class="t t">ServiceBusClientOptions</a> <span id="r2 rd" class="r2 r">options</span>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r0 r">host</span>, <b>nameof</b>(<span class="r0 r">host</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r1 r">credential</span>, <b>nameof</b>(<span class="r1 r">credential</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r2 r">options</span>, <b>nameof</b>(<span class="r2 r">options</span>));
+ 
+            <a href="#513326bb12e96584" class="i property">ServiceEndpoint</a> = <b>new</b> <span class="i">UriBuilder</span>
+            {
+                <span class="i">Scheme</span> = <span class="r2 r">options</span>.<a href="../Client/ServiceBusClientOptions.cs.html#beccbe5f47fe4d95" class="i property">TransportType</a>.<a href="../Core/TransportTypeExtensions.cs.html#4d70475a72015f55" class="i method">GetUriScheme</a>(),
+                <span class="i">Host</span> = <span class="r0 r">host</span>
+            }.<span class="i">Uri</span>;
+ 
+            <a href="#9dbd7b9176970ec7" class="i property">Credential</a> = <span class="r1 r">credential</span>;
+            <a href="#ab8cfde6048380f7" class="i property">ConnectionScope</a> = <b>new</b> <a href="AmqpConnectionScope.cs.html#cd88170354d6a0f4" class="t constructor">AmqpConnectionScope</a>(
+                <a href="#513326bb12e96584" class="i property">ServiceEndpoint</a>,
+                <span class="r1 r">credential</span>,
+                <span class="r2 r">options</span>.<a href="../Client/ServiceBusClientOptions.cs.html#beccbe5f47fe4d95" class="i property">TransportType</a>,
+                <span class="r2 r">options</span>.<a href="../Client/ServiceBusClientOptions.cs.html#91c69f48952f0b0c" class="i property">WebProxy</a>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Creates a producer strongly aligned with the active protocol and transport,</span>
+        <span class="c">///</span><span class="c">   responsible for publishing </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> to the Service Bus entity.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">entityPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The entity path to send the message to.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The policy which governs retry behavior and try timeouts.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">identifier</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The identifier for the sender.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Core/TransportSender.cs.html#c54f19921ea3dbe2" class="t t">TransportSender</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> configured in the requested manner.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public override</b> <a href="../Core/TransportSender.cs.html#c54f19921ea3dbe2" class="t t">TransportSender</a> <a id="9cf31bf888ad91ac" href="../R/9cf31bf888ad91ac.html" target="n" data-glyph="72,1" class="i method">CreateSender</a>(
+            <b>string</b> <span id="r3 rd" class="r3 r">entityPath</span>,
+            <a href="../Primitives/ServiceBusRetryPolicy.cs.html#d0d6be7ac57eb9c9" class="t t">ServiceBusRetryPolicy</a> <span id="r4 rd" class="r4 r">retryPolicy</span>,
+            <b>string</b> <span id="r5 rd" class="r5 r">identifier</span>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Core/Argument.cs.html#ad31cdc7051f5f26" class="i method">AssertNotDisposed</a>(<a href="#24199e07f87bb651" class="i field">_closed</a>, <b>nameof</b>(<a href="#9f0f1c6c2e39b9c2" class="t t">AmqpClient</a>));
+ 
+            <b>return</b> <b>new</b> <a href="AmqpSender.cs.html#381c9b3248641e26" class="t constructor">AmqpSender</a>
+            (
+                <span class="r3 r">entityPath</span>,
+                <a href="#ab8cfde6048380f7" class="i property">ConnectionScope</a>,
+                <span class="r4 r">retryPolicy</span>,
+                <span class="r5 r">identifier</span>
+            );
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Creates a consumer strongly aligned with the active protocol and transport, responsible</span>
+        <span class="c">///</span><span class="c">   for reading </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> from a specific Service Bus entity.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">entityPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The policy which governs retry behavior and try timeouts.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">receiveMode</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Receiver/ServiceBusReceiveMode.cs.html#baa558d5ec869168" class="t t">ServiceBusReceiveMode</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> used to specify how messages are received. Defaults to PeekLock mode.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">prefetchCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Controls the number of events received and queued locally without regard to whether an operation was requested.  If </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> a default will be used.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r10 r">identifier</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r11 r">sessionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">isSessionReceiver</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Core/TransportReceiver.cs.html#1b072fa1ddd22c6a" class="t t">TransportReceiver</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> configured in the requested manner.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override</b> <a href="../Core/TransportReceiver.cs.html#1b072fa1ddd22c6a" class="t t">TransportReceiver</a> <a id="018c6104465ba434" href="../R/018c6104465ba434.html" target="n" data-glyph="72,1" class="i method">CreateReceiver</a>(
+            <b>string</b> <span id="r6 rd" class="r6 r">entityPath</span>,
+            <a href="../Primitives/ServiceBusRetryPolicy.cs.html#d0d6be7ac57eb9c9" class="t t">ServiceBusRetryPolicy</a> <span id="r7 rd" class="r7 r">retryPolicy</span>,
+            <a href="../Receiver/ServiceBusReceiveMode.cs.html#baa558d5ec869168" class="t t">ServiceBusReceiveMode</a> <span id="r8 rd" class="r8 r">receiveMode</span>,
+            <b>uint</b> <span id="r9 rd" class="r9 r">prefetchCount</span>,
+            <b>string</b> <span id="r10 rd" class="r10 r">identifier</span>,
+            <b>string</b> <span id="r11 rd" class="r11 r">sessionId</span>,
+            <b>bool</b> <span id="r12 rd" class="r12 r">isSessionReceiver</span>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Core/Argument.cs.html#ad31cdc7051f5f26" class="i method">AssertNotDisposed</a>(<a href="#24199e07f87bb651" class="i field">_closed</a>, <b>nameof</b>(<a href="#9f0f1c6c2e39b9c2" class="t t">AmqpClient</a>));
+ 
+            <b>return</b> <b>new</b> <a href="AmqpReceiver.cs.html#01f5fcce7dfb4904" class="t constructor">AmqpReceiver</a>
+            (
+                <span class="r6 r">entityPath</span>,
+                <span class="r8 r">receiveMode</span>,
+                <span class="r9 r">prefetchCount</span>,
+                <a href="#ab8cfde6048380f7" class="i property">ConnectionScope</a>,
+                <span class="r7 r">retryPolicy</span>,
+                <span class="r10 r">identifier</span>,
+                <span class="r11 r">sessionId</span>,
+                <span class="r12 r">isSessionReceiver</span>
+            );
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Creates a rule manager strongly aligned with the active protocol and transport,</span>
+        <span class="c">///</span><span class="c">   responsible for adding, removing and getting rules from the Service Bus subscription.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">subscriptionPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The path of the Service Bus subscription to which the rule manager is bound.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r14 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The policy which governs retry behavior and try timeouts.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">identifier</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The identifier for the rule manager.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Core/TransportRuleManager.cs.html#756a3d383b80bb40" class="t t">TransportRuleManager</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> configured in the requested manner.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public override</b> <a href="../Core/TransportRuleManager.cs.html#756a3d383b80bb40" class="t t">TransportRuleManager</a> <a id="65ae41b89fc8ac23" href="../R/65ae41b89fc8ac23.html" target="n" data-glyph="72,1" class="i method">CreateRuleManager</a>(
+            <b>string</b> <span id="r13 rd" class="r13 r">subscriptionPath</span>,
+            <a href="../Primitives/ServiceBusRetryPolicy.cs.html#d0d6be7ac57eb9c9" class="t t">ServiceBusRetryPolicy</a> <span id="r14 rd" class="r14 r">retryPolicy</span>,
+            <b>string</b> <span id="r15 rd" class="r15 r">identifier</span>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Core/Argument.cs.html#ad31cdc7051f5f26" class="i method">AssertNotDisposed</a>(<a href="#24199e07f87bb651" class="i field">_closed</a>, <b>nameof</b>(<a href="#9f0f1c6c2e39b9c2" class="t t">AmqpClient</a>));
+ 
+            <b>return</b> <b>new</b> <a href="AmqpRuleManager.cs.html#4521ed431d44e8cb" class="t constructor">AmqpRuleManager</a>
+            (
+                <span class="r13 r">subscriptionPath</span>,
+                <a href="#ab8cfde6048380f7" class="i property">ConnectionScope</a>,
+                <span class="r14 r">retryPolicy</span>,
+                <span class="r15 r">identifier</span>
+            );
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Closes the connection to the transport client instance.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r16 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override</b> <span class="i">Task</span> <a id="90a06210ed9eb776" href="../R/90a06210ed9eb776.html" target="n" data-glyph="72,1" class="i method">CloseAsync</a>(<span class="i">CancellationToken</span> <span id="r16 rd" class="r16 r">cancellationToken</span>)
+        {
+            <b>if</b> (<a href="#24199e07f87bb651" class="i field">_closed</a>)
+            {
+                <b>return</b> <span class="i">Task</span>.<span class="i">CompletedTask</span>;
+            }
+ 
+            <a href="#24199e07f87bb651" class="i field">_closed</a> = <b>true</b>;
+ 
+            <b>try</b>
+            {
+                <span class="r16 r">cancellationToken</span>.<a href="../Core/CancellationTokenExtensions.cs.html#02fb1f7bead5539d" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+                <a href="#ab8cfde6048380f7" class="i property">ConnectionScope</a>?.<a href="AmqpConnectionScope.cs.html#0f202d7c95508350" class="i method">Dispose</a>();
+                <b>return</b> <span class="i">Task</span>.<span class="i">CompletedTask</span>;
+            }
+            <b>catch</b> (<span class="i">Exception</span>)
+            {
+                <a href="#24199e07f87bb651" class="i field">_closed</a> = <b>false</b>;
+                <b>throw</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Acquires an access token for authorization with the Service Bus service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The token to use for service authorization.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private async</b> <span class="i">Task</span>&lt;<b>string</b>&gt; <a id="fe32817ed9e93e6d" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">AcquireAccessTokenAsync</a>(<span class="i">CancellationToken</span> <span id="r17 rd" class="r17 r">cancellationToken</span>)
+        {
+            <span class="r17 r">cancellationToken</span>.<a href="../Core/CancellationTokenExtensions.cs.html#02fb1f7bead5539d" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+ 
+            <span class="i">AccessToken</span> <span id="r18 rd" class="r18 r">activeToken</span> = <a href="#eec4a989f8cce9e3" class="i field">_accessToken</a>;
+ 
+            <span class="c">// If there was no current token, or it is within the buffer for expiration, request a new token.</span>
+            <span class="c">// There is a benign race condition here, where there may be multiple requests in-flight for a new token.  Since</span>
+            <span class="c">// overlapping requests should be within a small window, allow the acquired token to replace the current one without</span>
+            <span class="c">// attempting to coordinate or ensure that the most recent is kept.</span>
+ 
+            <b>if</b> ((<b>string</b>.<span class="i">IsNullOrEmpty</span>(<span class="r18 r">activeToken</span>.<span class="i">Token</span>)) || (<span class="r18 r">activeToken</span>.<span class="i">ExpiresOn</span> &lt;= <span class="i">DateTimeOffset</span>.<span class="i">UtcNow</span>.<span class="i">Add</span>(<a href="#8c899f8cd6d2e26a" class="i property">CredentialRefreshBuffer</a>)))
+            {
+                <span class="r18 r">activeToken</span> = <b>await</b> <a href="#9dbd7b9176970ec7" class="i property">Credential</a>.<a href="../Authorization/ServiceBusTokenCredential.cs.html#8552d2411044b35b" class="i method">GetTokenUsingDefaultScopeAsync</a>(<span class="r17 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <b>if</b> ((<b>string</b>.<span class="i">IsNullOrEmpty</span>(<span class="r18 r">activeToken</span>.<span class="i">Token</span>)))
+                {
+                    <b>throw</b> <b>new</b> <span class="i">AuthenticationException</span>(<a href="../Resources.Designer.cs.html#7e6b2ac45384f6a8" class="t t">Resources</a>.<a href="../Resources.Designer.cs.html#12ec2b402ff00757" class="i property">CouldNotAcquireAccessToken</a>);
+                }
+ 
+                <a href="#eec4a989f8cce9e3" class="i field">_accessToken</a> = <span class="r18 r">activeToken</span>;
+            }
+ 
+            <b>return</b> <span class="r18 r">activeToken</span>.<span class="i">Token</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Uses the minimum value of the two specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">TimeSpan</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> instances.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r19 r">firstOption</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The first option to consider.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r20 r">secondOption</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The second option to consider.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static</b> <span class="i">TimeSpan</span> <a id="dd74b4ddda106a29" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">UseMinimum</a>(<span class="i">TimeSpan</span> <span id="r19 rd" class="r19 r">firstOption</span>,
+                                           <span class="i">TimeSpan</span> <span id="r20 rd" class="r20 r">secondOption</span>) =&gt; (<span class="r19 r">firstOption</span> &lt; <span class="r20 r">secondOption</span>) ? <span class="r19 r">firstOption</span> : <span class="r20 r">secondOption</span>;
+    }
+}
+</pre></td></tr></table></div></body></html>

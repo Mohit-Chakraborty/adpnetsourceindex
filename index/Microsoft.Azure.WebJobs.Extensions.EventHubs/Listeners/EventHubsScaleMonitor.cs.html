@@ -1,0 +1,309 @@
+﻿<!DOCTYPE html>
+<html><head><title>EventHubsScaleMonitor.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(300);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.EventHubs/Listeners/EventHubsScaleMonitor.cs" target="_top">Listeners\EventHubsScaleMonitor.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.EventHubs" target="_top">src\Microsoft.Azure.WebJobs.Extensions.EventHubs.csproj</a> (Microsoft.Azure.WebJobs.Extensions.EventHubs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) .NET Foundation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Linq</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Primitives</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Processor</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i">Host</span>.<span class="i">Scale</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Logging</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">EventHubs</span>.<span class="i n">Listeners</span>
+{
+    <b>internal class</b> <a id="9eea28105f8cf94e" href="../R/9eea28105f8cf94e.html" target="n" data-glyph="2,0" class="t t">EventHubsScaleMonitor</a> : <span class="i">IScaleMonitor</span>&lt;<a href="EventHubsTriggerMetrics.cs.html#dadafd2cf8d41bfe" class="t t">EventHubsTriggerMetrics</a>&gt;
+    {
+        <b>private const int</b> <a id="da8c4d70c199a023" href="../R/da8c4d70c199a023.html" target="n" data-glyph="10,1" class="i field">PartitionLogIntervalInMinutes</a> = 5;
+ 
+        <b>private readonly string</b> <a id="52bfed5f94d89405" href="../R/52bfed5f94d89405.html" target="n" data-glyph="46,1" class="i field">_functionId</a>;
+        <b>private readonly</b> <a href="../IEventHubConsumerClient.cs.html#c3b58af628117e60" class="t t">IEventHubConsumerClient</a> <a id="a8cd02f28bae9a5e" href="../R/a8cd02f28bae9a5e.html" target="n" data-glyph="46,1" class="i field">_client</a>;
+        <b>private readonly</b> <span class="i">ILogger</span> <a id="21463f97de0b286c" href="../R/21463f97de0b286c.html" target="n" data-glyph="46,1" class="i field">_logger</a>;
+        <b>private readonly</b> <a href="../P/fd9aa4b94caeba25.html#fd9aa4b94caeba25" class="t t">BlobsCheckpointStore</a> <a id="68432308d86af00b" href="../R/68432308d86af00b.html" target="n" data-glyph="46,1" class="i field">_checkpointStore</a>;
+ 
+        <b>private</b> <span class="i">DateTime</span> <a id="7b2114d0a6fc1dab" href="../R/7b2114d0a6fc1dab.html" target="n" data-glyph="46,1" class="i field">_nextPartitionLogTime</a>;
+        <b>private</b> <span class="i">DateTime</span> <a id="fa2572966c5cdebc" href="../R/fa2572966c5cdebc.html" target="n" data-glyph="46,1" class="i field">_nextPartitionWarningTime</a>;
+ 
+        <b>public</b> <a id="72e7834a3f93cdc1" href="../R/72e7834a3f93cdc1.html" target="n" data-glyph="72,1" class="t constructor">EventHubsScaleMonitor</a>(
+            <b>string</b> <span id="r0 rd" class="r0 r">functionId</span>,
+            <a href="../IEventHubConsumerClient.cs.html#c3b58af628117e60" class="t t">IEventHubConsumerClient</a> <span id="r1 rd" class="r1 r">client</span>,
+            <a href="../P/fd9aa4b94caeba25.html#fd9aa4b94caeba25" class="t t">BlobsCheckpointStore</a> <span id="r2 rd" class="r2 r">checkpointStore</span>,
+            <span class="i">ILogger</span> <span id="r3 rd" class="r3 r">logger</span>)
+        {
+            <a href="#52bfed5f94d89405" class="i field">_functionId</a> = <span class="r0 r">functionId</span>;
+            <a href="#21463f97de0b286c" class="i field">_logger</a> = <span class="r3 r">logger</span>;
+            <a href="#68432308d86af00b" class="i field">_checkpointStore</a> = <span class="r2 r">checkpointStore</span>;
+            <a href="#7b2114d0a6fc1dab" class="i field">_nextPartitionLogTime</a> = <span class="i">DateTime</span>.<span class="i">UtcNow</span>;
+            <a href="#fa2572966c5cdebc" class="i field">_nextPartitionWarningTime</a> = <span class="i">DateTime</span>.<span class="i">UtcNow</span>;
+            <a href="#a8cd02f28bae9a5e" class="i field">_client</a> = <span class="r1 r">client</span>;
+ 
+            <a href="#d8e89251c44a76ae" class="i property">Descriptor</a> = <b>new</b> <span class="i">ScaleMonitorDescriptor</span>(<span class="s">$&quot;</span>{<a href="#52bfed5f94d89405" class="i field">_functionId</a>}<span class="s">-EventHubTrigger-</span>{<a href="#a8cd02f28bae9a5e" class="i field">_client</a>.<a href="../IEventHubConsumerClient.cs.html#42006ee4f5da57aa" class="i property">EventHubName</a>}<span class="s">-</span>{<a href="#a8cd02f28bae9a5e" class="i field">_client</a>.<a href="../IEventHubConsumerClient.cs.html#38780187b06aa877" class="i property">ConsumerGroup</a>}<span class="s">&quot;</span>.<span class="i">ToLowerInvariant</span>());
+        }
+ 
+        <b>public</b> <span class="i">ScaleMonitorDescriptor</span> <a id="d8e89251c44a76ae" href="../R/d8e89251c44a76ae.html" target="n" data-glyph="102,1" class="i property">Descriptor</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Returns the state of the event hub for scaling purposes.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>async</b> <span class="i">Task</span>&lt;<span class="i">ScaleMetrics</span>&gt; <span class="i">IScaleMonitor</span>.<a id="f987f1f84ab3892b" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">GetMetricsAsync</a>()
+        {
+            <b>return</b> <b>await</b> <a href="#aab491d64875b8fe" class="i method">GetMetricsAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+        }
+ 
+        <b>public async</b> <span class="i">Task</span>&lt;<a href="EventHubsTriggerMetrics.cs.html#dadafd2cf8d41bfe" class="t t">EventHubsTriggerMetrics</a>&gt; <a id="aab491d64875b8fe" href="../R/aab491d64875b8fe.html" target="n" data-glyph="72,1" class="i method">GetMetricsAsync</a>()
+        {
+            <a href="EventHubsTriggerMetrics.cs.html#dadafd2cf8d41bfe" class="t t">EventHubsTriggerMetrics</a> <span id="r4 rd" class="r4 r">metrics</span> = <b>new</b> <span class="t">EventHubsTriggerMetrics</span>();
+            <b>string</b>[] <span id="r5 rd" class="r5 r">partitions</span> = <b>null</b>;
+ 
+            <b>try</b>
+            {
+                <span class="r5 r">partitions</span> = <b>await</b> <a href="#a8cd02f28bae9a5e" class="i field">_client</a>.<a href="../IEventHubConsumerClient.cs.html#87efe65458e0849a" class="i method">GetPartitionsAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <span class="r4 r">metrics</span>.<a href="EventHubsTriggerMetrics.cs.html#a63a9f3f67289c97" class="i property">PartitionCount</a> = <span class="r5 r">partitions</span>.<span class="i">Length</span>;
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r6 rd" class="r6 r">e</span>)
+            {
+                <a href="#21463f97de0b286c" class="i field">_logger</a>.<span class="i">LogWarning</span>(<span class="s">$&quot;</span><span class="s">Encountered an exception while checking EventHub &#39;</span>{<a href="#a8cd02f28bae9a5e" class="i field">_client</a>.<a href="../IEventHubConsumerClient.cs.html#42006ee4f5da57aa" class="i property">EventHubName</a>}<span class="s">&#39;. Error: </span>{<span class="r6 r">e</span>.<span class="i">Message</span>}<span class="s">&quot;</span>);
+                <b>return</b> <span class="r4 r">metrics</span>;
+            }
+ 
+            <span class="c">// Get the PartitionRuntimeInformation for all partitions</span>
+            <a href="#21463f97de0b286c" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Querying partition information for </span>{<span class="r5 r">partitions</span>.<span class="i">Length</span>}<span class="s"> partitions.</span><span class="s">&quot;</span>);
+            <b>var</b> <span id="r7 rd" class="r7 r">tasks</span> = <b>new</b> <span class="i">Task</span>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9311a292681a1af8" class="t t">PartitionProperties</a>&gt;[<span class="r5 r">partitions</span>.<span class="i">Length</span>];
+ 
+            <b>for</b> (<b>int</b> <span id="r8 rd" class="r8 r">i</span> = 0; <span class="r8 r">i</span> &lt; <span class="r5 r">partitions</span>.<span class="i">Length</span>; <span class="r8 r">i</span>++)
+            {
+                <span class="r7 r">tasks</span>[<span class="r8 r">i</span>] = <a href="#a8cd02f28bae9a5e" class="i field">_client</a>.<a href="../IEventHubConsumerClient.cs.html#fc9be297a373aa41" class="i method">GetPartitionPropertiesAsync</a>(<span class="r5 r">partitions</span>[<span class="r8 r">i</span>]);
+            }
+ 
+            <b>await</b> <span class="i">Task</span>.<span class="i">WhenAll</span>(<span class="r7 r">tasks</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+            <span class="i">IEnumerable</span>&lt;<a href="/Azure.Messaging.EventHubs/A.html#a957ac02e2072bb9" class="t t">EventProcessorCheckpoint</a>&gt; <span id="r9 rd" class="r9 r">checkpoints</span>;
+            <b>try</b>
+            {
+                <span class="r9 r">checkpoints</span> = <b>await</b> <a href="#68432308d86af00b" class="i field">_checkpointStore</a>.<a href="../SharedSource/BlobsCheckpointStore.cs.html#a1f1398f622a3c06" class="i method">ListCheckpointsAsync</a>(
+                        <a href="#a8cd02f28bae9a5e" class="i field">_client</a>.<a href="../IEventHubConsumerClient.cs.html#5bed814f053ed392" class="i property">FullyQualifiedNamespace</a>,
+                        <a href="#a8cd02f28bae9a5e" class="i field">_client</a>.<a href="../IEventHubConsumerClient.cs.html#42006ee4f5da57aa" class="i property">EventHubName</a>,
+                        <a href="#a8cd02f28bae9a5e" class="i field">_client</a>.<a href="../IEventHubConsumerClient.cs.html#38780187b06aa877" class="i property">ConsumerGroup</a>,
+                        <b>default</b>)
+                    .<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>catch</b>
+            {
+                <span class="c">// ListCheckpointsAsync would log</span>
+                <b>return</b> <span class="r4 r">metrics</span>;
+            }
+ 
+            <b>return</b> <span class="i">CreateTriggerMetrics</span>(<span class="r7 r">tasks</span>.<span class="i">Select</span>(<span id="r10 rd" class="r10 r">t</span> =&gt; <span class="r10 r">t</span>.<span class="i">Result</span>).<span class="i">ToList</span>(), <span class="r9 r">checkpoints</span>.<span class="i">ToArray</span>());
+        }
+ 
+        <b>private</b> <a href="EventHubsTriggerMetrics.cs.html#dadafd2cf8d41bfe" class="t t">EventHubsTriggerMetrics</a> <a id="2b814947baf02c8a" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">CreateTriggerMetrics</a>(<span class="i">List</span>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9311a292681a1af8" class="t t">PartitionProperties</a>&gt; <span id="r11 rd" class="r11 r">partitionRuntimeInfo</span>, <a href="/Azure.Messaging.EventHubs/A.html#a957ac02e2072bb9" class="t t">EventProcessorCheckpoint</a>[] <span id="r12 rd" class="r12 r">checkpoints</span>, <b>bool</b> <span id="r13 rd" class="r13 r">alwaysLog</span> = <b>false</b>)
+        {
+            <b>long</b> <span id="r14 rd" class="r14 r">totalUnprocessedEventCount</span> = 0;
+            <b>bool</b> <span id="r15 rd" class="r15 r">logPartitionInfo</span> = <span class="r13 r">alwaysLog</span> ? <b>true</b> : <span class="i">DateTime</span>.<span class="i">UtcNow</span> &gt;= <a href="#7b2114d0a6fc1dab" class="i field">_nextPartitionLogTime</a>;
+            <b>bool</b> <span id="r16 rd" class="r16 r">logPartitionWarning</span> = <span class="r13 r">alwaysLog</span> ? <b>true</b> : <span class="i">DateTime</span>.<span class="i">UtcNow</span> &gt;= <a href="#fa2572966c5cdebc" class="i field">_nextPartitionWarningTime</a>;
+ 
+            <span class="c">// For each partition, get the last enqueued sequence number.</span>
+            <span class="c">// If the last enqueued sequence number does not equal the SequenceNumber from the lease info in storage,</span>
+            <span class="c">// accumulate new event counts across partitions to derive total new event counts.</span>
+            <span class="i">List</span>&lt;<b>string</b>&gt; <span id="r17 rd" class="r17 r">partitionErrors</span> = <b>new</b> <span class="i">List</span>&lt;<b>string</b>&gt;();
+            <b>for</b> (<b>int</b> <span id="r18 rd" class="r18 r">i</span> = 0; <span class="r18 r">i</span> &lt; <span class="r11 r">partitionRuntimeInfo</span>.<span class="i">Count</span>; <span class="r18 r">i</span>++)
+            {
+                <b>var</b> <span id="r19 rd" class="r19 r">partitionProperties</span> = <span class="r11 r">partitionRuntimeInfo</span>[<span class="r18 r">i</span>];
+ 
+                <a href="../SharedSource/BlobsCheckpointStore.cs.html#248e8eefdba75fb4" class="k">var</a> <span id="r20 rd" class="r20 r">checkpoint</span> = (<a href="../P/fd9aa4b94caeba25.html#fd9aa4b94caeba25" class="t t">BlobsCheckpointStore</a>.<a href="../SharedSource/BlobsCheckpointStore.cs.html#248e8eefdba75fb4" class="t t">BlobStorageCheckpoint</a>)<span class="r12 r">checkpoints</span>.<span class="i">SingleOrDefault</span>(<span id="r21 rd" class="r21 r">c</span> =&gt; <span class="r21 r">c</span>.<span class="i">PartitionId</span> == <span class="r19 r">partitionProperties</span>.<span class="i">Id</span>);
+                <b>if</b> (<span class="r20 r">checkpoint</span> == <b>null</b>)
+                {
+                    <span class="r17 r">partitionErrors</span>.<span class="i">Add</span>(<span class="s">$&quot;</span><span class="s">Unable to find a checkpoint information for partition: </span>{<span class="r19 r">partitionProperties</span>.<span class="i">Id</span>}<span class="s">&quot;</span>);
+                    <b>continue</b>;
+                }
+ 
+                <span class="c">// Check for the unprocessed messages when there are messages on the event hub parition</span>
+                <span class="c">// In that case, LastEnqueuedSequenceNumber will be &gt;= 0</span>
+                <b>if</b> ((<span class="r19 r">partitionProperties</span>.<span class="i">LastEnqueuedSequenceNumber</span> != -1 &amp;&amp; <span class="r19 r">partitionProperties</span>.<span class="i">LastEnqueuedSequenceNumber</span> != <span class="r20 r">checkpoint</span>.<a href="../SharedSource/BlobsCheckpointStore.cs.html#6489ef493dd656f7" class="i property">SequenceNumber</a>)
+                    || (<span class="r20 r">checkpoint</span>.<a href="../SharedSource/BlobsCheckpointStore.cs.html#2c1a2c15ee99428d" class="i property">Offset</a> == <b>null</b> &amp;&amp; <span class="r19 r">partitionProperties</span>.<span class="i">LastEnqueuedSequenceNumber</span> &gt;= 0))
+                {
+                    <b>long</b> <span id="r22 rd" class="r22 r">partitionUnprocessedEventCount</span> = <span class="i">GetUnprocessedEventCount</span>(<span class="r19 r">partitionProperties</span>, <span class="r20 r">checkpoint</span>);
+                    <span class="r14 r">totalUnprocessedEventCount</span> += <span class="r22 r">partitionUnprocessedEventCount</span>;
+                }
+            }
+ 
+            <span class="c">// Only log if not all partitions are failing or it&#39;s time to log</span>
+            <b>if</b> (<span class="r17 r">partitionErrors</span>.<span class="i">Count</span> &gt; 0 &amp;&amp; (<span class="r17 r">partitionErrors</span>.<span class="i">Count</span> != <span class="r11 r">partitionRuntimeInfo</span>.<span class="i">Count</span> || <span class="r16 r">logPartitionWarning</span>))
+            {
+                <a href="#21463f97de0b286c" class="i field">_logger</a>.<span class="i">LogWarning</span>(<span class="s">$&quot;</span><span class="s">Function &#39;</span>{<a href="#52bfed5f94d89405" class="i field">_functionId</a>}<span class="s">&#39;: Unable to deserialize partition or lease info with the </span><span class="s">&quot;</span> +
+                    <span class="s">$&quot;</span><span class="s">following errors: </span>{<b>string</b>.<span class="i">Join</span>(<span class="s">&quot; &quot;</span>, <span class="r17 r">partitionErrors</span>)}<span class="s">&quot;</span>);
+                <a href="#fa2572966c5cdebc" class="i field">_nextPartitionWarningTime</a> = <span class="i">DateTime</span>.<span class="i">UtcNow</span>.<span class="i">AddMinutes</span>(<a href="#da8c4d70c199a023" class="i field">PartitionLogIntervalInMinutes</a>);
+            }
+ 
+            <b>if</b> (<span class="r14 r">totalUnprocessedEventCount</span> &gt; 0 &amp;&amp; <span class="r15 r">logPartitionInfo</span>)
+            {
+                <a href="#21463f97de0b286c" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Function &#39;</span>{<a href="#52bfed5f94d89405" class="i field">_functionId</a>}<span class="s">&#39;, Total new events: </span>{<span class="r14 r">totalUnprocessedEventCount</span>}<span class="s">&quot;</span>);
+                <a href="#7b2114d0a6fc1dab" class="i field">_nextPartitionLogTime</a> = <span class="i">DateTime</span>.<span class="i">UtcNow</span>.<span class="i">AddMinutes</span>(<a href="#da8c4d70c199a023" class="i field">PartitionLogIntervalInMinutes</a>);
+            }
+ 
+            <b>return</b> <b>new</b> <span class="t">EventHubsTriggerMetrics</span>
+            {
+                <span class="i">Timestamp</span> = <span class="i">DateTime</span>.<span class="i">UtcNow</span>,
+                <a href="EventHubsTriggerMetrics.cs.html#a63a9f3f67289c97" class="i property">PartitionCount</a> = <span class="r11 r">partitionRuntimeInfo</span>.<span class="i">Count</span>,
+                <a href="EventHubsTriggerMetrics.cs.html#bc7aa8457ffb29c6" class="i property">EventCount</a> = <span class="r14 r">totalUnprocessedEventCount</span>
+            };
+        }
+ 
+        <span class="c">// Get the number of unprocessed events by deriving the delta between the server side info and the partition lease info,</span>
+        <b>private static long</b> <a id="cfe42b93a24ceae8" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">GetUnprocessedEventCount</a>(<a href="/Azure.Messaging.EventHubs/A.html#9311a292681a1af8" class="t t">PartitionProperties</a> <span id="r23 rd" class="r23 r">partitionInfo</span>, <a href="../P/fd9aa4b94caeba25.html#fd9aa4b94caeba25" class="t t">BlobsCheckpointStore</a>.<a href="../SharedSource/BlobsCheckpointStore.cs.html#248e8eefdba75fb4" class="t t">BlobStorageCheckpoint</a> <span id="r24 rd" class="r24 r">partitionLeaseInfo</span>)
+        {
+            <b>long</b> <span id="r25 rd" class="r25 r">partitionLeaseInfoSequenceNumber</span> = <span class="r24 r">partitionLeaseInfo</span>.<a href="../SharedSource/BlobsCheckpointStore.cs.html#6489ef493dd656f7" class="i property">SequenceNumber</a> ?? 0;
+ 
+            <span class="c">// This handles two scenarios:</span>
+            <span class="c">//   1. If the partition has received its first message, Offset will be null and LastEnqueuedSequenceNumber will be 0</span>
+            <span class="c">//   2. If there are no instances set to process messages, Offset will be null and LastEnqueuedSequenceNumber will be &gt;= 0</span>
+            <b>if</b> (<span class="r24 r">partitionLeaseInfo</span>.<a href="../SharedSource/BlobsCheckpointStore.cs.html#2c1a2c15ee99428d" class="i property">Offset</a> == <b>null</b> &amp;&amp; <span class="r23 r">partitionInfo</span>.<a href="/Azure.Messaging.EventHubs/A.html#ba1db09430c53626" class="i property">LastEnqueuedSequenceNumber</a> &gt;= 0)
+            {
+                <b>return</b> (<span class="r23 r">partitionInfo</span>.<a href="/Azure.Messaging.EventHubs/A.html#ba1db09430c53626" class="i property">LastEnqueuedSequenceNumber</a> + 1);
+            }
+ 
+            <b>if</b> (<span class="r23 r">partitionInfo</span>.<a href="/Azure.Messaging.EventHubs/A.html#ba1db09430c53626" class="i property">LastEnqueuedSequenceNumber</a> &gt; <span class="r25 r">partitionLeaseInfoSequenceNumber</span>)
+            {
+                <b>return</b> (<span class="r23 r">partitionInfo</span>.<a href="/Azure.Messaging.EventHubs/A.html#ba1db09430c53626" class="i property">LastEnqueuedSequenceNumber</a> - <span class="r25 r">partitionLeaseInfoSequenceNumber</span>);
+            }
+ 
+            <span class="c">// Partition is a circular buffer, so it is possible that</span>
+            <span class="c">// LastEnqueuedSequenceNumber &lt; SequenceNumber</span>
+            <b>long</b> <span id="r26 rd" class="r26 r">count</span> = 0;
+            <b>unchecked</b>
+            {
+                <span class="r26 r">count</span> = (<b>long</b>.<span class="i">MaxValue</span> - <span class="r23 r">partitionInfo</span>.<a href="/Azure.Messaging.EventHubs/A.html#ba1db09430c53626" class="i property">LastEnqueuedSequenceNumber</a>) + <span class="r25 r">partitionLeaseInfoSequenceNumber</span>;
+            }
+ 
+            <span class="c">// It&#39;s possible for checkpointing to be ahead of the partition&#39;s LastEnqueuedSequenceNumber,</span>
+            <span class="c">// especially if checkpointing is happening often and load is very low.</span>
+            <span class="c">// If count is negative, we need to know that this read is invalid, so return 0.</span>
+            <span class="c">// e.g., (9223372036854775807 - 10) + 11 = -9223372036854775808</span>
+            <b>return</b> (<span class="r26 r">count</span> &lt; 0) ? 0 : <span class="r26 r">count</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Return the current scaling decision based on the EventHub status.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="i">ScaleStatus</span> <span class="i">IScaleMonitor</span>.<a id="d41591ef2b1a2cbf" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">GetScaleStatus</a>(<span class="i">ScaleStatusContext</span> <span id="r27 rd" class="r27 r">context</span>)
+        {
+            <b>return</b> <span class="i">GetScaleStatusCore</span>(<span class="r27 r">context</span>.<span class="i">WorkerCount</span>, <span class="r27 r">context</span>.<span class="i">Metrics</span>?.<span class="i">Cast</span>&lt;<a href="EventHubsTriggerMetrics.cs.html#dadafd2cf8d41bfe" class="t t">EventHubsTriggerMetrics</a>&gt;().<span class="i">ToArray</span>());
+        }
+ 
+        <b>public</b> <span class="i">ScaleStatus</span> <a id="c61ba381dd1dff4f" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetScaleStatus</a>(<span class="i">ScaleStatusContext</span>&lt;<a href="EventHubsTriggerMetrics.cs.html#dadafd2cf8d41bfe" class="t t">EventHubsTriggerMetrics</a>&gt; <span id="r28 rd" class="r28 r">context</span>)
+        {
+            <b>return</b> <span class="i">GetScaleStatusCore</span>(<span class="r28 r">context</span>.<span class="i">WorkerCount</span>, <span class="r28 r">context</span>.<span class="i">Metrics</span>?.<span class="i">ToArray</span>());
+        }
+ 
+        <b>private</b> <span class="i">ScaleStatus</span> <a id="60b8b4c8376d80cc" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">GetScaleStatusCore</a>(<b>int</b> <span id="r29 rd" class="r29 r">workerCount</span>, <a href="EventHubsTriggerMetrics.cs.html#dadafd2cf8d41bfe" class="t t">EventHubsTriggerMetrics</a>[] <span id="r30 rd" class="r30 r">metrics</span>)
+        {
+            <span class="i">ScaleStatus</span> <span id="r31 rd" class="r31 r">status</span> = <b>new</b> <span class="i">ScaleStatus</span>
+            {
+                <span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">None</span>
+            };
+ 
+            <b>const int</b> <span id="r32 rd" class="r32 r">NumberOfSamplesToConsider</span> = 5;
+ 
+            <span class="c">// Unable to determine the correct vote with no metrics.</span>
+            <b>if</b> (<span class="r30 r">metrics</span> == <b>null</b> || <span class="r30 r">metrics</span>.<span class="i">Length</span> == 0)
+            {
+                <b>return</b> <span class="r31 r">status</span>;
+            }
+ 
+            <span class="c">// We shouldn&#39;t assign more workers than there are partitions</span>
+            <span class="c">// This check is first, because it is independent of load or number of samples.</span>
+            <b>int</b> <span id="r33 rd" class="r33 r">partitionCount</span> = <span class="r30 r">metrics</span>.<span class="i">Last</span>().<span class="i">PartitionCount</span>;
+            <b>if</b> (<span class="r33 r">partitionCount</span> &gt; 0 &amp;&amp; <span class="r33 r">partitionCount</span> &lt; <span class="r29 r">workerCount</span>)
+            {
+                <span class="r31 r">status</span>.<span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">ScaleIn</span>;
+                <a href="#21463f97de0b286c" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">WorkerCount (</span>{<span class="r29 r">workerCount</span>}<span class="s">) &gt; PartitionCount (</span>{<span class="r33 r">partitionCount</span>}<span class="s">).</span><span class="s">&quot;</span>);
+                <a href="#21463f97de0b286c" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Number of instances (</span>{<span class="r29 r">workerCount</span>}<span class="s">) is too high relative to number </span><span class="s">&quot;</span> +
+                                       <span class="s">$&quot;</span><span class="s">of partitions (</span>{<span class="r33 r">partitionCount</span>}<span class="s">) for EventHubs entity (</span>{<a href="#a8cd02f28bae9a5e" class="i field">_client</a>.<a href="../IEventHubConsumerClient.cs.html#42006ee4f5da57aa" class="i property">EventHubName</a>}<span class="s">, </span>{<a href="#a8cd02f28bae9a5e" class="i field">_client</a>.<a href="../IEventHubConsumerClient.cs.html#38780187b06aa877" class="i property">ConsumerGroup</a>}<span class="s">).</span><span class="s">&quot;</span>);
+                <b>return</b> <span class="r31 r">status</span>;
+            }
+ 
+            <span class="c">// At least 5 samples are required to make a scale decision for the rest of the checks.</span>
+            <b>if</b> (<span class="r30 r">metrics</span>.<span class="i">Length</span> &lt; <span class="r32 r">NumberOfSamplesToConsider</span>)
+            {
+                <b>return</b> <span class="r31 r">status</span>;
+            }
+ 
+            <span class="c">// Maintain a minimum ratio of 1 worker per 1,000 unprocessed events.</span>
+            <b>long</b> <span id="r34 rd" class="r34 r">latestEventCount</span> = <span class="r30 r">metrics</span>.<span class="i">Last</span>().<span class="i">EventCount</span>;
+            <b>if</b> (<span class="r34 r">latestEventCount</span> &gt; <span class="r29 r">workerCount</span> * 1000)
+            {
+                <span class="r31 r">status</span>.<span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">ScaleOut</span>;
+                <a href="#21463f97de0b286c" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">EventCount (</span>{<span class="r34 r">latestEventCount</span>}<span class="s">) &gt; WorkerCount (</span>{<span class="r29 r">workerCount</span>}<span class="s">) * 1,000.</span><span class="s">&quot;</span>);
+                <a href="#21463f97de0b286c" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Event count (</span>{<span class="r34 r">latestEventCount</span>}<span class="s">) for EventHubs entity (</span>{<a href="#a8cd02f28bae9a5e" class="i field">_client</a>.<a href="../IEventHubConsumerClient.cs.html#42006ee4f5da57aa" class="i property">EventHubName</a>}<span class="s">, </span>{<a href="#a8cd02f28bae9a5e" class="i field">_client</a>.<a href="../IEventHubConsumerClient.cs.html#38780187b06aa877" class="i property">ConsumerGroup</a>}<span class="s">) </span><span class="s">&quot;</span> +
+                                       <span class="s">$&quot;</span><span class="s">is too high relative to the number of instances (</span>{<span class="r29 r">workerCount</span>}<span class="s">).</span><span class="s">&quot;</span>);
+                <b>return</b> <span class="r31 r">status</span>;
+            }
+ 
+            <span class="c">// Check to see if the EventHub has been empty for a while. Only if all metrics samples are empty do we scale down.</span>
+            <b>bool</b> <span id="r35 rd" class="r35 r">isIdle</span> = <span class="r30 r">metrics</span>.<span class="i">All</span>(<span id="r36 rd" class="r36 r">m</span> =&gt; <span class="r36 r">m</span>.<span class="i">EventCount</span> == 0);
+            <b>if</b> (<span class="r35 r">isIdle</span>)
+            {
+                <span class="r31 r">status</span>.<span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">ScaleIn</span>;
+                <a href="#21463f97de0b286c" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">&#39;</span>{<a href="#a8cd02f28bae9a5e" class="i field">_client</a>.<a href="../IEventHubConsumerClient.cs.html#42006ee4f5da57aa" class="i property">EventHubName</a>}<span class="s">&#39; is idle.</span><span class="s">&quot;</span>);
+                <b>return</b> <span class="r31 r">status</span>;
+            }
+ 
+            <span class="c">// Samples are in chronological order. Check for a continuous increase in unprocessed event count.</span>
+            <span class="c">// If detected, this results in an automatic scale out for the site container.</span>
+            <b>if</b> (<span class="r30 r">metrics</span>[0].<a href="EventHubsTriggerMetrics.cs.html#bc7aa8457ffb29c6" class="i property">EventCount</a> &gt; 0)
+            {
+                <b>bool</b> <span id="r37 rd" class="r37 r">eventCountIncreasing</span> =
+                <span class="i">IsTrueForLastN</span>(
+                    <span class="r30 r">metrics</span>,
+                    <span class="r32 r">NumberOfSamplesToConsider</span>,
+                    (<span id="r38 rd" class="r38 r">prev</span>, <span id="r39 rd" class="r39 r">next</span>) =&gt; <span class="r38 r">prev</span>.<span class="i">EventCount</span> &lt; <span class="r39 r">next</span>.<span class="i">EventCount</span>);
+                <b>if</b> (<span class="r37 r">eventCountIncreasing</span>)
+                {
+                    <span class="r31 r">status</span>.<span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">ScaleOut</span>;
+                    <a href="#21463f97de0b286c" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Event count is increasing for &#39;</span>{<a href="#a8cd02f28bae9a5e" class="i field">_client</a>.<a href="../IEventHubConsumerClient.cs.html#42006ee4f5da57aa" class="i property">EventHubName</a>}<span class="s">&#39;.</span><span class="s">&quot;</span>);
+                    <b>return</b> <span class="r31 r">status</span>;
+                }
+            }
+ 
+            <b>bool</b> <span id="r40 rd" class="r40 r">eventCountDecreasing</span> =
+                <span class="i">IsTrueForLastN</span>(
+                    <span class="r30 r">metrics</span>,
+                    <span class="r32 r">NumberOfSamplesToConsider</span>,
+                    (<span id="r41 rd" class="r41 r">prev</span>, <span id="r42 rd" class="r42 r">next</span>) =&gt; <span class="r41 r">prev</span>.<span class="i">EventCount</span> &gt; <span class="r42 r">next</span>.<span class="i">EventCount</span>);
+            <b>if</b> (<span class="r40 r">eventCountDecreasing</span>)
+            {
+                <span class="r31 r">status</span>.<span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">ScaleIn</span>;
+                <a href="#21463f97de0b286c" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Event count is decreasing for &#39;</span>{<a href="#a8cd02f28bae9a5e" class="i field">_client</a>.<a href="../IEventHubConsumerClient.cs.html#42006ee4f5da57aa" class="i property">EventHubName</a>}<span class="s">&#39;.</span><span class="s">&quot;</span>);
+                <b>return</b> <span class="r31 r">status</span>;
+            }
+ 
+            <a href="#21463f97de0b286c" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">EventHubs entity &#39;</span>{<a href="#a8cd02f28bae9a5e" class="i field">_client</a>.<a href="../IEventHubConsumerClient.cs.html#42006ee4f5da57aa" class="i property">EventHubName</a>}<span class="s">&#39; is steady.</span><span class="s">&quot;</span>);
+ 
+            <b>return</b> <span class="r31 r">status</span>;
+        }
+ 
+        <b>private static bool</b> <a id="f74ad962f08ce6ba" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">IsTrueForLastN</a>(<span class="i">IList</span>&lt;<a href="EventHubsTriggerMetrics.cs.html#dadafd2cf8d41bfe" class="t t">EventHubsTriggerMetrics</a>&gt; <span id="r43 rd" class="r43 r">samples</span>, <b>int</b> <span id="r44 rd" class="r44 r">count</span>, <span class="i">Func</span>&lt;<a href="EventHubsTriggerMetrics.cs.html#dadafd2cf8d41bfe" class="t t">EventHubsTriggerMetrics</a>, <a href="EventHubsTriggerMetrics.cs.html#dadafd2cf8d41bfe" class="t t">EventHubsTriggerMetrics</a>, <b>bool</b>&gt; <span id="r45 rd" class="r45 r">predicate</span>)
+        {
+            <span class="c">// Walks through the list from left to right starting at len(samples) - count.</span>
+            <b>for</b> (<b>int</b> <span id="r46 rd" class="r46 r">i</span> = <span class="r43 r">samples</span>.<span class="i">Count</span> - <span class="r44 r">count</span>; <span class="r46 r">i</span> &lt; <span class="r43 r">samples</span>.<span class="i">Count</span> - 1; <span class="r46 r">i</span>++)
+            {
+                <b>if</b> (!<span class="r45 r">predicate</span>(<span class="r43 r">samples</span>[<span class="r46 r">i</span>], <span class="r43 r">samples</span>[<span class="r46 r">i</span> + 1]))
+                {
+                    <b>return</b> <b>false</b>;
+                }
+            }
+ 
+            <b>return</b> <b>true</b>;
+        }
+    }
+}</pre></td></tr></table></div></body></html>

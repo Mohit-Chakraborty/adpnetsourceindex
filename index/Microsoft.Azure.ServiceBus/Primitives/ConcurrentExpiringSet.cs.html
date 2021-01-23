@@ -1,0 +1,109 @@
+﻿<!DOCTYPE html>
+<html><head><title>ConcurrentExpiringSet.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(100);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.ServiceBus/Primitives/ConcurrentExpiringSet.cs" target="_top">Primitives\ConcurrentExpiringSet.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.ServiceBus" target="_top">src\Microsoft.Azure.ServiceBus.csproj</a> (Microsoft.Azure.ServiceBus)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft. All rights reserved.</span>
+<span class="c">// Licensed under the MIT license. See LICENSE file in the project root for full license information.</span>
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">ServiceBus</span>.<span class="i n">Primitives</span>
+{
+    <b>using</b> <span class="i">System</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Concurrent</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+ 
+    <b>sealed class</b> <a id="3b2e53f6d3222e9d" href="../R/3b2e53f6d3222e9d.html" target="n" data-glyph="2,0" class="t t">ConcurrentExpiringSet</a>&lt;<span id="r0 rd t" class="r0 r t">TKey</span>&gt;
+    {
+        <b>readonly</b> <span class="i">ConcurrentDictionary</span>&lt;<span class="r0 r t">TKey</span>, <span class="i">DateTime</span>&gt; <a id="628da011546c1061" href="../R/628da011546c1061.html" target="n" data-glyph="46,1" class="i field">dictionary</a>;
+        <b>readonly</b> <span class="i">ICollection</span>&lt;<span class="i">KeyValuePair</span>&lt;<span class="r0 r t">TKey</span>, <span class="i">DateTime</span>&gt;&gt; <a id="5362e68195a33af6" href="../R/5362e68195a33af6.html" target="n" data-glyph="46,1" class="i field">dictionaryAsCollection</a>;
+        <b>readonly</b> <span class="i">CancellationTokenSource</span> <a id="a5b8798db1adb3a8" href="../R/a5b8798db1adb3a8.html" target="n" data-glyph="46,1" class="i field">tokenSource</a> = <b>new</b> <span class="i">CancellationTokenSource</span>();
+        <b>volatile</b> <span class="i">TaskCompletionSource</span>&lt;<b>bool</b>&gt; <a id="d9015bfea58d5800" href="../R/d9015bfea58d5800.html" target="n" data-glyph="46,1" class="i field">cleanupTaskCompletionSource</a> = <b>new</b> <span class="i">TaskCompletionSource</span>&lt;<b>bool</b>&gt;(<span class="i">TaskCreationOptions</span>.<span class="i">RunContinuationsAsynchronously</span>);
+        <b>int</b> <a id="23845ca888a0d935" href="../R/23845ca888a0d935.html" target="n" data-glyph="46,1" class="i field">closeSignaled</a>;
+        <b>bool</b> <a id="00a52e5cc3687cac" href="../R/00a52e5cc3687cac.html" target="n" data-glyph="46,1" class="i field">closed</a>;
+        <b>static readonly</b> <span class="i">TimeSpan</span> <a id="49de32675d3b08a2" href="../R/49de32675d3b08a2.html" target="n" data-glyph="46,1" class="i field">delayBetweenCleanups</a> = <span class="i">TimeSpan</span>.<span class="i">FromSeconds</span>(30);
+ 
+        <b>public</b> <a id="daff49678ab1595e" href="../R/daff49678ab1595e.html" target="n" data-glyph="72,1" class="t constructor">ConcurrentExpiringSet</a>()
+        {
+            <a href="#3b2e53f6d3222e9d" class="k">this</a>.<a href="#628da011546c1061" class="i field">dictionary</a> = <b>new</b> <span class="i">ConcurrentDictionary</span>&lt;<span class="r0 r t">TKey</span>, <span class="i">DateTime</span>&gt;();
+            <a href="#3b2e53f6d3222e9d" class="k">this</a>.<a href="#5362e68195a33af6" class="i field">dictionaryAsCollection</a> = <a href="#628da011546c1061" class="i field">dictionary</a>;
+            <b>_</b> = <span class="i">CollectExpiredEntriesAsync</span>(<a href="#a5b8798db1adb3a8" class="i field">tokenSource</a>.<span class="i">Token</span>);
+        }
+ 
+        <b>public void</b> <a id="b3d743476f2241ef" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">AddOrUpdate</a>(<span class="r0 r t">TKey</span> <span id="r1 rd" class="r1 r">key</span>, <span class="i">DateTime</span> <span id="r2 rd" class="r2 r">expiration</span>)
+        {
+            <a href="#3b2e53f6d3222e9d" class="k">this</a>.<a href="#e63bf622e021cfc8" class="i method">ThrowIfClosed</a>();
+ 
+            <a href="#3b2e53f6d3222e9d" class="k">this</a>.<a href="#628da011546c1061" class="i field">dictionary</a>[<span class="r1 r">key</span>] = <span class="r2 r">expiration</span>;
+            <a href="#3b2e53f6d3222e9d" class="k">this</a>.<a href="#d9015bfea58d5800" class="i field">cleanupTaskCompletionSource</a>.<span class="i">TrySetResult</span>(<b>true</b>);
+        }
+ 
+        <b>public bool</b> <a id="51697d4bbfb64f2a" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Contains</a>(<span class="r0 r t">TKey</span> <span id="r3 rd" class="r3 r">key</span>)
+        {
+            <a href="#3b2e53f6d3222e9d" class="k">this</a>.<a href="#e63bf622e021cfc8" class="i method">ThrowIfClosed</a>();
+ 
+            <b>return</b> <a href="#3b2e53f6d3222e9d" class="k">this</a>.<a href="#628da011546c1061" class="i field">dictionary</a>.<span class="i">TryGetValue</span>(<span class="r3 r">key</span>, <b>out</b> <b>var</b> <span id="r4 rd" class="r4 r">expiration</span>) &amp;&amp; <span class="r4 r">expiration</span> &gt; <span class="i">DateTime</span>.<span class="i">UtcNow</span>;
+        }
+ 
+        <b>public void</b> <a id="f80746cad678afdc" href="../R/f80746cad678afdc.html" target="n" data-glyph="72,1" class="i method">Close</a>()
+        {
+            <b>if</b> (<span class="i">Interlocked</span>.<span class="i">Exchange</span>(<b>ref</b> <a href="#3b2e53f6d3222e9d" class="k">this</a>.<a href="#23845ca888a0d935" class="i field">closeSignaled</a>, 1) != 0)
+            {
+                <b>return</b>;
+            }
+ 
+            <a href="#3b2e53f6d3222e9d" class="k">this</a>.<a href="#00a52e5cc3687cac" class="i field">closed</a> = <b>true</b>;
+ 
+            <a href="#3b2e53f6d3222e9d" class="k">this</a>.<a href="#a5b8798db1adb3a8" class="i field">tokenSource</a>.<span class="i">Cancel</span>();
+            <a href="#3b2e53f6d3222e9d" class="k">this</a>.<a href="#d9015bfea58d5800" class="i field">cleanupTaskCompletionSource</a>.<span class="i">TrySetCanceled</span>();
+            <a href="#3b2e53f6d3222e9d" class="k">this</a>.<a href="#628da011546c1061" class="i field">dictionary</a>.<span class="i">Clear</span>();
+            <a href="#3b2e53f6d3222e9d" class="k">this</a>.<a href="#a5b8798db1adb3a8" class="i field">tokenSource</a>.<span class="i">Dispose</span>();
+        }
+ 
+        <b>async</b> <span class="i">Task</span> <a id="8a812ecd5d92574a" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">CollectExpiredEntriesAsync</a>(<span class="i">CancellationToken</span> <span id="r5 rd" class="r5 r">token</span>)
+        {
+            <b>while</b> (!<span class="r5 r">token</span>.<span class="i">IsCancellationRequested</span>)
+            {
+                <b>try</b>
+                {
+                    <b>await</b> <a href="#3b2e53f6d3222e9d" class="k">this</a>.<a href="#d9015bfea58d5800" class="i field">cleanupTaskCompletionSource</a>.<span class="i">Task</span>.<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    <b>await</b> <span class="i">Task</span>.<span class="i">Delay</span>(<a href="#49de32675d3b08a2" class="i field">delayBetweenCleanups</a>, <span class="r5 r">token</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+                <b>catch</b> (<span class="i">OperationCanceledException</span>)
+                {
+                    <b>return</b>;
+                }
+ 
+                <b>var</b> <span id="r6 rd" class="r6 r">isEmpty</span> = <b>true</b>;
+                <b>var</b> <span id="r7 rd" class="r7 r">utcNow</span> = <span class="i">DateTime</span>.<span class="i">UtcNow</span>;
+                <b>foreach</b> (<b>var</b> <span id="r8 rd" class="r8 r">kvp</span> <b>in</b> <a href="#3b2e53f6d3222e9d" class="k">this</a>.<a href="#628da011546c1061" class="i field">dictionary</a>)
+                {
+                    <span class="r6 r">isEmpty</span> = <b>false</b>;
+                    <b>var</b> <span id="r9 rd" class="r9 r">expiration</span> = <span class="r8 r">kvp</span>.<span class="i">Value</span>;
+                    <b>if</b> (<span class="r7 r">utcNow</span> &gt; <span class="r9 r">expiration</span>)
+                    {
+                        <a href="#3b2e53f6d3222e9d" class="k">this</a>.<a href="#5362e68195a33af6" class="i field">dictionaryAsCollection</a>.<span class="i">Remove</span>(<span class="r8 r">kvp</span>);
+                    }
+                }
+ 
+                <b>if</b> (<span class="r6 r">isEmpty</span>)
+                {
+                    <a href="#3b2e53f6d3222e9d" class="k">this</a>.<a href="#d9015bfea58d5800" class="i field">cleanupTaskCompletionSource</a> = <b>new</b> <span class="i">TaskCompletionSource</span>&lt;<b>bool</b>&gt;(<span class="i">TaskCreationOptions</span>.<span class="i">RunContinuationsAsynchronously</span>);
+                }
+            }
+        }
+ 
+        <b>void</b> <a id="e63bf622e021cfc8" href="../R/e63bf622e021cfc8.html" target="n" data-glyph="76,1" class="i method">ThrowIfClosed</a>()
+        {
+            <b>if</b> (<a href="#00a52e5cc3687cac" class="i field">closed</a>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ObjectDisposedException</span>(<span class="s">$&quot;</span><span class="s">ConcurrentExpiringSet has already been closed. Please create a new set instead.</span><span class="s">&quot;</span>);
+            }
+        }
+    }
+}</pre></td></tr></table></div></body></html>

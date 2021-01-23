@@ -1,0 +1,424 @@
+﻿<!DOCTYPE html>
+<html><head><title>AmqpPartitionReceiver.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(415);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.EventHubs/Amqp/AmqpPartitionReceiver.cs" target="_top">Amqp\AmqpPartitionReceiver.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.EventHubs" target="_top">Microsoft.Azure.EventHubs\src\Microsoft.Azure.EventHubs.csproj</a> (Microsoft.Azure.EventHubs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft. All rights reserved.</span>
+<span class="c">// Licensed under the MIT license. See LICENSE file in the project root for full license information.</span>
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">EventHubs</span>.<span class="i n">Amqp</span>
+{
+    <b>using</b> <span class="i">System</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">Amqp</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">Amqp</span>.<span class="i">Encoding</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">Amqp</span>.<span class="i">Framing</span>;
+ 
+    <b>class</b> <a id="fa0aab02b61e95f1" href="../R/fa0aab02b61e95f1.html" target="n" data-glyph="2,0" class="t t">AmqpPartitionReceiver</a> : <a href="../PartitionReceiver.cs.html#c6301acd46b0811a" class="t t">PartitionReceiver</a>
+    {
+        <b>readonly object</b> <a id="425c494463d394a1" href="../R/425c494463d394a1.html" target="n" data-glyph="46,1" class="i field">receivePumpLock</a>;
+        <b>readonly</b> <a href="ActiveClientLinkManager.cs.html#c99969b68e6efcb5" class="t t">ActiveClientLinkManager</a> <a id="b083b67938db9d91" href="../R/b083b67938db9d91.html" target="n" data-glyph="46,1" class="i field">clientLinkManager</a>;
+        <a href="../IPartitionReceiveHandler.cs.html#4376c1c4658c32ac" class="t t">IPartitionReceiveHandler</a> <a id="28f001c0b6c91fed" href="../R/28f001c0b6c91fed.html" target="n" data-glyph="46,1" class="i field">receiveHandler</a>;
+        <span class="i">CancellationTokenSource</span> <a id="6fc1ff0b7ac97ec3" href="../R/6fc1ff0b7ac97ec3.html" target="n" data-glyph="46,1" class="i field">receivePumpCancellationSource</a>;
+        <span class="i">Task</span> <a id="188e2aa564fc8465" href="../R/188e2aa564fc8465.html" target="n" data-glyph="46,1" class="i field">receivePumpTask</a>;
+ 
+        <b>public</b> <a id="734c7cc9acdfc188" href="../R/734c7cc9acdfc188.html" target="n" data-glyph="72,1" class="t constructor">AmqpPartitionReceiver</a>(
+            <a href="AmqpEventHubClient.cs.html#a3d8f2ab12489a19" class="t t">AmqpEventHubClient</a> <span id="r0 rd" class="r0 r">eventHubClient</span>,
+            <b>string</b> <span id="r1 rd" class="r1 r">consumerGroupName</span>,
+            <b>string</b> <span id="r2 rd" class="r2 r">partitionId</span>,
+            <a href="../EventPosition.cs.html#5c55f1ce5bfdf68d" class="t t">EventPosition</a> <span id="r3 rd" class="r3 r">eventPosition</span>,
+            <b>long</b>? <span id="r4 rd" class="r4 r">epoch</span>,
+            <a href="../ReceiverOptions.cs.html#f0c29f0f48ec0eaa" class="t t">ReceiverOptions</a> <span id="r5 rd" class="r5 r">receiverOptions</span>)
+            : <a href="../PartitionReceiver.cs.html#1270bed3fa49be7e" class="k">base</a>(<span class="r0 r">eventHubClient</span>, <span class="r1 r">consumerGroupName</span>, <span class="r2 r">partitionId</span>, <span class="r3 r">eventPosition</span>, <span class="r4 r">epoch</span>, <span class="r5 r">receiverOptions</span>)
+        {
+            <b>string</b> <span id="r6 rd" class="r6 r">entityPath</span> = <span class="r0 r">eventHubClient</span>.<a href="../EventHubClient.cs.html#58a8e47a06e35c53" class="i property">ConnectionStringBuilder</a>.<a href="../Primitives/EventHubsConnectionStringBuilder.cs.html#07eaa0ed4c59a2a0" class="i property">EntityPath</a>;
+            <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#7d0372c13122c78d" class="i property">Path</a> = <span class="s">$&quot;</span>{<span class="r6 r">entityPath</span>}<span class="s">/ConsumerGroups/</span>{<span class="r1 r">consumerGroupName</span>}<span class="s">/Partitions/</span>{<span class="r2 r">partitionId</span>}<span class="s">&quot;</span>;
+            <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#1fd302f16e968194" class="i property">ReceiveLinkManager</a> = <b>new</b> <span class="i">FaultTolerantAmqpObject</span>&lt;<span class="i">ReceivingAmqpLink</span>&gt;(<a href="#fa0aab02b61e95f1" class="k">this</a>.<span class="i">CreateLinkAsync</span>, <a href="#fa0aab02b61e95f1" class="k">this</a>.<span class="i">CloseSession</span>);
+            <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#425c494463d394a1" class="i field">receivePumpLock</a> = <b>new</b> <b>object</b>();
+            <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#b083b67938db9d91" class="i field">clientLinkManager</a> = <b>new</b> <a href="ActiveClientLinkManager.cs.html#c063258d28921f07" class="t constructor">ActiveClientLinkManager</a>((<a href="AmqpEventHubClient.cs.html#a3d8f2ab12489a19" class="t t">AmqpEventHubClient</a>)<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../PartitionReceiver.cs.html#41b7077a1ae2add1" class="i property">EventHubClient</a>);
+        }
+ 
+        <b>string</b> <a id="7d0372c13122c78d" href="../R/7d0372c13122c78d.html" target="n" data-glyph="106,1" class="i property">Path</a> { <b>get</b>; }
+ 
+        <span class="i">FaultTolerantAmqpObject</span>&lt;<span class="i">ReceivingAmqpLink</span>&gt; <a id="1fd302f16e968194" href="../R/1fd302f16e968194.html" target="n" data-glyph="106,1" class="i property">ReceiveLinkManager</a> { <b>get</b>; }
+ 
+        <b>protected override async</b> <span class="i">Task</span> <a id="d080289e26f9bfbe" href="../R/d080289e26f9bfbe.html" target="n" data-glyph="75,1" class="i method">OnCloseAsync</a>()
+        {
+            <span class="c">// Close any ReceiveHandler (this is safe if there is none) and the ReceiveLinkManager in parallel.</span>
+            <b>await</b> <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#d55fe95fe3d0894c" class="i method">ReceiveHandlerClose</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+            <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#b083b67938db9d91" class="i field">clientLinkManager</a>.<a href="ActiveClientLinkManager.cs.html#6739d81e1328100e" class="i method">Close</a>();
+            <b>await</b> <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#1fd302f16e968194" class="i property">ReceiveLinkManager</a>.<span class="i">CloseAsync</span>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+        }
+ 
+        <b>protected override async</b> <span class="i">Task</span>&lt;<span class="i">IList</span>&lt;<a href="../EventData.cs.html#f56ed6e805f7061b" class="t t">EventData</a>&gt;&gt; <a id="483a0cd7a80b7eff" href="../R/483a0cd7a80b7eff.html" target="n" data-glyph="75,1" class="i method">OnReceiveAsync</a>(<b>int</b> <span id="r7 rd" class="r7 r">maxMessageCount</span>, <span class="i">TimeSpan</span> <span id="r8 rd" class="r8 r">waitTime</span>)
+        {
+            <b>bool</b> <span id="r9 rd" class="r9 r">shouldRetry</span>;
+            <b>int</b> <span id="r10 rd" class="r10 r">retryCount</span> = 0;
+ 
+            <a href="../Primitives/TimeoutHelper.cs.html#e772a1e22bafc59c" class="k">var</a> <span id="r11 rd" class="r11 r">timeoutHelper</span> = <b>new</b> <a href="../Primitives/TimeoutHelper.cs.html#d31129aa8e684f15" class="t constructor">TimeoutHelper</a>(<span class="r8 r">waitTime</span>, <b>true</b>);
+ 
+            <b>do</b>
+            {
+                <span class="r9 r">shouldRetry</span> = <b>false</b>;
+ 
+                <b>try</b>
+                {
+                    <b>try</b>
+                    {
+                        <span class="c">// Always use default timeout for AMQP sesssion.</span>
+                        <span class="i">ReceivingAmqpLink</span> <span id="r12 rd" class="r12 r">receiveLink</span> =
+                            <b>await</b> <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#1fd302f16e968194" class="i property">ReceiveLinkManager</a>.<span class="i">GetOrCreateAsync</span>(
+                                <span class="i">TimeSpan</span>.<span class="i">FromSeconds</span>(<a href="AmqpClientConstants.cs.html#c8bb1175d0499823" class="t t">AmqpClientConstants</a>.<a href="AmqpClientConstants.cs.html#bc95632afdd80c05" class="i field">AmqpSessionTimeoutInSeconds</a>)).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                        <span class="i">IEnumerable</span>&lt;<span class="i">AmqpMessage</span>&gt; <span id="r13 rd" class="r13 r">amqpMessages</span> = <b>null</b>;
+                        <b>bool</b> <span id="r14 rd" class="r14 r">hasMessages</span> = <b>await</b> <span class="i">Task</span>.<span class="i">Factory</span>.<span class="i">FromAsync</span>(
+                            (<span id="r15 rd" class="r15 r">c</span>, <span id="r16 rd" class="r16 r">s</span>) =&gt; <span class="r12 r">receiveLink</span>.<span class="i">BeginReceiveMessages</span>(<span class="r7 r">maxMessageCount</span>, <span class="r11 r">timeoutHelper</span>.<a href="../Primitives/TimeoutHelper.cs.html#a2f50f7cc33bc27c" class="i method">RemainingTime</a>(), <span class="r15 r">c</span>, <span class="r16 r">s</span>),
+                            <span id="r17 rd" class="r17 r">a</span> =&gt; <span class="r12 r">receiveLink</span>.<span class="i">EndReceiveMessages</span>(<span class="r17 r">a</span>, <b>out</b> <span class="r13 r">amqpMessages</span>),
+                            <a href="#fa0aab02b61e95f1" class="k">this</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                        <b>if</b> (<span class="r12 r">receiveLink</span>.<span class="i">TerminalException</span> != <b>null</b>)
+                        {
+                            <b>throw</b> <span class="r12 r">receiveLink</span>.<span class="i">TerminalException</span>;
+                        }
+ 
+                        <b>if</b> (<span class="r14 r">hasMessages</span> &amp;&amp; <span class="r13 r">amqpMessages</span> != <b>null</b>)
+                        {
+                            <span class="i">IList</span>&lt;<a href="../EventData.cs.html#f56ed6e805f7061b" class="t t">EventData</a>&gt; <span id="r18 rd" class="r18 r">eventDatas</span> = <b>null</b>;
+                            <b>foreach</b> (<b>var</b> <span id="r19 rd" class="r19 r">amqpMessage</span> <b>in</b> <span class="r13 r">amqpMessages</span>)
+                            {
+                                <b>if</b> (<span class="r18 r">eventDatas</span> == <b>null</b>)
+                                {
+                                    <span class="r18 r">eventDatas</span> = <b>new</b> <span class="i">List</span>&lt;<a href="../EventData.cs.html#f56ed6e805f7061b" class="t t">EventData</a>&gt;();
+                                }
+ 
+                                <span class="r12 r">receiveLink</span>.<span class="i">DisposeDelivery</span>(<span class="r19 r">amqpMessage</span>, <b>true</b>, <span class="i">AmqpConstants</span>.<span class="i">AcceptedOutcome</span>);
+                                <span class="r18 r">eventDatas</span>.<span class="i">Add</span>(<a href="AmqpMessageConverter.cs.html#2175e6b3c265d0d3" class="t t">AmqpMessageConverter</a>.<span class="i">AmqpMessageToEventData</span>(<span class="r19 r">amqpMessage</span>));
+                            }
+ 
+                            <b>return</b> <span class="r18 r">eventDatas</span>;
+                        }
+                    }
+                    <b>catch</b> (<span class="i">AmqpException</span> <span id="r20 rd" class="r20 r">amqpException</span>)
+                    {
+                        <b>throw</b> <a href="AmqpExceptionHelper.cs.html#a5cb48409a072b48" class="t t">AmqpExceptionHelper</a>.<span class="i">ToMessagingContract</span>(<span class="r20 r">amqpException</span>.<span class="i">Error</span>);
+                    }
+                    <b>catch</b> (<span class="i">Exception</span> <span id="r21 rd" class="r21 r">ex</span>)
+                    {
+                        <b>if</b> (<a href="AmqpExceptionHelper.cs.html#a5cb48409a072b48" class="t t">AmqpExceptionHelper</a>.<a href="AmqpExceptionHelper.cs.html#fc8b330d3458784b" class="i method">TryTranslateToRetriableException</a>(<span class="r21 r">ex</span>, <b>out</b> <a href="../Primitives/EventHubsException.cs.html#8b9817f4bb66b95f" class="k">var</a> <span id="r22 rd" class="r22 r">retriableEx</span>))
+                        {
+                            <b>throw</b> <span class="r22 r">retriableEx</span>;
+                        }
+ 
+                        <b>throw</b>;
+                    }
+                }
+                <b>catch</b> (<span class="i">Exception</span> <span id="r23 rd" class="r23 r">ex</span>)
+                {
+                    <span class="c">// Evaluate retry condition?</span>
+                    <span class="i">TimeSpan</span>? <span id="r24 rd" class="r24 r">retryInterval</span> = <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../Primitives/ClientEntity.cs.html#133e57fb5d300f42" class="i property">RetryPolicy</a>.<span class="i">GetNextRetryInterval</span>(<span class="r23 r">ex</span>, <span class="r11 r">timeoutHelper</span>.<a href="../Primitives/TimeoutHelper.cs.html#a2f50f7cc33bc27c" class="i method">RemainingTime</a>(), ++<span class="r10 r">retryCount</span>);
+                    <b>if</b> (<span class="r24 r">retryInterval</span> != <b>null</b> &amp;&amp; !<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../Primitives/ClientEntity.cs.html#136db9d3ec1ba014" class="i property">IsClosed</a> &amp;&amp; !<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../PartitionReceiver.cs.html#41b7077a1ae2add1" class="i property">EventHubClient</a>.<a href="../Primitives/ClientEntity.cs.html#136db9d3ec1ba014" class="i property">IsClosed</a>)
+                    {
+                        <b>await</b> <span class="i">Task</span>.<span class="i">Delay</span>(<span class="r24 r">retryInterval</span>.<span class="i">Value</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        <span class="r9 r">shouldRetry</span> = <b>true</b>;
+                    }
+                    <b>else</b>
+                    {
+                        <span class="c">// Handle EventHubsTimeoutException explicitly.</span>
+                        <span class="c">// We don&#39;t really want to throw EventHubsTimeoutException on this call.</span>
+                        <b>if</b> (<span class="r23 r">ex</span> <b>is</b> <a href="../Primitives/EventHubsTimeoutException.cs.html#8bda6c6ff3e8a38a" class="t t">EventHubsTimeoutException</a>)
+                        {
+                            <b>break</b>;
+                        }
+ 
+                        <b>throw</b>;
+                    }
+                }
+            } <b>while</b> (<span class="r9 r">shouldRetry</span>);
+ 
+            <span class="c">// No messages to deliver.</span>
+            <b>return</b> <b>null</b>;
+        }
+ 
+        <b>protected override void</b> <a id="784820b62efbd9f5" href="../R/784820b62efbd9f5.html" target="n" data-glyph="75,1" class="i method">OnSetReceiveHandler</a>(<a href="../IPartitionReceiveHandler.cs.html#4376c1c4658c32ac" class="t t">IPartitionReceiveHandler</a> <span id="r25 rd" class="r25 r">newReceiveHandler</span>, <b>bool</b> <span id="r26 rd" class="r26 r">invokeWhenNoEvents</span>)
+        {
+            <b>lock</b> (<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#425c494463d394a1" class="i field">receivePumpLock</a>)
+            {
+                <b>if</b> (<span class="r25 r">newReceiveHandler</span> != <b>null</b>)
+                {
+                    <b>if</b> (<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#28f001c0b6c91fed" class="i field">receiveHandler</a> != <b>null</b>)
+                    {
+                        <span class="c">// Notify existing handler first (but don&#39;t wait).</span>
+                        <span class="i">Task</span>.<span class="i">Run</span>(() =&gt;
+                            <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#28f001c0b6c91fed" class="i field">receiveHandler</a>.<span class="i">ProcessErrorAsync</span>(<b>new</b> <span class="i">OperationCanceledException</span>(<span class="s">&quot;New handler has registered for this receiver.&quot;</span>)))
+                            <span class="c">// We omit any failures from ProcessErrorAsync</span>
+                            .<span class="i">ContinueWith</span>(<span id="r27 rd" class="r27 r">t</span> =&gt; <span class="r27 r">t</span>.<span class="i">Exception</span>.<span class="i">Handle</span>(<span id="r28 rd" class="r28 r">ex</span> =&gt; <b>true</b>), <span class="i">TaskContinuationOptions</span>.<span class="i">OnlyOnFaulted</span>);
+                    }
+ 
+                    <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#28f001c0b6c91fed" class="i field">receiveHandler</a> = <span class="r25 r">newReceiveHandler</span>;
+ 
+                    <span class="c">// We have a new receiveHandler, ensure pump is running.</span>
+                    <b>if</b> (<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#188e2aa564fc8465" class="i field">receivePumpTask</a> == <b>null</b>)
+                    {
+                        <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#6fc1ff0b7ac97ec3" class="i field">receivePumpCancellationSource</a> = <b>new</b> <span class="i">CancellationTokenSource</span>();
+                        <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#188e2aa564fc8465" class="i field">receivePumpTask</a> = <a href="#fa0aab02b61e95f1" class="k">this</a>.<span class="i">ReceivePumpAsync</span>(<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#6fc1ff0b7ac97ec3" class="i field">receivePumpCancellationSource</a>.<span class="i">Token</span>, <span class="r26 r">invokeWhenNoEvents</span>);
+                    }
+                }
+                <b>else</b>
+                {
+                    <span class="c">// newReceiveHandler == null, so this is an unregister call, ensure pump is shut down.</span>
+                    <b>if</b> (<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#188e2aa564fc8465" class="i field">receivePumpTask</a> != <b>null</b>)
+                    {
+                        <span class="c">// Do not wait as could block and would still match the previous behavior</span>
+                        <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#d55fe95fe3d0894c" class="i method">ReceiveHandlerClose</a>();
+                    }
+ 
+                    <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#28f001c0b6c91fed" class="i field">receiveHandler</a> = <b>null</b>;
+                }
+            }
+        }
+ 
+        <b>async</b> <span class="i">Task</span>&lt;<span class="i">ReceivingAmqpLink</span>&gt; <a id="6b7c9389220ba715" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">CreateLinkAsync</a>(<span class="i">TimeSpan</span> <span id="r29 rd" class="r29 r">timeout</span>)
+        {
+            <a href="AmqpEventHubClient.cs.html#a3d8f2ab12489a19" class="k">var</a> <span id="r30 rd" class="r30 r">amqpEventHubClient</span> = ((<a href="AmqpEventHubClient.cs.html#a3d8f2ab12489a19" class="t t">AmqpEventHubClient</a>)<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../PartitionReceiver.cs.html#41b7077a1ae2add1" class="i property">EventHubClient</a>);
+ 
+            <a href="../Primitives/TimeoutHelper.cs.html#e772a1e22bafc59c" class="k">var</a> <span id="r31 rd" class="r31 r">timeoutHelper</span> = <b>new</b> <a href="../Primitives/TimeoutHelper.cs.html#590ff83c14fb7e1d" class="t constructor">TimeoutHelper</a>(<span class="r29 r">timeout</span>);
+            <span class="i">AmqpConnection</span> <span id="r32 rd" class="r32 r">connection</span> = <b>await</b> <span class="r30 r">amqpEventHubClient</span>.<a href="AmqpEventHubClient.cs.html#bedb28b5969278fa" class="i property">ConnectionManager</a>.<span class="i">GetOrCreateAsync</span>(<span class="r31 r">timeoutHelper</span>.<a href="../Primitives/TimeoutHelper.cs.html#a2f50f7cc33bc27c" class="i method">RemainingTime</a>()).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+            <span class="c">// Authenticate over CBS</span>
+            <b>var</b> <span id="r33 rd" class="r33 r">cbsLink</span> = <span class="r32 r">connection</span>.<span class="i">Extensions</span>.<span class="i">Find</span>&lt;<span class="i">AmqpCbsLink</span>&gt;();
+ 
+            <span class="i">ICbsTokenProvider</span> <span id="r34 rd" class="r34 r">cbsTokenProvider</span> = <span class="r30 r">amqpEventHubClient</span>.<a href="AmqpEventHubClient.cs.html#c17427d4e6e1b6db" class="i property">CbsTokenProvider</a>;
+            <span class="i">Uri</span> <span id="r35 rd" class="r35 r">address</span> = <b>new</b> <span class="i">Uri</span>(<span class="r30 r">amqpEventHubClient</span>.<a href="../EventHubClient.cs.html#58a8e47a06e35c53" class="i property">ConnectionStringBuilder</a>.<a href="../Primitives/EventHubsConnectionStringBuilder.cs.html#6d119b1fb797464e" class="i property">Endpoint</a>, <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#7d0372c13122c78d" class="i property">Path</a>);
+            <b>string</b> <span id="r36 rd" class="r36 r">audience</span> = <span class="r35 r">address</span>.<span class="i">AbsoluteUri</span>;
+            <b>string</b> <span id="r37 rd" class="r37 r">resource</span> = <span class="r35 r">address</span>.<span class="i">AbsoluteUri</span>;
+            <b>var</b> <span id="r38 rd" class="r38 r">expiresAt</span> = <b>await</b> <span class="r33 r">cbsLink</span>.<span class="i">SendTokenAsync</span>(<span class="r34 r">cbsTokenProvider</span>, <span class="r35 r">address</span>, <span class="r36 r">audience</span>, <span class="r37 r">resource</span>, <b>new</b>[] { <a href="../Primitives/ClaimConstants.cs.html#748ab48e857a3e43" class="t t">ClaimConstants</a>.<a href="../Primitives/ClaimConstants.cs.html#06acc30cc9bba37c" class="i field">Listen</a> }, <span class="r31 r">timeoutHelper</span>.<a href="../Primitives/TimeoutHelper.cs.html#a2f50f7cc33bc27c" class="i method">RemainingTime</a>()).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+            <span class="i">AmqpSession</span> <span id="r39 rd" class="r39 r">session</span> = <b>null</b>;
+            <b>try</b>
+            {
+                <span class="c">// Create our Session</span>
+                <b>var</b> <span id="r40 rd" class="r40 r">sessionSettings</span> = <b>new</b> <span class="i">AmqpSessionSettings</span> { <span class="i">Properties</span> = <b>new</b> <span class="i">Fields</span>() };
+                <span class="r39 r">session</span> = <span class="r32 r">connection</span>.<span class="i">CreateSession</span>(<span class="r40 r">sessionSettings</span>);
+                <b>await</b> <span class="r39 r">session</span>.<span class="i">OpenAsync</span>(<span class="r31 r">timeoutHelper</span>.<a href="../Primitives/TimeoutHelper.cs.html#a2f50f7cc33bc27c" class="i method">RemainingTime</a>()).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <span class="i">FilterSet</span> <span id="r41 rd" class="r41 r">filterMap</span> = <b>null</b>;
+                <b>var</b> <span id="r42 rd" class="r42 r">filters</span> = <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#d5849dcfeed3dd60" class="i method">CreateFilters</a>();
+                <b>if</b> (<span class="r42 r">filters</span> != <b>null</b> &amp;&amp; <span class="r42 r">filters</span>.<span class="i">Count</span> &gt; 0)
+                {
+                    <span class="r41 r">filterMap</span> = <b>new</b> <span class="i">FilterSet</span>();
+                    <b>foreach</b> (<b>var</b> <span id="r43 rd" class="r43 r">filter</span> <b>in</b> <span class="r42 r">filters</span>)
+                    {
+                        <span class="r41 r">filterMap</span>.<span class="i">Add</span>(<span class="r43 r">filter</span>.<span class="i">DescriptorName</span>, <span class="r43 r">filter</span>);
+                    }
+                }
+ 
+                <span class="c">// Create our Link</span>
+                <b>var</b> <span id="r44 rd" class="r44 r">linkSettings</span> = <b>new</b> <span class="i">AmqpLinkSettings</span>
+                {
+                    <span class="i">Role</span> = <b>true</b>,
+                    <span class="i">TotalLinkCredit</span> = (<b>uint</b>)<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../PartitionReceiver.cs.html#08586c50f20673c9" class="i property">PrefetchCount</a>,
+                    <span class="i">AutoSendFlow</span> = <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../PartitionReceiver.cs.html#08586c50f20673c9" class="i property">PrefetchCount</a> &gt; 0
+                };
+                <span class="r44 r">linkSettings</span>.<span class="i">AddProperty</span>(<a href="AmqpClientConstants.cs.html#c8bb1175d0499823" class="t t">AmqpClientConstants</a>.<a href="AmqpClientConstants.cs.html#bff60ab913b0c180" class="i field">EntityTypeName</a>, (<b>int</b>)<a href="../Primitives/MessagingEntityType.cs.html#1e322cb393957686" class="t t">MessagingEntityType</a>.<a href="../Primitives/MessagingEntityType.cs.html#b18ab9be1d0859e4" class="i field">ConsumerGroup</a>);
+                <span class="r44 r">linkSettings</span>.<span class="i">Source</span> = <b>new</b> <span class="i">Source</span> { <span class="i">Address</span> = <span class="r35 r">address</span>.<span class="i">AbsolutePath</span>, <span class="i">FilterSet</span> = <span class="r41 r">filterMap</span> };
+                <span class="r44 r">linkSettings</span>.<span class="i">Target</span> = <b>new</b> <span class="i">Target</span> { <span class="i">Address</span> = <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../Primitives/ClientEntity.cs.html#5b2ded861d3b6cd6" class="i property">ClientId</a> };
+                <span class="r44 r">linkSettings</span>.<span class="i">SettleType</span> = <span class="i">SettleMode</span>.<span class="i">SettleOnSend</span>;
+ 
+                <span class="c">// Receiver metrics enabled?</span>
+                <b>if</b> (<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../PartitionReceiver.cs.html#f9d085f517fbf112" class="i property">ReceiverRuntimeMetricEnabled</a>)
+                {
+                    <span class="r44 r">linkSettings</span>.<span class="i">DesiredCapabilities</span> = <b>new</b> <span class="i">Multiple</span>&lt;<span class="i">AmqpSymbol</span>&gt;(<b>new</b> <span class="i">List</span>&lt;<span class="i">AmqpSymbol</span>&gt;
+                    {
+                        <a href="AmqpClientConstants.cs.html#c8bb1175d0499823" class="t t">AmqpClientConstants</a>.<a href="AmqpClientConstants.cs.html#8a8b01db00303749" class="i field">EnableReceiverRuntimeMetricName</a>
+                    });
+                }
+ 
+                <b>if</b> (<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../PartitionReceiver.cs.html#1f0653f0aca87420" class="i property">Epoch</a>.<span class="i">HasValue</span>)
+                {
+                    <span class="r44 r">linkSettings</span>.<span class="i">AddProperty</span>(<a href="AmqpClientConstants.cs.html#c8bb1175d0499823" class="t t">AmqpClientConstants</a>.<a href="AmqpClientConstants.cs.html#8036ed1520258f10" class="i field">AttachEpoch</a>, <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../PartitionReceiver.cs.html#1f0653f0aca87420" class="i property">Epoch</a>.<span class="i">Value</span>);
+                }
+ 
+                <b>if</b> (!<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../PartitionReceiver.cs.html#1c1b27012cf589dd" class="i property">Identifier</a>))
+                {
+                    <span class="r44 r">linkSettings</span>.<span class="i">AddProperty</span>(<a href="AmqpClientConstants.cs.html#c8bb1175d0499823" class="t t">AmqpClientConstants</a>.<a href="AmqpClientConstants.cs.html#6d61b80f5d65b986" class="i field">ReceiverIdentifierName</a>, <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../PartitionReceiver.cs.html#1c1b27012cf589dd" class="i property">Identifier</a>);
+                }
+ 
+                <b>var</b> <span id="r45 rd" class="r45 r">link</span> = <b>new</b> <span class="i">ReceivingAmqpLink</span>(<span class="r44 r">linkSettings</span>);
+                <span class="r44 r">linkSettings</span>.<span class="i">LinkName</span> = <span class="s">$&quot;</span>{<span class="r30 r">amqpEventHubClient</span>.<a href="AmqpEventHubClient.cs.html#490a7f9ec845c866" class="i property">ContainerId</a>}<span class="s">;</span>{<span class="r32 r">connection</span>.<span class="i">Identifier</span>}<span class="s">:</span>{<span class="r39 r">session</span>.<span class="i">Identifier</span>}<span class="s">:</span>{<span class="r45 r">link</span>.<span class="i">Identifier</span>}<span class="s">&quot;</span>;
+                <span class="r45 r">link</span>.<span class="i">AttachTo</span>(<span class="r39 r">session</span>);
+ 
+                <b>await</b> <span class="r45 r">link</span>.<span class="i">OpenAsync</span>(<span class="r31 r">timeoutHelper</span>.<a href="../Primitives/TimeoutHelper.cs.html#a2f50f7cc33bc27c" class="i method">RemainingTime</a>()).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <a href="ActiveClientLink.cs.html#1bdec0b0815b0b1d" class="k">var</a> <span id="r46 rd" class="r46 r">activeClientLink</span> = <b>new</b> <span class="t">ActiveClientLink</span>(
+                    <span class="r45 r">link</span>,
+                    <span class="r36 r">audience</span>, <span class="c">// audience</span>
+                    <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../PartitionReceiver.cs.html#41b7077a1ae2add1" class="i property">EventHubClient</a>.<a href="../EventHubClient.cs.html#58a8e47a06e35c53" class="i property">ConnectionStringBuilder</a>.<a href="../Primitives/EventHubsConnectionStringBuilder.cs.html#6d119b1fb797464e" class="i property">Endpoint</a>.<span class="i">AbsoluteUri</span>, <span class="c">// endpointUri</span>
+                    <b>new</b>[] { <a href="../Primitives/ClaimConstants.cs.html#748ab48e857a3e43" class="t t">ClaimConstants</a>.<a href="../Primitives/ClaimConstants.cs.html#06acc30cc9bba37c" class="i field">Listen</a> },
+                    <b>true</b>,
+                    <span class="r38 r">expiresAt</span>);
+ 
+                <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#b083b67938db9d91" class="i field">clientLinkManager</a>.<a href="ActiveClientLinkManager.cs.html#08137352696729da" class="i method">SetActiveLink</a>(<span class="r46 r">activeClientLink</span>);
+ 
+                <b>return</b> <span class="r45 r">link</span>;
+            }
+            <b>catch</b>
+            {
+                <span class="c">// Cleanup any session (and thus link) in case of exception.</span>
+                <span class="r39 r">session</span>?.<span class="i">SafeClose</span>();
+                <b>throw</b>;
+            }
+        }
+ 
+        <b>void</b> <a id="be6f4624e1802da1" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">CloseSession</a>(<span class="i">ReceivingAmqpLink</span> <span id="r47 rd" class="r47 r">link</span>)
+        {
+            <span class="r47 r">link</span>.<span class="i">Session</span>.<span class="i">SafeClose</span>();
+        }
+ 
+        <span class="i">IList</span>&lt;<span class="i">AmqpDescribed</span>&gt; <a id="d5849dcfeed3dd60" href="../R/d5849dcfeed3dd60.html" target="n" data-glyph="76,1" class="i method">CreateFilters</a>()
+        {
+            <span class="i">List</span>&lt;<span class="i">AmqpDescribed</span>&gt; <span id="r48 rd" class="r48 r">filterMap</span> = <b>null</b>;
+ 
+            <b>if</b> (<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../PartitionReceiver.cs.html#8686e364c2fca6e0" class="i property">EventPosition</a> != <b>null</b>)
+            {
+                <span class="r48 r">filterMap</span> = <b>new</b> <span class="i">List</span>&lt;<span class="i">AmqpDescribed</span>&gt; { <b>new</b> <a href="AmqpSelectorFilter.cs.html#bb08dc69f2285ebb" class="t constructor">AmqpSelectorFilter</a>(<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../PartitionReceiver.cs.html#8686e364c2fca6e0" class="i property">EventPosition</a>.<a href="../EventPosition.cs.html#59a1c37d8deec4f2" class="i method">GetExpression</a>()) };
+            }
+ 
+            <b>return</b> <span class="r48 r">filterMap</span>;
+        }
+ 
+        <b>async</b> <span class="i">Task</span> <a id="606dca19a1707fd1" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">ReceivePumpAsync</a>(<span class="i">CancellationToken</span> <span id="r49 rd" class="r49 r">cancellationToken</span>, <b>bool</b> <span id="r50 rd" class="r50 r">invokeWhenNoEvents</span>)
+        {
+            <b>try</b>
+            {
+                <span class="c">// Loop until pump is shutdown or an error is hit.</span>
+                <b>while</b> (!<span class="r49 r">cancellationToken</span>.<span class="i">IsCancellationRequested</span>)
+                {
+                    <span class="i">IEnumerable</span>&lt;<a href="../EventData.cs.html#f56ed6e805f7061b" class="t t">EventData</a>&gt; <span id="r51 rd" class="r51 r">receivedEvents</span>;
+ 
+                    <b>try</b>
+                    {
+                        <b>int</b> <span id="r52 rd" class="r52 r">batchSize</span>;
+ 
+                        <b>lock</b> (<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#425c494463d394a1" class="i field">receivePumpLock</a>)
+                        {
+                            <b>if</b> (<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#28f001c0b6c91fed" class="i field">receiveHandler</a> == <b>null</b>)
+                            {
+                                <span class="c">// Pump has been shutdown, nothing more to do.</span>
+                                <b>return</b>;
+                            }
+ 
+                            <span class="r52 r">batchSize</span> = <a href="#28f001c0b6c91fed" class="i field">receiveHandler</a>.<a href="../IPartitionReceiveHandler.cs.html#a7f7ea993bc3c454" class="i property">MaxBatchSize</a> &gt; 0 ? <a href="#28f001c0b6c91fed" class="i field">receiveHandler</a>.<a href="../IPartitionReceiveHandler.cs.html#a7f7ea993bc3c454" class="i property">MaxBatchSize</a> : <a href="../Primitives/ClientConstants.cs.html#1bf37eeaed226d94" class="t t">ClientConstants</a>.<a href="../Primitives/ClientConstants.cs.html#1b3bdfdecb20daff" class="i field">ReceiveHandlerDefaultBatchSize</a>;
+                        }
+ 
+                        <span class="r51 r">receivedEvents</span> = <b>await</b> <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../PartitionReceiver.cs.html#bb31ba9a4e2f93c1" class="i method">ReceiveAsync</a>(<span class="r52 r">batchSize</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    }
+                    <b>catch</b> (<span class="i">Exception</span> <span id="r53 rd" class="r53 r">e</span>)
+                    {
+                        <span class="c">// Omit any failures at exception handling. Pump should continue until cancellation is triggered.</span>
+                        <b>try</b>
+                        {
+                            <a href="../EventHubsEventSource.cs.html#a8d90a446db9f305" class="t t">EventHubsEventSource</a>.<a href="../EventHubsEventSource.cs.html#876999de01c1c51a" class="i property">Log</a>.<span class="i">ReceiveHandlerExitingWithError</span>(<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../Primitives/ClientEntity.cs.html#5b2ded861d3b6cd6" class="i property">ClientId</a>, <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../PartitionReceiver.cs.html#470835fa67813644" class="i property">PartitionId</a>, <span class="r53 r">e</span>.<span class="i">Message</span>);
+                            <b>await</b> <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#01a4eca54909a9a9" class="i method">ReceiveHandlerProcessErrorAsync</a>(<span class="r53 r">e</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                            <span class="c">// Avoid tight loop if Receieve call keeps faling.</span>
+                            <b>await</b> <span class="i">Task</span>.<span class="i">Delay</span>(100, <span class="r49 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        }
+                        <b>catch</b> { }
+ 
+                        <span class="c">// ReceiverDisconnectedException is a special case where we know we cannot recover the pump.</span>
+                        <b>if</b> (<span class="r53 r">e</span> <b>is</b> <a href="../Primitives/ReceiverDisconnectedException.cs.html#52ecd05c9600cf6e" class="t t">ReceiverDisconnectedException</a>)
+                        {
+                            <b>break</b>;
+                        }
+ 
+                        <b>continue</b>;
+                    }
+ 
+                    <b>if</b> (<span class="r50 r">invokeWhenNoEvents</span> || <span class="r51 r">receivedEvents</span> != <b>null</b>)
+                    {
+                        <b>try</b>
+                        {
+                            <b>await</b> <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#a8fa07d3f6843d5a" class="i method">ReceiveHandlerProcessEventsAsync</a>(<span class="r51 r">receivedEvents</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        }
+                        <b>catch</b> (<span class="i">Exception</span> <span id="r54 rd" class="r54 r">userCodeError</span>)
+                        {
+                            <a href="../EventHubsEventSource.cs.html#a8d90a446db9f305" class="t t">EventHubsEventSource</a>.<a href="../EventHubsEventSource.cs.html#876999de01c1c51a" class="i property">Log</a>.<span class="i">ReceiveHandlerExitingWithError</span>(<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../Primitives/ClientEntity.cs.html#5b2ded861d3b6cd6" class="i property">ClientId</a>, <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../PartitionReceiver.cs.html#470835fa67813644" class="i property">PartitionId</a>, <span class="r54 r">userCodeError</span>.<span class="i">Message</span>);
+                            <b>await</b> <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#01a4eca54909a9a9" class="i method">ReceiveHandlerProcessErrorAsync</a>(<span class="r54 r">userCodeError</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        }
+                    }
+                }
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r55 rd" class="r55 r">ex</span>)
+            {
+                <span class="c">// This should never throw</span>
+                <a href="../EventHubsEventSource.cs.html#a8d90a446db9f305" class="t t">EventHubsEventSource</a>.<a href="../EventHubsEventSource.cs.html#876999de01c1c51a" class="i property">Log</a>.<span class="i">ReceiveHandlerExitingWithError</span>(<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../Primitives/ClientEntity.cs.html#5b2ded861d3b6cd6" class="i property">ClientId</a>, <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="../PartitionReceiver.cs.html#470835fa67813644" class="i property">PartitionId</a>, <span class="r55 r">ex</span>.<span class="i">Message</span>);
+                <span class="i">Environment</span>.<span class="i">FailFast</span>(<span class="r55 r">ex</span>.<span class="i">ToString</span>());
+            }
+        }
+ 
+        <span class="c">// Encapsulates taking the receivePumpLock, checking this.receiveHandler for null,</span>
+        <span class="c">// calls this.receiveHandler.CloseAsync (starting this operation inside the receivePumpLock).</span>
+        <span class="i">Task</span> <a id="d55fe95fe3d0894c" href="../R/d55fe95fe3d0894c.html" target="n" data-glyph="76,1" class="i method">ReceiveHandlerClose</a>()
+        {
+            <span class="i">Task</span> <span id="r56 rd" class="r56 r">task</span> = <b>null</b>;
+ 
+            <b>lock</b> (<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#425c494463d394a1" class="i field">receivePumpLock</a>)
+            {
+                <b>if</b> (<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#28f001c0b6c91fed" class="i field">receiveHandler</a> != <b>null</b>)
+                {
+                    <b>if</b> (<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#188e2aa564fc8465" class="i field">receivePumpTask</a> != <b>null</b>)
+                    {
+                        <span class="r56 r">task</span> = <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#188e2aa564fc8465" class="i field">receivePumpTask</a>;
+                        <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#6fc1ff0b7ac97ec3" class="i field">receivePumpCancellationSource</a>.<span class="i">Cancel</span>();
+                        <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#6fc1ff0b7ac97ec3" class="i field">receivePumpCancellationSource</a>.<span class="i">Dispose</span>();
+                        <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#6fc1ff0b7ac97ec3" class="i field">receivePumpCancellationSource</a> = <b>null</b>;
+                        <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#188e2aa564fc8465" class="i field">receivePumpTask</a> = <b>null</b>;
+                    }
+ 
+                    <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#28f001c0b6c91fed" class="i field">receiveHandler</a> = <b>null</b>;
+                }
+            }
+ 
+            <b>return</b> <span class="r56 r">task</span> ?? <span class="i">Task</span>.<span class="i">CompletedTask</span>;
+        }
+ 
+        <span class="c">// Encapsulates taking the receivePumpLock, checking this.receiveHandler for null,</span>
+        <span class="c">// calls this.receiveHandler.ProcessErrorAsync (starting this operation inside the receivePumpLock).</span>
+        <span class="i">Task</span> <a id="01a4eca54909a9a9" href="../R/01a4eca54909a9a9.html" target="n" data-glyph="76,1" class="i method">ReceiveHandlerProcessErrorAsync</a>(<span class="i">Exception</span> <span id="r57 rd" class="r57 r">error</span>)
+        {
+            <span class="i">Task</span> <span id="r58 rd" class="r58 r">processErrorTask</span> = <b>null</b>;
+            <b>lock</b> (<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#425c494463d394a1" class="i field">receivePumpLock</a>)
+            {
+                <b>if</b> (<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#28f001c0b6c91fed" class="i field">receiveHandler</a> != <b>null</b>)
+                {
+                    <span class="r58 r">processErrorTask</span> = <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#28f001c0b6c91fed" class="i field">receiveHandler</a>.<a href="../IPartitionReceiveHandler.cs.html#955d00c366400244" class="i method">ProcessErrorAsync</a>(<span class="r57 r">error</span>);
+                }
+            }
+ 
+            <b>return</b> <span class="r58 r">processErrorTask</span> ?? <span class="i">Task</span>.<span class="i">FromResult</span>(0);
+        }
+ 
+        <span class="c">// Encapsulates taking the receivePumpLock, checking this.receiveHandler for null,</span>
+        <span class="c">// calls this.receiveHandler.ProcessErrorAsync (starting this operation inside the receivePumpLock).</span>
+        <span class="i">Task</span> <a id="a8fa07d3f6843d5a" href="../R/a8fa07d3f6843d5a.html" target="n" data-glyph="76,1" class="i method">ReceiveHandlerProcessEventsAsync</a>(<span class="i">IEnumerable</span>&lt;<a href="../EventData.cs.html#f56ed6e805f7061b" class="t t">EventData</a>&gt; <span id="r59 rd" class="r59 r">eventDatas</span>)
+        {
+            <span class="i">Task</span> <span id="r60 rd" class="r60 r">processEventsTask</span> = <b>null</b>;
+ 
+            <b>lock</b> (<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#425c494463d394a1" class="i field">receivePumpLock</a>)
+            {
+                <b>if</b> (<a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#28f001c0b6c91fed" class="i field">receiveHandler</a> != <b>null</b>)
+                {
+                    <span class="r60 r">processEventsTask</span> = <a href="#fa0aab02b61e95f1" class="k">this</a>.<a href="#28f001c0b6c91fed" class="i field">receiveHandler</a>.<a href="../IPartitionReceiveHandler.cs.html#d0f0a73c649b131b" class="i method">ProcessEventsAsync</a>(<span class="r59 r">eventDatas</span>);
+                }
+            }
+ 
+            <b>return</b> <span class="r60 r">processEventsTask</span> ?? <span class="i">Task</span>.<span class="i">FromResult</span>(0);
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

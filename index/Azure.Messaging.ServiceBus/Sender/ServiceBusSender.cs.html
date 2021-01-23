@@ -1,0 +1,614 @@
+﻿<!DOCTYPE html>
+<html><head><title>ServiceBusSender.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(605);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Messaging.ServiceBus/Sender/ServiceBusSender.cs" target="_top">Sender\ServiceBusSender.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Messaging.ServiceBus" target="_top">src\Azure.Messaging.ServiceBus.csproj</a> (Azure.Messaging.ServiceBus)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">ComponentModel</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>.<span class="i">CodeAnalysis</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Globalization</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Linq</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>.<span class="i n">Plugins</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">   A client responsible for sending </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> to a specific Service Bus entity</span>
+    <span class="c">///</span><span class="c">   (Queue or Topic). It can be used for both session and non-session entities. It is constructed by calling </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Client/ServiceBusClient.cs.html#ad46ff0588c85077" class="t t">ServiceBusClient</a>.<a href="../Client/ServiceBusClient.cs.html#a445ec86cde923d7" class="i method">CreateSender</a>(<b>string</b>)<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <b>public class</b> <a id="565d94b474d31465" href="../R/565d94b474d31465.html" target="n" data-glyph="0,0" class="t t">ServiceBusSender</a> : <span class="i">IAsyncDisposable</span>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The minimum allowable size, in bytes, for a batch to be sent.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal const int</b> <a id="61c33e4438b44e5a" href="../R/61c33e4438b44e5a.html" target="n" data-glyph="8,1" class="i field">MinimumBatchSizeLimit</a> = 24;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The fully qualified Service Bus namespace that the producer is associated with.  This is likely</span>
+        <span class="c">///</span><span class="c">   to be similar to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">{yournamespace}.servicebus.windows.net</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public string</b> <a id="86c0cd9ddda3b581" href="../R/86c0cd9ddda3b581.html" target="n" data-glyph="102,1" class="i property">FullyQualifiedNamespace</a> =&gt; <a href="#a02ef8e8df64fd5f" class="i field">_connection</a>.<a href="../Primitives/ServiceBusConnection.cs.html#729943334b661165" class="i property">FullyQualifiedNamespace</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The path of the entity that the sender is connected to, specific to the</span>
+        <span class="c">///</span><span class="c">   Service Bus namespace that contains it.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public string</b> <a id="bbf4fdfcf49d376a" href="../R/bbf4fdfcf49d376a.html" target="n" data-glyph="102,1" class="i property">EntityPath</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Indicates whether or not this </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#565d94b474d31465" class="t t">ServiceBusSender</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> has been closed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the sender is closed; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        <b>public bool</b> <a id="fc5aeb98d6044cba" href="../R/fc5aeb98d6044cba.html" target="n" data-glyph="102,1" class="i property">IsClosed</a>
+        {
+            <b>get</b> =&gt; <a href="#7d47f9648651d854" class="i field">_closed</a>;
+            <b>private set</b> =&gt; <a href="#7d47f9648651d854" class="i field">_closed</a> = <b>value</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">Indicates whether or not this instance has been closed.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private volatile bool</b> <a id="7d47f9648651d854" href="../R/7d47f9648651d854.html" target="n" data-glyph="46,1" class="i field">_closed</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The instance of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Diagnostics/ServiceBusEventSource.cs.html#9f107e3f0d141c2b" class="t t">ServiceBusEventSource</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> which can be mocked for testing.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal</b> <a href="../Diagnostics/ServiceBusEventSource.cs.html#9f107e3f0d141c2b" class="t t">ServiceBusEventSource</a> <a id="882d9467ee0c8205" href="../R/882d9467ee0c8205.html" target="n" data-glyph="104,1" class="i property">Logger</a> { <b>get</b>; <b>set</b>; } = <a href="../Diagnostics/ServiceBusEventSource.cs.html#9f107e3f0d141c2b" class="t t">ServiceBusEventSource</a>.<a href="../Diagnostics/ServiceBusEventSource.cs.html#9494c77d3f8244ec" class="i property">Log</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the ID to identify this client. This can be used to correlate logs and exceptions.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">Every new client has a unique ID.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>internal string</b> <a id="5b8a6735cb752e7e" href="../R/5b8a6735cb752e7e.html" target="n" data-glyph="104,1" class="i property">Identifier</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The policy to use for determining retry behavior for when an operation fails.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private readonly</b> <a href="../Primitives/ServiceBusRetryPolicy.cs.html#d0d6be7ac57eb9c9" class="t t">ServiceBusRetryPolicy</a> <a id="70552db4fb0f04ba" href="../R/70552db4fb0f04ba.html" target="n" data-glyph="46,1" class="i field">_retryPolicy</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The active connection to the Azure Service Bus service, enabling client communications for metadata</span>
+        <span class="c">///</span><span class="c">   about the associated Service Bus entity and access to transport-aware consumers.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private readonly</b> <a href="../Primitives/ServiceBusConnection.cs.html#5fc67fb7b5056bea" class="t t">ServiceBusConnection</a> <a id="a02ef8e8df64fd5f" href="../R/a02ef8e8df64fd5f.html" target="n" data-glyph="46,1" class="i field">_connection</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   An abstracted Service Bus entity transport-specific sender that is associated with the</span>
+        <span class="c">///</span><span class="c">   Service Bus entity gateway rather than a specific partition; intended to perform delegated operations.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private readonly</b> <a href="../Core/TransportSender.cs.html#c54f19921ea3dbe2" class="t t">TransportSender</a> <a id="6cb8c6a9f63bf1b8" href="../R/6cb8c6a9f63bf1b8.html" target="n" data-glyph="46,1" class="i field">_innerSender</a>;
+        <b>private readonly</b> <a href="../Diagnostics/EntityScopeFactory.cs.html#9100164b526814a3" class="t t">EntityScopeFactory</a> <a id="1c12f121f76b7bfe" href="../R/1c12f121f76b7bfe.html" target="n" data-glyph="46,1" class="i field">_scopeFactory</a>;
+        <b>internal readonly</b> <span class="i">IList</span>&lt;<a href="../Plugins/ServiceBusPlugin.cs.html#5ee21a6788ad51aa" class="t t">ServiceBusPlugin</a>&gt; <a id="669a3c42d4d55fa2" href="../R/669a3c42d4d55fa2.html" target="n" data-glyph="44,1" class="i field">_plugins</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#565d94b474d31465" class="t t">ServiceBusSender</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">entityPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The entity path to send the message to.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">options</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The set of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusSenderOptions.cs.html#4d0b2fc41f9a2f3c" class="t t">ServiceBusSenderOptions</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to use for configuring</span>
+        <span class="c">///</span><span class="c"> this </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#565d94b474d31465" class="t t">ServiceBusSender</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">connection</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The connection for the sender.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">plugins</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Plugins to apply to outgoing messages.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal</b> <a id="e37dc4fadb22d3bf" href="../R/e37dc4fadb22d3bf.html" target="n" data-glyph="74,1" class="t constructor">ServiceBusSender</a>(
+            <b>string</b> <span id="r0 rd" class="r0 r">entityPath</span>,
+            <a href="ServiceBusSenderOptions.cs.html#4d0b2fc41f9a2f3c" class="t t">ServiceBusSenderOptions</a> <span id="r1 rd" class="r1 r">options</span>,
+            <a href="../Primitives/ServiceBusConnection.cs.html#5fc67fb7b5056bea" class="t t">ServiceBusConnection</a> <span id="r2 rd" class="r2 r">connection</span>,
+            <span class="i">IList</span>&lt;<a href="../Plugins/ServiceBusPlugin.cs.html#5ee21a6788ad51aa" class="t t">ServiceBusPlugin</a>&gt; <span id="r3 rd" class="r3 r">plugins</span>)
+        {
+            <a href="#882d9467ee0c8205" class="i property">Logger</a>.<span class="i">ClientCreateStart</span>(<b>typeof</b>(<a href="#565d94b474d31465" class="t t">ServiceBusSender</a>), <span class="r2 r">connection</span>?.<a href="../Primitives/ServiceBusConnection.cs.html#729943334b661165" class="i property">FullyQualifiedNamespace</a>, <span class="r0 r">entityPath</span>);
+            <b>try</b>
+            {
+                <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r2 r">connection</span>, <b>nameof</b>(<span class="r2 r">connection</span>));
+                <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r2 r">connection</span>.<a href="../Primitives/ServiceBusConnection.cs.html#6fbb28757496f6ee" class="i property">RetryOptions</a>, <b>nameof</b>(<span class="r2 r">connection</span>.<a href="../Primitives/ServiceBusConnection.cs.html#6fbb28757496f6ee" class="i property">RetryOptions</a>));
+                <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#fa55a5c88c3dc11d" class="i method">AssertNotNullOrWhiteSpace</a>(<span class="r0 r">entityPath</span>, <b>nameof</b>(<span class="r0 r">entityPath</span>));
+                <span class="r2 r">connection</span>.<a href="../Primitives/ServiceBusConnection.cs.html#9c53664d76dd11d7" class="i method">ThrowIfClosed</a>();
+ 
+                <span class="r1 r">options</span> = <span class="r1 r">options</span>?.<a href="ServiceBusSenderOptions.cs.html#f70be6932abd5200" class="i method">Clone</a>() ?? <b>new</b> <span class="t">ServiceBusSenderOptions</span>();
+                <a href="#bbf4fdfcf49d376a" class="i property">EntityPath</a> = <span class="r0 r">entityPath</span>;
+                <a href="#5b8a6735cb752e7e" class="i property">Identifier</a> = <a href="../Diagnostics/DiagnosticUtilities.cs.html#e63dadcef3cbbce1" class="t t">DiagnosticUtilities</a>.<a href="../Diagnostics/DiagnosticUtilities.cs.html#582c96465587da53" class="i method">GenerateIdentifier</a>(<a href="#bbf4fdfcf49d376a" class="i property">EntityPath</a>);
+                <a href="#a02ef8e8df64fd5f" class="i field">_connection</a> = <span class="r2 r">connection</span>;
+                <a href="#70552db4fb0f04ba" class="i field">_retryPolicy</a> = <a href="#a02ef8e8df64fd5f" class="i field">_connection</a>.<a href="../Primitives/ServiceBusConnection.cs.html#6fbb28757496f6ee" class="i property">RetryOptions</a>.<a href="../Core/ServiceBusRetryOptionsExtensions.cs.html#d698c84551779460" class="i method">ToRetryPolicy</a>();
+                <a href="#6cb8c6a9f63bf1b8" class="i field">_innerSender</a> = <a href="#a02ef8e8df64fd5f" class="i field">_connection</a>.<a href="../Primitives/ServiceBusConnection.cs.html#43eed66c6da39eaf" class="i method">CreateTransportSender</a>(
+                    <span class="r0 r">entityPath</span>,
+                    <a href="#70552db4fb0f04ba" class="i field">_retryPolicy</a>,
+                    <a href="#5b8a6735cb752e7e" class="i property">Identifier</a>);
+                <a href="#1c12f121f76b7bfe" class="i field">_scopeFactory</a> = <b>new</b> <a href="../Diagnostics/EntityScopeFactory.cs.html#5f446a7a93a315a4" class="t constructor">EntityScopeFactory</a>(<a href="#bbf4fdfcf49d376a" class="i property">EntityPath</a>, <a href="#86c0cd9ddda3b581" class="i property">FullyQualifiedNamespace</a>);
+                <a href="#669a3c42d4d55fa2" class="i field">_plugins</a> = <span class="r3 r">plugins</span>;
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r4 rd" class="r4 r">ex</span>)
+            {
+                <a href="#882d9467ee0c8205" class="i property">Logger</a>.<span class="i">ClientCreateException</span>(<b>typeof</b>(<a href="#565d94b474d31465" class="t t">ServiceBusSender</a>), <span class="r2 r">connection</span>?.<a href="../Primitives/ServiceBusConnection.cs.html#729943334b661165" class="i property">FullyQualifiedNamespace</a>, <span class="r0 r">entityPath</span>, <span class="r4 r">ex</span>);
+                <b>throw</b>;
+            }
+            <a href="#882d9467ee0c8205" class="i property">Logger</a>.<span class="i">ClientCreateComplete</span>(<b>typeof</b>(<a href="#565d94b474d31465" class="t t">ServiceBusSender</a>), <a href="#5b8a6735cb752e7e" class="i property">Identifier</a>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#565d94b474d31465" class="t t">ServiceBusSender</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class for mocking.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>protected</b> <a id="5162fed980229f82" href="../R/../../0000000000.html" target="n" data-glyph="75,1" class="t constructor">ServiceBusSender</a>()
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Sends a message to the associated entity of Service Bus.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">message</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A task to be resolved on when the operation has completed.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public virtual async</b> <span class="i">Task</span> <a id="7eef1bd623e1098f" href="../R/7eef1bd623e1098f.html" target="n" data-glyph="72,1" class="i method">SendMessageAsync</a>(
+            <a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a> <span id="r5 rd" class="r5 r">message</span>,
+            <span class="i">CancellationToken</span> <span id="r6 rd" class="r6 r">cancellationToken</span> = <b>default</b>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r5 r">message</span>, <b>nameof</b>(<span class="r5 r">message</span>));
+            <b>await</b> <span class="i">SendMessagesAsync</span>(
+                <b>new</b> <a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>[] { <span class="r5 r">message</span> },
+                <span class="r6 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Sends a set of messages to the associated Service Bus entity using a batched approach.</span>
+        <span class="c">///</span><span class="c">   If the size of the messages exceed the maximum size of a single batch,</span>
+        <span class="c">///</span><span class="c">   an exception will be triggered and the send will fail. In order to ensure that the messages</span>
+        <span class="c">///</span><span class="c">   being sent will fit in a batch, use </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#cb795ef13406feef" class="i method">SendMessagesAsync</a>(<a href="ServiceBusMessageBatch.cs.html#31077058165fc40f" class="t t">ServiceBusMessageBatch</a>, <span class="i">CancellationToken</span>)<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instead.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">messages</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The set of messages to send.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A task to be resolved on when the operation has completed.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public virtual async</b> <span class="i">Task</span> <a id="038daceb2325fbfe" href="../R/038daceb2325fbfe.html" target="n" data-glyph="72,1" class="i method">SendMessagesAsync</a>(
+            <span class="i">IEnumerable</span>&lt;<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>&gt; <span id="r7 rd" class="r7 r">messages</span>,
+            <span class="i">CancellationToken</span> <span id="r8 rd" class="r8 r">cancellationToken</span> = <b>default</b>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<span class="i">AssertNotNull</span>(<span class="r7 r">messages</span>, <b>nameof</b>(<span class="r7 r">messages</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Core/Argument.cs.html#ad31cdc7051f5f26" class="i method">AssertNotDisposed</a>(<a href="#fc5aeb98d6044cba" class="i property">IsClosed</a>, <b>nameof</b>(<a href="#565d94b474d31465" class="t t">ServiceBusSender</a>));
+            <span class="i">IReadOnlyList</span>&lt;<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>&gt; <span id="r9 rd" class="r9 r">messageList</span> = <span class="r7 r">messages</span> <b>switch</b>
+            {
+                <span class="i">IReadOnlyList</span>&lt;<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>&gt; <span id="r10 rd" class="r10 r">alreadyList</span> =&gt; <span class="r10 r">alreadyList</span>,
+                <b>_</b> =&gt; <span class="r7 r">messages</span>.<span class="i">ToList</span>()
+            };
+ 
+            <b>if</b> (<span class="r9 r">messageList</span>.<span class="i">Count</span> == 0)
+            {
+                <b>return</b>;
+            }
+            <b>await</b> <a href="#2b4d4e923c99c370" class="i method">ApplyPlugins</a>(<span class="r9 r">messageList</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            <span class="r8 r">cancellationToken</span>.<a href="../Core/CancellationTokenExtensions.cs.html#02fb1f7bead5539d" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+            <a href="#882d9467ee0c8205" class="i property">Logger</a>.<span class="i">SendMessageStart</span>(<a href="#5b8a6735cb752e7e" class="i property">Identifier</a>, <span class="i">messageCount</span>: <span class="r9 r">messageList</span>.<span class="i">Count</span>);
+            <b>using</b> <a href="../SharedSource/Azure.Core/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r11 rd" class="r11 r">scope</span> = <a href="#4250519b92443012" class="i method">CreateDiagnosticScope</a>(<span class="r7 r">messages</span>, <a href="../Diagnostics/DiagnosticProperty.cs.html#97b04f181690465e" class="t t">DiagnosticProperty</a>.<a href="../Diagnostics/DiagnosticProperty.cs.html#0e51af1e44542be1" class="i property">SendActivityName</a>);
+            <span class="r11 r">scope</span>.<a href="../SharedSource/Azure.Core/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
+ 
+            <b>try</b>
+            {
+                <b>await</b> <a href="#6cb8c6a9f63bf1b8" class="i field">_innerSender</a>.<a href="../Core/TransportSender.cs.html#41b227bd3e22c64c" class="i method">SendAsync</a>(
+                    <span class="r9 r">messageList</span>,
+                    <span class="r8 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+ 
+            <b>catch</b> (<span class="i">Exception</span> <span id="r12 rd" class="r12 r">exception</span>)
+            {
+                <a href="#882d9467ee0c8205" class="i property">Logger</a>.<span class="i">SendMessageException</span>(<a href="#5b8a6735cb752e7e" class="i property">Identifier</a>, <span class="r12 r">exception</span>.<span class="i">ToString</span>());
+                <span class="r11 r">scope</span>.<a href="../SharedSource/Azure.Core/DiagnosticScope.cs.html#1fc9b81e757b438c" class="i method">Failed</a>(<span class="r12 r">exception</span>);
+                <b>throw</b>;
+            }
+            <span class="r8 r">cancellationToken</span>.<a href="../Core/CancellationTokenExtensions.cs.html#02fb1f7bead5539d" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+            <a href="#882d9467ee0c8205" class="i property">Logger</a>.<a href="../Diagnostics/ServiceBusEventSource.cs.html#4121b75cf4f7f8ec" class="i method">SendMessageComplete</a>(<a href="#5b8a6735cb752e7e" class="i property">Identifier</a>);
+        }
+ 
+        <b>private async</b> <span class="i">Task</span> <a id="2b4d4e923c99c370" href="../R/2b4d4e923c99c370.html" target="n" data-glyph="76,1" class="i method">ApplyPlugins</a>(<span class="i">IReadOnlyList</span>&lt;<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>&gt; <span id="r13 rd" class="r13 r">messages</span>)
+        {
+            <b>foreach</b> (<a href="../Plugins/ServiceBusPlugin.cs.html#5ee21a6788ad51aa" class="t t">ServiceBusPlugin</a> <span id="r14 rd" class="r14 r">plugin</span> <b>in</b> <a href="#669a3c42d4d55fa2" class="i field">_plugins</a>)
+            {
+                <b>string</b> <span id="r15 rd" class="r15 r">pluginType</span> = <span class="r14 r">plugin</span>.<span class="i">GetType</span>().<span class="i">Name</span>;
+                <b>foreach</b> (<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a> <span id="r16 rd" class="r16 r">message</span> <b>in</b> <span class="r13 r">messages</span>)
+                {
+                    <b>try</b>
+                    {
+                        <a href="#882d9467ee0c8205" class="i property">Logger</a>.<a href="../Diagnostics/ServiceBusEventSource.cs.html#1b6b09935438b552" class="i method">PluginCallStarted</a>(<span class="r15 r">pluginType</span>, <span class="r16 r">message</span>.<a href="../Primitives/ServiceBusMessage.cs.html#62234b00feff0e3f" class="i property">MessageId</a>);
+                        <b>await</b> <span class="r14 r">plugin</span>.<a href="../Plugins/ServiceBusPlugin.cs.html#00e29c92e30af1bd" class="i method">BeforeMessageSendAsync</a>(<span class="r16 r">message</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        <a href="#882d9467ee0c8205" class="i property">Logger</a>.<a href="../Diagnostics/ServiceBusEventSource.cs.html#106ccbe88f594deb" class="i method">PluginCallCompleted</a>(<span class="r15 r">pluginType</span>, <span class="r16 r">message</span>.<a href="../Primitives/ServiceBusMessage.cs.html#62234b00feff0e3f" class="i property">MessageId</a>);
+                    }
+                    <b>catch</b> (<span class="i">Exception</span> <span id="r17 rd" class="r17 r">ex</span>)
+                    {
+                        <a href="#882d9467ee0c8205" class="i property">Logger</a>.<span class="i">PluginCallException</span>(<span class="r15 r">pluginType</span>, <span class="r16 r">message</span>.<a href="../Primitives/ServiceBusMessage.cs.html#62234b00feff0e3f" class="i property">MessageId</a>, <span class="r17 r">ex</span>.<span class="i">ToString</span>());
+                        <b>throw</b>;
+                    }
+                }
+            }
+        }
+ 
+        <b>private</b> <a href="../SharedSource/Azure.Core/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <a id="4250519b92443012" href="../R/4250519b92443012.html" target="n" data-glyph="76,1" class="i method">CreateDiagnosticScope</a>(<span class="i">IEnumerable</span>&lt;<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>&gt; <span id="r18 rd" class="r18 r">messages</span>, <b>string</b> <span id="r19 rd" class="r19 r">activityName</span>)
+        {
+            <a href="#abba9f79f9a82271" class="i method">InstrumentMessages</a>(<span class="r18 r">messages</span>);
+ 
+            <span class="c">// create a new scope for the specified operation</span>
+            <a href="../SharedSource/Azure.Core/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r20 rd" class="r20 r">scope</span> = <a href="#1c12f121f76b7bfe" class="i field">_scopeFactory</a>.<a href="../Diagnostics/EntityScopeFactory.cs.html#a8efaa1ce26bea38" class="i method">CreateScope</a>(
+                <span class="r19 r">activityName</span>,
+                <a href="../Diagnostics/DiagnosticProperty.cs.html#97b04f181690465e" class="t t">DiagnosticProperty</a>.<a href="../Diagnostics/DiagnosticProperty.cs.html#27a05ff983cef8c0" class="i field">ClientKind</a>);
+ 
+            <span class="r20 r">scope</span>.<a href="../Diagnostics/DiagnosticExtensions.cs.html#cc03f0a315547aed" class="i method">SetMessageData</a>(<span class="r18 r">messages</span>);
+            <b>return</b> <span class="r20 r">scope</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Performs the actions needed to instrument a set of messages.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r21 r">messages</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The messages to instrument.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private void</b> <a id="abba9f79f9a82271" href="../R/abba9f79f9a82271.html" target="n" data-glyph="76,1" class="i method">InstrumentMessages</a>(<span class="i">IEnumerable</span>&lt;<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>&gt; <span id="r21 rd" class="r21 r">messages</span>)
+        {
+            <b>foreach</b> (<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a> <span id="r22 rd" class="r22 r">message</span> <b>in</b> <span class="r21 r">messages</span>)
+            {
+                <b>if</b> (!<span class="r22 r">message</span>.<a href="../Primitives/ServiceBusMessage.cs.html#77b64a13b078404a" class="i property">ApplicationProperties</a>.<span class="i">ContainsKey</span>(<a href="../Diagnostics/DiagnosticProperty.cs.html#97b04f181690465e" class="t t">DiagnosticProperty</a>.<a href="../Diagnostics/DiagnosticProperty.cs.html#e89a2ffd0035964e" class="i field">DiagnosticIdAttribute</a>))
+                {
+                    <b>using</b> <a href="../SharedSource/Azure.Core/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r23 rd" class="r23 r">messageScope</span> = <a href="#1c12f121f76b7bfe" class="i field">_scopeFactory</a>.<a href="../Diagnostics/EntityScopeFactory.cs.html#a8efaa1ce26bea38" class="i method">CreateScope</a>(
+                        <a href="../Diagnostics/DiagnosticProperty.cs.html#97b04f181690465e" class="t t">DiagnosticProperty</a>.<a href="../Diagnostics/DiagnosticProperty.cs.html#5a61ca49a819615a" class="i property">MessageActivityName</a>,
+                        <a href="../Diagnostics/DiagnosticProperty.cs.html#97b04f181690465e" class="t t">DiagnosticProperty</a>.<a href="../Diagnostics/DiagnosticProperty.cs.html#98ff0ae76fdff1e0" class="i field">ProducerKind</a>);
+                    <span class="r23 r">messageScope</span>.<a href="../SharedSource/Azure.Core/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
+ 
+                    <span class="i">Activity</span> <span id="r24 rd" class="r24 r">activity</span> = <span class="i">Activity</span>.<span class="i">Current</span>;
+                    <b>if</b> (<span class="r24 r">activity</span> != <b>null</b>)
+                    {
+                        <span class="r22 r">message</span>.<a href="../Primitives/ServiceBusMessage.cs.html#77b64a13b078404a" class="i property">ApplicationProperties</a>[<a href="../Diagnostics/DiagnosticProperty.cs.html#97b04f181690465e" class="t t">DiagnosticProperty</a>.<a href="../Diagnostics/DiagnosticProperty.cs.html#e89a2ffd0035964e" class="i field">DiagnosticIdAttribute</a>] = <span class="r24 r">activity</span>.<span class="i">Id</span>;
+                    }
+                }
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Creates a size-constraint batch to which </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> may be added using</span>
+        <span class="c">///</span><span class="c">   a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusMessageBatch.cs.html#31077058165fc40f" class="t t">ServiceBusMessageBatch</a>.<a href="ServiceBusMessageBatch.cs.html#6680c7a85fc9d380" class="i method">TryAddMessage</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">. If a message would exceed the maximum</span>
+        <span class="c">///</span><span class="c">   allowable size of the batch, the batch will not allow adding the message and signal that</span>
+        <span class="c">///</span><span class="c">   scenario using it return value.</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c">   Because messages that would violate the size constraint cannot be added, publishing a batch</span>
+        <span class="c">///</span><span class="c">   will not trigger an exception when attempting to send the messages to the Queue/Topic.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r25 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">An </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusMessageBatch.cs.html#31077058165fc40f" class="t t">ServiceBusMessageBatch</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> with the default batch options.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#fb79cf846233d418" class="i method">CreateMessageBatchAsync</a>(<a href="CreateMessageBatchOptions.cs.html#8481199c5c5cc750" class="t t">CreateMessageBatchOptions</a>, <span class="i">CancellationToken</span>)<span class="c">&quot;</span> <span class="c">/&gt;</span>
+        <span class="c">///</span>
+        <b>public virtual</b> <span class="i">ValueTask</span>&lt;<a href="ServiceBusMessageBatch.cs.html#31077058165fc40f" class="t t">ServiceBusMessageBatch</a>&gt; <a id="341f9da5f7094ba3" href="../R/341f9da5f7094ba3.html" target="n" data-glyph="72,1" class="i method">CreateMessageBatchAsync</a>(<span class="i">CancellationToken</span> <span id="r25 rd" class="r25 r">cancellationToken</span> = <b>default</b>) =&gt; <a href="#fb79cf846233d418" class="i method">CreateMessageBatchAsync</a>(<b>null</b>, <span class="r25 r">cancellationToken</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Creates a size-constraint batch to which </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> may be added using a try-based pattern.  If a message would</span>
+        <span class="c">///</span><span class="c">   exceed the maximum allowable size of the batch, the batch will not allow adding the message and signal that scenario using its</span>
+        <span class="c">///</span><span class="c">   return value.</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c">   Because messages that would violate the size constraint cannot be added, publishing a batch will not trigger an exception when</span>
+        <span class="c">///</span><span class="c">   attempting to send the messages to the Queue/Topic.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r26 r">options</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The set of options to consider when creating this batch.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r27 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">An </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusMessageBatch.cs.html#31077058165fc40f" class="t t">ServiceBusMessageBatch</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> with the requested </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r26 r">options</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#fb79cf846233d418" class="i method">CreateMessageBatchAsync</a>(<a href="CreateMessageBatchOptions.cs.html#8481199c5c5cc750" class="t t">CreateMessageBatchOptions</a>, <span class="i">CancellationToken</span>)<span class="c">&quot;</span> <span class="c">/&gt;</span>
+        <span class="c">///</span>
+        <b>public virtual async</b> <span class="i">ValueTask</span>&lt;<a href="ServiceBusMessageBatch.cs.html#31077058165fc40f" class="t t">ServiceBusMessageBatch</a>&gt; <a id="fb79cf846233d418" href="../R/fb79cf846233d418.html" target="n" data-glyph="72,1" class="i method">CreateMessageBatchAsync</a>(
+            <a href="CreateMessageBatchOptions.cs.html#8481199c5c5cc750" class="t t">CreateMessageBatchOptions</a> <span id="r26 rd" class="r26 r">options</span>,
+            <span class="i">CancellationToken</span> <span id="r27 rd" class="r27 r">cancellationToken</span> = <b>default</b>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Core/Argument.cs.html#ad31cdc7051f5f26" class="i method">AssertNotDisposed</a>(<a href="#fc5aeb98d6044cba" class="i property">IsClosed</a>, <b>nameof</b>(<a href="#565d94b474d31465" class="t t">ServiceBusSender</a>));
+            <span class="r26 r">options</span> = <span class="r26 r">options</span>?.<a href="CreateMessageBatchOptions.cs.html#d35cadbcc5cfd40b" class="i method">Clone</a>() ?? <b>new</b> <span class="t">CreateMessageBatchOptions</span>();
+            <span class="r27 r">cancellationToken</span>.<a href="../Core/CancellationTokenExtensions.cs.html#02fb1f7bead5539d" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+            <a href="#882d9467ee0c8205" class="i property">Logger</a>.<a href="../Diagnostics/ServiceBusEventSource.cs.html#0d60e20ec7d5afbe" class="i method">CreateMessageBatchStart</a>(<a href="#5b8a6735cb752e7e" class="i property">Identifier</a>);
+            <a href="ServiceBusMessageBatch.cs.html#31077058165fc40f" class="t t">ServiceBusMessageBatch</a> <span id="r28 rd" class="r28 r">batch</span>;
+            <b>try</b>
+            {
+                <a href="../Core/TransportMessageBatch.cs.html#3b59283f63988656" class="t t">TransportMessageBatch</a> <span id="r29 rd" class="r29 r">transportBatch</span> = <b>await</b> <a href="#6cb8c6a9f63bf1b8" class="i field">_innerSender</a>.<a href="../Core/TransportSender.cs.html#b50491cc84d0b9b4" class="i method">CreateMessageBatchAsync</a>(<span class="r26 r">options</span>, <span class="r27 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <span class="r28 r">batch</span> = <b>new</b> <a href="ServiceBusMessageBatch.cs.html#4a3c407b80a094ef" class="t constructor">ServiceBusMessageBatch</a>(<span class="r29 r">transportBatch</span>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r30 rd" class="r30 r">ex</span>)
+            {
+                <a href="#882d9467ee0c8205" class="i property">Logger</a>.<span class="i">CreateMessageBatchException</span>(<a href="#5b8a6735cb752e7e" class="i property">Identifier</a>, <span class="r30 r">ex</span>.<span class="i">ToString</span>());
+                <b>throw</b>;
+            }
+            <span class="r27 r">cancellationToken</span>.<a href="../Core/CancellationTokenExtensions.cs.html#02fb1f7bead5539d" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+            <a href="#882d9467ee0c8205" class="i property">Logger</a>.<a href="../Diagnostics/ServiceBusEventSource.cs.html#cfc914a8b7897e1c" class="i method">CreateMessageBatchComplete</a>(<a href="#5b8a6735cb752e7e" class="i property">Identifier</a>);
+            <b>return</b> <span class="r28 r">batch</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Sends a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusMessageBatch.cs.html#31077058165fc40f" class="t t">ServiceBusMessageBatch</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <span class="c">///</span><span class="c">   containing a set of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to</span>
+        <span class="c">///</span><span class="c">   the associated Service Bus entity.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r31 r">messageBatch</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The batch of messages to send. A batch may be created using </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#341f9da5f7094ba3" class="i method">CreateMessageBatchAsync</a>(<span class="i">CancellationToken</span>)<span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r32 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A task to be resolved on when the operation has completed.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public virtual async</b> <span class="i">Task</span> <a id="cb795ef13406feef" href="../R/cb795ef13406feef.html" target="n" data-glyph="72,1" class="i method">SendMessagesAsync</a>(
+            <a href="ServiceBusMessageBatch.cs.html#31077058165fc40f" class="t t">ServiceBusMessageBatch</a> <span id="r31 rd" class="r31 r">messageBatch</span>,
+            <span class="i">CancellationToken</span> <span id="r32 rd" class="r32 r">cancellationToken</span> = <b>default</b>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r31 r">messageBatch</span>, <b>nameof</b>(<span class="r31 r">messageBatch</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Core/Argument.cs.html#ad31cdc7051f5f26" class="i method">AssertNotDisposed</a>(<a href="#fc5aeb98d6044cba" class="i property">IsClosed</a>, <b>nameof</b>(<a href="#565d94b474d31465" class="t t">ServiceBusSender</a>));
+            <b>if</b> (<span class="r31 r">messageBatch</span>.<a href="ServiceBusMessageBatch.cs.html#a015ed58451e00a1" class="i property">Count</a> == 0)
+            {
+                <b>return</b>;
+            }
+ 
+            <span class="r32 r">cancellationToken</span>.<a href="../Core/CancellationTokenExtensions.cs.html#02fb1f7bead5539d" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+            <a href="#882d9467ee0c8205" class="i property">Logger</a>.<a href="../Diagnostics/ServiceBusEventSource.cs.html#168ba5530aedd189" class="i method">SendMessageStart</a>(<a href="#5b8a6735cb752e7e" class="i property">Identifier</a>, <span class="r31 r">messageBatch</span>.<a href="ServiceBusMessageBatch.cs.html#a015ed58451e00a1" class="i property">Count</a>);
+            <b>using</b> <a href="../SharedSource/Azure.Core/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r33 rd" class="r33 r">scope</span> = <a href="#4250519b92443012" class="i method">CreateDiagnosticScope</a>(
+                <span class="r31 r">messageBatch</span>.<a href="ServiceBusMessageBatch.cs.html#5670e8d78393f8b9" class="i method">AsEnumerable</a>&lt;<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>&gt;(),
+                <a href="../Diagnostics/DiagnosticProperty.cs.html#97b04f181690465e" class="t t">DiagnosticProperty</a>.<a href="../Diagnostics/DiagnosticProperty.cs.html#0e51af1e44542be1" class="i property">SendActivityName</a>);
+            <span class="r33 r">scope</span>.<a href="../SharedSource/Azure.Core/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
+ 
+            <b>try</b>
+            {
+                <span class="r31 r">messageBatch</span>.<a href="ServiceBusMessageBatch.cs.html#83ae400673384596" class="i method">Lock</a>();
+                <b>await</b> <a href="#6cb8c6a9f63bf1b8" class="i field">_innerSender</a>.<a href="../Core/TransportSender.cs.html#47c2c602bfe0da39" class="i method">SendBatchAsync</a>(<span class="r31 r">messageBatch</span>, <span class="r32 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r34 rd" class="r34 r">exception</span>)
+            {
+                <a href="#882d9467ee0c8205" class="i property">Logger</a>.<span class="i">SendMessageException</span>(<a href="#5b8a6735cb752e7e" class="i property">Identifier</a>, <span class="r34 r">exception</span>.<span class="i">ToString</span>());
+                <span class="r33 r">scope</span>.<a href="../SharedSource/Azure.Core/DiagnosticScope.cs.html#1fc9b81e757b438c" class="i method">Failed</a>(<span class="r34 r">exception</span>);
+                <b>throw</b>;
+            }
+            <b>finally</b>
+            {
+                <span class="r31 r">messageBatch</span>.<a href="ServiceBusMessageBatch.cs.html#f9bb92bd49850f53" class="i method">Unlock</a>();
+            }
+ 
+            <span class="r32 r">cancellationToken</span>.<a href="../Core/CancellationTokenExtensions.cs.html#02fb1f7bead5539d" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+            <a href="#882d9467ee0c8205" class="i property">Logger</a>.<a href="../Diagnostics/ServiceBusEventSource.cs.html#4121b75cf4f7f8ec" class="i method">SendMessageComplete</a>(<a href="#5b8a6735cb752e7e" class="i property">Identifier</a>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Schedules a message to appear on Service Bus at a later time.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r35 r">message</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to schedule.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r36 r">scheduledEnqueueTime</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The UTC time at which the message should be available for processing</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r37 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">Although the message will not be available to be received until the scheduledEnqueueTime, it can still be peeked before that time.</span>
+        <span class="c">///</span><span class="c"> Messages can also be scheduled by setting </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>.<a href="../Primitives/ServiceBusMessage.cs.html#d2408da419959fb8" class="i property">ScheduledEnqueueTime</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> and</span>
+        <span class="c">///</span><span class="c"> using </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#7eef1bd623e1098f" class="i method">SendMessageAsync</a>(<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>, <span class="i">CancellationToken</span>)<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">,</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#038daceb2325fbfe" class="i method">SendMessagesAsync</a>(<span class="i">IEnumerable</span>{<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>}, <span class="i">CancellationToken</span>)<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">, or</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#cb795ef13406feef" class="i method">SendMessagesAsync</a>(<a href="ServiceBusMessageBatch.cs.html#31077058165fc40f" class="t t">ServiceBusMessageBatch</a>, <span class="i">CancellationToken</span>)<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The sequence number of the message that was scheduled.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public virtual async</b> <span class="i">Task</span>&lt;<b>long</b>&gt; <a id="eb4c9a7070529e73" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ScheduleMessageAsync</a>(
+            <a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a> <span id="r35 rd" class="r35 r">message</span>,
+            <span class="i">DateTimeOffset</span> <span id="r36 rd" class="r36 r">scheduledEnqueueTime</span>,
+            <span class="i">CancellationToken</span> <span id="r37 rd" class="r37 r">cancellationToken</span> = <b>default</b>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r35 r">message</span>, <b>nameof</b>(<span class="r35 r">message</span>));
+            <span class="i">IReadOnlyList</span>&lt;<b>long</b>&gt; <span id="r38 rd" class="r38 r">sequenceNumbers</span> = <b>await</b> <span class="i">ScheduleMessagesAsync</span>(
+                <b>new</b> <a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>[] { <span class="r35 r">message</span> },
+                <span class="r36 r">scheduledEnqueueTime</span>,
+                <span class="r37 r">cancellationToken</span>)
+            .<span class="i">ConfigureAwait</span>(<b>false</b>);
+            <span class="c">// if there isn&#39;t one sequence number in the list, an</span>
+            <span class="c">// exception should have been thrown by this point.</span>
+            <b>return</b> <span class="r38 r">sequenceNumbers</span>[0];
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Schedules a set of messages to appear on Service Bus at a later time.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r39 r">messages</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The set of messages to schedule.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r40 r">scheduledEnqueueTime</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The UTC time at which the message should be available for processing</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r41 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">Although the message will not be available to be received until the scheduledEnqueueTime, it can still be peeked before that time.</span>
+        <span class="c">///</span><span class="c"> Messages can also be scheduled by setting </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>.<a href="../Primitives/ServiceBusMessage.cs.html#d2408da419959fb8" class="i property">ScheduledEnqueueTime</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> and</span>
+        <span class="c">///</span><span class="c"> using </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#7eef1bd623e1098f" class="i method">SendMessageAsync</a>(<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>, <span class="i">CancellationToken</span>)<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">,</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#038daceb2325fbfe" class="i method">SendMessagesAsync</a>(<span class="i">IEnumerable</span>{<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>}, <span class="i">CancellationToken</span>)<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">, or</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#cb795ef13406feef" class="i method">SendMessagesAsync</a>(<a href="ServiceBusMessageBatch.cs.html#31077058165fc40f" class="t t">ServiceBusMessageBatch</a>, <span class="i">CancellationToken</span>)<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The sequence number of the message that was scheduled.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public virtual async</b> <span class="i">Task</span>&lt;<span class="i">IReadOnlyList</span>&lt;<b>long</b>&gt;&gt; <a id="a52f29ac40702b80" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ScheduleMessagesAsync</a>(
+            <span class="i">IEnumerable</span>&lt;<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>&gt; <span id="r39 rd" class="r39 r">messages</span>,
+            <span class="i">DateTimeOffset</span> <span id="r40 rd" class="r40 r">scheduledEnqueueTime</span>,
+            <span class="i">CancellationToken</span> <span id="r41 rd" class="r41 r">cancellationToken</span> = <b>default</b>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<span class="i">AssertNotNull</span>(<span class="r39 r">messages</span>, <b>nameof</b>(<span class="r39 r">messages</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Core/Argument.cs.html#ad31cdc7051f5f26" class="i method">AssertNotDisposed</a>(<a href="#fc5aeb98d6044cba" class="i property">IsClosed</a>, <b>nameof</b>(<a href="#565d94b474d31465" class="t t">ServiceBusSender</a>));
+            <span class="r41 r">cancellationToken</span>.<a href="../Core/CancellationTokenExtensions.cs.html#02fb1f7bead5539d" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+ 
+            <span class="i">IReadOnlyList</span>&lt;<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>&gt; <span id="r42 rd" class="r42 r">messageList</span> = <span class="r39 r">messages</span> <b>switch</b>
+            {
+                <span class="i">IReadOnlyList</span>&lt;<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>&gt; <span id="r43 rd" class="r43 r">alreadyList</span> =&gt; <span class="r43 r">alreadyList</span>,
+                <b>_</b> =&gt; <span class="r39 r">messages</span>.<span class="i">ToList</span>()
+            };
+ 
+            <b>if</b> (<span class="r42 r">messageList</span>.<span class="i">Count</span> == 0)
+            {
+                <b>return</b> <span class="i">Array</span>.<span class="i">Empty</span>&lt;<b>long</b>&gt;();
+            }
+ 
+            <b>await</b> <a href="#2b4d4e923c99c370" class="i method">ApplyPlugins</a>(<span class="r42 r">messageList</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            <a href="#882d9467ee0c8205" class="i property">Logger</a>.<span class="i">ScheduleMessagesStart</span>(
+                <a href="#5b8a6735cb752e7e" class="i property">Identifier</a>,
+                <span class="r42 r">messageList</span>.<span class="i">Count</span>,
+                <span class="r40 r">scheduledEnqueueTime</span>.<span class="i">ToString</span>(<span class="i">CultureInfo</span>.<span class="i">InvariantCulture</span>));
+ 
+            <b>using</b> <a href="../SharedSource/Azure.Core/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r44 rd" class="r44 r">scope</span> = <a href="#4250519b92443012" class="i method">CreateDiagnosticScope</a>(
+                <span class="r39 r">messages</span>,
+                <a href="../Diagnostics/DiagnosticProperty.cs.html#97b04f181690465e" class="t t">DiagnosticProperty</a>.<a href="../Diagnostics/DiagnosticProperty.cs.html#a94bfe3878fbb6d3" class="i property">ScheduleActivityName</a>);
+            <span class="r44 r">scope</span>.<a href="../SharedSource/Azure.Core/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
+ 
+            <span class="i">IReadOnlyList</span>&lt;<b>long</b>&gt; <span id="r45 rd" class="r45 r">sequenceNumbers</span> = <b>null</b>;
+            <b>try</b>
+            {
+                <b>foreach</b> (<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a> <span id="r46 rd" class="r46 r">message</span> <b>in</b> <span class="r42 r">messageList</span>)
+                {
+                    <span class="r46 r">message</span>.<a href="../Primitives/ServiceBusMessage.cs.html#d2408da419959fb8" class="i property">ScheduledEnqueueTime</a> = <span class="r40 r">scheduledEnqueueTime</span>.<span class="i">UtcDateTime</span>;
+                }
+                <span class="r45 r">sequenceNumbers</span> = <b>await</b> <a href="#6cb8c6a9f63bf1b8" class="i field">_innerSender</a>.<a href="../Core/TransportSender.cs.html#278430a70583a76e" class="i method">ScheduleMessagesAsync</a>(<span class="r42 r">messageList</span>, <span class="r41 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r47 rd" class="r47 r">exception</span>)
+            {
+                <a href="#882d9467ee0c8205" class="i property">Logger</a>.<span class="i">ScheduleMessagesException</span>(<a href="#5b8a6735cb752e7e" class="i property">Identifier</a>, <span class="r47 r">exception</span>.<span class="i">ToString</span>());
+                <span class="r44 r">scope</span>.<a href="../SharedSource/Azure.Core/DiagnosticScope.cs.html#1fc9b81e757b438c" class="i method">Failed</a>(<span class="r47 r">exception</span>);
+                <b>throw</b>;
+            }
+ 
+            <span class="r41 r">cancellationToken</span>.<a href="../Core/CancellationTokenExtensions.cs.html#02fb1f7bead5539d" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+            <a href="#882d9467ee0c8205" class="i property">Logger</a>.<a href="../Diagnostics/ServiceBusEventSource.cs.html#7689168ac8c08dc1" class="i method">ScheduleMessagesComplete</a>(<a href="#5b8a6735cb752e7e" class="i property">Identifier</a>);
+            <b>return</b> <span class="r45 r">sequenceNumbers</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Cancels a message that was scheduled.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r48 r">sequenceNumber</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Primitives/ServiceBusReceivedMessage.cs.html#347e87fb652ef164" class="t t">ServiceBusReceivedMessage</a>.<a href="../Primitives/ServiceBusReceivedMessage.cs.html#60eeb92ab1c1889a" class="i property">SequenceNumber</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> of the message to be cancelled.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r49 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public virtual async</b> <span class="i">Task</span> <a id="4d03673ac7c33eac" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">CancelScheduledMessageAsync</a>(
+            <b>long</b> <span id="r48 rd" class="r48 r">sequenceNumber</span>,
+            <span class="i">CancellationToken</span> <span id="r49 rd" class="r49 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <b>await</b> <span class="i">CancelScheduledMessagesAsync</span>(
+                <b>new</b> <b>long</b>[] { <span class="r48 r">sequenceNumber</span> },
+                <span class="r49 r">cancellationToken</span>)
+            .<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Cancels a set of messages that were scheduled.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r50 r">sequenceNumbers</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The set of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Primitives/ServiceBusReceivedMessage.cs.html#347e87fb652ef164" class="t t">ServiceBusReceivedMessage</a>.<a href="../Primitives/ServiceBusReceivedMessage.cs.html#60eeb92ab1c1889a" class="i property">SequenceNumber</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> of the messages to be cancelled.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r51 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public virtual async</b> <span class="i">Task</span> <a id="785aa353a57cae7c" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">CancelScheduledMessagesAsync</a>(
+            <span class="i">IEnumerable</span>&lt;<b>long</b>&gt; <span id="r50 rd" class="r50 r">sequenceNumbers</span>,
+            <span class="i">CancellationToken</span> <span id="r51 rd" class="r51 r">cancellationToken</span> = <b>default</b>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Core/Argument.cs.html#ad31cdc7051f5f26" class="i method">AssertNotDisposed</a>(<a href="#fc5aeb98d6044cba" class="i property">IsClosed</a>, <b>nameof</b>(<a href="#565d94b474d31465" class="t t">ServiceBusSender</a>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<span class="i">AssertNotNull</span>(<span class="r50 r">sequenceNumbers</span>, <b>nameof</b>(<span class="r50 r">sequenceNumbers</span>));
+            <span class="r51 r">cancellationToken</span>.<a href="../Core/CancellationTokenExtensions.cs.html#02fb1f7bead5539d" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+ 
+            <span class="c">// the sequence numbers MUST be in array form for them to be encoded correctly</span>
+            <b>long</b>[] <span id="r52 rd" class="r52 r">sequenceArray</span> = <span class="r50 r">sequenceNumbers</span> <b>switch</b>
+            {
+                <b>long</b>[] <span id="r53 rd" class="r53 r">alreadyArray</span> =&gt; <span class="r53 r">alreadyArray</span>,
+                <b>_</b> =&gt; <span class="r50 r">sequenceNumbers</span>.<span class="i">ToArray</span>()
+            };
+ 
+            <b>if</b> (<span class="r52 r">sequenceArray</span>.<span class="i">Length</span> == 0)
+            {
+                <b>return</b>;
+            }
+ 
+            <a href="#882d9467ee0c8205" class="i property">Logger</a>.<a href="../Diagnostics/ServiceBusEventSource.cs.html#3bfcd52f99137f52" class="i method">CancelScheduledMessagesStart</a>(<a href="#5b8a6735cb752e7e" class="i property">Identifier</a>, <span class="r52 r">sequenceArray</span>);
+ 
+            <b>using</b> <a href="../SharedSource/Azure.Core/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r54 rd" class="r54 r">scope</span> = <a href="#1c12f121f76b7bfe" class="i field">_scopeFactory</a>.<a href="../Diagnostics/EntityScopeFactory.cs.html#a8efaa1ce26bea38" class="i method">CreateScope</a>(
+                <a href="../Diagnostics/DiagnosticProperty.cs.html#97b04f181690465e" class="t t">DiagnosticProperty</a>.<a href="../Diagnostics/DiagnosticProperty.cs.html#c26cf9f5478d0bfa" class="i property">CancelActivityName</a>,
+                <a href="../Diagnostics/DiagnosticProperty.cs.html#97b04f181690465e" class="t t">DiagnosticProperty</a>.<a href="../Diagnostics/DiagnosticProperty.cs.html#27a05ff983cef8c0" class="i field">ClientKind</a>);
+            <span class="r54 r">scope</span>.<a href="../SharedSource/Azure.Core/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
+ 
+            <b>try</b>
+            {
+                <b>await</b> <a href="#6cb8c6a9f63bf1b8" class="i field">_innerSender</a>.<a href="../Core/TransportSender.cs.html#6c1b4dc9ff550e5c" class="i method">CancelScheduledMessagesAsync</a>(<span class="r52 r">sequenceArray</span>, <span class="r51 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r55 rd" class="r55 r">ex</span>)
+            {
+                <a href="#882d9467ee0c8205" class="i property">Logger</a>.<span class="i">CancelScheduledMessagesException</span>(<a href="#5b8a6735cb752e7e" class="i property">Identifier</a>, <span class="r55 r">ex</span>.<span class="i">ToString</span>());
+                <b>throw</b>;
+            }
+ 
+            <span class="r51 r">cancellationToken</span>.<a href="../Core/CancellationTokenExtensions.cs.html#02fb1f7bead5539d" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+            <a href="#882d9467ee0c8205" class="i property">Logger</a>.<a href="../Diagnostics/ServiceBusEventSource.cs.html#ba958f4fb099c188" class="i method">CancelScheduledMessagesComplete</a>(<a href="#5b8a6735cb752e7e" class="i property">Identifier</a>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Performs the task needed to clean up resources used by the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#565d94b474d31465" class="t t">ServiceBusSender</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r56 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c"> An optional</span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the</span>
+        <span class="c">///</span><span class="c"> request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public virtual async</b> <span class="i">Task</span> <a id="4e01bf2fc41f6c6f" href="../R/4e01bf2fc41f6c6f.html" target="n" data-glyph="72,1" class="i method">CloseAsync</a>(
+            <span class="i">CancellationToken</span> <span id="r56 rd" class="r56 r">cancellationToken</span> = <b>default</b>)
+        {
+            <a href="#fc5aeb98d6044cba" class="i property">IsClosed</a> = <b>true</b>;
+ 
+            <a href="#882d9467ee0c8205" class="i property">Logger</a>.<span class="i">ClientCloseStart</span>(<b>typeof</b>(<a href="#565d94b474d31465" class="t t">ServiceBusSender</a>), <a href="#5b8a6735cb752e7e" class="i property">Identifier</a>);
+ 
+            <b>try</b>
+            {
+                <b>await</b> <a href="#6cb8c6a9f63bf1b8" class="i field">_innerSender</a>.<span class="i">CloseAsync</span>(<span class="i">CancellationToken</span>.<span class="i">None</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r57 rd" class="r57 r">ex</span>)
+            {
+                <a href="#882d9467ee0c8205" class="i property">Logger</a>.<span class="i">ClientCloseException</span>(<b>typeof</b>(<a href="#565d94b474d31465" class="t t">ServiceBusSender</a>), <a href="#5b8a6735cb752e7e" class="i property">Identifier</a>, <span class="r57 r">ex</span>);
+                <b>throw</b>;
+            }
+ 
+            <a href="#882d9467ee0c8205" class="i property">Logger</a>.<span class="i">ClientCloseComplete</span>(<b>typeof</b>(<a href="#565d94b474d31465" class="t t">ServiceBusSender</a>), <a href="#5b8a6735cb752e7e" class="i property">Identifier</a>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Performs the task needed to clean up resources used by the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#565d94b474d31465" class="t t">ServiceBusSender</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c">   This is equivalent to calling </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#4e01bf2fc41f6c6f" class="i method">CloseAsync</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> with the default </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Primitives/LinkCloseMode.cs.html#f8c9ace71ea8e421" class="t t">LinkCloseMode</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A task to be resolved on when the operation has completed.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        [<span class="i">SuppressMessage</span>(<span class="s">&quot;Usage&quot;</span>, <span class="s">&quot;AZC0002:Ensure all service methods take an optional CancellationToken parameter.&quot;</span>, <span class="i">Justification</span> = <span class="s">&quot;This signature must match the IAsyncDisposable interface.&quot;</span>)]
+        <b>public virtual async</b> <span class="i">ValueTask</span> <a id="d48d314cc40df06a" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">DisposeAsync</a>() =&gt;
+            <b>await</b> <a href="#4e01bf2fc41f6c6f" class="i method">CloseAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Determines whether the specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">System</span>.<span class="i">Object</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> is equal to this instance.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r58 r">obj</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">System</span>.<span class="i">Object</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> to compare with this instance.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">System</span>.<span class="i">Object</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> is equal to this instance; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="i">EditorBrowsable</span>(<span class="i">EditorBrowsableState</span>.<span class="i">Never</span>)]
+        <b>public override bool</b> <a id="8820c82c6ab30c3d" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Equals</a>(<b>object</b> <span id="r58 rd" class="r58 r">obj</span>) =&gt; <b>base</b>.<span class="i">Equals</span>(<span class="r58 r">obj</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Returns a hash code for this instance.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A hash code for this instance, suitable for use in hashing algorithms and data structures like a hash table.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="i">EditorBrowsable</span>(<span class="i">EditorBrowsableState</span>.<span class="i">Never</span>)]
+        <b>public override int</b> <a id="500ab72cf9ba8fcd" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetHashCode</a>() =&gt; <b>base</b>.<span class="i">GetHashCode</span>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Converts the instance to string representation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">System</span>.<span class="i">String</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> that represents this instance.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="i">EditorBrowsable</span>(<span class="i">EditorBrowsableState</span>.<span class="i">Never</span>)]
+        <b>public override string</b> <a id="d9dea4a18bfebd30" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ToString</a>() =&gt; <b>base</b>.<span class="i">ToString</span>();
+    }
+}
+</pre></td></tr></table></div></body></html>

@@ -1,0 +1,282 @@
+﻿<!DOCTYPE html>
+<html><head><title>MsiAccessTokenProvider.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(273);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.Services.AppAuthentication/TokenProviders/MsiAccessTokenProvider.cs" target="_top">TokenProviders\MsiAccessTokenProvider.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.Services.AppAuthentication" target="_top">Azure.Services.AppAuthentication\Microsoft.Azure.Services.AppAuthentication.csproj</a> (Microsoft.Azure.Services.AppAuthentication)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Globalization</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>.<span class="i n">Http</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>.<span class="i n">Security</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Services</span>.<span class="i n">AppAuthentication</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Gets a token using Azure VM or App Services MSI.</span>
+    <span class="c">///</span><span class="c"> https://docs.microsoft.com/en-us/azure/active-directory/msi-overview</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="a03cb7a938cc3c56" href="../R/a03cb7a938cc3c56.html" target="n" data-glyph="2,0" class="t t">MsiAccessTokenProvider</a> : <a href="NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="t t">NonInteractiveAzureServiceTokenProviderBase</a>
+    {
+        <b>private enum</b> <a id="9233497143982dfc" href="../R/9233497143982dfc.html" target="n" data-glyph="22,1" class="t t"><span id="cf513c07572723cc">MsiEnvironment</span></a>
+        {
+            <a id="63948a298cab5cbe" href="../R/63948a298cab5cbe.html" target="n" data-glyph="24,2" class="i field">AppServices</a>,
+            <a id="2a5a5a8a8d63c137" href="../R/2a5a5a8a8d63c137.html" target="n" data-glyph="24,2" class="i field">Imds</a>,
+            <a id="c3f2fbff1764e085" href="../R/c3f2fbff1764e085.html" target="n" data-glyph="24,2" class="i field">ServiceFabric</a>
+        }
+ 
+        <b>private readonly</b> <span class="t t">HttpMessageHandler</span> <a id="685be00470fe025f" href="../R/685be00470fe025f.html" target="n" data-glyph="46,1" class="i field">_httpMessageHandler</a>; <span class="c">// This is for unit testing</span>
+        <b>private</b> <span class="t t">HttpClient</span> <a id="5b5c6550c85143eb" href="../R/5b5c6550c85143eb.html" target="n" data-glyph="46,1" class="i field">_httpClient</a>;
+        <b>private string</b> <a id="3037b89a40819f7b" href="../R/3037b89a40819f7b.html" target="n" data-glyph="46,1" class="i field">_serviceFabricMsiThumbprint</a>;
+ 
+        <span class="c">// singleton instance of HttpClient</span>
+        <b>private</b> <span class="t t">HttpClient</span> <a id="2f7d714840d82b00" href="../R/2f7d714840d82b00.html" target="n" data-glyph="106,1" class="i property">HttpClient</a>
+        {
+            <b>get</b>
+            {
+                <b>if</b> (<a href="#5b5c6550c85143eb" class="i field">_httpClient</a> == <b>default</b>)
+                {
+                    <b>if</b> (<a href="#685be00470fe025f" class="i field">_httpMessageHandler</a> != <b>default</b>)
+                    {
+                        <a href="#5b5c6550c85143eb" class="i field">_httpClient</a> = <b>new</b> <span class="t constructor">HttpClient</span>(<a href="#685be00470fe025f" class="i field">_httpMessageHandler</a>);
+                    }
+                    <b>else</b>
+                    {
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">NETSTANDARD1_4</span> || <span class="i">net452</span> || <span class="i">net461</span>
+<span class="e">                        var httpClientHandler = new HttpClientHandler();
+</span><span class="k preprocess">#</span><span class="k preprocess">else</span>
+                        <b>var</b> <span id="r0 rd" class="r0 r">httpClientHandler</span> = <b>new</b> <span class="t constructor">HttpClientHandler</span>() { <span class="i property">CheckCertificateRevocationList</span> = <b>true</b> };
+<span class="k preprocess">#</span><span class="k preprocess">endif</span>
+ 
+<span class="k preprocess">#</span><span class="k preprocess">if</span> !<span class="i">net452</span>
+                        <span class="c">// Service Fabric requires custom certificate validation</span>
+                        <b>if</b> (!<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>(<a href="#3037b89a40819f7b" class="i field">_serviceFabricMsiThumbprint</a>))
+                        {
+                            <span class="r0 r">httpClientHandler</span>.<span class="i property">ServerCertificateCustomValidationCallback</span> = (<span id="r1 rd" class="r1 r">httpRequestMessage</span>, <span id="r2 rd" class="r2 r">cert</span>, <span id="r3 rd" class="r3 r">certChain</span>, <span id="r4 rd" class="r4 r">policyErrors</span>) =&gt;
+                            {
+                                <b>if</b> (<span class="r4 r">policyErrors</span> == <a href="@0@System/A.html#dcab16068caa4a83" class="t t">SslPolicyErrors</a>.<a href="@0@System/A.html#d8fd7320a641befc" class="i field">None</a>)
+                                    <b>return</b> <b>true</b>;
+ 
+                                <span class="c">// X509Certificate2.GetCertHashString() not available in .NET Core 1.4 and net452, this works for all platforms</span>
+                                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r5 rd" class="r5 r">certHashString</span> = <a href="@0@mscorlib/A.html#8640d8adfffb155b" class="t t">BitConverter</a>.<a href="@0@mscorlib/A.html#867cd6f1b74e166e" class="i method">ToString</a>(<span class="r2 r">cert</span>.<a href="@0@mscorlib/A.html#a7b53632c3b56c8e" class="i method">GetCertHash</a>()).<a href="@0@mscorlib/A.html#69fc1d0aa6df8a90" class="i method">Replace</a>(<span class="s">&quot;-&quot;</span>, <span class="s">&quot;&quot;</span>);
+                                <b>return</b> 0 == <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#0be9474bc8e160b6" class="i method">Compare</a>(<span class="r5 r">certHashString</span>, <a href="#3037b89a40819f7b" class="i field">_serviceFabricMsiThumbprint</a>, <a href="@0@mscorlib/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@0@mscorlib/A.html#6c3139b940557bf9" class="i field">OrdinalIgnoreCase</a>);
+                            };
+                        }
+<span class="k preprocess">#</span><span class="k preprocess">endif</span>
+ 
+                        <a href="#5b5c6550c85143eb" class="i field">_httpClient</a> = <b>new</b> <span class="t constructor">HttpClient</span>(<span class="r0 r">httpClientHandler</span>);
+                    }
+                }
+ 
+                <b>return</b> <a href="#5b5c6550c85143eb" class="i field">_httpClient</a>;
+            }
+        }
+ 
+        <span class="c">// This client ID can be specified in the constructor to specify a specific managed identity to use (e.g. user-assigned identity)</span>
+        <b>private readonly string</b> <a id="8e44c5c058dc7849" href="../R/8e44c5c058dc7849.html" target="n" data-glyph="46,1" class="i field">_managedIdentityClientId</a>;
+ 
+        <span class="c">// Azure Instance Metadata Service (IMDS) endpoint</span>
+        <b>private const string</b> <a id="443ef04cfdbca06c" href="../R/443ef04cfdbca06c.html" target="n" data-glyph="10,1" class="i field">ImdsEndpoint</a> = <span class="s">&quot;http://169.254.169.254&quot;</span>;
+        <b>private const string</b> <a id="3b40c5182c77a1c2" href="../R/3b40c5182c77a1c2.html" target="n" data-glyph="10,1" class="i field">ImdsInstanceRoute</a> = <span class="s">&quot;/metadata/instance&quot;</span>;
+        <b>private const string</b> <a id="37cea59dd05e50d6" href="../R/37cea59dd05e50d6.html" target="n" data-glyph="10,1" class="i field">ImdsTokenRoute</a> = <span class="s">&quot;/metadata/identity/oauth2/token&quot;</span>;
+        <b>private const string</b> <a id="1340f5bfb0bc9c7b" href="../R/1340f5bfb0bc9c7b.html" target="n" data-glyph="10,1" class="i field">ImdsInstanceApiVersion</a> = <span class="s">&quot;2020-06-01&quot;</span>;
+        <b>private const string</b> <a id="ab4981c44c9e94d2" href="../R/ab4981c44c9e94d2.html" target="n" data-glyph="10,1" class="i field">ImdsTokenApiVersion</a> = <span class="s">&quot;2019-11-01&quot;</span>;
+ 
+        <span class="c">// Azure App Services MSI endpoint constants</span>
+        <b>private const string</b> <a id="a468edc27eacd1ae" href="../R/a468edc27eacd1ae.html" target="n" data-glyph="10,1" class="i field">AppServicesApiVersion</a> = <span class="s">&quot;2019-08-01&quot;</span>;
+ 
+        <span class="c">// Each environment require different header</span>
+        <b>internal const string</b> <a id="4d2c10aef9ed8b8f" href="../R/4d2c10aef9ed8b8f.html" target="n" data-glyph="8,1" class="i field">AppServicesHeader</a> = <span class="s">&quot;X-IDENTITY-HEADER&quot;</span>;
+        <b>internal const string</b> <a id="e4c5e48bd11f9885" href="../R/e4c5e48bd11f9885.html" target="n" data-glyph="8,1" class="i field">AzureVMImdsHeader</a> = <span class="s">&quot;Metadata&quot;</span>;
+        <b>internal const string</b> <a id="9e4a4b8696f248d5" href="../R/9e4a4b8696f248d5.html" target="n" data-glyph="8,1" class="i field">ServiceFabricHeader</a> = <span class="s">&quot;secret&quot;</span>;
+ 
+        <span class="c">// Timeout for Azure IMDS probe request</span>
+        <b>internal const int</b> <a id="c9f701199c07bb09" href="../R/c9f701199c07bb09.html" target="n" data-glyph="8,1" class="i field">AzureVmImdsProbeTimeoutInSeconds</a> = 3;
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="d687167b9f79e319" href="../R/d687167b9f79e319.html" target="n" data-glyph="46,1" class="i field">AzureVmImdsProbeTimeout</a> = <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(<a href="#c9f701199c07bb09" class="i field">AzureVmImdsProbeTimeoutInSeconds</a>);
+ 
+        <span class="c">// Configurable timeout for MSI retry logic</span>
+        <b>private readonly int</b> <a id="b7f0f1b07ff9a192" href="../R/b7f0f1b07ff9a192.html" target="n" data-glyph="46,1" class="i field">_retryTimeoutInSeconds</a> = 0;
+ 
+        <b>internal</b> <a id="1a7c5b6067de8a61" href="../R/1a7c5b6067de8a61.html" target="n" data-glyph="74,1" class="t constructor">MsiAccessTokenProvider</a>(<b>int</b> <span id="r6 rd" class="r6 r">retryTimeoutInSeconds</span> = 0, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r7 rd" class="r7 r">managedIdentityClientId</span> = <b>default</b>)
+        {
+            <span class="c">// require storeLocation if using subject name or thumbprint identifier</span>
+            <b>if</b> (<span class="r6 r">retryTimeoutInSeconds</span> &lt; 0)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(
+                    <span class="s">$&quot;</span><span class="s">MsiRetryTimeout </span>{<span class="r6 r">retryTimeoutInSeconds</span>}<span class="s"> is not valid. Valid values are integers greater than or equal to 0.</span><span class="s">&quot;</span>);
+            }
+ 
+            <a href="#8e44c5c058dc7849" class="i field">_managedIdentityClientId</a> = <span class="r7 r">managedIdentityClientId</span>;
+            <a href="#b7f0f1b07ff9a192" class="i field">_retryTimeoutInSeconds</a> = <span class="r6 r">retryTimeoutInSeconds</span>;
+ 
+            <a href="NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a> = <b>new</b> <a href="../Principal.cs.html#ee98ea95591837a0" class="t constructor">Principal</a> { <a href="../Principal.cs.html#d9e4b09403dc585a" class="i field">Type</a> = <span class="s">&quot;App&quot;</span> };
+        }
+ 
+        <b>internal</b> <a id="7699ac12df884788" href="../R/7699ac12df884788.html" target="n" data-glyph="74,1" class="t constructor">MsiAccessTokenProvider</a>(<span class="t t">HttpMessageHandler</span> <span id="r8 rd" class="r8 r">httpMessageHandler</span>, <b>int</b> <span id="r9 rd" class="r9 r">retryTimeoutInSeconds</span> = 0, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r10 rd" class="r10 r">managedIdentityClientId</span> = <b>null</b>) : <a href="#1a7c5b6067de8a61" class="k">this</a>(<span class="r9 r">retryTimeoutInSeconds</span>, <span class="r10 r">managedIdentityClientId</span>)
+        {
+            <a href="#685be00470fe025f" class="i field">_httpMessageHandler</a> = <span class="r8 r">httpMessageHandler</span>;
+        }
+ 
+        <b>public override async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="../AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="t t">AppAuthenticationResult</a>&gt; <a id="46c3afd96415a0bd" href="../R/46c3afd96415a0bd.html" target="n" data-glyph="72,1" class="i method">GetAuthResultAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r11 rd" class="r11 r">resource</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r12 rd" class="r12 r">authority</span>,
+            <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r13 rd" class="r13 r">cancellationToken</span> = <b>default</b>)
+        {
+            <a href="#9233497143982dfc" class="t t">MsiEnvironment</a>? <span id="r14 rd" class="r14 r">msiEnvironment</span> = <b>null</b>;
+ 
+            <b>try</b>
+            {
+                <span class="c">// Check if App Services MSI or Service Fabric MSI are available. Both use different set of shared env vars.</span>
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r15 rd" class="r15 r">msiEndpoint</span> = <a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#3956c71d4fc09576" class="i method">GetEnvironmentVariable</a>(<span class="s">&quot;IDENTITY_ENDPOINT&quot;</span>);
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r16 rd" class="r16 r">msiHeader</span> = <a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#3956c71d4fc09576" class="i method">GetEnvironmentVariable</a>(<span class="s">&quot;IDENTITY_HEADER&quot;</span>);
+                <a href="#3037b89a40819f7b" class="i field">_serviceFabricMsiThumbprint</a> = <a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#3956c71d4fc09576" class="i method">GetEnvironmentVariable</a>(<span class="s">&quot;IDENTITY_SERVER_THUMBPRINT&quot;</span>); <span class="c">// only in Service Fabric, needed to create HttpClient</span>
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r17 rd" class="r17 r">serviceFabricApiVersion</span> = <a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#3956c71d4fc09576" class="i method">GetEnvironmentVariable</a>(<span class="s">&quot;IDENTITY_API_VERSION&quot;</span>); <span class="c">// only in Service Fabric</span>
+ 
+                <a href="@0@mscorlib/A.html#f1b135ff6c380b37" class="k">var</a> <span id="r18 rd" class="r18 r">endpointAndHeaderAvailable</span> = !<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>(<span class="r15 r">msiEndpoint</span>) &amp;&amp; !<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>(<span class="r16 r">msiHeader</span>);
+                <a href="@0@mscorlib/A.html#f1b135ff6c380b37" class="k">var</a> <span id="r19 rd" class="r19 r">thumbprintAndApiVersionAvailable</span> = !<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>(<a href="#3037b89a40819f7b" class="i field">_serviceFabricMsiThumbprint</a>) &amp;&amp; !<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>(<span class="r17 r">serviceFabricApiVersion</span>);
+ 
+                <b>if</b> (<span class="r18 r">endpointAndHeaderAvailable</span>)
+                    <span class="r14 r">msiEnvironment</span> = <span class="r19 r">thumbprintAndApiVersionAvailable</span>
+                        ? <a href="#9233497143982dfc" class="t t">MsiEnvironment</a>.<a href="#c3f2fbff1764e085" class="i field">ServiceFabric</a>
+                        : <a href="#9233497143982dfc" class="t t">MsiEnvironment</a>.<a href="#63948a298cab5cbe" class="i field">AppServices</a>;
+ 
+                <span class="c">// if App Service and Service Fabric MSI is not available then Azure VM IMDS may be available, test with a probe request</span>
+                <b>if</b> (<span class="r14 r">msiEnvironment</span> == <b>null</b>)
+                {
+                    <b>using</b> (<a href="@0@mscorlib/A.html#130a9536ac96b392" class="k">var</a> <span id="r20 rd" class="r20 r">internalTokenSource</span> = <b>new</b> <a href="@0@mscorlib/A.html#0fd973cb6741d972" class="t constructor">CancellationTokenSource</a>())
+                    <b>using</b> (<a href="@0@mscorlib/A.html#130a9536ac96b392" class="k">var</a> <span id="r21 rd" class="r21 r">linkedTokenSource</span> = <a href="@0@mscorlib/A.html#130a9536ac96b392" class="t t">CancellationTokenSource</a>.<a href="@0@mscorlib/A.html#03f4ba87373778ca" class="i method">CreateLinkedTokenSource</a>(<span class="r20 r">internalTokenSource</span>.<a href="@0@mscorlib/A.html#9e22b9c8995bf195" class="i property">Token</a>, <span class="r13 r">cancellationToken</span>))
+                    {
+                        <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r22 rd" class="r22 r">probeRequestUrl</span> = <span class="s">$&quot;</span>{<a href="#443ef04cfdbca06c" class="i field">ImdsEndpoint</a>}{<a href="#3b40c5182c77a1c2" class="i field">ImdsInstanceRoute</a>}<span class="s">?api-version=</span>{<a href="#1340f5bfb0bc9c7b" class="i field">ImdsInstanceApiVersion</a>}<span class="s">&quot;</span>;
+                        <span class="t t">HttpRequestMessage</span> <span id="r23 rd" class="r23 r">imdsProbeRequest</span> = <b>new</b> <span class="t constructor">HttpRequestMessage</span>(<span class="t t">HttpMethod</span>.<span class="i property">Get</span>, <span class="r22 r">probeRequestUrl</span>);
+                        <span class="r23 r">imdsProbeRequest</span>.<span class="i property">Headers</span>.<span class="i method">Add</span>(<a href="#e4c5e48bd11f9885" class="i field">AzureVMImdsHeader</a>, <span class="s">&quot;true&quot;</span>);
+ 
+                        <b>try</b>
+                        {
+                            <span class="r20 r">internalTokenSource</span>.<a href="@0@mscorlib/A.html#70756b542df0e802" class="i method">CancelAfter</a>(<a href="#d687167b9f79e319" class="i field">AzureVmImdsProbeTimeout</a>);
+                            <b>await</b> <a href="#2f7d714840d82b00" class="i property">HttpClient</a>.<span class="i method">SendAsync</span>(<span class="r23 r">imdsProbeRequest</span>, <span class="r21 r">linkedTokenSource</span>.<a href="@0@mscorlib/A.html#9e22b9c8995bf195" class="i property">Token</a>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                            <span class="r14 r">msiEnvironment</span> = <a href="#9233497143982dfc" class="t t">MsiEnvironment</a>.<a href="#2a5a5a8a8d63c137" class="i field">Imds</a>;
+                        }
+                        <b>catch</b> (<a href="@0@mscorlib/A.html#a0a8b79c277cf327" class="t t">OperationCanceledException</a>)
+                        {
+                            <span class="c">// request to IMDS timed out (internal cancellation token cancelled), neither Azure VM IMDS nor App Services MSI are available</span>
+                            <b>if</b> (<span class="r20 r">internalTokenSource</span>.<a href="@0@mscorlib/A.html#9e22b9c8995bf195" class="i property">Token</a>.<a href="@0@mscorlib/A.html#f32abbe8e2f1f6c1" class="i property">IsCancellationRequested</a>)
+                            {
+                                <b>throw</b> <b>new</b> <a href="../AzureServiceTokenProviderException.cs.html#70a0a38c19f200fb" class="t constructor">AzureServiceTokenProviderException</a>(<a href="NonInteractiveAccessTokenProviderBase.cs.html#24367a95c4c1012b" class="i field">ConnectionString</a>, <span class="r11 r">resource</span>, <span class="r12 r">authority</span>,
+                                    <span class="s">$&quot;</span>{<a href="../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a>.<a href="../AzureServiceTokenProviderException.cs.html#e649763b96b7a1b3" class="i field">ManagedServiceIdentityUsed</a>}<span class="s"> </span>{<a href="../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a>.<a href="../AzureServiceTokenProviderException.cs.html#9a932234bd062946" class="i field">MetadataEndpointNotListening</a>}<span class="s">&quot;</span>);
+                            }
+ 
+                            <b>throw</b>;
+                        }
+                    }
+                }
+ 
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">net452</span>
+<span class="e">                if (msiEnvironment == MsiEnvironment.ServiceFabric)
+                {
+                    throw new AzureServiceTokenProviderException(ConnectionString, resource, authority,
+                        $&quot;{AzureServiceTokenProviderException.ManagedServiceIdentityUsed} Service Fabric MSI not supported on .NET 4.5.2&quot;);
+                }
+</span><span class="k preprocess">#</span><span class="k preprocess">endif</span>
+ 
+                <span class="c">// If managed identity is specified, include client ID parameter in request</span>
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r24 rd" class="r24 r">clientIdParameter</span> = <a href="#8e44c5c058dc7849" class="i field">_managedIdentityClientId</a> != <b>default</b>
+                    ? <span class="s">$&quot;</span><span class="s">&amp;client_id=</span>{<a href="#8e44c5c058dc7849" class="i field">_managedIdentityClientId</a>}<span class="s">&quot;</span>
+                    : <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#c9f70a27facb27cf" class="i field">Empty</a>;
+ 
+                <span class="c">// endpoint and API version dependent on environment</span>
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r25 rd" class="r25 r">endpoint</span> = <b>null</b>, <span id="r26 rd" class="r26 r">apiVersion</span> = <b>null</b>;
+                <b>switch</b> (<span class="r14 r">msiEnvironment</span>)
+                {
+                    <b>case</b> <a href="#9233497143982dfc" class="t t">MsiEnvironment</a>.<a href="#63948a298cab5cbe" class="i field">AppServices</a>:
+                        <span class="r25 r">endpoint</span> = <span class="r15 r">msiEndpoint</span>;
+                        <span class="r26 r">apiVersion</span> = <a href="#a468edc27eacd1ae" class="i field">AppServicesApiVersion</a>;
+                        <b>break</b>;
+                    <b>case</b> <a href="#9233497143982dfc" class="t t">MsiEnvironment</a>.<a href="#2a5a5a8a8d63c137" class="i field">Imds</a>:
+                        <span class="r25 r">endpoint</span> = <span class="s">$&quot;</span>{<a href="#443ef04cfdbca06c" class="i field">ImdsEndpoint</a>}{<a href="#37cea59dd05e50d6" class="i field">ImdsTokenRoute</a>}<span class="s">&quot;</span>;
+                        <span class="r26 r">apiVersion</span> = <a href="#ab4981c44c9e94d2" class="i field">ImdsTokenApiVersion</a>;
+                        <b>break</b>;
+                    <b>case</b> <a href="#9233497143982dfc" class="t t">MsiEnvironment</a>.<a href="#c3f2fbff1764e085" class="i field">ServiceFabric</a>:
+                        <span class="r25 r">endpoint</span> = <span class="r15 r">msiEndpoint</span>;
+                        <span class="r26 r">apiVersion</span> = <span class="r17 r">serviceFabricApiVersion</span>;
+                        <b>break</b>;
+                }
+ 
+                <span class="c">// Craft request as per the MSI protocol</span>
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r27 rd" class="r27 r">requestUrl</span> = <span class="s">$&quot;</span>{<span class="r25 r">endpoint</span>}<span class="s">?resource=</span>{<span class="r11 r">resource</span>}{<span class="r24 r">clientIdParameter</span>}<span class="s">&amp;api-version=</span>{<span class="r26 r">apiVersion</span>}<span class="s">&quot;</span>;
+ 
+                <span class="t t">HttpRequestMessage</span> <a id="fb44ce53d800960e" href="../R/fb44ce53d800960e.html" target="n" data-glyph="76,2" class="i method">getRequestMessage</a>()
+                {
+                    <span class="t t">HttpRequestMessage</span> <span id="r28 rd" class="r28 r">request</span> = <b>new</b> <span class="t constructor">HttpRequestMessage</span>(<span class="t t">HttpMethod</span>.<span class="i property">Get</span>, <span class="r27 r">requestUrl</span>);
+ 
+                    <b>switch</b> (<span class="r14 r">msiEnvironment</span>)
+                    {
+                        <b>case</b> <a href="#9233497143982dfc" class="t t">MsiEnvironment</a>.<a href="#63948a298cab5cbe" class="i field">AppServices</a>:
+                            <span class="r28 r">request</span>.<span class="i property">Headers</span>.<span class="i method">Add</span>(<a href="#4d2c10aef9ed8b8f" class="i field">AppServicesHeader</a>, <span class="r16 r">msiHeader</span>);
+                            <b>break</b>;
+                        <b>case</b> <a href="#9233497143982dfc" class="t t">MsiEnvironment</a>.<a href="#2a5a5a8a8d63c137" class="i field">Imds</a>:
+                            <span class="r28 r">request</span>.<span class="i property">Headers</span>.<span class="i method">Add</span>(<a href="#e4c5e48bd11f9885" class="i field">AzureVMImdsHeader</a>, <span class="s">&quot;true&quot;</span>);
+                            <b>break</b>;
+                        <b>case</b> <a href="#9233497143982dfc" class="t t">MsiEnvironment</a>.<a href="#c3f2fbff1764e085" class="i field">ServiceFabric</a>:
+                            <span class="r28 r">request</span>.<span class="i property">Headers</span>.<span class="i method">Add</span>(<a href="#9e4a4b8696f248d5" class="i field">ServiceFabricHeader</a>, <span class="r16 r">msiHeader</span>);
+                            <b>break</b>;
+                    }
+ 
+                    <b>return</b> <span class="r28 r">request</span>;
+                }
+ 
+                <span class="t t">HttpResponseMessage</span> <span id="r29 rd" class="r29 r">response</span>;
+                <b>try</b>
+                {
+                    <span class="r29 r">response</span> = <b>await</b> <a href="#2f7d714840d82b00" class="i property">HttpClient</a>.<a href="../Helpers/MsiRetryHelper.cs.html#221e713f6f2abc18" class="i method">SendAsyncWithRetry</a>(<a href="#fb44ce53d800960e" class="i method">getRequestMessage</a>, <a href="#b7f0f1b07ff9a192" class="i field">_retryTimeoutInSeconds</a>, <span class="r13 r">cancellationToken</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                }
+                <b>catch</b> (<span class="t t">HttpRequestException</span>)
+                {
+                    <b>throw</b> <b>new</b> <a href="../AzureServiceTokenProviderException.cs.html#70a0a38c19f200fb" class="t constructor">AzureServiceTokenProviderException</a>(<a href="NonInteractiveAccessTokenProviderBase.cs.html#24367a95c4c1012b" class="i field">ConnectionString</a>, <span class="r11 r">resource</span>, <span class="r12 r">authority</span>,
+                        <span class="s">$&quot;</span>{<a href="../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a>.<a href="../AzureServiceTokenProviderException.cs.html#e649763b96b7a1b3" class="i field">ManagedServiceIdentityUsed</a>}<span class="s"> </span>{<a href="../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a>.<a href="../AzureServiceTokenProviderException.cs.html#8e0c139d3005d1a3" class="i field">RetryFailure</a>}<span class="s"> </span>{<a href="../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a>.<a href="../AzureServiceTokenProviderException.cs.html#cb6dbdb6f895d63a" class="i field">MsiEndpointNotListening</a>}<span class="s">&quot;</span>);
+                }
+ 
+                <span class="c">// If the response is successful, it should have JSON response with an access_token field</span>
+                <b>if</b> (<span class="r29 r">response</span>.<span class="i property">IsSuccessStatusCode</span>)
+                {
+                    <a href="NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a>.<a href="../Principal.cs.html#409d9406f1d3c582" class="i field">IsAuthenticated</a> = <b>true</b>;
+ 
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r30 rd" class="r30 r">jsonResponse</span> = <b>await</b> <span class="r29 r">response</span>.<span class="i property">Content</span>.<span class="i method">ReadAsStringAsync</span>().<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                    <span class="c">// Parse the JSON response</span>
+                    <a href="../TokenResponse.cs.html#e4a748da6aaba4d8" class="t t">TokenResponse</a> <span id="r31 rd" class="r31 r">tokenResponse</span> = <a href="../TokenResponse.cs.html#e4a748da6aaba4d8" class="t t">TokenResponse</a>.<a href="../TokenResponse.cs.html#d9d834fc9b291968" class="i method">Parse</a>(<span class="r30 r">jsonResponse</span>);
+ 
+                    <a href="../AccessToken.cs.html#4bf4fd515869512d" class="t t">AccessToken</a> <span id="r32 rd" class="r32 r">token</span> = <a href="../AccessToken.cs.html#4bf4fd515869512d" class="t t">AccessToken</a>.<a href="../AccessToken.cs.html#6c1ca005586c3862" class="i method">Parse</a>(<span class="r31 r">tokenResponse</span>.<a href="../TokenResponse.cs.html#c00db2133be4e9a5" class="i property">AccessToken</a>);
+ 
+                    <span class="c">// If token is null, then there has been a parsing issue, which means the access token format has changed</span>
+                    <b>if</b> (<span class="r32 r">token</span> != <b>null</b>)
+                    {
+                        <a href="NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a>.<a href="../Principal.cs.html#d85fbf1b18e43572" class="i field">AppId</a> = <span class="r32 r">token</span>.<a href="../AccessToken.cs.html#7b68cd5f6a68e8fc" class="i property">AppId</a>;
+                        <a href="NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a>.<a href="../Principal.cs.html#64e7621ee7fb4766" class="i field">TenantId</a> = <span class="r32 r">token</span>.<a href="../AccessToken.cs.html#665b479704e13887" class="i property">TenantId</a>;
+                    }
+ 
+                    <b>return</b> <a href="../AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="t t">AppAuthenticationResult</a>.<a href="../AppAuthenticationResult.cs.html#d3763f80b01ec6b9" class="i method">Create</a>(<span class="r31 r">tokenResponse</span>);
+                }
+ 
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r33 rd" class="r33 r">errorStatusDetail</span> = <span class="r29 r">response</span>.<a href="../Helpers/MsiRetryHelper.cs.html#ab0eb26042615de7" class="i method">IsRetryableStatusCode</a>()
+                    ? <a href="../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a>.<a href="../AzureServiceTokenProviderException.cs.html#8e0c139d3005d1a3" class="i field">RetryFailure</a>
+                    : <a href="../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a>.<a href="../AzureServiceTokenProviderException.cs.html#fc3290e4b6df1e4c" class="i field">NonRetryableError</a>;
+ 
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r34 rd" class="r34 r">errorText</span> = <b>await</b> <span class="r29 r">response</span>.<span class="i property">Content</span>.<span class="i method">ReadAsStringAsync</span>().<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#df2d82d91ca29e40" class="t constructor">Exception</a>(<span class="s">$&quot;</span>{<span class="r33 r">errorStatusDetail</span>}<span class="s"> MSI ResponseCode: </span>{<span class="r29 r">response</span>.<span class="i property">StatusCode</span>}<span class="s">, Response: </span>{<span class="r34 r">errorText</span>}<span class="s">&quot;</span>);
+            }
+            <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r35 rd" class="r35 r">exp</span>)
+            {
+                <b>if</b> (<span class="r35 r">exp</span> <b>is</b> <a href="../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a>) <b>throw</b>;
+ 
+                <b>throw</b> <b>new</b> <a href="../AzureServiceTokenProviderException.cs.html#70a0a38c19f200fb" class="t constructor">AzureServiceTokenProviderException</a>(<a href="NonInteractiveAccessTokenProviderBase.cs.html#24367a95c4c1012b" class="i field">ConnectionString</a>, <span class="r11 r">resource</span>, <span class="r12 r">authority</span>,
+                    <span class="s">$&quot;</span>{<a href="../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a>.<a href="../AzureServiceTokenProviderException.cs.html#e649763b96b7a1b3" class="i field">ManagedServiceIdentityUsed</a>}<span class="s"> </span>{<a href="../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a>.<a href="../AzureServiceTokenProviderException.cs.html#74c51a6320d16d98" class="i field">GenericErrorMessage</a>}<span class="s"> </span>{<span class="r35 r">exp</span>.<a href="@0@mscorlib/A.html#5fba0e16215b42a3" class="i property">Message</a>}<span class="s">&quot;</span>);
+            }
+        }
+    }
+}</pre></td></tr></table></div></body></html>

@@ -1,0 +1,193 @@
+﻿<!DOCTYPE html>
+<html><head><title>EventGridExtensionConfigProvider.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(184);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.EventGrid/EventGridExtensionConfigProvider.cs" target="_top">EventGridExtensionConfigProvider.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.EventGrid" target="_top">src\Microsoft.Azure.WebJobs.Extensions.EventGrid.csproj</a> (Microsoft.Azure.WebJobs.Extensions.EventGrid)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Linq</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Net</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Net</span>.<span class="i">Http</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Web</span>;
+<b>using</b> <span class="i n">Azure</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventGrid</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i">Description</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i">Host</span>.<span class="i">Bindings</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i">Host</span>.<span class="i">Config</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i">Host</span>.<span class="i">Executors</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i">Logging</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Logging</span>;
+<b>using</b> <span class="i">Newtonsoft</span>.<span class="i">Json</span>;
+<b>using</b> <span class="i">Newtonsoft</span>.<span class="i">Json</span>.<span class="i">Linq</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">EventGrid</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Defines the configuration options for the EventGrid binding.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    [<span class="i">Extension</span>(<span class="s">&quot;EventGrid&quot;</span>, <span class="s">&quot;EventGrid&quot;</span>)]
+    <b>internal class</b> <a id="4312a0da54760daa" href="R/4312a0da54760daa.html" target="n" data-glyph="2,0" class="t t">EventGridExtensionConfigProvider</a> : <span class="i">IExtensionConfigProvider</span>,
+                       <span class="i">IAsyncConverter</span>&lt;<span class="i">HttpRequestMessage</span>, <span class="i">HttpResponseMessage</span>&gt;
+    {
+        <b>private</b> <span class="i">ILogger</span> <a id="96744d539aeb1987" href="R/96744d539aeb1987.html" target="n" data-glyph="46,1" class="i field">_logger</a>;
+        <b>private readonly</b> <span class="i">ILoggerFactory</span> <a id="f985ae2f874d7efa" href="R/f985ae2f874d7efa.html" target="n" data-glyph="46,1" class="i field">_loggerFactory</a>;
+        <b>private readonly</b> <span class="i">Func</span>&lt;<a href="OutputBinding/EventGridAttribute.cs.html#dd0b94054deea0ca" class="t t">EventGridAttribute</a>, <span class="i">IAsyncCollector</span>&lt;<a href="/Azure.Messaging.EventGrid/A.html#6bf184dbad8b1fb5" class="t t">EventGridEvent</a>&gt;&gt; <a id="4e9d172ae2068bd2" href="R/4e9d172ae2068bd2.html" target="n" data-glyph="46,1" class="i field">_converter</a>;
+        <b>private readonly</b> <a href="TriggerBinding/HttpRequestProcessor.cs.html#12526a91e7851acb" class="t t">HttpRequestProcessor</a> <a id="840b7094b7642c9f" href="R/840b7094b7642c9f.html" target="n" data-glyph="46,1" class="i field">_httpRequestProcessor</a>;
+ 
+        <span class="c">// for end to end testing</span>
+        <b>internal</b> <a id="befc58eae025049f" href="R/../../0000000000.html" target="n" data-glyph="74,1" class="t constructor">EventGridExtensionConfigProvider</a>(
+            <span class="i">Func</span>&lt;<a href="OutputBinding/EventGridAttribute.cs.html#dd0b94054deea0ca" class="t t">EventGridAttribute</a>, <span class="i">IAsyncCollector</span>&lt;<a href="/Azure.Messaging.EventGrid/A.html#6bf184dbad8b1fb5" class="t t">EventGridEvent</a>&gt;&gt; <span id="r0 rd" class="r0 r">converter</span>,
+            <a href="TriggerBinding/HttpRequestProcessor.cs.html#12526a91e7851acb" class="t t">HttpRequestProcessor</a> <span id="r1 rd" class="r1 r">httpRequestProcessor</span>,
+            <span class="i">ILoggerFactory</span> <span id="r2 rd" class="r2 r">loggerFactory</span>)
+        {
+            <a href="#4e9d172ae2068bd2" class="i field">_converter</a> = <span class="r0 r">converter</span>;
+            <a href="#840b7094b7642c9f" class="i field">_httpRequestProcessor</a> = <span class="r1 r">httpRequestProcessor</span>;
+            <a href="#f985ae2f874d7efa" class="i field">_loggerFactory</a> = <span class="r2 r">loggerFactory</span>;
+        }
+ 
+        <span class="c">// default constructor</span>
+        <b>public</b> <a id="a595f786dbe884d6" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">EventGridExtensionConfigProvider</a>(<a href="TriggerBinding/HttpRequestProcessor.cs.html#12526a91e7851acb" class="t t">HttpRequestProcessor</a> <span id="r3 rd" class="r3 r">httpRequestProcessor</span>, <span class="i">ILoggerFactory</span> <span id="r4 rd" class="r4 r">loggerFactory</span>)
+        {
+            <a href="#4e9d172ae2068bd2" class="i field">_converter</a> = (<span id="r5 rd" class="r5 r">attr</span> =&gt; <b>new</b> <a href="OutputBinding/EventGridAsyncCollector.cs.html#16a5faec85a311fc" class="t constructor">EventGridAsyncCollector</a>(<b>new</b> <span class="t">EventGridPublisherClient</span>(<b>new</b> <span class="i">Uri</span>(<span class="r5 r">attr</span>.<span class="i">TopicEndpointUri</span>), <b>new</b> <span class="i">AzureKeyCredential</span>(<span class="r5 r">attr</span>.<span class="i">TopicKeySetting</span>))));
+            <a href="#840b7094b7642c9f" class="i field">_httpRequestProcessor</a> = <span class="r3 r">httpRequestProcessor</span>;
+            <a href="#f985ae2f874d7efa" class="i field">_loggerFactory</a> = <span class="r4 r">loggerFactory</span>;
+        }
+ 
+        <b>public void</b> <a id="fd4b231978541b3c" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Initialize</a>(<span class="i">ExtensionConfigContext</span> <span id="r6 rd" class="r6 r">context</span>)
+        {
+            <b>if</b> (<span class="r6 r">context</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r6 r">context</span>));
+            }
+ 
+            <a href="#96744d539aeb1987" class="i field">_logger</a> = <a href="#f985ae2f874d7efa" class="i field">_loggerFactory</a>.<span class="i">CreateLogger</span>(<span class="i">LogCategories</span>.<span class="i">CreateTriggerCategory</span>(<span class="s">&quot;EventGrid&quot;</span>));
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> 618
+            <span class="i">Uri</span> <span id="r7 rd" class="r7 r">url</span> = <span class="r6 r">context</span>.<span class="i">GetWebhookHandler</span>();
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> 618
+            <a href="#96744d539aeb1987" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">registered EventGrid Endpoint = </span>{<span class="r7 r">url</span>?.<span class="i">GetLeftPart</span>(<span class="i">UriPartial</span>.<span class="i">Path</span>)}<span class="s">&quot;</span>);
+ 
+            <span class="c">// Register our extension binding providers</span>
+            <span class="c">// use converterManager as a hashTable</span>
+            <span class="c">// also take benefit of identity converter</span>
+            <span class="r6 r">context</span>
+                .<span class="i">AddBindingRule</span>&lt;<a href="TriggerBinding/EventGridTriggerAttribute.cs.html#b41ca29e0b3dc8d6" class="t t">EventGridTriggerAttribute</a>&gt;() <span class="c">// following converters are for EventGridTriggerAttribute only</span>
+                .<span class="i">AddConverter</span>&lt;<span class="i">JToken</span>, <b>string</b>&gt;((<span id="r8 rd" class="r8 r">jtoken</span>) =&gt; <span class="r8 r">jtoken</span>.<span class="i">ToString</span>(<span class="i">Formatting</span>.<span class="i">Indented</span>))
+                .<span class="i">AddConverter</span>&lt;<span class="i">JToken</span>, <b>string</b>[]&gt;((<span id="r9 rd" class="r9 r">jarray</span>) =&gt; <span class="r9 r">jarray</span>.<span class="i">Select</span>(<span id="r10 rd" class="r10 r">ar</span> =&gt; <span class="r10 r">ar</span>.<span class="i">ToString</span>(<span class="i">Formatting</span>.<span class="i">Indented</span>)).<span class="i">ToArray</span>())
+                .<span class="i">AddConverter</span>&lt;<span class="i">JToken</span>, <span class="i">DirectInvokeString</span>&gt;((<span id="r11 rd" class="r11 r">jtoken</span>) =&gt; <b>new</b> <span class="i">DirectInvokeString</span>(<b>null</b>))
+                .<span class="i">AddConverter</span>&lt;<span class="i">JToken</span>, <a href="/Azure.Messaging.EventGrid/A.html#6bf184dbad8b1fb5" class="t t">EventGridEvent</a>&gt;((<span id="r12 rd" class="r12 r">jobject</span>) =&gt; <span class="r12 r">jobject</span>.<span class="i">ToObject</span>&lt;<a href="/Azure.Messaging.EventGrid/A.html#6bf184dbad8b1fb5" class="t t">EventGridEvent</a>&gt;()) <span class="c">// surface the type to function runtime</span>
+                .<span class="i">AddConverter</span>&lt;<span class="i">JToken</span>, <a href="/Azure.Messaging.EventGrid/A.html#6bf184dbad8b1fb5" class="t t">EventGridEvent</a>[]&gt;((<span id="r13 rd" class="r13 r">jobject</span>) =&gt; <span class="r13 r">jobject</span>.<span class="i">ToObject</span>&lt;<a href="/Azure.Messaging.EventGrid/A.html#6bf184dbad8b1fb5" class="t t">EventGridEvent</a>[]&gt;()) <span class="c">// surface the type to function runtime</span>
+                .<span class="i">AddOpenConverter</span>&lt;<span class="i">JToken</span>, <span class="i">OpenType</span>.<span class="i">Poco</span>&gt;(<b>typeof</b>(<a href="#825ae88c98b94d21" class="t t">JTokenToPocoConverter</a>&lt;&gt;))
+                .<span class="i">AddOpenConverter</span>&lt;<span class="i">JToken</span>, <span class="i">OpenType</span>.<span class="i">Poco</span>[]&gt;(<b>typeof</b>(<a href="#825ae88c98b94d21" class="t t">JTokenToPocoConverter</a>&lt;&gt;))
+                .<span class="i">BindToTrigger</span>&lt;<span class="i">JToken</span>&gt;(<b>new</b> <a href="TriggerBinding/EventGridTriggerAttributeBindingProvider.cs.html#3563bbcc43a712f7" class="t constructor">EventGridTriggerAttributeBindingProvider</a>(<a href="#4312a0da54760daa" class="k">this</a>));
+ 
+            <span class="c">// Register the output binding</span>
+            <b>var</b> <span id="r14 rd" class="r14 r">rule</span> = <span class="r6 r">context</span>
+                .<span class="i">AddBindingRule</span>&lt;<a href="OutputBinding/EventGridAttribute.cs.html#dd0b94054deea0ca" class="t t">EventGridAttribute</a>&gt;()
+                .<span class="i">AddConverter</span>&lt;<b>string</b>, <a href="/Azure.Messaging.EventGrid/A.html#6bf184dbad8b1fb5" class="t t">EventGridEvent</a>&gt;((<span id="r15 rd" class="r15 r">str</span>) =&gt; <a href="/Azure.Messaging.EventGrid/A.html#6bf184dbad8b1fb5" class="t t">EventGridEvent</a>.<span class="i">Parse</span>(<span class="r15 r">str</span>).<span class="i">Single</span>())
+                .<span class="i">AddConverter</span>&lt;<span class="i">JObject</span>, <a href="/Azure.Messaging.EventGrid/A.html#6bf184dbad8b1fb5" class="t t">EventGridEvent</a>&gt;((<span id="r16 rd" class="r16 r">jobject</span>) =&gt;  <a href="/Azure.Messaging.EventGrid/A.html#6bf184dbad8b1fb5" class="t t">EventGridEvent</a>.<span class="i">Parse</span>(<span class="r16 r">jobject</span>.<span class="i">ToString</span>()).<span class="i">Single</span>());
+            <span class="r14 r">rule</span>.<span class="i">BindToCollector</span>(<a href="#4e9d172ae2068bd2" class="i field">_converter</a>);
+            <span class="r14 r">rule</span>.<span class="i">AddValidator</span>((<span id="r17 rd" class="r17 r">a</span>, <span id="r18 rd" class="r18 r">t</span>) =&gt;
+            {
+                <span class="c">// if app setting is missing, it will be caught by runtime</span>
+                <span class="c">// this logic tries to validate the practicality of attribute properties</span>
+                <b>if</b> (<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r17 r">a</span>.<span class="i">TopicKeySetting</span>))
+                {
+                    <b>throw</b> <b>new</b> <span class="i">InvalidOperationException</span>(<span class="s">$&quot;</span><span class="s">The &#39;</span>{<b>nameof</b>(<a href="OutputBinding/EventGridAttribute.cs.html#dd0b94054deea0ca" class="t t">EventGridAttribute</a>.<a href="OutputBinding/EventGridAttribute.cs.html#1a0693047047547a" class="i property">TopicKeySetting</a>)}<span class="s">&#39; property must be the name of an application setting containing the Topic Key</span><span class="s">&quot;</span>);
+                }
+ 
+                <b>if</b> (!<span class="i">Uri</span>.<span class="i">IsWellFormedUriString</span>(<span class="r17 r">a</span>.<span class="i">TopicEndpointUri</span>, <span class="i">UriKind</span>.<span class="i">Absolute</span>))
+                {
+                    <b>throw</b> <b>new</b> <span class="i">InvalidOperationException</span>(<span class="s">$&quot;</span><span class="s">The &#39;</span>{<b>nameof</b>(<a href="OutputBinding/EventGridAttribute.cs.html#dd0b94054deea0ca" class="t t">EventGridAttribute</a>.<a href="OutputBinding/EventGridAttribute.cs.html#8c15dd33ab17a004" class="i property">TopicEndpointUri</a>)}<span class="s">&#39; property must be a valid absolute Uri</span><span class="s">&quot;</span>);
+                }
+            });
+        }
+ 
+        <b>private</b> <span class="i">Dictionary</span>&lt;<b>string</b>, <a href="TriggerBinding/EventGridListener.cs.html#3fc949aadaa732ef" class="t t">EventGridListener</a>&gt; <a id="14690c244c53a5ac" href="R/14690c244c53a5ac.html" target="n" data-glyph="46,1" class="i field">_listeners</a> = <b>new</b> <span class="i">Dictionary</span>&lt;<b>string</b>, <a href="TriggerBinding/EventGridListener.cs.html#3fc949aadaa732ef" class="t t">EventGridListener</a>&gt;();
+ 
+        <b>internal void</b> <a id="b03e92ea86a0b524" href="R/b03e92ea86a0b524.html" target="n" data-glyph="74,1" class="i method">AddListener</a>(<b>string</b> <span id="r19 rd" class="r19 r">key</span>, <a href="TriggerBinding/EventGridListener.cs.html#3fc949aadaa732ef" class="t t">EventGridListener</a> <span id="r20 rd" class="r20 r">listener</span>)
+        {
+            <a href="#14690c244c53a5ac" class="i field">_listeners</a>.<span class="i">Add</span>(<span class="r19 r">key</span>, <span class="r20 r">listener</span>);
+        }
+ 
+        <b>public async</b> <span class="i">Task</span>&lt;<span class="i">HttpResponseMessage</span>&gt; <a id="a0823d5e9d9aa0aa" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ConvertAsync</a>(<span class="i">HttpRequestMessage</span> <span id="r21 rd" class="r21 r">input</span>, <span class="i">CancellationToken</span> <span id="r22 rd" class="r22 r">cancellationToken</span>)
+        {
+            <b>var</b> <span id="r23 rd" class="r23 r">response</span> = <a href="#6b0c595caacc6f92" class="i method">ProcessAsync</a>(<span class="r21 r">input</span>);
+            <b>return</b> <b>await</b> <span class="r23 r">response</span>.<span class="i">ConfigureAwait</span>(<b>false</b>);
+        }
+ 
+        <b>private async</b> <span class="i">Task</span>&lt;<span class="i">HttpResponseMessage</span>&gt; <a id="6b0c595caacc6f92" href="R/6b0c595caacc6f92.html" target="n" data-glyph="76,1" class="i method">ProcessAsync</a>(<span class="i">HttpRequestMessage</span> <span id="r24 rd" class="r24 r">req</span>)
+        {
+            <span class="c">// webjobs.script uses req.GetQueryNameValuePairs();</span>
+            <span class="c">// which requires webapi.core...but this does not work for .netframework2.0</span>
+            <span class="c">// TODO change this once webjobs.script is migrated</span>
+            <b>var</b> <span id="r25 rd" class="r25 r">functionName</span> = <span class="i">HttpUtility</span>.<span class="i">ParseQueryString</span>(<span class="r24 r">req</span>.<span class="i">RequestUri</span>.<span class="i">Query</span>)[<span class="s">&quot;functionName&quot;</span>];
+            <b>if</b> (<span class="i">String</span>.<span class="i">IsNullOrEmpty</span>(<span class="r25 r">functionName</span>) || !<a href="#14690c244c53a5ac" class="i field">_listeners</a>.<span class="i">ContainsKey</span>(<span class="r25 r">functionName</span>))
+            {
+                <a href="#96744d539aeb1987" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">cannot find function: &#39;</span>{<span class="r25 r">functionName</span>}<span class="s">&#39;, available function names: [</span>{<b>string</b>.<span class="i">Join</span>(<span class="s">&quot;, &quot;</span>, <a href="#14690c244c53a5ac" class="i field">_listeners</a>.<span class="i">Keys</span>.<span class="i">ToArray</span>())}<span class="s">]</span><span class="s">&quot;</span>);
+                <b>return</b> <b>new</b> <span class="i">HttpResponseMessage</span>(<span class="i">HttpStatusCode</span>.<span class="i">NotFound</span>) { <span class="i">Content</span> = <b>new</b> <span class="i">StringContent</span>(<span class="s">$&quot;</span><span class="s">cannot find function: &#39;</span>{<span class="r25 r">functionName</span>}<span class="s">&#39;</span><span class="s">&quot;</span>) };
+            }
+ 
+            <b>return</b> <b>await</b> <a href="#840b7094b7642c9f" class="i field">_httpRequestProcessor</a>.<span class="i">ProcessAsync</span>(<span class="r24 r">req</span>, <span class="r25 r">functionName</span>, <span class="i">ProcessEventsAsync</span>, <span class="i">CancellationToken</span>.<span class="i">None</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+        }
+ 
+        <b>private async</b> <span class="i">Task</span>&lt;<span class="i">HttpResponseMessage</span>&gt; <a id="cc4204d42a1d2721" href="R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">ProcessEventsAsync</a>(<span class="i">JArray</span> <span id="r26 rd" class="r26 r">events</span>, <b>string</b> <span id="r27 rd" class="r27 r">functionName</span>, <span class="i">CancellationToken</span> <span id="r28 rd" class="r28 r">cancellationToken</span>)
+        {
+            <span class="i">List</span>&lt;<span class="i">Task</span>&lt;<span class="i">FunctionResult</span>&gt;&gt; <span id="r29 rd" class="r29 r">executions</span> = <b>new</b> <span class="i">List</span>&lt;<span class="i">Task</span>&lt;<span class="i">FunctionResult</span>&gt;&gt;();
+ 
+            <span class="c">// Single Dispatch</span>
+            <b>if</b> (<a href="#14690c244c53a5ac" class="i field">_listeners</a>[<span class="r27 r">functionName</span>].<span class="i">SingleDispatch</span>)
+            {
+                <b>foreach</b> (<b>var</b> <span id="r30 rd" class="r30 r">ev</span> <b>in</b> <span class="r26 r">events</span>)
+                {
+                    <span class="c">// assume each event is a JObject</span>
+                    <span class="i">TriggeredFunctionData</span> <span id="r31 rd" class="r31 r">triggerData</span> = <b>new</b> <span class="i">TriggeredFunctionData</span>
+                    {
+                        <span class="i">TriggerValue</span> = <span class="r30 r">ev</span>
+                    };
+                    <span class="r29 r">executions</span>.<span class="i">Add</span>(<a href="#14690c244c53a5ac" class="i field">_listeners</a>[<span class="r27 r">functionName</span>].<span class="i">Executor</span>.<span class="i">TryExecuteAsync</span>(<span class="r31 r">triggerData</span>, <span class="i">CancellationToken</span>.<span class="i">None</span>));
+                }
+                <b>await</b> <span class="i">Task</span>.<span class="i">WhenAll</span>(<span class="r29 r">executions</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <span class="c">// Batch Dispatch</span>
+            <b>else</b>
+            {
+                <span class="i">TriggeredFunctionData</span> <span id="r32 rd" class="r32 r">triggerData</span> = <b>new</b> <span class="i">TriggeredFunctionData</span>
+                {
+                    <span class="i">TriggerValue</span> = <span class="r26 r">events</span>
+                };
+                <span class="r29 r">executions</span>.<span class="i">Add</span>(<a href="#14690c244c53a5ac" class="i field">_listeners</a>[<span class="r27 r">functionName</span>].<span class="i">Executor</span>.<span class="i">TryExecuteAsync</span>(<span class="r32 r">triggerData</span>, <span class="i">CancellationToken</span>.<span class="i">None</span>));
+            }
+ 
+            <span class="c">// FIXME without internal queuing, we are going to process all events in parallel</span>
+            <span class="c">// and return 500 if there&#39;s at least one failure...which will cause EventGrid to resend the entire payload</span>
+            <b>foreach</b> (<b>var</b> <span id="r33 rd" class="r33 r">execution</span> <b>in</b> <span class="r29 r">executions</span>)
+            {
+                <b>if</b> (!<span class="r33 r">execution</span>.<span class="i">Result</span>.<span class="i">Succeeded</span>)
+                {
+                    <b>return</b> <b>new</b> <span class="i">HttpResponseMessage</span>(<span class="i">HttpStatusCode</span>.<span class="i">InternalServerError</span>) { <span class="i">Content</span> = <b>new</b> <span class="i">StringContent</span>(<span class="r33 r">execution</span>.<span class="i">Result</span>.<span class="i">Exception</span>.<span class="i">Message</span>) };
+                }
+            }
+ 
+            <b>return</b> <b>new</b> <span class="i">HttpResponseMessage</span>(<span class="i">HttpStatusCode</span>.<span class="i">Accepted</span>);
+        }
+ 
+        <b>private class</b> <a id="825ae88c98b94d21" href="R/825ae88c98b94d21.html" target="n" data-glyph="4,1" class="t t"><span id="dca6f94fba291d68">JTokenToPocoConverter</span></a>&lt;<span id="r34 rd t" class="r34 r t">T</span>&gt; : <span class="i">IConverter</span>&lt;<span class="i">JToken</span>, <span class="r34 r t">T</span>&gt;
+        {
+            <b>public</b> <span class="r34 r t">T</span> <a id="a6fd5d96fb077ec3" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">Convert</a>(<span class="i">JToken</span> <span id="r35 rd" class="r35 r">input</span>)
+            {
+                <b>return</b> <span class="r35 r">input</span>.<span class="i">ToObject</span>&lt;<span class="r34 r t">T</span>&gt;();
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

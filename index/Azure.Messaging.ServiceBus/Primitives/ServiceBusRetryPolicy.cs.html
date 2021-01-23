@@ -1,0 +1,224 @@
+﻿<!DOCTYPE html>
+<html><head><title>ServiceBusRetryPolicy.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(215);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Messaging.ServiceBus/Primitives/ServiceBusRetryPolicy.cs" target="_top">Primitives\ServiceBusRetryPolicy.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Messaging.ServiceBus" target="_top">src\Azure.Messaging.ServiceBus.csproj</a> (Azure.Messaging.ServiceBus)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">ComponentModel</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Runtime</span>.<span class="i">ExceptionServices</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>.<span class="i n">Amqp</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>.<span class="i n">Diagnostics</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">   An abstract representation of a policy to govern retrying of messaging operations.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">   It is recommended that developers without advanced needs not implement custom retry</span>
+    <span class="c">///</span><span class="c">   policies but instead configure the default policy by specifying the desired set of</span>
+    <span class="c">///</span><span class="c">   retry options when creating one of the Service Bus clients.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusRetryOptions.cs.html#f405da36db2d38b0" class="t t">ServiceBusRetryOptions</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+    <span class="c">///</span>
+    <b>public abstract class</b> <a id="d0d6be7ac57eb9c9" href="../R/d0d6be7ac57eb9c9.html" target="n" data-glyph="0,0" class="t t"><span id="fbddd6e2fc41e070">ServiceBusRetryPolicy</span></a>
+    {
+        <b>private static readonly</b> <span class="i">TimeSpan</span> <a id="0805ccc9cf24d116" href="../R/0805ccc9cf24d116.html" target="n" data-glyph="46,1" class="i field">ServerBusyBaseSleepTime</a> = <span class="i">TimeSpan</span>.<span class="i">FromSeconds</span>(10);
+ 
+        <b>private readonly object</b> <a id="ff23a83e7a6a1b7e" href="../R/ff23a83e7a6a1b7e.html" target="n" data-glyph="46,1" class="i field">serverBusyLock</a> = <b>new</b> <b>object</b>();
+ 
+        <span class="c">// This is a volatile copy of IsServerBusy. IsServerBusy is synchronized with a lock, whereas encounteredServerBusy is kept volatile for performance reasons.</span>
+        <b>private volatile bool</b> <a id="753351c2f38f20ae" href="../R/753351c2f38f20ae.html" target="n" data-glyph="46,1" class="i field">encounteredServerBusy</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Determines whether or not the server returned a busy error.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private bool</b> <a id="17539ae5eaafb36c" href="../R/17539ae5eaafb36c.html" target="n" data-glyph="106,1" class="i property">IsServerBusy</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the exception message when a server busy error is returned.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private string</b> <a id="e83817c4a078b260" href="../R/e83817c4a078b260.html" target="n" data-glyph="106,1" class="i property">ServerBusyExceptionMessage</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The instance of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Diagnostics/ServiceBusEventSource.cs.html#9f107e3f0d141c2b" class="t t">ServiceBusEventSource</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> which can be mocked for testing.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal</b> <a href="../Diagnostics/ServiceBusEventSource.cs.html#9f107e3f0d141c2b" class="t t">ServiceBusEventSource</a> <a id="5af608efb479f8ca" href="../R/5af608efb479f8ca.html" target="n" data-glyph="104,1" class="i property">Logger</a> { <b>get</b>; <b>set</b>; } = <a href="../Diagnostics/ServiceBusEventSource.cs.html#9f107e3f0d141c2b" class="t t">ServiceBusEventSource</a>.<a href="../Diagnostics/ServiceBusEventSource.cs.html#9494c77d3f8244ec" class="i property">Log</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Calculates the amount of time to allow the current attempt for an operation to</span>
+        <span class="c">///</span><span class="c">   complete before considering it to be timed out.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">attemptCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The number of total attempts that have been made, including the initial attempt before any retries.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The amount of time to allow for an operation to complete.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public abstract</b> <span class="i">TimeSpan</span> <a id="7907d7485910654f" href="../R/7907d7485910654f.html" target="n" data-glyph="72,1" class="i method">CalculateTryTimeout</a>(<b>int</b> <span id="r0 rd" class="r0 r">attemptCount</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Calculates the amount of time to wait before another attempt should be made.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">lastException</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The last exception that was observed for the operation to be retried.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">attemptCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The number of total attempts that have been made, including the initial attempt before any retries.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The amount of time to delay before retrying the associated operation; if </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">, then the operation is no longer eligible to be retried.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public abstract</b> <span class="i">TimeSpan</span>? <a id="0fa71435103a6c90" href="../R/0fa71435103a6c90.html" target="n" data-glyph="72,1" class="i method">CalculateRetryDelay</a>(
+            <span class="i">Exception</span> <span id="r1 rd" class="r1 r">lastException</span>,
+            <b>int</b> <span id="r2 rd" class="r2 r">attemptCount</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Determines whether the specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">System</span>.<span class="i">Object</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> is equal to this instance.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">obj</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">System</span>.<span class="i">Object</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> to compare with this instance.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">System</span>.<span class="i">Object</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> is equal to this instance; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="i">EditorBrowsable</span>(<span class="i">EditorBrowsableState</span>.<span class="i">Never</span>)]
+        <b>public override bool</b> <a id="5a751a9dfdcf00fe" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Equals</a>(<b>object</b> <span id="r3 rd" class="r3 r">obj</span>) =&gt; <b>base</b>.<span class="i">Equals</span>(<span class="r3 r">obj</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Returns a hash code for this instance.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A hash code for this instance, suitable for use in hashing algorithms and data structures like a hash table.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="i">EditorBrowsable</span>(<span class="i">EditorBrowsableState</span>.<span class="i">Never</span>)]
+        <b>public override int</b> <a id="7741364fb5d09f40" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetHashCode</a>() =&gt; <b>base</b>.<span class="i">GetHashCode</span>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Converts the instance to string representation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">System</span>.<span class="i">String</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> that represents this instance.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="i">EditorBrowsable</span>(<span class="i">EditorBrowsableState</span>.<span class="i">Never</span>)]
+        <b>public override string</b> <a id="4d9ea43284e10965" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ToString</a>() =&gt; <b>base</b>.<span class="i">ToString</span>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">operation</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">scope</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>internal async</b> <span class="i">Task</span> <a id="ab08a4d7ab7f79b1" href="../R/../../0000000000.html" target="n" data-glyph="74,1" class="i method">RunOperation</a>(
+            <span class="i">Func</span>&lt;<span class="i">TimeSpan</span>, <span class="i">Task</span>&gt; <span id="r4 rd" class="r4 r">operation</span>,
+            <a href="../Core/TransportConnectionScope.cs.html#11f1f0b8e77c8334" class="t t">TransportConnectionScope</a> <span id="r5 rd" class="r5 r">scope</span>,
+            <span class="i">CancellationToken</span> <span id="r6 rd" class="r6 r">cancellationToken</span>)
+        {
+            <b>var</b> <span id="r7 rd" class="r7 r">failedAttemptCount</span> = 0;
+ 
+            <span class="i">TimeSpan</span> <span id="r8 rd" class="r8 r">tryTimeout</span> = <a href="#7907d7485910654f" class="i method">CalculateTryTimeout</a>(0);
+            <b>if</b> (<a href="#17539ae5eaafb36c" class="i property">IsServerBusy</a> &amp;&amp; <span class="r8 r">tryTimeout</span> &lt; <a href="#0805ccc9cf24d116" class="i field">ServerBusyBaseSleepTime</a>)
+            {
+                <span class="c">// We are in a server busy state before we start processing.</span>
+                <span class="c">// Since ServerBusyBaseSleepTime &gt; remaining time for the operation, we don&#39;t wait for the entire Sleep time.</span>
+                <b>await</b> <span class="i">Task</span>.<span class="i">Delay</span>(<span class="r8 r">tryTimeout</span>, <span class="r6 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <b>throw</b> <b>new</b> <a href="ServiceBusException.cs.html#95b231b131b3e35a" class="t constructor">ServiceBusException</a>(
+                    <a href="#e83817c4a078b260" class="i property">ServerBusyExceptionMessage</a>,
+                    <a href="ServiceBusFailureReason.cs.html#ac3a011acdeef28e" class="t t">ServiceBusFailureReason</a>.<a href="ServiceBusFailureReason.cs.html#efe9c3bcf10716f8" class="i field">ServiceBusy</a>);
+            }
+            <b>while</b> (!<span class="r6 r">cancellationToken</span>.<span class="i">IsCancellationRequested</span>)
+            {
+                <b>if</b> (<a href="#17539ae5eaafb36c" class="i property">IsServerBusy</a>)
+                {
+                    <b>await</b> <span class="i">Task</span>.<span class="i">Delay</span>(<a href="#0805ccc9cf24d116" class="i field">ServerBusyBaseSleepTime</a>, <span class="r6 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+ 
+                <b>try</b>
+                {
+                    <b>await</b> <span class="r4 r">operation</span>(<span class="r8 r">tryTimeout</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    <b>return</b>;
+                }
+ 
+                <b>catch</b> (<span class="i">Exception</span> <span id="r9 rd" class="r9 r">ex</span>)
+                {
+                    <span class="i">Exception</span> <span id="r10 rd" class="r10 r">activeEx</span> = <a href="../Amqp/AmqpExceptionHelper.cs.html#85a8becbeb6366aa" class="t t">AmqpExceptionHelper</a>.<a href="../Amqp/AmqpExceptionHelper.cs.html#1ab7a8b4a64b612f" class="i method">TranslateException</a>(<span class="r9 r">ex</span>);
+ 
+                    <span class="c">// Determine if there should be a retry for the next attempt; if so enforce the delay but do not quit the loop.</span>
+                    <span class="c">// Otherwise, throw the translated exception.</span>
+ 
+                    ++<span class="r7 r">failedAttemptCount</span>;
+                    <span class="i">TimeSpan</span>? <span id="r11 rd" class="r11 r">retryDelay</span> = <a href="#0fa71435103a6c90" class="i method">CalculateRetryDelay</a>(<span class="r10 r">activeEx</span>, <span class="r7 r">failedAttemptCount</span>);
+                    <b>if</b> (<span class="r11 r">retryDelay</span>.<span class="i">HasValue</span> &amp;&amp; !<span class="r5 r">scope</span>.<a href="../Core/TransportConnectionScope.cs.html#266e2e2254b57f8c" class="i property">IsDisposed</a> &amp;&amp; !<span class="r6 r">cancellationToken</span>.<span class="i">IsCancellationRequested</span>)
+                    {
+                        <a href="#5af608efb479f8ca" class="i property">Logger</a>.<span class="i">RunOperationExceptionEncountered</span>(<span class="r10 r">activeEx</span>.<span class="i">ToString</span>());
+                        <b>await</b> <span class="i">Task</span>.<span class="i">Delay</span>(<span class="r11 r">retryDelay</span>.<span class="i">Value</span>, <span class="r6 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        <span class="r8 r">tryTimeout</span> = <a href="#7907d7485910654f" class="i method">CalculateTryTimeout</a>(<span class="r7 r">failedAttemptCount</span>);
+                    }
+                    <b>else</b>
+                    {
+                        <span class="i">ExceptionDispatchInfo</span>.<span class="i">Capture</span>(<span class="r10 r">activeEx</span>)
+                            .<span class="i">Throw</span>();
+                    }
+                }
+            }
+            <span class="c">// If no value has been returned nor exception thrown by this point,</span>
+            <span class="c">// then cancellation has been requested.</span>
+            <b>throw</b> <b>new</b> <span class="i">TaskCanceledException</span>();
+        }
+ 
+        <b>internal void</b> <a id="b667b18cc720e762" href="../R/../../0000000000.html" target="n" data-glyph="74,1" class="i method">SetServerBusy</a>(<b>string</b> <span id="r12 rd" class="r12 r">exceptionMessage</span>)
+        {
+            <span class="c">// multiple call to this method will not prolong the timer.</span>
+            <b>if</b> (<a href="#753351c2f38f20ae" class="i field">encounteredServerBusy</a>)
+            {
+                <b>return</b>;
+            }
+ 
+            <b>lock</b> (<a href="#ff23a83e7a6a1b7e" class="i field">serverBusyLock</a>)
+            {
+                <b>if</b> (!<a href="#753351c2f38f20ae" class="i field">encounteredServerBusy</a>)
+                {
+                    <a href="#753351c2f38f20ae" class="i field">encounteredServerBusy</a> = <b>true</b>;
+                    <a href="#e83817c4a078b260" class="i property">ServerBusyExceptionMessage</a> = <b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r12 r">exceptionMessage</span>) ?
+                        <a href="../Resources.Designer.cs.html#7e6b2ac45384f6a8" class="t t">Resources</a>.<a href="../Resources.Designer.cs.html#a1b03d41eab4409d" class="i property">DefaultServerBusyException</a> : <span class="r12 r">exceptionMessage</span>;
+                    <a href="#17539ae5eaafb36c" class="i property">IsServerBusy</a> = <b>true</b>;
+                    <b>_</b> = <a href="#346a471416898819" class="i method">ScheduleResetServerBusy</a>();
+                }
+            }
+        }
+ 
+        <b>internal void</b> <a id="6eae2de96bb5c2f1" href="../R/6eae2de96bb5c2f1.html" target="n" data-glyph="74,1" class="i method">ResetServerBusy</a>()
+        {
+            <b>if</b> (!<a href="#753351c2f38f20ae" class="i field">encounteredServerBusy</a>)
+            {
+                <b>return</b>;
+            }
+ 
+            <b>lock</b> (<a href="#ff23a83e7a6a1b7e" class="i field">serverBusyLock</a>)
+            {
+                <b>if</b> (<a href="#753351c2f38f20ae" class="i field">encounteredServerBusy</a>)
+                {
+                    <a href="#753351c2f38f20ae" class="i field">encounteredServerBusy</a> = <b>false</b>;
+                    <a href="#e83817c4a078b260" class="i property">ServerBusyExceptionMessage</a> = <a href="../Resources.Designer.cs.html#7e6b2ac45384f6a8" class="t t">Resources</a>.<a href="../Resources.Designer.cs.html#a1b03d41eab4409d" class="i property">DefaultServerBusyException</a>;
+                    <a href="#17539ae5eaafb36c" class="i property">IsServerBusy</a> = <b>false</b>;
+                }
+            }
+        }
+ 
+        <b>private async</b> <span class="i">Task</span> <a id="346a471416898819" href="../R/346a471416898819.html" target="n" data-glyph="76,1" class="i method">ScheduleResetServerBusy</a>()
+        {
+            <b>await</b> <span class="i">Task</span>.<span class="i">Delay</span>(<a href="#0805ccc9cf24d116" class="i field">ServerBusyBaseSleepTime</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            <a href="#6eae2de96bb5c2f1" class="i method">ResetServerBusy</a>();
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

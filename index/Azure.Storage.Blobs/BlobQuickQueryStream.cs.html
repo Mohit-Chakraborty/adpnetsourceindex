@@ -1,0 +1,339 @@
+﻿<!DOCTYPE html>
+<html><head><title>BlobQuickQueryStream.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(330);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Storage.Blobs/BlobQuickQueryStream.cs" target="_top">BlobQuickQueryStream.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Storage.Blobs" target="_top">Azure.Storage.Blobs\src\Azure.Storage.Blobs.csproj</a> (Azure.Storage.Blobs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Internal</span>.<span class="i n">Avro</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>.<span class="i n">Models</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Buffers</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> QuickQueryStream.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="72938d05db8348cd" href="R/72938d05db8348cd.html" target="n" data-glyph="2,0" class="t t">BlobQuickQueryStream</a> : <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Underlying stream.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal</b> <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <a id="ec598d8163e17817" href="R/ec598d8163e17817.html" target="n" data-glyph="44,1" class="i field">_avroStream</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Avro Reader.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal</b> <a href="Shared/AvroReader.cs.html#c2f49d0fdd2145f8" class="t t">AvroReader</a> <a id="f44b200cfc18cb18" href="R/f44b200cfc18cb18.html" target="n" data-glyph="44,1" class="i field">_avroReader</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Buffer to hold bytes we haven&#39;t processed yet.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal byte</b>[] <a id="fef0bcac2f975757" href="R/fef0bcac2f975757.html" target="n" data-glyph="44,1" class="i field">_buffer</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Current buffer offset.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal int</b> <a id="519f17a352f074c5" href="R/519f17a352f074c5.html" target="n" data-glyph="44,1" class="i field">_bufferOffset</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The current length of the buffer.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal int</b> <a id="1034bc29c4448aae" href="R/1034bc29c4448aae.html" target="n" data-glyph="44,1" class="i field">_bufferLength</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Progress handler.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal</b> <a href="@1@netstandard/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<b>long</b>&gt; <a id="1e44dd5c6409e5fa" href="R/1e44dd5c6409e5fa.html" target="n" data-glyph="44,1" class="i field">_progressHandler</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Error handler.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal</b> <a href="@1@netstandard/A.html#486d58da4553e12d" class="t t">Action</a>&lt;<a href="Models/BlobQueryError.cs.html#248957619f70b79e" class="t t">BlobQueryError</a>&gt; <a id="0749aac6f3adff7b" href="R/0749aac6f3adff7b.html" target="n" data-glyph="44,1" class="i field">_errorHandler</a>;
+ 
+        <b>public</b> <a id="4fb5dbec6045cb7c" href="R/4fb5dbec6045cb7c.html" target="n" data-glyph="72,1" class="t constructor">BlobQuickQueryStream</a>(
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r0 rd" class="r0 r">avroStream</span>,
+            <a href="@1@netstandard/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<b>long</b>&gt; <span id="r1 rd" class="r1 r">progressHandler</span> = <b>default</b>,
+            <a href="@1@netstandard/A.html#486d58da4553e12d" class="t t">Action</a>&lt;<a href="Models/BlobQueryError.cs.html#248957619f70b79e" class="t t">BlobQueryError</a>&gt; <span id="r2 rd" class="r2 r">errorHandler</span> = <b>default</b>)
+        {
+            <a href="#ec598d8163e17817" class="i field">_avroStream</a> = <span class="r0 r">avroStream</span>;
+            <a href="#f44b200cfc18cb18" class="i field">_avroReader</a> = <b>new</b> <a href="Shared/AvroReader.cs.html#f166d0acc1db7150" class="t constructor">AvroReader</a>(<a href="#ec598d8163e17817" class="i field">_avroStream</a>);
+            <a href="#519f17a352f074c5" class="i field">_bufferOffset</a> = 0;
+            <a href="#1034bc29c4448aae" class="i field">_bufferLength</a> = 0;
+            <a href="#1e44dd5c6409e5fa" class="i field">_progressHandler</a> = <span class="r1 r">progressHandler</span>;
+            <a href="#0749aac6f3adff7b" class="i field">_errorHandler</a> = <span class="r2 r">errorHandler</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override int</b> <a id="97597edc67fb0fdb" href="R/97597edc67fb0fdb.html" target="n" data-glyph="72,1" class="i method">Read</a>(<b>byte</b>[] <span id="r3 rd" class="r3 r">buffer</span>, <b>int</b> <span id="r4 rd" class="r4 r">offset</span>, <b>int</b> <span id="r5 rd" class="r5 r">count</span>)
+            =&gt; <a href="#a1f8e0dc7ced8fb3" class="i method">ReadInternal</a>(<span class="r6 r">async</span>: <b>false</b>, <span class="r3 r">buffer</span>, <span class="r4 r">offset</span>, <span class="r5 r">count</span>).<a href="Shared/Core/TaskExtensions.cs.html#c5b047e3cbfab399" class="i method">EnsureCompleted</a>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public</b> <b>new</b> <b>async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>int</b>&gt; <a id="f989a6ebbe7cc774" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ReadAsync</a>(<b>byte</b>[] <span id="r7 rd" class="r7 r">buffer</span>, <b>int</b> <span id="r8 rd" class="r8 r">offset</span>, <b>int</b> <span id="r9 rd" class="r9 r">count</span>)
+            =&gt; <b>await</b> <a href="#a1f8e0dc7ced8fb3" class="i method">ReadInternal</a>(<span class="r6 r">async</span>: <b>true</b>, <span class="r7 r">buffer</span>, <span class="r8 r">offset</span>, <span class="r9 r">count</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+        <span class="c">// Note - offset is with respect to buffer.</span>
+        <b>private async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>int</b>&gt; <a id="a1f8e0dc7ced8fb3" href="R/a1f8e0dc7ced8fb3.html" target="n" data-glyph="76,1" class="i method">ReadInternal</a>(<b>bool</b> <span id="r6 rd" class="r6 r">async</span>, <b>byte</b>[] <span id="r10 rd" class="r10 r">buffer</span>, <b>int</b> <span id="r11 rd" class="r11 r">offset</span>, <b>int</b> <span id="r12 rd" class="r12 r">count</span>)
+        {
+            <a href="#9550518f4e2637a7" class="i method">ValidateReadParameters</a>(<span class="r10 r">buffer</span>, <span class="r11 r">offset</span>, <span class="r12 r">count</span>);
+ 
+            <b>int</b> <span id="r13 rd" class="r13 r">remainingBytes</span> = <a href="#1034bc29c4448aae" class="i field">_bufferLength</a> - <a href="#519f17a352f074c5" class="i field">_bufferOffset</a>;
+ 
+            <span class="c">// We have enough bytes in the buffer and don&#39;t need to read the next Record.</span>
+            <b>if</b> (<span class="r12 r">count</span> &lt;= <span class="r13 r">remainingBytes</span>)
+            {
+                <a href="@1@netstandard/A.html#156e066ecc4ccedf" class="t t">Array</a>.<a href="@1@netstandard/A.html#7441c6721593042c" class="i method">Copy</a>(
+                    <span class="r14 r">sourceArray</span>: <a href="#fef0bcac2f975757" class="i field">_buffer</a>,
+                    <span class="r15 r">sourceIndex</span>: <a href="#519f17a352f074c5" class="i field">_bufferOffset</a>,
+                    <span class="r16 r">destinationArray</span>: <span class="r10 r">buffer</span>,
+                    <span class="r17 r">destinationIndex</span>: <span class="r11 r">offset</span>,
+                    <span class="r18 r">length</span>: <span class="r12 r">count</span>);
+                <a href="#519f17a352f074c5" class="i field">_bufferOffset</a> += <span class="r12 r">count</span>;
+                <b>return</b> <span class="r12 r">count</span>;
+            }
+ 
+            <span class="c">// Copy remaining buffer</span>
+            <b>if</b> (<span class="r13 r">remainingBytes</span> &gt; 0)
+            {
+                <a href="@1@netstandard/A.html#156e066ecc4ccedf" class="t t">Array</a>.<a href="@1@netstandard/A.html#7441c6721593042c" class="i method">Copy</a>(
+                    <span class="r14 r">sourceArray</span>: <a href="#fef0bcac2f975757" class="i field">_buffer</a>,
+                    <span class="r15 r">sourceIndex</span>: <a href="#519f17a352f074c5" class="i field">_bufferOffset</a>,
+                    <span class="r16 r">destinationArray</span>: <span class="r10 r">buffer</span>,
+                    <span class="r17 r">destinationIndex</span>: <span class="r11 r">offset</span>,
+                    <span class="r18 r">length</span>: <span class="r13 r">remainingBytes</span>);
+                <a href="#519f17a352f074c5" class="i field">_bufferOffset</a> += <span class="r13 r">remainingBytes</span>;
+                <b>return</b> <span class="r13 r">remainingBytes</span>;
+            }
+ 
+            <span class="c">// Reset _bufferOffset, _bufferLength, and remainingBytes</span>
+            <a href="#519f17a352f074c5" class="i field">_bufferOffset</a> = 0;
+            <a href="#1034bc29c4448aae" class="i field">_bufferLength</a> = 0;
+            <span class="r13 r">remainingBytes</span> = 0;
+ 
+            <span class="c">// We&#39;ve caught up to the end of the _avroStream, but it isn&#39;t necessarly the end of the stream.</span>
+            <b>if</b> (!<a href="#f44b200cfc18cb18" class="i field">_avroReader</a>.<a href="Shared/AvroReader.cs.html#c85e3217fd3f0f0f" class="i method">HasNext</a>())
+            {
+                <b>return</b> 0;
+            }
+ 
+            <span class="c">// We need to keep getting the next record until we get a data record.</span>
+            <b>while</b> (<span class="r13 r">remainingBytes</span> == 0)
+            {
+                <span class="c">// Get next Record.</span>
+                <a href="@1@netstandard/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>, <b>object</b>&gt; <span id="r19 rd" class="r19 r">record</span> = (<a href="@1@netstandard/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>, <b>object</b>&gt;)<b>await</b> <a href="#f44b200cfc18cb18" class="i field">_avroReader</a>.<a href="Shared/AvroReader.cs.html#1f38b587b1ca468d" class="i method">Next</a>(<span class="r6 r">async</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                <b>switch</b> (<span class="r19 r">record</span><a href="@1@netstandard/A.html#49962975508e2d83">[</a><span class="s">&quot;$schema&quot;</span>])
+                {
+                    <span class="c">// Data Record</span>
+                    <b>case</b> <a href="Shared/Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Shared/Constants.cs.html#11c79be4ed701063" class="t t">QuickQuery</a>.<a href="Shared/Constants.cs.html#a3b28b4c7d636b65" class="i field">DataRecordName</a>:
+                        <span class="r19 r">record</span>.<a href="@1@netstandard/A.html#2e5bc6d8c0f21e67" class="i method">TryGetValue</a>(<a href="Shared/Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Shared/Constants.cs.html#11c79be4ed701063" class="t t">QuickQuery</a>.<a href="Shared/Constants.cs.html#f7a7f417aa37d9a9" class="i field">Data</a>, <b>out object</b> <span id="r20 rd" class="r20 r">byteObject</span>);
+ 
+                        <b>if</b> (<span class="r20 r">byteObject</span> == <b>null</b>)
+                        {
+                            <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span><span class="s">Avro data record is missing </span>{<a href="Shared/Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Shared/Constants.cs.html#11c79be4ed701063" class="t t">QuickQuery</a>.<a href="Shared/Constants.cs.html#f7a7f417aa37d9a9" class="i field">Data</a>}<span class="s"> property</span><span class="s">&quot;</span>);
+                        }
+ 
+                        <b>byte</b>[] <span id="r21 rd" class="r21 r">bytes</span> = (<b>byte</b>[])<span class="r20 r">byteObject</span>;
+ 
+                        <span class="c">// Return the buffer if it is not null and not big enough.</span>
+                        <b>if</b> (<a href="#fef0bcac2f975757" class="i field">_buffer</a> != <b>null</b> &amp;&amp; <a href="#fef0bcac2f975757" class="i field">_buffer</a>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a> &lt; <span class="r21 r">bytes</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>)
+                        {
+                            <span class="t t">ArrayPool</span>&lt;<b>byte</b>&gt;.<span class="i property">Shared</span>.<span class="i method">Return</span>(<a href="#fef0bcac2f975757" class="i field">_buffer</a>, <span class="r22 r">clearArray</span>: <b>true</b>);
+                        }
+ 
+                        <span class="c">// Rent a new buffer if it is null or not big enough.</span>
+                        <b>if</b> (<a href="#fef0bcac2f975757" class="i field">_buffer</a> == <b>null</b> || <a href="#fef0bcac2f975757" class="i field">_buffer</a>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a> &lt; <span class="r21 r">bytes</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>)
+                        {
+                            <a href="#fef0bcac2f975757" class="i field">_buffer</a> = <span class="t t">ArrayPool</span>&lt;<b>byte</b>&gt;.<span class="i property">Shared</span>.<span class="i method">Rent</span>(<a href="@1@netstandard/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@1@netstandard/A.html#80ff956e9ca8e414" class="i method">Max</a>(4 * <a href="Shared/Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Shared/Constants.cs.html#f083580f332431a9" class="i field">MB</a>, <span class="r21 r">bytes</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>));
+                        }
+ 
+                        <a href="@1@netstandard/A.html#156e066ecc4ccedf" class="t t">Array</a>.<a href="@1@netstandard/A.html#7441c6721593042c" class="i method">Copy</a>(
+                            <span class="r14 r">sourceArray</span>: <span class="r21 r">bytes</span>,
+                            <span class="r15 r">sourceIndex</span>: 0,
+                            <span class="r16 r">destinationArray</span>: <a href="#fef0bcac2f975757" class="i field">_buffer</a>,
+                            <span class="r17 r">destinationIndex</span>: 0,
+                            <span class="r18 r">length</span>: <span class="r21 r">bytes</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>);
+ 
+                        <a href="#1034bc29c4448aae" class="i field">_bufferLength</a> = <span class="r21 r">bytes</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>;
+ 
+                        <span class="c">// Don&#39;t remove this reset, it is used in the final array copy below.</span>
+                        <span class="r13 r">remainingBytes</span> = <span class="r21 r">bytes</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>;
+                        <b>break</b>;
+ 
+                    <span class="c">// Progress Record</span>
+                    <b>case</b> <a href="Shared/Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Shared/Constants.cs.html#11c79be4ed701063" class="t t">QuickQuery</a>.<a href="Shared/Constants.cs.html#4b0875c1d339f78b" class="i field">ProgressRecordName</a>:
+                        <b>if</b> (<a href="#1e44dd5c6409e5fa" class="i field">_progressHandler</a> != <b>default</b>)
+                        {
+                            <span class="r19 r">record</span>.<a href="@1@netstandard/A.html#2e5bc6d8c0f21e67" class="i method">TryGetValue</a>(<a href="Shared/Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Shared/Constants.cs.html#11c79be4ed701063" class="t t">QuickQuery</a>.<a href="Shared/Constants.cs.html#3d70f80dcde5ccd9" class="i field">BytesScanned</a>, <b>out object</b> <span id="r23 rd" class="r23 r">progress</span>);
+ 
+                            <b>if</b> (<span class="r23 r">progress</span> == <b>null</b>)
+                            {
+                                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span><span class="s">Avro progress record is mssing </span>{<a href="Shared/Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Shared/Constants.cs.html#11c79be4ed701063" class="t t">QuickQuery</a>.<a href="Shared/Constants.cs.html#3d70f80dcde5ccd9" class="i field">BytesScanned</a>}<span class="s"> property</span><span class="s">&quot;</span>);
+                            }
+ 
+                            <a href="#1e44dd5c6409e5fa" class="i field">_progressHandler</a>.<a href="@1@netstandard/A.html#cd87d052fb216d27" class="i method">Report</a>((<b>long</b>)<span class="r23 r">progress</span>);
+                        }
+                        <b>break</b>;
+ 
+                    <span class="c">// Error Record</span>
+                    <b>case</b> <a href="Shared/Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Shared/Constants.cs.html#11c79be4ed701063" class="t t">QuickQuery</a>.<a href="Shared/Constants.cs.html#6a4d3fe71f345368" class="i field">ErrorRecordName</a>:
+                        <a href="#46bc78e624d32b66" class="i method">ProcessErrorRecord</a>(<span class="r19 r">record</span>);
+                        <b>break</b>;
+ 
+                    <span class="c">// End Record</span>
+                    <b>case</b> <a href="Shared/Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Shared/Constants.cs.html#11c79be4ed701063" class="t t">QuickQuery</a>.<a href="Shared/Constants.cs.html#8156d6df7162c765" class="i field">EndRecordName</a>:
+                        <b>if</b> (<a href="#1e44dd5c6409e5fa" class="i field">_progressHandler</a> != <b>default</b>)
+                        {
+                            <span class="r19 r">record</span>.<a href="@1@netstandard/A.html#2e5bc6d8c0f21e67" class="i method">TryGetValue</a>(<a href="Shared/Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Shared/Constants.cs.html#11c79be4ed701063" class="t t">QuickQuery</a>.<a href="Shared/Constants.cs.html#49b5797128f6b96c" class="i field">TotalBytes</a>, <b>out object</b> <span id="r24 rd" class="r24 r">progress</span>);
+ 
+                            <b>if</b> (<span class="r24 r">progress</span> == <b>null</b>)
+                            {
+                                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span><span class="s">Avro end record is missing </span>{<a href="Shared/Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Shared/Constants.cs.html#11c79be4ed701063" class="t t">QuickQuery</a>.<a href="Shared/Constants.cs.html#49b5797128f6b96c" class="i field">TotalBytes</a>}<span class="s"> property</span><span class="s">&quot;</span>);
+                            }
+ 
+                            <a href="#1e44dd5c6409e5fa" class="i field">_progressHandler</a>.<a href="@1@netstandard/A.html#cd87d052fb216d27" class="i method">Report</a>((<b>long</b>)<span class="r24 r">progress</span>);
+                        }
+                        <b>return</b> 0;
+                }
+            }
+ 
+            <b>int</b> <span id="r25 rd" class="r25 r">length</span> = <a href="@1@netstandard/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@1@netstandard/A.html#f441d55c88d635ad" class="i method">Min</a>(<span class="r12 r">count</span>, <span class="r13 r">remainingBytes</span>);
+            <a href="@1@netstandard/A.html#156e066ecc4ccedf" class="t t">Array</a>.<a href="@1@netstandard/A.html#7441c6721593042c" class="i method">Copy</a>(
+                <span class="r14 r">sourceArray</span>: <a href="#fef0bcac2f975757" class="i field">_buffer</a>,
+                <span class="r15 r">sourceIndex</span>: <a href="#519f17a352f074c5" class="i field">_bufferOffset</a>,
+                <span class="r16 r">destinationArray</span>: <span class="r10 r">buffer</span>,
+                <span class="r17 r">destinationIndex</span>: <span class="r11 r">offset</span>,
+                <span class="r18 r">length</span>: <span class="r25 r">length</span>);
+ 
+            <a href="#519f17a352f074c5" class="i field">_bufferOffset</a> += <span class="r25 r">length</span>;
+            <b>return</b> <span class="r25 r">length</span>;
+        }
+ 
+        <b>internal static void</b> <a id="9550518f4e2637a7" href="R/9550518f4e2637a7.html" target="n" data-glyph="74,1" class="i method">ValidateReadParameters</a>(<b>byte</b>[] <span id="r26 rd" class="r26 r">buffer</span>, <b>int</b> <span id="r27 rd" class="r27 r">offset</span>, <b>int</b> <span id="r28 rd" class="r28 r">count</span>)
+        {
+            <b>if</b> (<span class="r26 r">buffer</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#b50c77b2acc23eca" class="t constructor">ArgumentNullException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="r26 r">buffer</span>)}<span class="s">&quot;</span>, <span class="s">&quot;Parameter cannot be null.&quot;</span>);
+            }
+ 
+            <b>if</b> (<span class="r27 r">offset</span> &lt; 0)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#27138d3b17d5ff6b" class="t constructor">ArgumentOutOfRangeException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="r27 r">offset</span>)}<span class="s">&quot;</span>, <span class="s">&quot;Parameter cannot be negative.&quot;</span>);
+            }
+ 
+            <b>if</b> (<span class="r28 r">count</span> &lt; 0)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#27138d3b17d5ff6b" class="t constructor">ArgumentOutOfRangeException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="r28 r">count</span>)}<span class="s">&quot;</span>, <span class="s">&quot;Parameter cannot be negative.&quot;</span>);
+            }
+ 
+            <b>if</b> (<span class="r27 r">offset</span> + <span class="r28 r">count</span> &gt; <span class="r26 r">buffer</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">$&quot;</span><span class="s">The sum of </span>{<b>nameof</b>(<span class="r27 r">offset</span>)}<span class="s"> and </span>{<b>nameof</b>(<span class="r28 r">count</span>)}<span class="s"> cannot be greater than </span>{<b>nameof</b>(<span class="r26 r">buffer</span>)}<span class="s"> length.</span><span class="s">&quot;</span>);
+            }
+        }
+ 
+        <b>internal void</b> <a id="46bc78e624d32b66" href="R/46bc78e624d32b66.html" target="n" data-glyph="74,1" class="i method">ProcessErrorRecord</a>(<a href="@1@netstandard/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>, <b>object</b>&gt; <span id="r29 rd" class="r29 r">record</span>)
+        {
+            <span class="r29 r">record</span>.<a href="@1@netstandard/A.html#2e5bc6d8c0f21e67" class="i method">TryGetValue</a>(<a href="Shared/Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Shared/Constants.cs.html#11c79be4ed701063" class="t t">QuickQuery</a>.<a href="Shared/Constants.cs.html#39cb068a83ce9734" class="i field">Fatal</a>, <b>out object</b> <span id="r30 rd" class="r30 r">fatal</span>);
+            <span class="r29 r">record</span>.<a href="@1@netstandard/A.html#2e5bc6d8c0f21e67" class="i method">TryGetValue</a>(<a href="Shared/Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Shared/Constants.cs.html#11c79be4ed701063" class="t t">QuickQuery</a>.<a href="Shared/Constants.cs.html#22a2ac975e1fbe73" class="i field">Name</a>, <b>out object</b> <span id="r31 rd" class="r31 r">name</span>);
+            <span class="r29 r">record</span>.<a href="@1@netstandard/A.html#2e5bc6d8c0f21e67" class="i method">TryGetValue</a>(<a href="Shared/Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Shared/Constants.cs.html#11c79be4ed701063" class="t t">QuickQuery</a>.<a href="Shared/Constants.cs.html#7d7450fa83fcaf2f" class="i field">Description</a>, <b>out object</b> <span id="r32 rd" class="r32 r">description</span>);
+            <span class="r29 r">record</span>.<a href="@1@netstandard/A.html#2e5bc6d8c0f21e67" class="i method">TryGetValue</a>(<a href="Shared/Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Shared/Constants.cs.html#11c79be4ed701063" class="t t">QuickQuery</a>.<a href="Shared/Constants.cs.html#fc64dcf1b8a5d931" class="i field">Position</a>, <b>out object</b> <span id="r33 rd" class="r33 r">position</span>);
+ 
+            <b>if</b> (<span class="r30 r">fatal</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span><span class="s">Avro error record is missing </span>{<b>nameof</b>(<span class="r30 r">fatal</span>)}<span class="s"> property</span><span class="s">&quot;</span>);
+            }
+ 
+            <b>if</b> (<span class="r31 r">name</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span><span class="s">Avro error record is missing </span>{<b>nameof</b>(<span class="r31 r">name</span>)}<span class="s"> property</span><span class="s">&quot;</span>);
+            }
+ 
+            <b>if</b> (<span class="r32 r">description</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span><span class="s">Avro error record is missing </span>{<b>nameof</b>(<span class="r32 r">description</span>)}<span class="s"> property</span><span class="s">&quot;</span>);
+            }
+ 
+            <b>if</b> (<span class="r33 r">position</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span><span class="s">Avro error record is missing </span>{<b>nameof</b>(<span class="r33 r">position</span>)}<span class="s"> property</span><span class="s">&quot;</span>);
+            }
+ 
+            <b>if</b> (<a href="#0749aac6f3adff7b" class="i field">_errorHandler</a> != <b>null</b>)
+            {
+                <a href="Models/BlobQueryError.cs.html#248957619f70b79e" class="t t">BlobQueryError</a> <span id="r34 rd" class="r34 r">blobQueryError</span> = <b>new</b> <a href="Models/BlobQueryError.cs.html#84c54b03fd015a18" class="t constructor">BlobQueryError</a>
+                {
+                    <a href="Models/BlobQueryError.cs.html#95dd2da9cc7a7560" class="i property">IsFatal</a> = (<b>bool</b>)<span class="r30 r">fatal</span>,
+                    <a href="Models/BlobQueryError.cs.html#77b0e91c6ba1c2b4" class="i property">Name</a> = (<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>)<span class="r31 r">name</span>,
+                    <a href="Models/BlobQueryError.cs.html#d4f345b5f099c617" class="i property">Description</a> = (<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>)<span class="r32 r">description</span>,
+                    <a href="Models/BlobQueryError.cs.html#9306ce8e2293f838" class="i property">Position</a> = (<b>long</b>)<span class="r33 r">position</span>
+                };
+                <a href="#0749aac6f3adff7b" class="i field">_errorHandler</a>(<span class="r34 r">blobQueryError</span>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override bool</b> <a id="6c90c287d318b703" href="R/6c90c287d318b703.html" target="n" data-glyph="102,1" class="i property">CanRead</a> =&gt; <b>true</b>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override bool</b> <a id="0f6943cd6af0496f" href="R/0f6943cd6af0496f.html" target="n" data-glyph="102,1" class="i property">CanSeek</a> =&gt; <b>false</b>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override bool</b> <a id="2f6fccc750f1f0f9" href="R/2f6fccc750f1f0f9.html" target="n" data-glyph="102,1" class="i property">CanWrite</a> =&gt; <b>false</b>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override long</b> <a id="29eb076b76589f77" href="R/29eb076b76589f77.html" target="n" data-glyph="102,1" class="i property">Length</a> =&gt; <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#ab0acd5f99886747" class="t constructor">NotSupportedException</a>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override long</b> <a id="581067c07c4f4ee7" href="R/581067c07c4f4ee7.html" target="n" data-glyph="102,1" class="i property">Position</a>
+        {
+            <b>get</b> =&gt; <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#ab0acd5f99886747" class="t constructor">NotSupportedException</a>();
+            <b>set</b> =&gt; <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#ab0acd5f99886747" class="t constructor">NotSupportedException</a>();
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override void</b> <a id="734f92a87dcacd00" href="R/734f92a87dcacd00.html" target="n" data-glyph="72,1" class="i method">Flush</a>() =&gt; <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#ab0acd5f99886747" class="t constructor">NotSupportedException</a>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override long</b> <a id="33b731021a74c3d5" href="R/33b731021a74c3d5.html" target="n" data-glyph="72,1" class="i method">Seek</a>(<b>long</b> <span id="r35 rd" class="r35 r">offset</span>, <a href="@1@netstandard/A.html#2cc1cf6635f00a52" class="t t">SeekOrigin</a> <span id="r36 rd" class="r36 r">origin</span>) =&gt; <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#ab0acd5f99886747" class="t constructor">NotSupportedException</a>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override void</b> <a id="fe3845d8b1b37a24" href="R/fe3845d8b1b37a24.html" target="n" data-glyph="72,1" class="i method">SetLength</a>(<b>long</b> <span id="r37 rd" class="r37 r">value</span>) =&gt; <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#ab0acd5f99886747" class="t constructor">NotSupportedException</a>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override void</b> <a id="9fbf7d92329fe200" href="R/9fbf7d92329fe200.html" target="n" data-glyph="72,1" class="i method">Write</a>(<b>byte</b>[] <span id="r38 rd" class="r38 r">buffer</span>, <b>int</b> <span id="r39 rd" class="r39 r">offset</span>, <b>int</b> <span id="r40 rd" class="r40 r">count</span>) =&gt; <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#ab0acd5f99886747" class="t constructor">NotSupportedException</a>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>protected override void</b> <a id="184b8dd39a4e3fed" href="R/184b8dd39a4e3fed.html" target="n" data-glyph="75,1" class="i method">Dispose</a>(<b>bool</b> <span id="r41 rd" class="r41 r">disposing</span>)
+        {
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="k">base</a>.<a href="@1@netstandard/A.html#f35c7d226df4a465" class="i method">Dispose</a>(<b>true</b>);
+ 
+            <span class="c">// Return the buffer to the pool if we&#39;re called from Dispose or a finalizer</span>
+            <b>if</b> (<a href="#fef0bcac2f975757" class="i field">_buffer</a> != <b>null</b>)
+            {
+                <span class="t t">ArrayPool</span>&lt;<b>byte</b>&gt;.<span class="i property">Shared</span>.<span class="i method">Return</span>(<a href="#fef0bcac2f975757" class="i field">_buffer</a>, <span class="r22 r">clearArray</span>: <b>true</b>);
+                <a href="#fef0bcac2f975757" class="i field">_buffer</a> = <b>null</b>;
+            }
+ 
+            <a href="#ec598d8163e17817" class="i field">_avroStream</a>.<a href="@1@netstandard/A.html#f1b4285950a82354" class="i method">Dispose</a>();
+            <b>if</b> (<a href="#fef0bcac2f975757" class="i field">_buffer</a> != <b>null</b>)
+            {
+                <span class="t t">ArrayPool</span>&lt;<b>byte</b>&gt;.<span class="i property">Shared</span>.<span class="i method">Return</span>(<a href="#fef0bcac2f975757" class="i field">_buffer</a>, <span class="r22 r">clearArray</span>: <b>true</b>);
+                <a href="#fef0bcac2f975757" class="i field">_buffer</a> = <b>null</b>;
+            }
+ 
+            <a href="#f44b200cfc18cb18" class="i field">_avroReader</a>.<a href="Shared/AvroReader.cs.html#912f872a701f7863" class="i method">Dispose</a>();
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

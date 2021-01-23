@@ -1,0 +1,451 @@
+﻿<!DOCTYPE html>
+<html><head><title>BufferedReadStream.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(442);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Storage.Blobs.Batch/Shared/BufferedReadStream.cs" target="_top">Shared\BufferedReadStream.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Storage.Blobs.Batch" target="_top">Azure.Storage.Blobs.Batch\src\Azure.Storage.Blobs.Batch.csproj</a> (Azure.Storage.Blobs.Batch)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<span class="c">// Copied from https://github.com/aspnet/AspNetCore/tree/master/src/Http/WebUtilities/src</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Buffers</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA1305</span>  <span class="c">// ToString Locale</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA1822</span>  <span class="c">// Make member static</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">IDE0016</span> <span class="c">// Simplify null check</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">IDE0036</span> <span class="c">// Modifiers not ordered</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">IDE0054</span> <span class="c">// Use compound assignment</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">IDE0059</span> <span class="c">// Unnecessary assignment</span>
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Http</span>.<span class="i n">Multipart</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> A Stream that wraps another stream and allows reading lines.</span>
+    <span class="c">///</span><span class="c"> The data is buffered in memory.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="36d3399a2dd9b074" href="../R/36d3399a2dd9b074.html" target="n" data-glyph="2,0" class="t t">BufferedReadStream</a> : <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a>
+    {
+        <b>private const byte</b> <a id="6153cccdb78a5a2a" href="../R/6153cccdb78a5a2a.html" target="n" data-glyph="10,1" class="i field">CR</a> = (<b>byte</b>)<span class="s">&#39;\r&#39;</span>;
+        <b>private const byte</b> <a id="379f4a4010b51dce" href="../R/379f4a4010b51dce.html" target="n" data-glyph="10,1" class="i field">LF</a> = (<b>byte</b>)<span class="s">&#39;\n&#39;</span>;
+ 
+        <b>private readonly</b> <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <a id="e95decd1dea99796" href="../R/e95decd1dea99796.html" target="n" data-glyph="46,1" class="i field">_inner</a>;
+        <b>private readonly byte</b>[] <a id="e54d5654321c2cd2" href="../R/e54d5654321c2cd2.html" target="n" data-glyph="46,1" class="i field">_buffer</a>;
+        <b>private readonly</b> <span class="t t">ArrayPool</span>&lt;<b>byte</b>&gt; <a id="a54e150bfa242227" href="../R/a54e150bfa242227.html" target="n" data-glyph="46,1" class="i field">_bytePool</a>;
+        <b>private int</b> <a id="332793f4d33165eb" href="../R/332793f4d33165eb.html" target="n" data-glyph="46,1" class="i field">_bufferOffset</a>;
+        <b>private int</b> <a id="0eaed13ea8ed40c0" href="../R/0eaed13ea8ed40c0.html" target="n" data-glyph="46,1" class="i field">_bufferCount</a>;
+        <b>private bool</b> <a id="e8ccf7c046857080" href="../R/e8ccf7c046857080.html" target="n" data-glyph="46,1" class="i field">_disposed</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new stream.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">inner</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The stream to wrap.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">bufferSize</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Size of buffer in bytes.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="049f82024d42f0a0" href="../R/049f82024d42f0a0.html" target="n" data-glyph="72,1" class="t constructor">BufferedReadStream</a>(<a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r0 rd" class="r0 r">inner</span>, <b>int</b> <span id="r1 rd" class="r1 r">bufferSize</span>)
+            : <a href="#efc1a2346c933f70" class="k">this</a>(<span class="r0 r">inner</span>, <span class="r1 r">bufferSize</span>, <span class="t t">ArrayPool</span>&lt;<b>byte</b>&gt;.<span class="i property">Shared</span>)
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new stream.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">inner</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The stream to wrap.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">bufferSize</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Size of buffer in bytes.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">bytePool</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">ArrayPool for the buffer.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="efc1a2346c933f70" href="../R/efc1a2346c933f70.html" target="n" data-glyph="72,1" class="t constructor">BufferedReadStream</a>(<a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r2 rd" class="r2 r">inner</span>, <b>int</b> <span id="r3 rd" class="r3 r">bufferSize</span>, <span class="t t">ArrayPool</span>&lt;<b>byte</b>&gt; <span id="r4 rd" class="r4 r">bytePool</span>)
+        {
+            <b>if</b> (<span class="r2 r">inner</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>(<b>nameof</b>(<span class="r2 r">inner</span>));
+            }
+ 
+            <a href="#e95decd1dea99796" class="i field">_inner</a> = <span class="r2 r">inner</span>;
+            <a href="#a54e150bfa242227" class="i field">_bytePool</a> = <span class="r4 r">bytePool</span>;
+            <a href="#e54d5654321c2cd2" class="i field">_buffer</a> = <span class="r4 r">bytePool</span>.<span class="i method">Rent</span>(<span class="r3 r">bufferSize</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The currently buffered data.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a href="@1@netstandard/A.html#d2e9d465e1639af7" class="t t">ArraySegment</a>&lt;<b>byte</b>&gt; <a id="8b76df51c5a6adcd" href="../R/8b76df51c5a6adcd.html" target="n" data-glyph="102,1" class="i property">BufferedData</a>
+        {
+            <b>get</b> { <b>return</b> <b>new</b> <a href="@1@netstandard/A.html#7439abe3fdaec1c7" class="t constructor">ArraySegment</a>&lt;<b>byte</b>&gt;(<a href="#e54d5654321c2cd2" class="i field">_buffer</a>, <a href="#332793f4d33165eb" class="i field">_bufferOffset</a>, <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a>); }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override bool</b> <a id="6ae2d89b4d8e0ab7" href="../R/6ae2d89b4d8e0ab7.html" target="n" data-glyph="102,1" class="i property">CanRead</a>
+        {
+            <b>get</b> { <b>return</b> <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#9d92fb3890523d38" class="i property">CanRead</a> || <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> &gt; 0; }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override bool</b> <a id="8022929c6cffe2b8" href="../R/8022929c6cffe2b8.html" target="n" data-glyph="102,1" class="i property">CanSeek</a>
+        {
+            <b>get</b> { <b>return</b> <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#73e4413d240b4cee" class="i property">CanSeek</a>; }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override bool</b> <a id="eb83cf3506ec4906" href="../R/eb83cf3506ec4906.html" target="n" data-glyph="102,1" class="i property">CanTimeout</a>
+        {
+            <b>get</b> { <b>return</b> <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#aefb5714c6c10e85" class="i property">CanTimeout</a>; }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override bool</b> <a id="cd935a3286d22be2" href="../R/cd935a3286d22be2.html" target="n" data-glyph="102,1" class="i property">CanWrite</a>
+        {
+            <b>get</b> { <b>return</b> <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#ebab682837a70146" class="i property">CanWrite</a>; }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override long</b> <a id="98e7a2c4b28f1dfc" href="../R/98e7a2c4b28f1dfc.html" target="n" data-glyph="102,1" class="i property">Length</a>
+        {
+            <b>get</b> { <b>return</b> <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#48b7e39cfd844dc5" class="i property">Length</a>; }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override long</b> <a id="fb1b5685a10cd5f5" href="../R/fb1b5685a10cd5f5.html" target="n" data-glyph="102,1" class="i property">Position</a>
+        {
+            <b>get</b> { <b>return</b> <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#35112b2a53fb536a" class="i property">Position</a> - <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a>; }
+            <b>set</b>
+            {
+                <b>if</b> (<b>value</b> &lt; 0)
+                {
+                    <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#c524af42f1a5665e" class="t constructor">ArgumentOutOfRangeException</a>(<b>nameof</b>(<b>value</b>), <b>value</b>, <span class="s">&quot;Position must be positive.&quot;</span>);
+                }
+                <b>if</b> (<b>value</b> == <a href="#fb1b5685a10cd5f5" class="i property">Position</a>)
+                {
+                    <b>return</b>;
+                }
+ 
+                <span class="c">// Backwards?</span>
+                <b>if</b> (<b>value</b> &lt;= <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#35112b2a53fb536a" class="i property">Position</a>)
+                {
+                    <span class="c">// Forward within the buffer?</span>
+                    <a href="@1@netstandard/A.html#225942ed7b7a3252" class="k">var</a> <span id="r5 rd" class="r5 r">innerOffset</span> = (<b>int</b>)(<a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#35112b2a53fb536a" class="i property">Position</a> - <b>value</b>);
+                    <b>if</b> (<span class="r5 r">innerOffset</span> &lt;= <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a>)
+                    {
+                        <span class="c">// Yes, just skip some of the buffered data</span>
+                        <a href="#332793f4d33165eb" class="i field">_bufferOffset</a> += <span class="r5 r">innerOffset</span>;
+                        <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> -= <span class="r5 r">innerOffset</span>;
+                    }
+                    <b>else</b>
+                    {
+                        <span class="c">// No, reset the buffer</span>
+                        <a href="#332793f4d33165eb" class="i field">_bufferOffset</a> = 0;
+                        <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> = 0;
+                        <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#35112b2a53fb536a" class="i property">Position</a> = <b>value</b>;
+                    }
+                }
+                <b>else</b>
+                {
+                    <span class="c">// Forward, reset the buffer</span>
+                    <a href="#332793f4d33165eb" class="i field">_bufferOffset</a> = 0;
+                    <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> = 0;
+                    <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#35112b2a53fb536a" class="i property">Position</a> = <b>value</b>;
+                }
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override long</b> <a id="60885cd0db3b994d" href="../R/60885cd0db3b994d.html" target="n" data-glyph="72,1" class="i method">Seek</a>(<b>long</b> <span id="r6 rd" class="r6 r">offset</span>, <a href="@1@netstandard/A.html#2cc1cf6635f00a52" class="t t">SeekOrigin</a> <span id="r7 rd" class="r7 r">origin</span>)
+        {
+            <b>if</b> (<span class="r7 r">origin</span> == <a href="@1@netstandard/A.html#2cc1cf6635f00a52" class="t t">SeekOrigin</a>.<a href="@1@netstandard/A.html#c29481af7c617299" class="i field">Begin</a>)
+            {
+                <a href="#fb1b5685a10cd5f5" class="i property">Position</a> = <span class="r6 r">offset</span>;
+            }
+            <b>else</b> <b>if</b> (<span class="r7 r">origin</span> == <a href="@1@netstandard/A.html#2cc1cf6635f00a52" class="t t">SeekOrigin</a>.<a href="@1@netstandard/A.html#efa75a72affe543f" class="i field">Current</a>)
+            {
+                <a href="#fb1b5685a10cd5f5" class="i property">Position</a> = <a href="#fb1b5685a10cd5f5" class="i property">Position</a> + <span class="r6 r">offset</span>;
+            }
+            <b>else</b> <span class="c">// if (origin == SeekOrigin.End)</span>
+            {
+                <a href="#fb1b5685a10cd5f5" class="i property">Position</a> = <a href="#98e7a2c4b28f1dfc" class="i property">Length</a> + <span class="r6 r">offset</span>;
+            }
+            <b>return</b> <a href="#fb1b5685a10cd5f5" class="i property">Position</a>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override void</b> <a id="270a00f498bafbc1" href="../R/270a00f498bafbc1.html" target="n" data-glyph="72,1" class="i method">SetLength</a>(<b>long</b> <span id="r8 rd" class="r8 r">value</span>)
+        {
+            <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#70f6f69c124200cc" class="i method">SetLength</a>(<span class="r8 r">value</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>protected override void</b> <a id="3c3b6798d7236c8f" href="../R/3c3b6798d7236c8f.html" target="n" data-glyph="75,1" class="i method">Dispose</a>(<b>bool</b> <span id="r9 rd" class="r9 r">disposing</span>)
+        {
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="k">base</a>.<a href="@1@netstandard/A.html#f35c7d226df4a465" class="i method">Dispose</a>(<span class="r9 r">disposing</span>);
+            <b>if</b> (!<a href="#e8ccf7c046857080" class="i field">_disposed</a>)
+            {
+                <a href="#e8ccf7c046857080" class="i field">_disposed</a> = <b>true</b>;
+                <a href="#a54e150bfa242227" class="i field">_bytePool</a>.<span class="i method">Return</span>(<a href="#e54d5654321c2cd2" class="i field">_buffer</a>);
+ 
+                <b>if</b> (<span class="r9 r">disposing</span>)
+                {
+                    <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#f1b4285950a82354" class="i method">Dispose</a>();
+                }
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override void</b> <a id="1c6c47ae0f2dbd28" href="../R/1c6c47ae0f2dbd28.html" target="n" data-glyph="72,1" class="i method">Flush</a>()
+        {
+            <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#1bd99e8a41c68d21" class="i method">Flush</a>();
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="b7ddcd2107e7d13b" href="../R/b7ddcd2107e7d13b.html" target="n" data-glyph="72,1" class="i method">FlushAsync</a>(<a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r10 rd" class="r10 r">cancellationToken</span>)
+        {
+            <b>return</b> <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#d09e05e8b8859a5a" class="i method">FlushAsync</a>(<span class="r10 r">cancellationToken</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override void</b> <a id="9855ec90137c7cda" href="../R/9855ec90137c7cda.html" target="n" data-glyph="72,1" class="i method">Write</a>(<b>byte</b>[] <span id="r11 rd" class="r11 r">buffer</span>, <b>int</b> <span id="r12 rd" class="r12 r">offset</span>, <b>int</b> <span id="r13 rd" class="r13 r">count</span>)
+        {
+            <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#809202cd37ae53a9" class="i method">Write</a>(<span class="r11 r">buffer</span>, <span class="r12 r">offset</span>, <span class="r13 r">count</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="73513b6f80dfc472" href="../R/73513b6f80dfc472.html" target="n" data-glyph="72,1" class="i method">WriteAsync</a>(<b>byte</b>[] <span id="r14 rd" class="r14 r">buffer</span>, <b>int</b> <span id="r15 rd" class="r15 r">offset</span>, <b>int</b> <span id="r16 rd" class="r16 r">count</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r17 rd" class="r17 r">cancellationToken</span>)
+        {
+            <b>return</b> <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#646bf77f3c9e8556" class="i method">WriteAsync</a>(<span class="r14 r">buffer</span>, <span class="r15 r">offset</span>, <span class="r16 r">count</span>, <span class="r17 r">cancellationToken</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public override int</b> <a id="1dae29fd26020215" href="../R/1dae29fd26020215.html" target="n" data-glyph="72,1" class="i method">Read</a>(<b>byte</b>[] <span id="r18 rd" class="r18 r">buffer</span>, <b>int</b> <span id="r19 rd" class="r19 r">offset</span>, <b>int</b> <span id="r20 rd" class="r20 r">count</span>)
+        {
+            <a href="#ccbbde9776cc1f78" class="i method">ValidateBuffer</a>(<span class="r18 r">buffer</span>, <span class="r19 r">offset</span>, <span class="r20 r">count</span>);
+ 
+            <span class="c">// Drain buffer</span>
+            <b>if</b> (<a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> &gt; 0)
+            {
+                <b>int</b> <span id="r21 rd" class="r21 r">toCopy</span> = <a href="@1@netstandard/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@1@netstandard/A.html#f441d55c88d635ad" class="i method">Min</a>(<a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a>, <span class="r20 r">count</span>);
+                <a href="@1@netstandard/A.html#570e88af5685d024" class="t t">Buffer</a>.<a href="@1@netstandard/A.html#1fbec67d6ee92203" class="i method">BlockCopy</a>(<a href="#e54d5654321c2cd2" class="i field">_buffer</a>, <a href="#332793f4d33165eb" class="i field">_bufferOffset</a>, <span class="r18 r">buffer</span>, <span class="r19 r">offset</span>, <span class="r21 r">toCopy</span>);
+                <a href="#332793f4d33165eb" class="i field">_bufferOffset</a> += <span class="r21 r">toCopy</span>;
+                <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> -= <span class="r21 r">toCopy</span>;
+                <b>return</b> <span class="r21 r">toCopy</span>;
+            }
+ 
+            <b>return</b> <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#6fb9c001d7524ba2" class="i method">Read</a>(<span class="r18 r">buffer</span>, <span class="r19 r">offset</span>, <span class="r20 r">count</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span><span class="c">/&gt;</span>
+        <b>public async override</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>int</b>&gt; <a id="5113bb19f12fea1b" href="../R/5113bb19f12fea1b.html" target="n" data-glyph="72,1" class="i method">ReadAsync</a>(<b>byte</b>[] <span id="r22 rd" class="r22 r">buffer</span>, <b>int</b> <span id="r23 rd" class="r23 r">offset</span>, <b>int</b> <span id="r24 rd" class="r24 r">count</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r25 rd" class="r25 r">cancellationToken</span>)
+        {
+            <a href="#ccbbde9776cc1f78" class="i method">ValidateBuffer</a>(<span class="r22 r">buffer</span>, <span class="r23 r">offset</span>, <span class="r24 r">count</span>);
+ 
+            <span class="c">// Drain buffer</span>
+            <b>if</b> (<a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> &gt; 0)
+            {
+                <b>int</b> <span id="r26 rd" class="r26 r">toCopy</span> = <a href="@1@netstandard/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@1@netstandard/A.html#f441d55c88d635ad" class="i method">Min</a>(<a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a>, <span class="r24 r">count</span>);
+                <a href="@1@netstandard/A.html#570e88af5685d024" class="t t">Buffer</a>.<a href="@1@netstandard/A.html#1fbec67d6ee92203" class="i method">BlockCopy</a>(<a href="#e54d5654321c2cd2" class="i field">_buffer</a>, <a href="#332793f4d33165eb" class="i field">_bufferOffset</a>, <span class="r22 r">buffer</span>, <span class="r23 r">offset</span>, <span class="r26 r">toCopy</span>);
+                <a href="#332793f4d33165eb" class="i field">_bufferOffset</a> += <span class="r26 r">toCopy</span>;
+                <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> -= <span class="r26 r">toCopy</span>;
+                <b>return</b> <span class="r26 r">toCopy</span>;
+            }
+ 
+            <b>return</b> <b>await</b> <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#e224b4bec8748849" class="i method">ReadAsync</a>(<span class="r22 r">buffer</span>, <span class="r23 r">offset</span>, <span class="r24 r">count</span>, <span class="r25 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Ensures that the buffer is not empty.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Returns </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the buffer is not empty; </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> otherwise.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public bool</b> <a id="3ef2451dd9839a86" href="../R/3ef2451dd9839a86.html" target="n" data-glyph="72,1" class="i method">EnsureBuffered</a>()
+        {
+            <b>if</b> (<a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> &gt; 0)
+            {
+                <b>return</b> <b>true</b>;
+            }
+            <span class="c">// Downshift to make room</span>
+            <a href="#332793f4d33165eb" class="i field">_bufferOffset</a> = 0;
+            <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> = <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#6fb9c001d7524ba2" class="i method">Read</a>(<a href="#e54d5654321c2cd2" class="i field">_buffer</a>, 0, <a href="#e54d5654321c2cd2" class="i field">_buffer</a>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>);
+            <b>return</b> <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> &gt; 0;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Ensures that the buffer is not empty.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r27 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Cancellation token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Returns </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the buffer is not empty; </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> otherwise.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>bool</b>&gt; <a id="dc4e6415a0febecd" href="../R/dc4e6415a0febecd.html" target="n" data-glyph="72,1" class="i method">EnsureBufferedAsync</a>(<a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r27 rd" class="r27 r">cancellationToken</span>)
+        {
+            <b>if</b> (<a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> &gt; 0)
+            {
+                <b>return</b> <b>true</b>;
+            }
+            <span class="c">// Downshift to make room</span>
+            <a href="#332793f4d33165eb" class="i field">_bufferOffset</a> = 0;
+            <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> = <b>await</b> <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#e224b4bec8748849" class="i method">ReadAsync</a>(<a href="#e54d5654321c2cd2" class="i field">_buffer</a>, 0, <a href="#e54d5654321c2cd2" class="i field">_buffer</a>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>, <span class="r27 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+            <b>return</b> <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> &gt; 0;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Ensures that a minimum amount of buffered data is available.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r28 r">minCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Minimum amount of buffered data.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Returns </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the minimum amount of buffered data is available; </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> otherwise.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public bool</b> <a id="4e3a25bb977113a6" href="../R/4e3a25bb977113a6.html" target="n" data-glyph="72,1" class="i method">EnsureBuffered</a>(<b>int</b> <span id="r28 rd" class="r28 r">minCount</span>)
+        {
+            <b>if</b> (<span class="r28 r">minCount</span> &gt; <a href="#e54d5654321c2cd2" class="i field">_buffer</a>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#c524af42f1a5665e" class="t constructor">ArgumentOutOfRangeException</a>(<b>nameof</b>(<span class="r28 r">minCount</span>), <span class="r28 r">minCount</span>, <span class="s">&quot;The value must be smaller than the buffer size: &quot;</span> + <a href="#e54d5654321c2cd2" class="i field">_buffer</a>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>.<a href="@1@netstandard/A.html#8d6f2d8bc0589463" class="i method">ToString</a>());
+            }
+            <b>while</b> (<a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> &lt; <span class="r28 r">minCount</span>)
+            {
+                <span class="c">// Downshift to make room</span>
+                <b>if</b> (<a href="#332793f4d33165eb" class="i field">_bufferOffset</a> &gt; 0)
+                {
+                    <b>if</b> (<a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> &gt; 0)
+                    {
+                        <a href="@1@netstandard/A.html#570e88af5685d024" class="t t">Buffer</a>.<a href="@1@netstandard/A.html#1fbec67d6ee92203" class="i method">BlockCopy</a>(<a href="#e54d5654321c2cd2" class="i field">_buffer</a>, <a href="#332793f4d33165eb" class="i field">_bufferOffset</a>, <a href="#e54d5654321c2cd2" class="i field">_buffer</a>, 0, <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a>);
+                    }
+                    <a href="#332793f4d33165eb" class="i field">_bufferOffset</a> = 0;
+                }
+                <b>int</b> <span id="r29 rd" class="r29 r">read</span> = <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#6fb9c001d7524ba2" class="i method">Read</a>(<a href="#e54d5654321c2cd2" class="i field">_buffer</a>, <a href="#332793f4d33165eb" class="i field">_bufferOffset</a> + <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a>, <a href="#e54d5654321c2cd2" class="i field">_buffer</a>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a> - <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> - <a href="#332793f4d33165eb" class="i field">_bufferOffset</a>);
+                <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> += <span class="r29 r">read</span>;
+                <b>if</b> (<span class="r29 r">read</span> == 0)
+                {
+                    <b>return</b> <b>false</b>;
+                }
+            }
+            <b>return</b> <b>true</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Ensures that a minimum amount of buffered data is available.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r30 r">minCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Minimum amount of buffered data.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r31 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Cancellation token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Returns </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the minimum amount of buffered data is available; </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> otherwise.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>bool</b>&gt; <a id="1ff07c0a208bd585" href="../R/1ff07c0a208bd585.html" target="n" data-glyph="72,1" class="i method">EnsureBufferedAsync</a>(<b>int</b> <span id="r30 rd" class="r30 r">minCount</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r31 rd" class="r31 r">cancellationToken</span>)
+        {
+            <b>if</b> (<span class="r30 r">minCount</span> &gt; <a href="#e54d5654321c2cd2" class="i field">_buffer</a>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#c524af42f1a5665e" class="t constructor">ArgumentOutOfRangeException</a>(<b>nameof</b>(<span class="r30 r">minCount</span>), <span class="r30 r">minCount</span>, <span class="s">&quot;The value must be smaller than the buffer size: &quot;</span> + <a href="#e54d5654321c2cd2" class="i field">_buffer</a>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>.<a href="@1@netstandard/A.html#8d6f2d8bc0589463" class="i method">ToString</a>());
+            }
+            <b>while</b> (<a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> &lt; <span class="r30 r">minCount</span>)
+            {
+                <span class="c">// Downshift to make room</span>
+                <b>if</b> (<a href="#332793f4d33165eb" class="i field">_bufferOffset</a> &gt; 0)
+                {
+                    <b>if</b> (<a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> &gt; 0)
+                    {
+                        <a href="@1@netstandard/A.html#570e88af5685d024" class="t t">Buffer</a>.<a href="@1@netstandard/A.html#1fbec67d6ee92203" class="i method">BlockCopy</a>(<a href="#e54d5654321c2cd2" class="i field">_buffer</a>, <a href="#332793f4d33165eb" class="i field">_bufferOffset</a>, <a href="#e54d5654321c2cd2" class="i field">_buffer</a>, 0, <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a>);
+                    }
+                    <a href="#332793f4d33165eb" class="i field">_bufferOffset</a> = 0;
+                }
+                <b>int</b> <span id="r32 rd" class="r32 r">read</span> = <b>await</b> <a href="#e95decd1dea99796" class="i field">_inner</a>.<a href="@1@netstandard/A.html#e224b4bec8748849" class="i method">ReadAsync</a>(<a href="#e54d5654321c2cd2" class="i field">_buffer</a>, <a href="#332793f4d33165eb" class="i field">_bufferOffset</a> + <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a>, <a href="#e54d5654321c2cd2" class="i field">_buffer</a>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a> - <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> - <a href="#332793f4d33165eb" class="i field">_bufferOffset</a>, <span class="r31 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a> += <span class="r32 r">read</span>;
+                <b>if</b> (<span class="r32 r">read</span> == 0)
+                {
+                    <b>return</b> <b>false</b>;
+                }
+            }
+            <b>return</b> <b>true</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Reads a line. A line is defined as a sequence of characters followed by</span>
+        <span class="c">///</span><span class="c"> a carriage return immediately followed by a line feed. The resulting string does not</span>
+        <span class="c">///</span><span class="c"> contain the terminating carriage return and line feed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r33 r">lengthLimit</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Maximum allowed line length.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A line.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public string</b> <a id="1e925799a410ca4f" href="../R/1e925799a410ca4f.html" target="n" data-glyph="72,1" class="i method">ReadLine</a>(<b>int</b> <span id="r33 rd" class="r33 r">lengthLimit</span>)
+        {
+            <a href="#5f8bf79b035b95a0" class="i method">CheckDisposed</a>();
+            <b>using</b> (<a href="@1@netstandard/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r34 rd" class="r34 r">builder</span> = <b>new</b> <a href="@1@netstandard/A.html#0db5cb2960bec2f2" class="t constructor">MemoryStream</a>(200))
+            {
+                <b>bool</b> <span id="r35 rd" class="r35 r">foundCR</span> = <b>false</b>, <span id="r36 rd" class="r36 r">foundCRLF</span> = <b>false</b>;
+ 
+                <b>while</b> (!<span class="r36 r">foundCRLF</span> &amp;&amp; <a href="#3ef2451dd9839a86" class="i method">EnsureBuffered</a>())
+                {
+                    <b>if</b> (<span class="r34 r">builder</span>.<a href="@1@netstandard/A.html#af4720ccd5d86f14" class="i property">Length</a> &gt; <span class="r33 r">lengthLimit</span>)
+                    {
+                        <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#3be0a1f685d20864" class="t constructor">InvalidDataException</a>(<span class="s">$&quot;</span><span class="s">Line length limit </span>{<span class="r33 r">lengthLimit</span>}<span class="s"> exceeded.</span><span class="s">&quot;</span>);
+                    }
+                    <a href="#59826de170faea4e" class="i method">ProcessLineChar</a>(<span class="r34 r">builder</span>, <b>ref</b> <span class="r35 r">foundCR</span>, <b>ref</b> <span class="r36 r">foundCRLF</span>);
+                }
+ 
+                <b>return</b> <a href="#1d9e8f580ba9a0ba" class="i method">DecodeLine</a>(<span class="r34 r">builder</span>, <span class="r36 r">foundCRLF</span>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Reads a line. A line is defined as a sequence of characters followed by</span>
+        <span class="c">///</span><span class="c"> a carriage return immediately followed by a line feed. The resulting string does not</span>
+        <span class="c">///</span><span class="c"> contain the terminating carriage return and line feed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r37 r">lengthLimit</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Maximum allowed line length.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r38 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Cancellation token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A line.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="9900a87abbed4638" href="../R/9900a87abbed4638.html" target="n" data-glyph="72,1" class="i method">ReadLineAsync</a>(<b>int</b> <span id="r37 rd" class="r37 r">lengthLimit</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r38 rd" class="r38 r">cancellationToken</span>)
+        {
+            <a href="#5f8bf79b035b95a0" class="i method">CheckDisposed</a>();
+            <b>using</b> (<a href="@1@netstandard/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r39 rd" class="r39 r">builder</span> = <b>new</b> <a href="@1@netstandard/A.html#0db5cb2960bec2f2" class="t constructor">MemoryStream</a>(200))
+            {
+                <b>bool</b> <span id="r40 rd" class="r40 r">foundCR</span> = <b>false</b>, <span id="r41 rd" class="r41 r">foundCRLF</span> = <b>false</b>;
+ 
+                <b>while</b> (!<span class="r41 r">foundCRLF</span> &amp;&amp; <b>await</b> <a href="#dc4e6415a0febecd" class="i method">EnsureBufferedAsync</a>(<span class="r38 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>))
+                {
+                    <b>if</b> (<span class="r39 r">builder</span>.<a href="@1@netstandard/A.html#af4720ccd5d86f14" class="i property">Length</a> &gt; <span class="r37 r">lengthLimit</span>)
+                    {
+                        <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#3be0a1f685d20864" class="t constructor">InvalidDataException</a>(<span class="s">$&quot;</span><span class="s">Line length limit </span>{<span class="r37 r">lengthLimit</span>}<span class="s"> exceeded.</span><span class="s">&quot;</span>);
+                    }
+ 
+                    <a href="#59826de170faea4e" class="i method">ProcessLineChar</a>(<span class="r39 r">builder</span>, <b>ref</b> <span class="r40 r">foundCR</span>, <b>ref</b> <span class="r41 r">foundCRLF</span>);
+                }
+ 
+                <b>return</b> <a href="#1d9e8f580ba9a0ba" class="i method">DecodeLine</a>(<span class="r39 r">builder</span>, <span class="r41 r">foundCRLF</span>);
+            }
+        }
+ 
+        <b>private void</b> <a id="59826de170faea4e" href="../R/59826de170faea4e.html" target="n" data-glyph="76,1" class="i method">ProcessLineChar</a>(<a href="@1@netstandard/A.html#1a4dcb744a23ba6f" class="t t">MemoryStream</a> <span id="r42 rd" class="r42 r">builder</span>, <b>ref bool</b> <span id="r43 rd" class="r43 r">foundCR</span>, <b>ref bool</b> <span id="r44 rd" class="r44 r">foundCRLF</span>)
+        {
+            <a href="@1@netstandard/A.html#3933aebb80415ce0" class="k">var</a> <span id="r45 rd" class="r45 r">b</span> = <a href="#e54d5654321c2cd2" class="i field">_buffer</a>[<a href="#332793f4d33165eb" class="i field">_bufferOffset</a>];
+            <span class="r42 r">builder</span>.<a href="@1@netstandard/A.html#147bc75491cf2226" class="i method">WriteByte</a>(<span class="r45 r">b</span>);
+            <a href="#332793f4d33165eb" class="i field">_bufferOffset</a>++;
+            <a href="#0eaed13ea8ed40c0" class="i field">_bufferCount</a>--;
+            <b>if</b> (<span class="r45 r">b</span> == <a href="#379f4a4010b51dce" class="i field">LF</a> &amp;&amp; <span class="r43 r">foundCR</span>)
+            {
+                <span class="r44 r">foundCRLF</span> = <b>true</b>;
+                <b>return</b>;
+            }
+            <span class="r43 r">foundCR</span> = <span class="r45 r">b</span> == <a href="#6153cccdb78a5a2a" class="i field">CR</a>;
+        }
+ 
+        <b>private string</b> <a id="1d9e8f580ba9a0ba" href="../R/1d9e8f580ba9a0ba.html" target="n" data-glyph="76,1" class="i method">DecodeLine</a>(<a href="@1@netstandard/A.html#1a4dcb744a23ba6f" class="t t">MemoryStream</a> <span id="r46 rd" class="r46 r">builder</span>, <b>bool</b> <span id="r47 rd" class="r47 r">foundCRLF</span>)
+        {
+            <span class="c">// Drop the final CRLF, if any</span>
+            <a href="@1@netstandard/A.html#e566178cce890c36" class="k">var</a> <span id="r48 rd" class="r48 r">length</span> = <span class="r47 r">foundCRLF</span> ? <span class="r46 r">builder</span>.<a href="@1@netstandard/A.html#af4720ccd5d86f14" class="i property">Length</a> - 2 : <span class="r46 r">builder</span>.<a href="@1@netstandard/A.html#af4720ccd5d86f14" class="i property">Length</a>;
+            <b>return</b> <a href="@1@netstandard/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@1@netstandard/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@1@netstandard/A.html#233647d04fbec0c0" class="i method">GetString</a>(<span class="r46 r">builder</span>.<a href="@1@netstandard/A.html#5df5fc757781f05e" class="i method">ToArray</a>(), 0, (<b>int</b>)<span class="r48 r">length</span>);
+        }
+ 
+        <b>private void</b> <a id="5f8bf79b035b95a0" href="../R/5f8bf79b035b95a0.html" target="n" data-glyph="76,1" class="i method">CheckDisposed</a>()
+        {
+            <b>if</b> (<a href="#e8ccf7c046857080" class="i field">_disposed</a>)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#53515c848f859933" class="t constructor">ObjectDisposedException</a>(<b>nameof</b>(<a href="#36d3399a2dd9b074" class="t t">BufferedReadStream</a>));
+            }
+        }
+ 
+        <b>private void</b> <a id="ccbbde9776cc1f78" href="../R/ccbbde9776cc1f78.html" target="n" data-glyph="76,1" class="i method">ValidateBuffer</a>(<b>byte</b>[] <span id="r49 rd" class="r49 r">buffer</span>, <b>int</b> <span id="r50 rd" class="r50 r">offset</span>, <b>int</b> <span id="r51 rd" class="r51 r">count</span>)
+        {
+            <span class="c">// Delegate most of our validation.</span>
+            <a href="@1@netstandard/A.html#d2e9d465e1639af7" class="k">var</a> <span id="r52 rd" class="r52 r">ignored</span> = <b>new</b> <a href="@1@netstandard/A.html#7439abe3fdaec1c7" class="t constructor">ArraySegment</a>&lt;<b>byte</b>&gt;(<span class="r49 r">buffer</span>, <span class="r50 r">offset</span>, <span class="r51 r">count</span>);
+            <b>if</b> (<span class="r51 r">count</span> == 0)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#27138d3b17d5ff6b" class="t constructor">ArgumentOutOfRangeException</a>(<b>nameof</b>(<span class="r51 r">count</span>), <span class="s">&quot;The value must be greater than zero.&quot;</span>);
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

@@ -1,0 +1,489 @@
+﻿<!DOCTYPE html>
+<html><head><title>SingleSegmentUploader.cs</title><link rel="stylesheet" href="../../../../styles.css"><script src="../../../../scripts.js"></script></head>
+<body class="cB" onload="i(480);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.Management.DataLake.Store/Customizations/DataTransfer/Upload/SingleSegmentUploader.cs" target="_top">Customizations\DataTransfer\Upload\SingleSegmentUploader.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.Management.DataLake.Store" target="_top">src\Microsoft.Azure.Management.DataLake.Store.csproj</a> (Microsoft.Azure.Management.DataLake.Store)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Management</span>.<span class="i n">DataLake</span>.<span class="i n">Store</span>.<span class="i n">Models</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">Rest</span>;
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Management</span>.<span class="i n">DataLake</span>.<span class="i n">Store</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Represents an uploader for a single segment of a larger file.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="62b7b26e3b4d119f" href="../../../R/62b7b26e3b4d119f.html" target="n" data-glyph="2,0" class="t t">SingleSegmentUploader</a>
+    {
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Private
+ 
+        <b>internal const int</b> <a id="6f8c82413ca1bb6e" href="../../../R/6f8c82413ca1bb6e.html" target="n" data-glyph="8,1" class="i field">BufferLength</a> = 4 * 1024 * 1024; <span class="c">// 4mb</span>
+ 
+        <span class="c">// 4MB is the maximum length of a single extent. So if one record is longer than this,</span>
+        <span class="c">// then we will fast fail, since that record will cross extent boundaries.</span>
+        <b>internal const int</b> <a id="8e8bbe2ca2eaa3d5" href="../../../R/8e8bbe2ca2eaa3d5.html" target="n" data-glyph="8,1" class="i field">MaxRecordLength</a> = 4 * 1024 * 1024; 
+        <b>private const int</b> <a id="ea2abed02830ff64" href="../../../R/ea2abed02830ff64.html" target="n" data-glyph="10,1" class="i field">MaximumBackoffWaitSeconds</a> = 32;
+        <b>internal const int</b> <a id="7aa3318da19b9344" href="../../../R/7aa3318da19b9344.html" target="n" data-glyph="8,1" class="i field">MaxBufferUploadAttemptCount</a> = 4;
+ 
+        <b>private readonly</b> <a href="../Common/IFrontEndAdapter.cs.html#d503d7a60084fa22" class="t t">IFrontEndAdapter</a> <a id="6559c3ec67c93d6e" href="../../../R/6559c3ec67c93d6e.html" target="n" data-glyph="46,1" class="i field">_frontEnd</a>;
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<a href="../Common/SegmentTransferProgress.cs.html#47a2d1611194ef16" class="t t">SegmentTransferProgress</a>&gt; <a id="835e380ef9e10f0a" href="../../../R/835e380ef9e10f0a.html" target="n" data-glyph="46,1" class="i field">_progressTracker</a>;
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <a id="8f4ba23e9bc62c7a" href="../../../R/8f4ba23e9bc62c7a.html" target="n" data-glyph="46,1" class="i field">_token</a>;
+        <b>private</b> <a href="../Common/TransferSegmentMetadata.cs.html#4a50ebae0a9351d2" class="t t">TransferSegmentMetadata</a> <a id="073ec94156317c2a" href="../../../R/073ec94156317c2a.html" target="n" data-glyph="46,1" class="i field">_segmentMetadata</a>;
+        <b>private</b> <a href="../Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <a id="bf178ddd9d5551b7" href="../../../R/bf178ddd9d5551b7.html" target="n" data-glyph="46,1" class="i field">_metadata</a>;
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Constructor
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new uploader for a single segment.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">segmentNumber</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The sequence number of the segment.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">uploadMetadata</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The metadata for the entire upload.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">frontEnd</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A pointer to the front end.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">progressTracker</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">(Optional) A tracker to report progress on this segment.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="ed11e1036e912d28" href="../../../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">SingleSegmentUploader</a>(<b>int</b> <span id="r0 rd" class="r0 r">segmentNumber</span>, <a href="../Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <span id="r1 rd" class="r1 r">uploadMetadata</span>, <a href="../Common/IFrontEndAdapter.cs.html#d503d7a60084fa22" class="t t">IFrontEndAdapter</a> <span id="r2 rd" class="r2 r">frontEnd</span>, <a href="@0@mscorlib/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<a href="../Common/SegmentTransferProgress.cs.html#47a2d1611194ef16" class="t t">SegmentTransferProgress</a>&gt; <span id="r3 rd" class="r3 r">progressTracker</span> = <b>null</b>) :
+            <a href="#655fdceeb69cb8ed" class="k">this</a>(<span class="r0 r">segmentNumber</span>, <span class="r1 r">uploadMetadata</span>, <span class="r2 r">frontEnd</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>, <span class="r3 r">progressTracker</span>)
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new uploader for a single segment.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">segmentNumber</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The sequence number of the segment.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">uploadMetadata</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The metadata for the entire upload.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">frontEnd</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A pointer to the front end.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">token</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The cancellation token to use</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">progressTracker</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">(Optional) A tracker to report progress on this segment.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="655fdceeb69cb8ed" href="../../../R/655fdceeb69cb8ed.html" target="n" data-glyph="72,1" class="t constructor">SingleSegmentUploader</a>(<b>int</b> <span id="r4 rd" class="r4 r">segmentNumber</span>, <a href="../Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <span id="r5 rd" class="r5 r">uploadMetadata</span>, <a href="../Common/IFrontEndAdapter.cs.html#d503d7a60084fa22" class="t t">IFrontEndAdapter</a> <span id="r6 rd" class="r6 r">frontEnd</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r7 rd" class="r7 r">token</span>, <a href="@0@mscorlib/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<a href="../Common/SegmentTransferProgress.cs.html#47a2d1611194ef16" class="t t">SegmentTransferProgress</a>&gt; <span id="r8 rd" class="r8 r">progressTracker</span> = <b>null</b>)
+        {
+            <a href="#bf178ddd9d5551b7" class="i field">_metadata</a> = <span class="r5 r">uploadMetadata</span>;
+            <a href="#073ec94156317c2a" class="i field">_segmentMetadata</a> = <span class="r5 r">uploadMetadata</span>.<a href="../Common/TransferMetadata.cs.html#982540b694e3af39" class="i property">Segments</a>[<span class="r4 r">segmentNumber</span>];
+ 
+            <a href="#6559c3ec67c93d6e" class="i field">_frontEnd</a> = <span class="r6 r">frontEnd</span>;
+            <a href="#835e380ef9e10f0a" class="i field">_progressTracker</a> = <span class="r8 r">progressTracker</span>;
+            <a href="#8f4ba23e9bc62c7a" class="i field">_token</a> = <span class="r7 r">token</span>;
+            <a href="#62b7b26e3b4d119f" class="k">this</a>.<a href="#1f3cfffd2c17dddb" class="i property">UseBackOffRetryStrategy</a> = <b>true</b>;
+        }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Properties
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets a value indicating whether to use a back-off (exponenential) in case of individual block failures.</span>
+        <span class="c">///</span><span class="c"> If set to &#39;false&#39; every retry is handled immediately; otherwise an amount of time is waited between retries, as a function of power of 2.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal bool</b> <a id="1f3cfffd2c17dddb" href="../../../R/1f3cfffd2c17dddb.html" target="n" data-glyph="104,1" class="i property">UseBackOffRetryStrategy</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Upload Operations
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Uploads the portion of the InputFilePath to the given TargetStreamPath, starting at the given StartOffset.</span>
+        <span class="c">///</span><span class="c"> The segment is further divided into equally-sized blocks which are uploaded in sequence.</span>
+        <span class="c">///</span><span class="c"> Each such block is attempted a certain number of times; if after that it still cannot be uploaded, the entire segment is aborted (in which case no cleanup is performed on the server).</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public void</b> <a id="ce622d6d79e9b5c3" href="../../../R/ce622d6d79e9b5c3.html" target="n" data-glyph="72,1" class="i method">Upload</a>()
+        {
+            <b>if</b> (!<a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#3360368484a9f131" class="i method">Exists</a>(<a href="#bf178ddd9d5551b7" class="i field">_metadata</a>.<a href="../Common/TransferMetadata.cs.html#190138f2a84df06b" class="i property">InputFilePath</a>))
+            {
+                <a href="@0@mscorlib/A.html#fd582974d1f75ac7" class="k">var</a> <span id="r9 rd" class="r9 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#e49034af96bf20b2" class="t constructor">FileNotFoundException</a>(<span class="s">&quot;Unable to locate input file&quot;</span>, <a href="#bf178ddd9d5551b7" class="i field">_metadata</a>.<a href="../Common/TransferMetadata.cs.html#190138f2a84df06b" class="i property">InputFilePath</a>);
+                <a href="../Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="../Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r9 r">ex</span>);
+ 
+                <b>throw</b> <span class="r9 r">ex</span>;
+            }
+ 
+            <b>if</b> (<a href="#8f4ba23e9bc62c7a" class="i field">_token</a>.<a href="@0@mscorlib/A.html#f32abbe8e2f1f6c1" class="i property">IsCancellationRequested</a>)
+            {
+                <a href="#8f4ba23e9bc62c7a" class="i field">_token</a>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+            }
+ 
+            <span class="c">//open up a reader from the input file, seek to the appropriate offset</span>
+            <b>using</b> (<a href="@0@mscorlib/A.html#f956b0c07e86df64" class="k">var</a> <span id="r10 rd" class="r10 r">inputStream</span> = <a href="#b231eb688ce59255" class="i method">OpenInputStream</a>())
+            {
+                <b>long</b> <span id="r11 rd" class="r11 r">endPosition</span> = <a href="#073ec94156317c2a" class="i field">_segmentMetadata</a>.<a href="../Common/TransferSegmentMetadata.cs.html#df08bf689d04aaad" class="i property">Offset</a> + <a href="#073ec94156317c2a" class="i field">_segmentMetadata</a>.<a href="../Common/TransferSegmentMetadata.cs.html#d35d9c4278e3e239" class="i property">Length</a>;
+                <b>if</b> (<span class="r11 r">endPosition</span> &gt; <span class="r10 r">inputStream</span>.<a href="@0@mscorlib/A.html#48b7e39cfd844dc5" class="i property">Length</a>)
+                {
+                    <a href="@0@mscorlib/A.html#beac22dfca574cd4" class="k">var</a> <span id="r12 rd" class="r12 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;StartOffset+UploadLength is beyond the end of the input file&quot;</span>);
+                    <a href="../Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="../Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r12 r">ex</span>);
+ 
+                    <b>throw</b> <span class="r12 r">ex</span>;
+                }
+ 
+                <a href="#9aa1275f8f1bde90" class="i method">UploadSegmentContents</a>(<span class="r10 r">inputStream</span>, <span class="r11 r">endPosition</span>);
+ 
+                <a href="#5a85a67c54701423" class="i method">VerifyUploadedStream</a>();
+                <span class="c">//any exceptions are (re)thrown to be handled by the caller; we do not handle retries or other recovery techniques here</span>
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Verifies the uploaded stream.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Common/TransferFailedException.cs.html#020a0db52cedc36b" class="t t">TransferFailedException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="5a85a67c54701423" href="../../../R/5a85a67c54701423.html" target="n" data-glyph="76,1" class="i method">VerifyUploadedStream</a>()
+        {
+            <span class="c">//verify that the remote stream has the length we expected.</span>
+            <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r13 rd" class="r13 r">retryCount</span> = 0;
+            <b>long</b> <span id="r14 rd" class="r14 r">remoteLength</span> = -1;
+            <b>while</b> (<span class="r13 r">retryCount</span> &lt; <a href="#7aa3318da19b9344" class="i field">MaxBufferUploadAttemptCount</a>)
+            {
+                <a href="#8f4ba23e9bc62c7a" class="i field">_token</a>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+                <span class="r13 r">retryCount</span>++;
+                <b>try</b>
+                {
+                    <span class="r14 r">remoteLength</span> = <a href="#6559c3ec67c93d6e" class="i field">_frontEnd</a>.<a href="../Common/IFrontEndAdapter.cs.html#84a396ab34116429" class="i method">GetStreamLength</a>(<a href="#073ec94156317c2a" class="i field">_segmentMetadata</a>.<a href="../Common/TransferSegmentMetadata.cs.html#3e61c0eaf4a2746f" class="i property">Path</a>, <a href="#bf178ddd9d5551b7" class="i field">_metadata</a>.<a href="../Common/TransferMetadata.cs.html#bff991c0ada527f8" class="i property">IsDownload</a>);
+                    <b>break</b>;
+                }
+                <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r15 rd" class="r15 r">e</span>)
+                {
+                    <a href="#8f4ba23e9bc62c7a" class="i field">_token</a>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+                    <b>if</b> (<span class="r13 r">retryCount</span> &gt;= <a href="#7aa3318da19b9344" class="i field">MaxBufferUploadAttemptCount</a>)
+                    {
+                        <a href="../Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="../Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r15 r">e</span>);
+ 
+                        <b>throw</b> <span class="r15 r">e</span>;
+                    }
+ 
+                    <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r16 rd" class="r16 r">waitTime</span>= <a href="#2b602a587e9dc188" class="i method">WaitForRetry</a>(<span class="r13 r">retryCount</span>, <a href="#62b7b26e3b4d119f" class="k">this</a>.<a href="#1f3cfffd2c17dddb" class="i property">UseBackOffRetryStrategy</a>, <a href="#8f4ba23e9bc62c7a" class="i field">_token</a>);
+                    <a href="../Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="../Common/TracingHelper.cs.html#d6f22d2fc99e22e6" class="i method">LogInfo</a>(<span class="s">&quot;VerifyUploadedStream: GetStreamLength at path:{0} failed on try: {1} with exception: {2}. Wait time in ms before retry: {3}&quot;</span>,
+                        <a href="#073ec94156317c2a" class="i field">_segmentMetadata</a>.<a href="../Common/TransferSegmentMetadata.cs.html#3e61c0eaf4a2746f" class="i property">Path</a>,
+                        <span class="r13 r">retryCount</span>,
+                        <span class="r15 r">e</span>,
+                        <span class="r16 r">waitTime</span>);
+                }
+            }
+ 
+            <b>if</b> (<a href="#073ec94156317c2a" class="i field">_segmentMetadata</a>.<a href="../Common/TransferSegmentMetadata.cs.html#d35d9c4278e3e239" class="i property">Length</a> != <span class="r14 r">remoteLength</span>)
+            {
+                <a href="../Common/TransferFailedException.cs.html#020a0db52cedc36b" class="k">var</a> <span id="r17 rd" class="r17 r">ex</span> = <b>new</b> <a href="../Common/TransferFailedException.cs.html#0257d7104f85f50a" class="t constructor">TransferFailedException</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#7432dab173fae5fc" class="i method">Format</a>(<span class="s">&quot;Post-upload stream verification failed: target stream has a length of {0}, expected {1}&quot;</span>, <span class="r14 r">remoteLength</span>, <a href="#073ec94156317c2a" class="i field">_segmentMetadata</a>.<a href="../Common/TransferSegmentMetadata.cs.html#d35d9c4278e3e239" class="i property">Length</a>));
+                <a href="../Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="../Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r17 r">ex</span>);
+ 
+                <b>throw</b> <span class="r17 r">ex</span>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Uploads the segment contents.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r18 r">inputStream</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The input stream.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r19 r">endPosition</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The end position.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="9aa1275f8f1bde90" href="../../../R/9aa1275f8f1bde90.html" target="n" data-glyph="76,1" class="i method">UploadSegmentContents</a>(<a href="@0@mscorlib/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r18 rd" class="r18 r">inputStream</span>, <b>long</b> <span id="r19 rd" class="r19 r">endPosition</span>)
+        {
+            <b>long</b> <span id="r20 rd" class="r20 r">bytesCopiedSoFar</span> = 0; <span class="c">// we start off with a fresh stream</span>
+            
+            <b>byte</b>[] <span id="r21 rd" class="r21 r">buffer</span> = <b>new</b> <b>byte</b>[<a href="#6f8c82413ca1bb6e" class="i field">BufferLength</a>];
+            <b>int</b> <span id="r22 rd" class="r22 r">residualBufferLength</span> = 0; <span class="c">//the number of bytes that remained in the buffer from the last upload (bytes which were not uploaded)</span>
+ 
+            <b>while</b> (<span class="r18 r">inputStream</span>.<a href="@0@mscorlib/A.html#35112b2a53fb536a" class="i property">Position</a> &lt; <span class="r19 r">endPosition</span>)
+            {
+                <a href="#8f4ba23e9bc62c7a" class="i field">_token</a>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+ 
+                <span class="c">//read a block of data, and keep track of how many bytes are actually read</span>
+                <b>int</b> <span id="r23 rd" class="r23 r">bytesRead</span> = <a href="#a58302bdcdb9adf1" class="i method">ReadIntoBuffer</a>(<span class="r18 r">inputStream</span>, <span class="r21 r">buffer</span>, <span class="r22 r">residualBufferLength</span>, <span class="r19 r">endPosition</span>);
+                <b>int</b> <span id="r24 rd" class="r24 r">bufferDataLength</span> = <span class="r22 r">residualBufferLength</span> + <span class="r23 r">bytesRead</span>;
+ 
+                <span class="c">//determine the cutoff offset for upload - everything before will be uploaded, everything after is residual; (the position of the last record in this buffer)</span>
+                <b>int</b> <span id="r25 rd" class="r25 r">uploadCutoff</span> = <span class="r24 r">bufferDataLength</span>;
+                <b>if</b> (!<a href="#bf178ddd9d5551b7" class="i field">_metadata</a>.<a href="../Common/TransferMetadata.cs.html#ffdbb867506e256b" class="i property">IsBinary</a>)
+                {
+                    <span class="r25 r">uploadCutoff</span> = <a href="#40ef4e9e1d6c6c83" class="i method">DetermineUploadCutoffForTextFile</a>(<span class="r21 r">buffer</span>, <span class="r24 r">bufferDataLength</span>, <span class="r18 r">inputStream</span>);
+                }
+ 
+                <span class="r20 r">bytesCopiedSoFar</span> = <a href="#210629720f5fc5c6" class="i method">UploadBuffer</a>(<span class="r21 r">buffer</span>, <span class="r25 r">uploadCutoff</span>, <span class="r20 r">bytesCopiedSoFar</span>);
+ 
+                <span class="r22 r">residualBufferLength</span> = <span class="r24 r">bufferDataLength</span> - <span class="r25 r">uploadCutoff</span>;
+                <b>if</b> (<span class="r22 r">residualBufferLength</span> &gt; 0)
+                {
+                    <span class="c">//move the remainder of the buffer to the front</span>
+                    <a href="@0@mscorlib/A.html#156e066ecc4ccedf" class="t t">Array</a>.<a href="@0@mscorlib/A.html#7441c6721593042c" class="i method">Copy</a>(<span class="r21 r">buffer</span>, <span class="r25 r">uploadCutoff</span>, <span class="r21 r">buffer</span>, 0, <span class="r22 r">residualBufferLength</span>);
+                }
+            }
+            
+            <span class="c">//make sure we don&#39;t leave anything behind</span>
+            <b>if</b> (<span class="r22 r">residualBufferLength</span> &gt; 0)
+            {
+                <a href="#210629720f5fc5c6" class="i method">UploadBuffer</a>(<span class="r21 r">buffer</span>, <span class="r22 r">residualBufferLength</span>, <span class="r20 r">bytesCopiedSoFar</span>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Determines the upload cutoff for text file.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r26 r">buffer</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The buffer.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r27 r">bufferDataLength</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Length of the buffer data.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r28 r">inputStream</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The input stream.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Common/TransferFailedException.cs.html#020a0db52cedc36b" class="t t">TransferFailedException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>private int</b> <a id="40ef4e9e1d6c6c83" href="../../../R/40ef4e9e1d6c6c83.html" target="n" data-glyph="76,1" class="i method">DetermineUploadCutoffForTextFile</a>(<b>byte</b>[] <span id="r26 rd" class="r26 r">buffer</span>, <b>int</b> <span id="r27 rd" class="r27 r">bufferDataLength</span>, <a href="@0@mscorlib/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r28 rd" class="r28 r">inputStream</span>)
+        {
+            <a href="@0@mscorlib/A.html#3b6090c501893c25" class="k">var</a> <span id="r29 rd" class="r29 r">encoding</span> = <a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#d8ca9f7c66a5e85e" class="i method">GetEncoding</a>(<a href="#bf178ddd9d5551b7" class="i field">_metadata</a>.<a href="../Common/TransferMetadata.cs.html#7c9968d38fc350f1" class="i property">EncodingCodePage</a>);
+            <span class="c">//NOTE: we return an offset, but everywhere else below we treat it as a byte count; in order for that to work, we need to add 1 to the result of FindNewLine.</span>
+            <b>int</b> <span id="r30 rd" class="r30 r">uploadCutoff</span> = <a href="../Common/StringExtensions.cs.html#2e10c3c8474c5c94" class="t t">StringExtensions</a>.<a href="../Common/StringExtensions.cs.html#e58ca4853b85aa06" class="i method">FindNewline</a>(<span class="r26 r">buffer</span>, <span class="r27 r">bufferDataLength</span> - 1, <span class="r27 r">bufferDataLength</span>, <b>true</b>, <span class="r29 r">encoding</span>, <a href="#bf178ddd9d5551b7" class="i field">_metadata</a>.<a href="../Common/TransferMetadata.cs.html#8e7f770985aedd51" class="i property">Delimiter</a>) + 1;
+            <b>if</b> (<span class="r30 r">uploadCutoff</span> &lt;= 0 &amp;&amp; (<a href="#bf178ddd9d5551b7" class="i field">_metadata</a>.<a href="../Common/TransferMetadata.cs.html#9131b8fdd074a557" class="i property">SegmentCount</a> &gt; 1 || <span class="r27 r">bufferDataLength</span> &gt;= <a href="#8e8bbe2ca2eaa3d5" class="i field">MaxRecordLength</a>))
+            {
+                <a href="../Common/TransferFailedException.cs.html#020a0db52cedc36b" class="k">var</a> <span id="r31 rd" class="r31 r">ex</span> = <b>new</b> <a href="../Common/TransferFailedException.cs.html#0257d7104f85f50a" class="t constructor">TransferFailedException</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;Found a record that exceeds the maximum allowed record length around offset {0}&quot;</span>, <span class="r28 r">inputStream</span>.<a href="@0@mscorlib/A.html#35112b2a53fb536a" class="i property">Position</a>));
+                <a href="../Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="../Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r31 r">ex</span>);
+ 
+                <b>throw</b> <span class="r31 r">ex</span>;
+            }
+ 
+            <span class="c">//a corner case here is when the newline is 2 chars long, and the first of those lands on the last byte of the buffer. If so, let&#39;s try to find another </span>
+            <span class="c">//newline inside the buffer, because we might be splitting this wrongly.</span>
+            <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<a href="#bf178ddd9d5551b7" class="i field">_metadata</a>.<a href="../Common/TransferMetadata.cs.html#8e7f770985aedd51" class="i property">Delimiter</a>) &amp;&amp; <span class="r30 r">uploadCutoff</span> == <span class="r26 r">buffer</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a> &amp;&amp; <span class="r26 r">buffer</span>[<span class="r26 r">buffer</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a> - 1] == (<b>byte</b>)<span class="s">&#39;\r&#39;</span>)
+            {
+                <b>int</b> <span id="r32 rd" class="r32 r">newCutoff</span> = <a href="../Common/StringExtensions.cs.html#2e10c3c8474c5c94" class="t t">StringExtensions</a>.<a href="../Common/StringExtensions.cs.html#e58ca4853b85aa06" class="i method">FindNewline</a>(<span class="r26 r">buffer</span>, <span class="r27 r">bufferDataLength</span> - 2, <span class="r27 r">bufferDataLength</span> - 1, <b>true</b>, <span class="r29 r">encoding</span>) + 1;
+                <b>if</b> (<span class="r32 r">newCutoff</span> &gt; 0)
+                {
+                    <span class="r30 r">uploadCutoff</span> = <span class="r32 r">newCutoff</span>;
+                }
+            }
+ 
+            <b>return</b> <span class="r30 r">uploadCutoff</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Uploads the buffer.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r33 r">buffer</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The buffer.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r34 r">bytesToCopy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The bytes to copy.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r35 r">targetStreamOffset</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The target stream offset.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private long</b> <a id="210629720f5fc5c6" href="../../../R/210629720f5fc5c6.html" target="n" data-glyph="76,1" class="i method">UploadBuffer</a>(<b>byte</b>[] <span id="r33 rd" class="r33 r">buffer</span>, <b>int</b> <span id="r34 rd" class="r34 r">bytesToCopy</span>, <b>long</b> <span id="r35 rd" class="r35 r">targetStreamOffset</span>)
+        {
+            <span class="c">//append it to the remote stream</span>
+            <b>int</b> <span id="r36 rd" class="r36 r">attemptCount</span> = 0;
+            <b>bool</b> <span id="r37 rd" class="r37 r">uploadCompleted</span> = <b>false</b>;
+            <b>while</b> (!<span class="r37 r">uploadCompleted</span> &amp;&amp; <span class="r36 r">attemptCount</span> &lt; <a href="#7aa3318da19b9344" class="i field">MaxBufferUploadAttemptCount</a>)
+            {
+                <a href="#8f4ba23e9bc62c7a" class="i field">_token</a>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+                <span class="r36 r">attemptCount</span>++;
+                <b>try</b>
+                {
+                    <b>if</b> (<span class="r35 r">targetStreamOffset</span> == 0)
+                    {
+                        <a href="#6559c3ec67c93d6e" class="i field">_frontEnd</a>.<a href="../Common/IFrontEndAdapter.cs.html#2141f29b06afee70" class="i method">CreateStream</a>(<a href="#073ec94156317c2a" class="i field">_segmentMetadata</a>.<a href="../Common/TransferSegmentMetadata.cs.html#3e61c0eaf4a2746f" class="i property">Path</a>, <b>true</b>, <span class="r33 r">buffer</span>, <span class="r34 r">bytesToCopy</span>);
+                    }
+                    <b>else</b>
+                    {
+                        <a href="#6559c3ec67c93d6e" class="i field">_frontEnd</a>.<a href="../Common/IFrontEndAdapter.cs.html#0586131b3b9b5d13" class="i method">AppendToStream</a>(<a href="#073ec94156317c2a" class="i field">_segmentMetadata</a>.<a href="../Common/TransferSegmentMetadata.cs.html#3e61c0eaf4a2746f" class="i property">Path</a>, <span class="r33 r">buffer</span>, <span class="r35 r">targetStreamOffset</span>, <span class="r34 r">bytesToCopy</span>);
+                        
+                    }
+                    
+                    <span class="r37 r">uploadCompleted</span> = <b>true</b>;
+                    <span class="r35 r">targetStreamOffset</span> += <span class="r34 r">bytesToCopy</span>;
+                    <a href="#6b2d86b38d020737" class="i method">ReportProgress</a>(<span class="r35 r">targetStreamOffset</span>, <b>false</b>);
+                }
+                <b>catch</b> (<a href="@0@mscorlib/A.html#be77e0a7fbc110e6" class="t t">AggregateException</a> <span id="r38 rd" class="r38 r">e</span>)
+                {
+                    <b>if</b> (<span class="r38 r">e</span>.<a href="@0@mscorlib/A.html#e9d864767768da2b" class="i property">InnerExceptions</a>.<a href="@0@mscorlib/A.html#7e2071514968aca1" class="i property">Count</a> == 1 &amp;&amp; <span class="r38 r">e</span>.<a href="@0@mscorlib/A.html#89c20b39fb04108b" class="i property">InnerException</a> <b>is</b> <span class="i">AdlsErrorException</span>)
+                    {
+                        <b>if</b>(((<span class="i">AdlsErrorException</span>)<span class="r38 r">e</span>.<a href="@0@mscorlib/A.html#89c20b39fb04108b" class="i property">InnerException</a>).<span class="i">Body</span>.<span class="i">RemoteException</span> <b>is</b> <span class="i">AdlsBadOffsetException</span>)
+                        {
+                            <span class="c">// this means we tried to re-upload at the same location and the upload actually succeeded, which means we should move on.</span>
+                            <span class="r37 r">uploadCompleted</span> = <b>true</b>;
+                            <span class="r35 r">targetStreamOffset</span> += <span class="r34 r">bytesToCopy</span>;
+                            <a href="#6b2d86b38d020737" class="i method">ReportProgress</a>(<span class="r35 r">targetStreamOffset</span>, <b>false</b>);
+                        }
+                        <b>else</b>
+                        {
+                            <span class="c">//if we tried more than the number of times we were allowed to, give up and throw the exception</span>
+                            <b>if</b> (<span class="r36 r">attemptCount</span> &gt;= <a href="#7aa3318da19b9344" class="i field">MaxBufferUploadAttemptCount</a>)
+                            {
+                                <a href="#6b2d86b38d020737" class="i method">ReportProgress</a>(<span class="r35 r">targetStreamOffset</span>, <b>true</b>);
+                                <a href="../Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="../Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r38 r">e</span>);
+ 
+                                <b>throw</b> <span class="r38 r">e</span>;
+                            }
+                            <b>else</b>
+                            {
+                                
+                                <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r39 rd" class="r39 r">waitTime</span>= <a href="#2b602a587e9dc188" class="i method">WaitForRetry</a>(<span class="r36 r">attemptCount</span>, <a href="#62b7b26e3b4d119f" class="k">this</a>.<a href="#1f3cfffd2c17dddb" class="i property">UseBackOffRetryStrategy</a>, <a href="#8f4ba23e9bc62c7a" class="i field">_token</a>);
+                                <a href="../Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="../Common/TracingHelper.cs.html#d6f22d2fc99e22e6" class="i method">LogInfo</a>(<span class="s">&quot;{0} at path:{1} failed on try: {2} with exception: {3}. Wait time in ms before retry: {4}&quot;</span>,
+                                    <span class="r35 r">targetStreamOffset</span> == 0 ? <span class="s">&quot;CREATE&quot;</span> : <span class="s">&quot;APPEND&quot;</span>,
+                                    <a href="#073ec94156317c2a" class="i field">_segmentMetadata</a>.<a href="../Common/TransferSegmentMetadata.cs.html#3e61c0eaf4a2746f" class="i property">Path</a>,
+                                    <span class="r36 r">attemptCount</span>,
+                                    <span class="r38 r">e</span>,
+                                    <span class="r39 r">waitTime</span>);
+                            }
+                        }
+                    }
+                    <b>else</b>
+                    {
+                        <span class="c">//if we tried more than the number of times we were allowed to, give up and throw the exception</span>
+                        <b>if</b> (<span class="r36 r">attemptCount</span> &gt;= <a href="#7aa3318da19b9344" class="i field">MaxBufferUploadAttemptCount</a>)
+                        {
+                            <a href="#6b2d86b38d020737" class="i method">ReportProgress</a>(<span class="r35 r">targetStreamOffset</span>, <b>true</b>);
+                            <a href="../Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="../Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r38 r">e</span>);
+ 
+                            <b>throw</b> <span class="r38 r">e</span>;
+                        }
+                        <b>else</b>
+                        {
+                            <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r40 rd" class="r40 r">waitTime</span> = <a href="#2b602a587e9dc188" class="i method">WaitForRetry</a>(<span class="r36 r">attemptCount</span>, <a href="#62b7b26e3b4d119f" class="k">this</a>.<a href="#1f3cfffd2c17dddb" class="i property">UseBackOffRetryStrategy</a>, <a href="#8f4ba23e9bc62c7a" class="i field">_token</a>);
+                            <a href="../Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="../Common/TracingHelper.cs.html#d6f22d2fc99e22e6" class="i method">LogInfo</a>(<span class="s">&quot;{0} at path:{1} failed on try: {2} with exception: {3}. Wait time in ms before retry: {4}&quot;</span>,
+                                <span class="r35 r">targetStreamOffset</span> == 0 ? <span class="s">&quot;CREATE&quot;</span> : <span class="s">&quot;APPEND&quot;</span>,
+                                <a href="#073ec94156317c2a" class="i field">_segmentMetadata</a>.<a href="../Common/TransferSegmentMetadata.cs.html#3e61c0eaf4a2746f" class="i property">Path</a>,
+                                <span class="r36 r">attemptCount</span>,
+                                <span class="r38 r">e</span>,
+                                <span class="r40 r">waitTime</span>);
+                        }
+                    }
+                }
+                <b>catch</b> (<span class="i">AdlsErrorException</span> <span id="r41 rd" class="r41 r">e</span>)
+                {
+                    <b>if</b> (<span class="r41 r">e</span>.<span class="i">Body</span>.<span class="i">RemoteException</span> <b>is</b> <span class="i">AdlsBadOffsetException</span>)
+                    {
+                        <span class="c">// this means we tried to re-upload at the same location and the upload actually succeeded, which means we should move on.</span>
+                        <span class="r37 r">uploadCompleted</span> = <b>true</b>;
+                        <span class="r35 r">targetStreamOffset</span> += <span class="r34 r">bytesToCopy</span>;
+                        <a href="#6b2d86b38d020737" class="i method">ReportProgress</a>(<span class="r35 r">targetStreamOffset</span>, <b>false</b>);
+                    }
+                    <b>else</b>
+                    {
+                        <span class="c">//if we tried more than the number of times we were allowed to, give up and throw the exception</span>
+                        <b>if</b> (<span class="r36 r">attemptCount</span> &gt;= <a href="#7aa3318da19b9344" class="i field">MaxBufferUploadAttemptCount</a>)
+                        {
+                            <a href="#6b2d86b38d020737" class="i method">ReportProgress</a>(<span class="r35 r">targetStreamOffset</span>, <b>true</b>);
+                            <a href="../Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<span class="i">LogError</span>(<span class="r41 r">e</span>);
+ 
+                            <b>throw</b> <span class="r41 r">e</span>;
+                        }
+                        <b>else</b>
+                        {
+                            <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r42 rd" class="r42 r">waitTime</span> = <a href="#2b602a587e9dc188" class="i method">WaitForRetry</a>(<span class="r36 r">attemptCount</span>, <a href="#62b7b26e3b4d119f" class="k">this</a>.<a href="#1f3cfffd2c17dddb" class="i property">UseBackOffRetryStrategy</a>, <a href="#8f4ba23e9bc62c7a" class="i field">_token</a>);
+                            <a href="../Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<span class="i">LogInfo</span>(<span class="s">&quot;{0} at path:{1} failed on try: {2} with exception: {3}. Wait time in ms before retry: {4}&quot;</span>,
+                                <span class="r35 r">targetStreamOffset</span> == 0 ? <span class="s">&quot;CREATE&quot;</span> : <span class="s">&quot;APPEND&quot;</span>,
+                                <a href="#073ec94156317c2a" class="i field">_segmentMetadata</a>.<a href="../Common/TransferSegmentMetadata.cs.html#3e61c0eaf4a2746f" class="i property">Path</a>,
+                                <span class="r36 r">attemptCount</span>,
+                                <span class="r41 r">e</span>,
+                                <span class="r42 r">waitTime</span>);
+                        }
+                    }
+                }
+                <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r43 rd" class="r43 r">ex</span>)
+                {
+                    <span class="c">//if we tried more than the number of times we were allowed to, give up and throw the exception</span>
+                    <b>if</b> (<span class="r36 r">attemptCount</span> &gt;= <a href="#7aa3318da19b9344" class="i field">MaxBufferUploadAttemptCount</a>)
+                    {
+                        <a href="#6b2d86b38d020737" class="i method">ReportProgress</a>(<span class="r35 r">targetStreamOffset</span>, <b>true</b>);
+                        <a href="../Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="../Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r43 r">ex</span>);
+ 
+                        <b>throw</b> <span class="r43 r">ex</span>;
+                    }
+                    <b>else</b>
+                    {
+                        <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r44 rd" class="r44 r">waitTime</span> = <a href="#2b602a587e9dc188" class="i method">WaitForRetry</a>(<span class="r36 r">attemptCount</span>, <a href="#62b7b26e3b4d119f" class="k">this</a>.<a href="#1f3cfffd2c17dddb" class="i property">UseBackOffRetryStrategy</a>, <a href="#8f4ba23e9bc62c7a" class="i field">_token</a>);
+                        <a href="../Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="../Common/TracingHelper.cs.html#d6f22d2fc99e22e6" class="i method">LogInfo</a>(<span class="s">&quot;{0} at path:{1} failed on try: {2} with exception: {3}. Wait time in ms before retry: {4}&quot;</span>,
+                            <span class="r35 r">targetStreamOffset</span> == 0 ? <span class="s">&quot;CREATE&quot;</span> : <span class="s">&quot;APPEND&quot;</span>,
+                            <a href="#073ec94156317c2a" class="i field">_segmentMetadata</a>.<a href="../Common/TransferSegmentMetadata.cs.html#3e61c0eaf4a2746f" class="i property">Path</a>,
+                            <span class="r36 r">attemptCount</span>,
+                            <span class="r43 r">ex</span>,
+                            <span class="r44 r">waitTime</span>);
+                    }
+                }
+            }
+ 
+            <b>return</b> <span class="r35 r">targetStreamOffset</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Reads the into buffer.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r45 r">inputStream</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The input stream.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r46 r">buffer</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The buffer.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r47 r">bufferOffset</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The buffer offset.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r48 r">streamEndPosition</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The stream end position.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private int</b> <a id="a58302bdcdb9adf1" href="../../../R/a58302bdcdb9adf1.html" target="n" data-glyph="76,1" class="i method">ReadIntoBuffer</a>(<a href="@0@mscorlib/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r45 rd" class="r45 r">inputStream</span>, <b>byte</b>[] <span id="r46 rd" class="r46 r">buffer</span>, <b>int</b> <span id="r47 rd" class="r47 r">bufferOffset</span>, <b>long</b> <span id="r48 rd" class="r48 r">streamEndPosition</span>)
+        {
+            <span class="c">//read a block of data</span>
+            <b>int</b> <span id="r49 rd" class="r49 r">bytesToRead</span> = <span class="r46 r">buffer</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a> - <span class="r47 r">bufferOffset</span>;
+            <b>if</b> (<span class="r49 r">bytesToRead</span> &gt; <span class="r48 r">streamEndPosition</span> - <span class="r45 r">inputStream</span>.<a href="@0@mscorlib/A.html#35112b2a53fb536a" class="i property">Position</a>)
+            {
+                <span class="c">//last read may be smaller than previous reads; readjust # of bytes to read accordingly</span>
+                <span class="r49 r">bytesToRead</span> = (<b>int</b>)(<span class="r48 r">streamEndPosition</span> - <span class="r45 r">inputStream</span>.<a href="@0@mscorlib/A.html#35112b2a53fb536a" class="i property">Position</a>);
+            }
+ 
+            <b>int</b> <span id="r50 rd" class="r50 r">remainingBytes</span> = <span class="r49 r">bytesToRead</span>;
+ 
+            <b>while</b> (<span class="r50 r">remainingBytes</span> &gt; 0)
+            {
+                <span class="c">//Stream.Read may not read all the bytes we requested, so we need to retry until we filled up the entire buffer</span>
+                <a href="#8f4ba23e9bc62c7a" class="i field">_token</a>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+                <b>int</b> <span id="r51 rd" class="r51 r">bytesRead</span> = <span class="r45 r">inputStream</span>.<a href="@0@mscorlib/A.html#6fb9c001d7524ba2" class="i method">Read</a>(<span class="r46 r">buffer</span>, <span class="r47 r">bufferOffset</span>, <span class="r50 r">remainingBytes</span>);
+                <span class="r47 r">bufferOffset</span> += <span class="r51 r">bytesRead</span>;
+                <span class="r50 r">remainingBytes</span> = <span class="r49 r">bytesToRead</span> - <span class="r47 r">bufferOffset</span>;
+            }
+ 
+            <b>return</b> <span class="r49 r">bytesToRead</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Waits for retry.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r52 r">attemptCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The attempt count.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>internal static int</b> <a id="2b602a587e9dc188" href="../../../R/2b602a587e9dc188.html" target="n" data-glyph="74,1" class="i method">WaitForRetry</a>(<b>int</b> <span id="r52 rd" class="r52 r">attemptCount</span>, <b>bool</b> <span id="r53 rd" class="r53 r">useBackOffRetryStrategy</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r54 rd" class="r54 r">token</span>)
+        {
+            <span class="r54 r">token</span>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+            <b>if</b> (!<span class="r53 r">useBackOffRetryStrategy</span>)
+            {
+                <span class="c">//no need to wait</span>
+                <b>return</b> -1;
+            }
+ 
+            <b>int</b> <span id="r55 rd" class="r55 r">intervalMs</span> = <a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#f441d55c88d635ad" class="i method">Min</a>(<a href="#ea2abed02830ff64" class="i field">MaximumBackoffWaitSeconds</a>, (<b>int</b>)<a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#95354113fadc3083" class="i method">Pow</a>(2, <span class="r52 r">attemptCount</span>)) * 1000;
+ 
+            <span class="c">// add up to 10% to the sleep to allow for randomness in the retry so that thread contention is unlikely</span>
+            <a href="@0@mscorlib/A.html#bb77e610694e64ca" class="k">var</a> <span id="r56 rd" class="r56 r">randomMS</span> = <b>new</b> <a href="@0@mscorlib/A.html#5d22f8880fc9f8d9" class="t constructor">Random</a>();
+            <span class="r55 r">intervalMs</span> += <span class="r56 r">randomMS</span>.<a href="@0@mscorlib/A.html#8aeb183c03bdcdcf" class="i method">Next</a>((<b>int</b>)<a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#1841a5ce24ed9fb3" class="i method">Ceiling</a>(<span class="r55 r">intervalMs</span> * .1));
+            <a href="@0@mscorlib/A.html#3980e012bae82e96" class="t t">Thread</a>.<a href="@0@mscorlib/A.html#82aedb56cecde82c" class="i method">Sleep</a>(<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#668d91d771bce54b" class="i method">FromMilliseconds</a>(<span class="r55 r">intervalMs</span>));
+            <b>return</b> <span class="r55 r">intervalMs</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Opens the input stream.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">System</span>.<a href="@0@mscorlib/A.html#109b3ef6299ef9df" class="t t">ArgumentException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">StartOffset is beyond the end of the input file;StartOffset</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>private</b> <a href="@0@mscorlib/A.html#f956b0c07e86df64" class="t t">Stream</a> <a id="b231eb688ce59255" href="../../../R/b231eb688ce59255.html" target="n" data-glyph="76,1" class="i method">OpenInputStream</a>()
+        {
+            <b>return</b> <a href="#6559c3ec67c93d6e" class="i field">_frontEnd</a>.<a href="../Common/IFrontEndAdapter.cs.html#7ea09b5a0ed2c2e5" class="i method">ReadStream</a>(<a href="#bf178ddd9d5551b7" class="i field">_metadata</a>.<a href="../Common/TransferMetadata.cs.html#190138f2a84df06b" class="i property">InputFilePath</a>, <a href="#073ec94156317c2a" class="i field">_segmentMetadata</a>.<a href="../Common/TransferSegmentMetadata.cs.html#df08bf689d04aaad" class="i property">Offset</a>, <a href="#073ec94156317c2a" class="i field">_segmentMetadata</a>.<a href="../Common/TransferSegmentMetadata.cs.html#d35d9c4278e3e239" class="i property">Length</a>, <a href="#bf178ddd9d5551b7" class="i field">_metadata</a>.<a href="../Common/TransferMetadata.cs.html#bff991c0ada527f8" class="i property">IsDownload</a>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Reports the progress.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r57 r">uploadedByteCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The uploaded byte count.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r58 r">isFailed</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">if set to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> [is failed].</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="6b2d86b38d020737" href="../../../R/6b2d86b38d020737.html" target="n" data-glyph="76,1" class="i method">ReportProgress</a>(<b>long</b> <span id="r57 rd" class="r57 r">uploadedByteCount</span>, <b>bool</b> <span id="r58 rd" class="r58 r">isFailed</span>)
+        {
+            <b>if</b> (<a href="#835e380ef9e10f0a" class="i field">_progressTracker</a> == <b>null</b>)
+            {
+                <b>return</b>;
+            }
+ 
+            <b>try</b>
+            {
+                <a href="#835e380ef9e10f0a" class="i field">_progressTracker</a>.<a href="@0@mscorlib/A.html#cd87d052fb216d27" class="i method">Report</a>(<b>new</b> <a href="../Common/SegmentTransferProgress.cs.html#2563cc8b0b736569" class="t constructor">SegmentTransferProgress</a>(<a href="#073ec94156317c2a" class="i field">_segmentMetadata</a>.<a href="../Common/TransferSegmentMetadata.cs.html#b23a7e7d251e39e8" class="i property">SegmentNumber</a>, <a href="#073ec94156317c2a" class="i field">_segmentMetadata</a>.<a href="../Common/TransferSegmentMetadata.cs.html#d35d9c4278e3e239" class="i property">Length</a>, <span class="r57 r">uploadedByteCount</span>, <span class="r58 r">isFailed</span>));
+            }
+            <b>catch</b> { }<span class="c">// don&#39;t break the upload if the progress tracker threw one our way</span>
+        }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+    }
+}
+</pre></td></tr></table></div></body></html>

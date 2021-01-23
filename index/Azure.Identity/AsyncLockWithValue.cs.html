@@ -1,0 +1,190 @@
+﻿<!DOCTYPE html>
+<html><head><title>AsyncLockWithValue.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(181);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Identity/AsyncLockWithValue.cs" target="_top">AsyncLockWithValue.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Identity" target="_top">..\..\identity\Azure.Identity\src\Azure.Identity.csproj</a> (Azure.Identity)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Identity</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Primitive that combines async lock and value cache</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r t">T</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+    <b>internal sealed class</b> <a id="5e92cb3f7f76aa38" href="R/5e92cb3f7f76aa38.html" target="n" data-glyph="2,0" class="t t"><span id="6e17710397c117ad">AsyncLockWithValue</span></a>&lt;<span id="r0 rd t" class="r0 r t">T</span>&gt;
+    {
+        <b>private readonly object</b> <a id="b59635d314edba82" href="R/b59635d314edba82.html" target="n" data-glyph="46,1" class="i field">_syncObj</a> = <b>new</b> <b>object</b>();
+        <b>private</b> <a href="@1@netstandard/A.html#aa3beab99b2e0db2" class="t t">Queue</a>&lt;<a href="@1@netstandard/A.html#94bf04047d6bd325" class="t t">TaskCompletionSource</a>&lt;<a href="#286c27a3197b72f3" class="t t">Lock</a>&gt;&gt; <a id="7cacecbd418deab1" href="R/7cacecbd418deab1.html" target="n" data-glyph="46,1" class="i field">_waiters</a>;
+        <b>private bool</b> <a id="9c856433e02d998c" href="R/9c856433e02d998c.html" target="n" data-glyph="46,1" class="i field">_isLocked</a>;
+        <b>private bool</b> <a id="cc0836d9bfec40d9" href="R/cc0836d9bfec40d9.html" target="n" data-glyph="46,1" class="i field">_hasValue</a>;
+        <b>private</b> <span class="r0 r t">T</span> <a id="b78a4a92ba560b13" href="R/b78a4a92ba560b13.html" target="n" data-glyph="46,1" class="i field">_value</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Method that either returns cached value or acquire a lock.</span>
+        <span class="c">///</span><span class="c"> If one caller has acquired a lock, other callers will be waiting for the lock to be released.</span>
+        <span class="c">///</span><span class="c"> If value is set, lock is released and all waiters get that value.</span>
+        <span class="c">///</span><span class="c"> If value isn&#39;t set, the next waiter in the queue will get the lock.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">async</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public async</b> <span class="t t">ValueTask</span>&lt;<a href="#286c27a3197b72f3" class="t t">Lock</a>&gt; <a id="5ef9be9ea30144dd" href="R/5ef9be9ea30144dd.html" target="n" data-glyph="72,1" class="i method">GetLockOrValueAsync</a>(<b>bool</b> <span id="r1 rd" class="r1 r">async</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r2 rd" class="r2 r">cancellationToken</span> = <b>default</b>)
+        {
+            <a href="@1@netstandard/A.html#94bf04047d6bd325" class="t t">TaskCompletionSource</a>&lt;<a href="#286c27a3197b72f3" class="t t">Lock</a>&gt; <span id="r3 rd" class="r3 r">valueTcs</span>;
+            <b>lock</b> (<a href="#b59635d314edba82" class="i field">_syncObj</a>)
+            {
+                <span class="c">// If there is a value, just return it</span>
+                <b>if</b> (<a href="#cc0836d9bfec40d9" class="i field">_hasValue</a>)
+                {
+                    <b>return</b> <b>new</b> <a href="#5712b3aabfcfaf79" class="t constructor">Lock</a>(<a href="#b78a4a92ba560b13" class="i field">_value</a>);
+                }
+ 
+                <span class="c">// If lock isn&#39;t acquire yet, acquire it and return to the caller</span>
+                <b>if</b> (!<a href="#9c856433e02d998c" class="i field">_isLocked</a>)
+                {
+                    <a href="#9c856433e02d998c" class="i field">_isLocked</a> = <b>true</b>;
+                    <b>return</b> <b>new</b> <a href="#975a942ff02ab16f" class="t constructor">Lock</a>(<a href="#5e92cb3f7f76aa38" class="k">this</a>);
+                }
+ 
+                <span class="c">// Check cancellationToken before instantiating waiter</span>
+                <span class="r2 r">cancellationToken</span>.<a href="@1@netstandard/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+ 
+                <span class="c">// If lock is already taken, create a waiter and wait either until value is set or lock can be acquired by this waiter</span>
+                <a href="#7cacecbd418deab1" class="i field">_waiters</a> ??= <b>new</b> <a href="@1@netstandard/A.html#a09109def640b7b1" class="t constructor">Queue</a>&lt;<a href="@1@netstandard/A.html#94bf04047d6bd325" class="t t">TaskCompletionSource</a>&lt;<a href="#286c27a3197b72f3" class="t t">Lock</a>&gt;&gt;();
+                <span class="c">// if async == false, valueTcs will be waited only in this thread and only synchronously, so RunContinuationsAsynchronously isn&#39;t needed.</span>
+                <span class="r3 r">valueTcs</span> = <b>new</b> <a href="@1@netstandard/A.html#c4984003e7683ee0" class="t constructor">TaskCompletionSource</a>&lt;<a href="#286c27a3197b72f3" class="t t">Lock</a>&gt;(<span class="r1 r">async</span> ? <a href="@1@netstandard/A.html#17b17e17ae1468b0" class="t t">TaskCreationOptions</a>.<a href="@1@netstandard/A.html#8a4ba0b9ea2b26f8" class="i field">RunContinuationsAsynchronously</a> : <a href="@1@netstandard/A.html#17b17e17ae1468b0" class="t t">TaskCreationOptions</a>.<a href="@1@netstandard/A.html#dc7247a09b22ff40" class="i field">None</a>);
+                <a href="#7cacecbd418deab1" class="i field">_waiters</a>.<a href="@1@netstandard/A.html#14c3cc45ceaf1566" class="i method">Enqueue</a>(<span class="r3 r">valueTcs</span>);
+            }
+ 
+            <b>try</b>
+            {
+                <b>if</b> (<span class="r1 r">async</span>)
+                {
+                    <b>return</b> <b>await</b> <span class="r3 r">valueTcs</span>.<a href="@1@netstandard/A.html#14fe3876fba4607a" class="i property">Task</a>.<a href="TaskExtensions.cs.html#4368accee5eff0f0" class="i method">AwaitWithCancellation</a>(<span class="r2 r">cancellationToken</span>);
+                }
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">AZC0104</span> <span class="c">// Use EnsureCompleted() directly on asynchronous method return value.</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">AZC0111</span> <span class="c">// DO NOT use EnsureCompleted in possibly asynchronous scope.</span>
+                <span class="r3 r">valueTcs</span>.<a href="@1@netstandard/A.html#14fe3876fba4607a" class="i property">Task</a>.<a href="@1@netstandard/A.html#d4140d38f7fd1b0c" class="i method">Wait</a>(<span class="r2 r">cancellationToken</span>);
+                <b>return</b> <span class="r3 r">valueTcs</span>.<a href="@1@netstandard/A.html#14fe3876fba4607a" class="i property">Task</a>.<a href="TaskExtensions.cs.html#c5b047e3cbfab399" class="i method">EnsureCompleted</a>();
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">AZC0111</span> <span class="c">// DO NOT use EnsureCompleted in possibly asynchronous scope.</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">AZC0104</span> <span class="c">// Use EnsureCompleted() directly on asynchronous method return value.</span>
+            }
+            <b>catch</b> (<a href="@1@netstandard/A.html#a0a8b79c277cf327" class="t t">OperationCanceledException</a>)
+            {
+                <span class="c">// Throw OperationCanceledException only if another thread hasn&#39;t set a value to this waiter</span>
+                <span class="c">// by calling either Reset or SetValue</span>
+                <b>if</b> (<span class="r3 r">valueTcs</span>.<a href="@1@netstandard/A.html#b025f953e3a13daa" class="i method">TrySetCanceled</a>(<span class="r2 r">cancellationToken</span>))
+                {
+                    <b>throw</b>;
+                }
+ 
+                <b>return</b> <span class="r3 r">valueTcs</span>.<a href="@1@netstandard/A.html#14fe3876fba4607a" class="i property">Task</a>.<a href="@1@netstandard/A.html#826690b09f24e719" class="i property">Result</a>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Set value to the cache and to all the waiters</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">value</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="0327d6f5b152eafa" href="R/0327d6f5b152eafa.html" target="n" data-glyph="76,1" class="i method">SetValue</a>(<span class="r0 r t">T</span> <span id="r4 rd" class="r4 r">value</span>)
+        {
+            <a href="@1@netstandard/A.html#aa3beab99b2e0db2" class="t t">Queue</a>&lt;<a href="@1@netstandard/A.html#94bf04047d6bd325" class="t t">TaskCompletionSource</a>&lt;<a href="#286c27a3197b72f3" class="t t">Lock</a>&gt;&gt; <span id="r5 rd" class="r5 r">waiters</span>;
+            <b>lock</b> (<a href="#b59635d314edba82" class="i field">_syncObj</a>)
+            {
+                <a href="#b78a4a92ba560b13" class="i field">_value</a> = <span class="r4 r">value</span>;
+                <a href="#cc0836d9bfec40d9" class="i field">_hasValue</a> = <b>true</b>;
+                <a href="#9c856433e02d998c" class="i field">_isLocked</a> = <b>false</b>;
+                <b>if</b> (<a href="#7cacecbd418deab1" class="i field">_waiters</a> == <b>default</b>)
+                {
+                    <b>return</b>;
+                }
+ 
+                <span class="r5 r">waiters</span> = <a href="#7cacecbd418deab1" class="i field">_waiters</a>;
+                <a href="#7cacecbd418deab1" class="i field">_waiters</a> = <b>default</b>;
+            }
+ 
+            <b>while</b> (<span class="r5 r">waiters</span>.<a href="@1@netstandard/A.html#2d2504e4ca700843" class="i property">Count</a> &gt; 0)
+            {
+                <span class="r5 r">waiters</span>.<a href="@1@netstandard/A.html#e68caf2d91344411" class="i method">Dequeue</a>().<a href="@1@netstandard/A.html#f58e440930617bf6" class="i method">TrySetResult</a>(<b>new</b> <a href="#5712b3aabfcfaf79" class="t constructor">Lock</a>(<span class="r4 r">value</span>));
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Release the lock and allow next waiter acquire it</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="9bc3556066930453" href="R/9bc3556066930453.html" target="n" data-glyph="76,1" class="i method">Reset</a>()
+        {
+            <a href="@1@netstandard/A.html#94bf04047d6bd325" class="t t">TaskCompletionSource</a>&lt;<a href="#286c27a3197b72f3" class="t t">Lock</a>&gt; <span id="r6 rd" class="r6 r">nextWaiter</span> = <a href="#3303cbdbaf3f5929" class="i method">UnlockOrGetNextWaiter</a>();
+            <b>while</b> (<span class="r6 r">nextWaiter</span> != <b>default</b> &amp;&amp; !<span class="r6 r">nextWaiter</span>.<a href="@1@netstandard/A.html#f58e440930617bf6" class="i method">TrySetResult</a>(<b>new</b> <a href="#975a942ff02ab16f" class="t constructor">Lock</a>(<a href="#5e92cb3f7f76aa38" class="k">this</a>)))
+            {
+                <span class="r6 r">nextWaiter</span> = <a href="#3303cbdbaf3f5929" class="i method">UnlockOrGetNextWaiter</a>();
+            }
+        }
+ 
+        <b>private</b> <a href="@1@netstandard/A.html#94bf04047d6bd325" class="t t">TaskCompletionSource</a>&lt;<a href="#286c27a3197b72f3" class="t t">Lock</a>&gt; <a id="3303cbdbaf3f5929" href="R/3303cbdbaf3f5929.html" target="n" data-glyph="76,1" class="i method">UnlockOrGetNextWaiter</a>()
+        {
+            <b>lock</b> (<a href="#b59635d314edba82" class="i field">_syncObj</a>)
+            {
+                <b>if</b> (!<a href="#9c856433e02d998c" class="i field">_isLocked</a>)
+                {
+                    <b>return</b> <b>default</b>;
+                }
+ 
+                <b>if</b> (<a href="#7cacecbd418deab1" class="i field">_waiters</a> == <b>default</b>)
+                {
+                    <a href="#9c856433e02d998c" class="i field">_isLocked</a> = <b>false</b>;
+                    <b>return</b> <b>default</b>;
+                }
+ 
+                <b>while</b> (<a href="#7cacecbd418deab1" class="i field">_waiters</a>.<a href="@1@netstandard/A.html#2d2504e4ca700843" class="i property">Count</a> &gt; 0)
+                {
+                    <a href="@1@netstandard/A.html#94bf04047d6bd325" class="k">var</a> <span id="r7 rd" class="r7 r">nextWaiter</span> = <a href="#7cacecbd418deab1" class="i field">_waiters</a>.<a href="@1@netstandard/A.html#e68caf2d91344411" class="i method">Dequeue</a>();
+                    <b>if</b> (!<span class="r7 r">nextWaiter</span>.<a href="@1@netstandard/A.html#14fe3876fba4607a" class="i property">Task</a>.<a href="@1@netstandard/A.html#8d8a16ab86bf7a8a" class="i property">IsCompleted</a>)
+                    {
+                        <span class="c">// Return the waiter only if it wasn&#39;t canceled already</span>
+                        <b>return</b> <span class="r7 r">nextWaiter</span>;
+                    }
+                }
+ 
+                <a href="#9c856433e02d998c" class="i field">_isLocked</a> = <b>false</b>;
+                <b>return</b> <b>default</b>;
+            }
+        }
+ 
+        <b>public readonly struct</b> <a id="286c27a3197b72f3" href="R/286c27a3197b72f3.html" target="n" data-glyph="108,1" class="t t"><span id="41eb5d88be608ddf">Lock</span></a> : <a href="@1@netstandard/A.html#1f55292c3174123d" class="t t">IDisposable</a>
+        {
+            <b>private readonly</b> <a href="#5e92cb3f7f76aa38" class="t t">AsyncLockWithValue</a>&lt;<span class="r0 r t">T</span>&gt; <a id="7db3e384d80d68b4" href="R/7db3e384d80d68b4.html" target="n" data-glyph="46,2" class="i field">_owner</a>;
+            <b>public bool</b> <a id="0466f2968c6dce2a" href="R/0466f2968c6dce2a.html" target="n" data-glyph="102,2" class="i property">HasValue</a> =&gt; <a href="#7db3e384d80d68b4" class="i field">_owner</a> == <b>default</b>;
+            <b>public</b> <span class="r0 r t">T</span> <a id="3c39250d077d5409" href="R/3c39250d077d5409.html" target="n" data-glyph="102,2" class="i property">Value</a> { <b>get</b>; }
+ 
+            <b>public</b> <a id="5712b3aabfcfaf79" href="R/5712b3aabfcfaf79.html" target="n" data-glyph="72,2" class="t constructor">Lock</a>(<span class="r0 r t">T</span> <span id="r8 rd" class="r8 r">value</span>)
+            {
+                <a href="#7db3e384d80d68b4" class="i field">_owner</a> = <b>default</b>;
+                <a href="#3c39250d077d5409" class="i property">Value</a> = <span class="r8 r">value</span>;
+            }
+ 
+            <b>public</b> <a id="975a942ff02ab16f" href="R/975a942ff02ab16f.html" target="n" data-glyph="72,2" class="t constructor">Lock</a>(<a href="#5e92cb3f7f76aa38" class="t t">AsyncLockWithValue</a>&lt;<span class="r0 r t">T</span>&gt; <span id="r9 rd" class="r9 r">owner</span>)
+            {
+                <a href="#7db3e384d80d68b4" class="i field">_owner</a> = <span class="r9 r">owner</span>;
+                <a href="#3c39250d077d5409" class="i property">Value</a> = <b>default</b>;
+            }
+ 
+            <b>public void</b> <a id="706ee2072c29c8ff" href="R/706ee2072c29c8ff.html" target="n" data-glyph="72,2" class="i method">SetValue</a>(<span class="r0 r t">T</span> <span id="r10 rd" class="r10 r">value</span>) =&gt; <a href="#7db3e384d80d68b4" class="i field">_owner</a>.<a href="#0327d6f5b152eafa" class="i method">SetValue</a>(<span class="r10 r">value</span>);
+ 
+            <b>public void</b> <a id="c9b476bfc9abd87a" href="R/c9b476bfc9abd87a.html" target="n" data-glyph="72,2" class="i method">Dispose</a>() =&gt; <a href="#7db3e384d80d68b4" class="i field">_owner</a>?.<a href="#9bc3556066930453" class="i method">Reset</a>();
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

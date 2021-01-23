@@ -1,0 +1,346 @@
+﻿<!DOCTYPE html>
+<html><head><title>ClientFactory.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(337);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Extensions.Azure/Internal/ClientFactory.cs" target="_top">Internal\ClientFactory.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Extensions.Azure" target="_top">..\..\extensions\Microsoft.Extensions.Azure\src\Microsoft.Extensions.Azure.csproj</a> (Microsoft.Extensions.Azure)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Linq</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Reflection</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Security</span>.<span class="i">Cryptography</span>.<span class="i">X509Certificates</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Text</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i">Identity</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Configuration</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i n">Azure</span>
+{
+    <b>internal static class</b> <a id="b5ae3e7998068a24" href="../R/b5ae3e7998068a24.html" target="n" data-glyph="2,0" class="t t">ClientFactory</a>
+    {
+        <b>private const string</b> <a id="78dfe0ac0069e2b1" href="../R/78dfe0ac0069e2b1.html" target="n" data-glyph="10,1" class="i field">ServiceVersionParameterTypeName</a> = <span class="s">&quot;ServiceVersion&quot;</span>;
+        <b>private const string</b> <a id="118d5e2d0222fc32" href="../R/118d5e2d0222fc32.html" target="n" data-glyph="10,1" class="i field">ConnectionStringParameterName</a> = <span class="s">&quot;connectionString&quot;</span>;
+ 
+        <b>public static object</b> <a id="a01905468c5ecfd5" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">CreateClient</a>(<span class="i">Type</span> <span id="r0 rd" class="r0 r">clientType</span>, <span class="i">Type</span> <span id="r1 rd" class="r1 r">optionsType</span>, <b>object</b> <span id="r2 rd" class="r2 r">options</span>, <span class="i">IConfiguration</span> <span id="r3 rd" class="r3 r">configuration</span>, <span class="i">TokenCredential</span> <span id="r4 rd" class="r4 r">credential</span>)
+        {
+            <span class="i">List</span>&lt;<b>object</b>&gt; <span id="r5 rd" class="r5 r">arguments</span> = <b>new</b> <span class="i">List</span>&lt;<b>object</b>&gt;();
+            <span class="c">// Handle single values as connection strings</span>
+            <b>if</b> (<span class="r3 r">configuration</span> <b>is</b> <span class="i">IConfigurationSection</span> <span id="r6 rd" class="r6 r">section</span> &amp;&amp; <span class="r6 r">section</span>.<span class="i">Value</span> != <b>null</b>)
+            {
+                <b>var</b> <span id="r7 rd" class="r7 r">connectionString</span> = <span class="r6 r">section</span>.<span class="i">Value</span>;
+                <span class="r3 r">configuration</span> = <b>new</b> <span class="i">ConfigurationBuilder</span>()
+                    .<span class="i">AddInMemoryCollection</span>(<b>new</b>[]
+                    {
+                        <b>new</b> <span class="i">KeyValuePair</span>&lt;<b>string</b>, <b>string</b>&gt;(<a href="#118d5e2d0222fc32" class="i field">ConnectionStringParameterName</a>, <span class="r7 r">connectionString</span>)
+                    })
+                    .<span class="i">Build</span>();
+            }
+            <b>foreach</b> (<b>var</b> <span id="r8 rd" class="r8 r">constructor</span> <b>in</b> <span class="r0 r">clientType</span>.<span class="i">GetConstructors</span>().<span class="i">OrderByDescending</span>(<span id="r9 rd" class="r9 r">c</span> =&gt; <span class="r9 r">c</span>.<span class="i">GetParameters</span>().<span class="i">Length</span>))
+            {
+                <b>if</b> (!<span class="i">IsApplicableConstructor</span>(<span class="r8 r">constructor</span>, <span class="r1 r">optionsType</span>))
+                {
+                    <b>continue</b>;
+                }
+ 
+                <span class="r5 r">arguments</span>.<span class="i">Clear</span>();
+ 
+                <b>bool</b> <span id="r10 rd" class="r10 r">match</span> = <b>true</b>;
+                <b>foreach</b> (<b>var</b> <span id="r11 rd" class="r11 r">parameter</span> <b>in</b> <span class="r8 r">constructor</span>.<span class="i">GetParameters</span>())
+                {
+                    <b>if</b> (<span class="i">IsCredentialParameter</span>(<span class="r11 r">parameter</span>))
+                    {
+                        <b>if</b> (<span class="r4 r">credential</span> == <b>null</b>)
+                        {
+                            <span class="r10 r">match</span> = <b>false</b>;
+                            <b>break</b>;
+                        }
+ 
+                        <span class="r5 r">arguments</span>.<span class="i">Add</span>(<span class="r4 r">credential</span>);
+                        <b>continue</b>;
+                    }
+ 
+                    <b>if</b> (<span class="i">IsOptionsParameter</span>(<span class="r11 r">parameter</span>, <span class="r1 r">optionsType</span>))
+                    {
+                        <b>break</b>;
+                    }
+ 
+                    <b>if</b> (!<span class="i">TryConvertArgument</span>(<span class="r3 r">configuration</span>, <span class="r11 r">parameter</span>.<span class="i">Name</span>, <span class="r11 r">parameter</span>.<span class="i">ParameterType</span>, <b>out object</b> <span id="r12 rd" class="r12 r">argument</span>))
+                    {
+                        <span class="r10 r">match</span> = <b>false</b>;
+                        <b>break</b>;
+                    }
+ 
+                    <span class="r5 r">arguments</span>.<span class="i">Add</span>(<span class="r12 r">argument</span>);
+                }
+ 
+                <b>if</b> (!<span class="r10 r">match</span>)
+                {
+                    <b>continue</b>;
+                }
+ 
+                <span class="r5 r">arguments</span>.<span class="i">Add</span>(<span class="r2 r">options</span>);
+ 
+                <b>return</b> <span class="r8 r">constructor</span>.<span class="i">Invoke</span>(<span class="r5 r">arguments</span>.<span class="i">ToArray</span>());
+            }
+ 
+            <b>throw</b> <b>new</b> <span class="i">InvalidOperationException</span>(<a href="#5458efe5c453f394" class="i method">BuildErrorMessage</a>(<span class="r0 r">clientType</span>, <span class="r1 r">optionsType</span>));
+        }
+ 
+        <b>internal static</b> <span class="i">TokenCredential</span> <a id="a23614f9907bea52" href="../R/a23614f9907bea52.html" target="n" data-glyph="74,1" class="i method">CreateCredential</a>(<span class="i">IConfiguration</span> <span id="r13 rd" class="r13 r">configuration</span>, <span class="i">TokenCredentialOptions</span> <span id="r14 rd" class="r14 r">identityClientOptions</span> = <b>null</b>)
+        {
+            <b>var</b> <span id="r15 rd" class="r15 r">clientId</span> = <span class="r13 r">configuration</span>[<span class="s">&quot;clientId&quot;</span>];
+            <b>var</b> <span id="r16 rd" class="r16 r">tenantId</span> = <span class="r13 r">configuration</span>[<span class="s">&quot;tenantId&quot;</span>];
+            <b>var</b> <span id="r17 rd" class="r17 r">clientSecret</span> = <span class="r13 r">configuration</span>[<span class="s">&quot;clientSecret&quot;</span>];
+            <b>var</b> <span id="r18 rd" class="r18 r">certificate</span> = <span class="r13 r">configuration</span>[<span class="s">&quot;clientCertificate&quot;</span>];
+            <b>var</b> <span id="r19 rd" class="r19 r">certificateStoreName</span> = <span class="r13 r">configuration</span>[<span class="s">&quot;clientCertificateStoreName&quot;</span>];
+            <b>var</b> <span id="r20 rd" class="r20 r">certificateStoreLocation</span> = <span class="r13 r">configuration</span>[<span class="s">&quot;clientCertificateStoreLocation&quot;</span>];
+ 
+            <b>if</b> (!<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r16 r">tenantId</span>) &amp;&amp;
+                !<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r15 r">clientId</span>) &amp;&amp;
+                !<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r17 r">clientSecret</span>))
+            {
+                <b>return</b> <b>new</b> <span class="i">ClientSecretCredential</span>(<span class="r16 r">tenantId</span>, <span class="r15 r">clientId</span>, <span class="r17 r">clientSecret</span>, <span class="r14 r">identityClientOptions</span>);
+            }
+ 
+            <b>if</b> (!<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r16 r">tenantId</span>) &amp;&amp;
+                !<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r15 r">clientId</span>) &amp;&amp;
+                !<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r18 r">certificate</span>))
+            {
+                <span class="i">StoreLocation</span> <span id="r21 rd" class="r21 r">storeLocation</span> = <span class="i">StoreLocation</span>.<span class="i">CurrentUser</span>;
+ 
+                <b>if</b> (!<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r20 r">certificateStoreLocation</span>))
+                {
+                    <span class="r21 r">storeLocation</span> = (<span class="i">StoreLocation</span>)<span class="i">Enum</span>.<span class="i">Parse</span>(<b>typeof</b>(<span class="i">StoreLocation</span>), <span class="r20 r">certificateStoreLocation</span>, <b>true</b>);
+                }
+ 
+                <b>if</b> (<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r19 r">certificateStoreName</span>))
+                {
+                    <span class="r19 r">certificateStoreName</span> = <span class="s">&quot;MY&quot;</span>; <span class="c">// MY is the default used in X509Store</span>
+                }
+ 
+                <b>using</b> <b>var</b> <span id="r22 rd" class="r22 r">store</span> = <b>new</b> <span class="i">X509Store</span>(<span class="r19 r">certificateStoreName</span>, <span class="r21 r">storeLocation</span>);
+                <span class="r22 r">store</span>.<span class="i">Open</span>(<span class="i">OpenFlags</span>.<span class="i">ReadOnly</span>);
+                <span class="i">X509Certificate2Collection</span> <span id="r23 rd" class="r23 r">certs</span> = <span class="r22 r">store</span>.<span class="i">Certificates</span>.<span class="i">Find</span>(<span class="i">X509FindType</span>.<span class="i">FindByThumbprint</span>, <span class="r18 r">certificate</span>, <b>false</b>);
+ 
+                <b>if</b> (<span class="r23 r">certs</span>.<span class="i">Count</span> == 0)
+                {
+                    <b>throw</b> <b>new</b> <span class="i">InvalidOperationException</span>(<span class="s">$&quot;</span><span class="s">Unable to find a certificate with thumbprint &#39;</span>{<span class="r18 r">certificate</span>}<span class="s">&#39;</span><span class="s">&quot;</span>);
+                }
+ 
+                <b>var</b> <span id="r24 rd" class="r24 r">credential</span> = <b>new</b> <span class="i">ClientCertificateCredential</span>(<span class="r16 r">tenantId</span>, <span class="r15 r">clientId</span>, <span class="r23 r">certs</span>[0], <span class="r14 r">identityClientOptions</span>);
+                <span class="r22 r">store</span>.<span class="i">Close</span>();
+ 
+                <b>return</b> <span class="r24 r">credential</span>;
+            }
+ 
+            <span class="c">// TODO: More logging</span>
+            <b>return</b> <b>null</b>;
+        }
+ 
+        <b>internal static object</b> <a id="274dae55ddc8f0bb" href="../R/274dae55ddc8f0bb.html" target="n" data-glyph="74,1" class="i method">CreateClientOptions</a>(<b>object</b> <span id="r25 rd" class="r25 r">version</span>, <span class="i">Type</span> <span id="r26 rd" class="r26 r">optionsType</span>)
+        {
+            <span class="i">ConstructorInfo</span> <span id="r27 rd" class="r27 r">parameterlessConstructor</span> = <b>null</b>;
+            <b>int</b> <span id="r28 rd" class="r28 r">versionParameterIndex</span> = 0;
+            <b>object</b>[] <span id="r29 rd" class="r29 r">constructorArguments</span> = <b>null</b>;
+ 
+            <b>foreach</b> (<b>var</b> <span id="r30 rd" class="r30 r">constructor</span> <b>in</b> <span class="r26 r">optionsType</span>.<span class="i">GetConstructors</span>())
+            {
+                <b>var</b> <span id="r31 rd" class="r31 r">parameters</span> = <span class="r30 r">constructor</span>.<span class="i">GetParameters</span>();
+                <b>if</b> (<span class="r31 r">parameters</span>.<span class="i">Length</span> == 0)
+                {
+                    <span class="r27 r">parameterlessConstructor</span> = <span class="r30 r">constructor</span>;
+                    <b>continue</b>;
+                }
+ 
+                <b>bool</b> <span id="r32 rd" class="r32 r">allParametersHaveDefaultValue</span> = <b>true</b>;
+                <b>for</b> (<b>int</b> <span id="r33 rd" class="r33 r">i</span> = 0; <span class="r33 r">i</span> &lt; <span class="r31 r">parameters</span>.<span class="i">Length</span>; <span class="r33 r">i</span>++)
+                {
+                    <span class="i">ParameterInfo</span> <span id="r34 rd" class="r34 r">parameter</span> = <span class="r31 r">parameters</span>[<span class="r33 r">i</span>];
+                    <b>if</b> (<span class="r34 r">parameter</span>.<span class="i">HasDefaultValue</span>)
+                    {
+                        <b>if</b> (<a href="#3e64fe0228b6a5a9" class="i method">IsServiceVersionParameter</a>(<span class="r34 r">parameter</span>))
+                        {
+                            <span class="r28 r">versionParameterIndex</span> = <span class="r33 r">i</span>;
+                        }
+                    }
+                    <b>else</b>
+                    {
+                        <span class="r32 r">allParametersHaveDefaultValue</span> = <b>false</b>;
+                        <b>break</b>;
+                    }
+                }
+ 
+                <b>if</b> (<span class="r32 r">allParametersHaveDefaultValue</span>)
+                {
+                    <span class="r29 r">constructorArguments</span> = <b>new</b> <b>object</b>[<span class="r31 r">parameters</span>.<span class="i">Length</span>];
+ 
+                    <b>for</b> (<b>int</b> <span id="r35 rd" class="r35 r">i</span> = 0; <span class="r35 r">i</span> &lt; <span class="r31 r">parameters</span>.<span class="i">Length</span>; <span class="r35 r">i</span>++)
+                    {
+                        <span class="r29 r">constructorArguments</span>[<span class="r35 r">i</span>] = <span class="r31 r">parameters</span>[<span class="r35 r">i</span>].<span class="i">DefaultValue</span>;
+                    }
+                }
+            }
+ 
+            <b>if</b> (<span class="r25 r">version</span> != <b>null</b>)
+            {
+                <b>if</b> (<span class="r29 r">constructorArguments</span> != <b>null</b>)
+                {
+                    <span class="r29 r">constructorArguments</span>[<span class="r28 r">versionParameterIndex</span>] = <span class="r25 r">version</span>;
+                    <b>return</b> <span class="i">Activator</span>.<span class="i">CreateInstance</span>(<span class="r26 r">optionsType</span>, <span class="r29 r">constructorArguments</span>);
+                }
+ 
+                <b>throw</b> <b>new</b> <span class="i">InvalidOperationException</span>(<span class="s">&quot;Unable to find constructor that takes service version&quot;</span>);
+            }
+ 
+            <b>if</b> (<span class="r27 r">parameterlessConstructor</span> != <b>null</b>)
+            {
+                <b>return</b> <span class="i">Activator</span>.<span class="i">CreateInstance</span>(<span class="r26 r">optionsType</span>);
+            }
+ 
+            <b>return</b> <span class="i">Activator</span>.<span class="i">CreateInstance</span>(<span class="r26 r">optionsType</span>, <span class="r29 r">constructorArguments</span>);
+        }
+ 
+        <b>private static bool</b> <a id="3e64fe0228b6a5a9" href="../R/3e64fe0228b6a5a9.html" target="n" data-glyph="76,1" class="i method">IsServiceVersionParameter</a>(<span class="i">ParameterInfo</span> <span id="r36 rd" class="r36 r">parameter</span>) =&gt;
+            <span class="r36 r">parameter</span>.<span class="i">ParameterType</span>.<span class="i">Name</span> == <a href="#78dfe0ac0069e2b1" class="i field">ServiceVersionParameterTypeName</a>;
+ 
+        <b>private static bool</b> <a id="3c9b5894f82b0644" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">IsCredentialParameter</a>(<span class="i">ParameterInfo</span> <span id="r37 rd" class="r37 r">parameter</span>)
+        {
+            <b>return</b> <span class="r37 r">parameter</span>.<span class="i">ParameterType</span> == <b>typeof</b>(<span class="i">TokenCredential</span>);
+        }
+ 
+        <b>private static bool</b> <a id="4f6447152b697c3f" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">IsOptionsParameter</a>(<span class="i">ParameterInfo</span> <span id="r38 rd" class="r38 r">parameter</span>, <span class="i">Type</span> <span id="r39 rd" class="r39 r">optionsType</span>)
+        {
+            <b>return</b> <span class="r38 r">parameter</span>.<span class="i">ParameterType</span>.<span class="i">IsAssignableFrom</span>(<span class="r39 r">optionsType</span>) &amp;&amp;
+                   <span class="r38 r">parameter</span>.<span class="i">Position</span> == ((<span class="i">ConstructorInfo</span>)<span class="r38 r">parameter</span>.<span class="i">Member</span>).<span class="i">GetParameters</span>().<span class="i">Length</span> - 1;
+        }
+ 
+        <b>private static string</b> <a id="5458efe5c453f394" href="../R/5458efe5c453f394.html" target="n" data-glyph="76,1" class="i method">BuildErrorMessage</a>(<span class="i">Type</span> <span id="r40 rd" class="r40 r">clientType</span>, <span class="i">Type</span> <span id="r41 rd" class="r41 r">optionsType</span>)
+        {
+            <b>var</b> <span id="r42 rd" class="r42 r">builder</span> = <b>new</b> <span class="i">StringBuilder</span>();
+            <span class="r42 r">builder</span>.<span class="i">AppendLine</span>(<span class="s">&quot;Unable to find matching constructor. Define one of the follow sets of configuration parameters:&quot;</span>);
+ 
+            <b>int</b> <span id="r43 rd" class="r43 r">counter</span> = 1;
+ 
+            <b>foreach</b> (<b>var</b> <span id="r44 rd" class="r44 r">constructor</span> <b>in</b> <span class="r40 r">clientType</span>.<span class="i">GetConstructors</span>())
+            {
+                <b>if</b> (!<span class="i">IsApplicableConstructor</span>(<span class="r44 r">constructor</span>, <span class="r41 r">optionsType</span>))
+                {
+                    <b>continue</b>;
+                }
+ 
+                <span class="r42 r">builder</span>.<span class="i">Append</span>(<span class="r43 r">counter</span>).<span class="i">Append</span>(<span class="s">&quot;. &quot;</span>);
+ 
+                <b>bool</b> <span id="r45 rd" class="r45 r">first</span> = <b>true</b>;
+ 
+                <b>foreach</b> (<b>var</b> <span id="r46 rd" class="r46 r">parameter</span> <b>in</b> <span class="r44 r">constructor</span>.<span class="i">GetParameters</span>())
+                {
+                    <b>if</b> (<span class="i">IsOptionsParameter</span>(<span class="r46 r">parameter</span>, <span class="r41 r">optionsType</span>))
+                    {
+                        <b>break</b>;
+                    }
+ 
+                    <b>if</b> (<span class="r45 r">first</span>)
+                    {
+                        <span class="r45 r">first</span> = <b>false</b>;
+                    }
+                    <b>else</b>
+                    {
+                        <span class="r42 r">builder</span>.<span class="i">Append</span>(<span class="s">&quot;, &quot;</span>);
+                    }
+ 
+                    <span class="r42 r">builder</span>.<span class="i">Append</span>(<span class="r46 r">parameter</span>.<span class="i">Name</span>);
+                }
+ 
+                <span class="r42 r">builder</span>.<span class="i">AppendLine</span>();
+                <span class="r43 r">counter</span>++;
+            }
+ 
+            <b>return</b> <span class="r42 r">builder</span>.<span class="i">ToString</span>();
+        }
+ 
+        <b>private static bool</b> <a id="49c7d8d0e6dcddca" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">IsApplicableConstructor</a>(<span class="i">ConstructorInfo</span> <span id="r47 rd" class="r47 r">constructorInfo</span>, <span class="i">Type</span> <span id="r48 rd" class="r48 r">optionsType</span>)
+        {
+            <b>var</b> <span id="r49 rd" class="r49 r">parameters</span> = <span class="r47 r">constructorInfo</span>.<span class="i">GetParameters</span>();
+ 
+            <b>return</b> <span class="r47 r">constructorInfo</span>.<span class="i">IsPublic</span> &amp;&amp;
+                   <span class="r49 r">parameters</span>.<span class="i">Length</span> &gt; 0 &amp;&amp;
+                   <span class="i">IsOptionsParameter</span>(<span class="r49 r">parameters</span>[<span class="r49 r">parameters</span>.<span class="i">Length</span> - 1], <span class="r48 r">optionsType</span>);
+        }
+ 
+        <b>private static bool</b> <a id="ce2bcbeae4da9bc6" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">TryConvertArgument</a>(<span class="i">IConfiguration</span> <span id="r50 rd" class="r50 r">configuration</span>, <b>string</b> <span id="r51 rd" class="r51 r">parameterName</span>, <span class="i">Type</span> <span id="r52 rd" class="r52 r">parameterType</span>, <b>out object</b> <span id="r53 rd" class="r53 r">value</span>)
+        {
+            <b>if</b> (<span class="r52 r">parameterType</span> == <b>typeof</b>(<b>string</b>))
+            {
+                <b>return</b> <span class="i">TryConvertFromString</span>(<span class="r50 r">configuration</span>, <span class="r51 r">parameterName</span>, <span id="r54 rd" class="r54 r">s</span> =&gt; <span class="r54 r">s</span>, <b>out</b> <span class="r53 r">value</span>);
+            }
+ 
+            <b>if</b> (<span class="r52 r">parameterType</span> == <b>typeof</b>(<span class="i">Uri</span>))
+            {
+                <b>return</b> <span class="i">TryConvertFromString</span>(<span class="r50 r">configuration</span>, <span class="r51 r">parameterName</span>, <span id="r55 rd" class="r55 r">s</span> =&gt; <b>new</b> <span class="i">Uri</span>(<span class="r55 r">s</span>), <b>out</b> <span class="r53 r">value</span>);
+            }
+ 
+            <b>if</b> (<span class="r50 r">configuration</span>[<span class="r51 r">parameterName</span>] != <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">InvalidOperationException</span>(<span class="s">$&quot;</span><span class="s">Unable to convert value &#39;</span>{<span class="r50 r">configuration</span>[<span class="r51 r">parameterName</span>]}<span class="s">&#39; to parameter type </span>{<span class="r52 r">parameterType</span>.<span class="i">FullName</span>}<span class="s">&quot;</span>);
+            }
+ 
+            <b>return</b> <span class="i">TryCreateObject</span>(<span class="r52 r">parameterType</span>, <span class="r50 r">configuration</span>.<span class="i">GetSection</span>(<span class="r51 r">parameterName</span>), <b>out</b> <span class="r53 r">value</span>);
+        }
+ 
+        <b>private static bool</b> <a id="5414806f8d1f58f4" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">TryConvertFromString</a>(<span class="i">IConfiguration</span> <span id="r56 rd" class="r56 r">configuration</span>, <b>string</b> <span id="r57 rd" class="r57 r">parameterName</span>, <span class="i">Func</span>&lt;<b>string</b>, <b>object</b>&gt; <span id="r58 rd" class="r58 r">func</span>, <b>out object</b> <span id="r59 rd" class="r59 r">value</span>)
+        {
+            <b>string</b> <span id="r60 rd" class="r60 r">stringValue</span> = <span class="r56 r">configuration</span>[<span class="r57 r">parameterName</span>];
+            <b>if</b> (<span class="r60 r">stringValue</span> == <b>null</b>)
+            {
+                <span class="r59 r">value</span> = <b>null</b>;
+                <b>return</b> <b>false</b>;
+            }
+ 
+            <span class="r59 r">value</span> = <span class="r58 r">func</span>(<span class="r60 r">stringValue</span>);
+            <b>return</b> <b>true</b>;
+        }
+ 
+        <b>internal static bool</b> <a id="5b123914521eebf4" href="../R/../../0000000000.html" target="n" data-glyph="74,1" class="i method">TryCreateObject</a>(<span class="i">Type</span> <span id="r61 rd" class="r61 r">type</span>, <span class="i">IConfigurationSection</span> <span id="r62 rd" class="r62 r">configuration</span>, <b>out object</b> <span id="r63 rd" class="r63 r">value</span>)
+        {
+            <b>if</b> (!<span class="r62 r">configuration</span>.<span class="i">GetChildren</span>().<span class="i">Any</span>())
+            {
+                <span class="r63 r">value</span> = <b>null</b>;
+                <b>return</b> <b>false</b>;
+            }
+ 
+            <span class="i">List</span>&lt;<b>object</b>&gt; <span id="r64 rd" class="r64 r">arguments</span> = <b>new</b> <span class="i">List</span>&lt;<b>object</b>&gt;();
+            <b>foreach</b> (<b>var</b> <span id="r65 rd" class="r65 r">constructor</span> <b>in</b> <span class="r61 r">type</span>.<span class="i">GetConstructors</span>().<span class="i">OrderByDescending</span>(<span id="r66 rd" class="r66 r">c</span> =&gt; <span class="r66 r">c</span>.<span class="i">GetParameters</span>().<span class="i">Length</span>))
+            {
+                <span class="r64 r">arguments</span>.<span class="i">Clear</span>();
+ 
+                <b>bool</b> <span id="r67 rd" class="r67 r">match</span> = <b>true</b>;
+                <b>foreach</b> (<b>var</b> <span id="r68 rd" class="r68 r">parameter</span> <b>in</b> <span class="r65 r">constructor</span>.<span class="i">GetParameters</span>())
+                {
+                    <b>if</b> (!<span class="i">TryConvertArgument</span>(<span class="r62 r">configuration</span>, <span class="r68 r">parameter</span>.<span class="i">Name</span>, <span class="r68 r">parameter</span>.<span class="i">ParameterType</span>, <b>out object</b> <span id="r69 rd" class="r69 r">argument</span>))
+                    {
+                        <span class="r67 r">match</span> = <b>false</b>;
+                        <b>break</b>;
+                    }
+ 
+                    <span class="r64 r">arguments</span>.<span class="i">Add</span>(<span class="r69 r">argument</span>);
+                }
+ 
+                <b>if</b> (!<span class="r67 r">match</span>)
+                {
+                    <b>continue</b>;
+                }
+ 
+                <span class="r63 r">value</span> = <span class="r65 r">constructor</span>.<span class="i">Invoke</span>(<span class="r64 r">arguments</span>.<span class="i">ToArray</span>());
+                <b>return</b> <b>true</b>;
+            }
+ 
+            <b>throw</b> <b>new</b> <span class="i">InvalidOperationException</span>(<span class="s">$&quot;</span><span class="s">Unable to convert section &#39;</span>{<span class="r62 r">configuration</span>.<span class="i">Path</span>}<span class="s">&#39; to parameter type &#39;</span>{<span class="r61 r">type</span>}<span class="s">&#39;, unable to find matching constructor.</span><span class="s">&quot;</span>);
+        }
+    }
+}</pre></td></tr></table></div></body></html>

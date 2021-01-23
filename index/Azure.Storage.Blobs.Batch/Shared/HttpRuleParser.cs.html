@@ -1,0 +1,365 @@
+﻿<!DOCTYPE html>
+<html><head><title>HttpRuleParser.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(356);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Storage.Blobs.Batch/Shared/HttpRuleParser.cs" target="_top">Shared\HttpRuleParser.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Storage.Blobs.Batch" target="_top">Azure.Storage.Blobs.Batch\src\Azure.Storage.Blobs.Batch.csproj</a> (Azure.Storage.Blobs.Batch)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<span class="c">// Copied from https://github.com/aspnet/AspNetCore/tree/master/src/Http/Headers/src</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Diagnostics</span>.<span class="i n">Contracts</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Globalization</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>;
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">IDE0018</span> <span class="c">// Inline declaration</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">IDE0054</span> <span class="c">// Use compound assignment</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">IDE0059</span> <span class="c">// Unnecessary assignment</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">IDE1006</span> <span class="c">// Missing s_ prefix</span>
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Http</span>.<span class="i n">Multipart</span>
+{
+    <b>internal static class</b> <a id="818aace47de76adc" href="../R/818aace47de76adc.html" target="n" data-glyph="2,0" class="t t">HttpRuleParser</a>
+    {
+        <b>private static readonly bool</b>[] <a id="2e4cf4a1d8a1c926" href="../R/2e4cf4a1d8a1c926.html" target="n" data-glyph="46,1" class="i field">TokenChars</a> = <a href="#802e63b63352ae13" class="i method">CreateTokenChars</a>();
+        <b>private const int</b> <a id="bbf77f78f6a84f85" href="../R/bbf77f78f6a84f85.html" target="n" data-glyph="10,1" class="i field">MaxNestedCount</a> = 5;
+        <b>private static readonly string</b>[] <a id="b94c782cbe35c2d8" href="../R/b94c782cbe35c2d8.html" target="n" data-glyph="46,1" class="i field">DateFormats</a> = <b>new</b> <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>[] {
+            <span class="c">// &quot;r&quot;, // RFC 1123, required output format but too strict for input</span>
+            <span class="s">&quot;ddd, d MMM yyyy H:m:s &#39;GMT&#39;&quot;</span>, <span class="c">// RFC 1123 (r, except it allows both 1 and 01 for date and time)</span>
+            <span class="s">&quot;ddd, d MMM yyyy H:m:s&quot;</span>, <span class="c">// RFC 1123, no zone - assume GMT</span>
+            <span class="s">&quot;d MMM yyyy H:m:s &#39;GMT&#39;&quot;</span>, <span class="c">// RFC 1123, no day-of-week</span>
+            <span class="s">&quot;d MMM yyyy H:m:s&quot;</span>, <span class="c">// RFC 1123, no day-of-week, no zone</span>
+            <span class="s">&quot;ddd, d MMM yy H:m:s &#39;GMT&#39;&quot;</span>, <span class="c">// RFC 1123, short year</span>
+            <span class="s">&quot;ddd, d MMM yy H:m:s&quot;</span>, <span class="c">// RFC 1123, short year, no zone</span>
+            <span class="s">&quot;d MMM yy H:m:s &#39;GMT&#39;&quot;</span>, <span class="c">// RFC 1123, no day-of-week, short year</span>
+            <span class="s">&quot;d MMM yy H:m:s&quot;</span>, <span class="c">// RFC 1123, no day-of-week, short year, no zone</span>
+ 
+            <span class="s">&quot;dddd, d&#39;-&#39;MMM&#39;-&#39;yy H:m:s &#39;GMT&#39;&quot;</span>, <span class="c">// RFC 850, short year</span>
+            <span class="s">&quot;dddd, d&#39;-&#39;MMM&#39;-&#39;yy H:m:s&quot;</span>, <span class="c">// RFC 850 no zone</span>
+            <span class="s">&quot;ddd, d&#39;-&#39;MMM&#39;-&#39;yyyy H:m:s &#39;GMT&#39;&quot;</span>, <span class="c">// RFC 850, long year</span>
+            <span class="s">&quot;ddd MMM d H:m:s yyyy&quot;</span>, <span class="c">// ANSI C&#39;s asctime() format</span>
+ 
+            <span class="s">&quot;ddd, d MMM yyyy H:m:s zzz&quot;</span>, <span class="c">// RFC 5322</span>
+            <span class="s">&quot;ddd, d MMM yyyy H:m:s&quot;</span>, <span class="c">// RFC 5322 no zone</span>
+            <span class="s">&quot;d MMM yyyy H:m:s zzz&quot;</span>, <span class="c">// RFC 5322 no day-of-week</span>
+            <span class="s">&quot;d MMM yyyy H:m:s&quot;</span>, <span class="c">// RFC 5322 no day-of-week, no zone</span>
+        };
+ 
+        <b>internal const char</b> <a id="b2f06f99de91dd7b" href="../R/b2f06f99de91dd7b.html" target="n" data-glyph="8,1" class="i field">CR</a> = <span class="s">&#39;\r&#39;</span>;
+        <b>internal const char</b> <a id="5ecd2f1f8a789047" href="../R/5ecd2f1f8a789047.html" target="n" data-glyph="8,1" class="i field">LF</a> = <span class="s">&#39;\n&#39;</span>;
+        <b>internal const char</b> <a id="78da35c9294375c3" href="../R/78da35c9294375c3.html" target="n" data-glyph="8,1" class="i field">SP</a> = <span class="s">&#39; &#39;</span>;
+        <b>internal const char</b> <a id="97d52754475f6770" href="../R/97d52754475f6770.html" target="n" data-glyph="8,1" class="i field">Tab</a> = <span class="s">&#39;\t&#39;</span>;
+        <b>internal const int</b> <a id="9c196750da2fd858" href="../R/../../0000000000.html" target="n" data-glyph="8,1" class="i field">MaxInt64Digits</a> = 19;
+        <b>internal const int</b> <a id="9241a82671a92854" href="../R/../../0000000000.html" target="n" data-glyph="8,1" class="i field">MaxInt32Digits</a> = 10;
+ 
+        <span class="c">// iso-8859-1, Western European (ISO)</span>
+        <b>internal static readonly</b> <a href="@1@netstandard/A.html#3b6090c501893c25" class="t t">Encoding</a> <a id="282d26a8b986ee3c" href="../R/../../0000000000.html" target="n" data-glyph="44,1" class="i field">DefaultHttpEncoding</a> = <a href="@1@netstandard/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@1@netstandard/A.html#fcb297ea96bd997e" class="i method">GetEncoding</a>(<span class="s">&quot;iso-8859-1&quot;</span>);
+ 
+        <b>private static bool</b>[] <a id="802e63b63352ae13" href="../R/802e63b63352ae13.html" target="n" data-glyph="76,1" class="i method">CreateTokenChars</a>()
+        {
+            <span class="c">// token = 1*&lt;any CHAR except CTLs or separators&gt;</span>
+            <span class="c">// CTL = &lt;any US-ASCII control character (octets 0 - 31) and DEL (127)&gt;</span>
+ 
+            <b>var</b> <span id="r0 rd" class="r0 r">tokenChars</span> = <b>new</b> <b>bool</b>[128]; <span class="c">// everything is false</span>
+ 
+            <b>for</b> (<b>int</b> <span id="r1 rd" class="r1 r">i</span> = 33; <span class="r1 r">i</span> &lt; 127; <span class="r1 r">i</span>++) <span class="c">// skip Space (32) &amp; DEL (127)</span>
+            {
+                <span class="r0 r">tokenChars</span>[<span class="r1 r">i</span>] = <b>true</b>;
+            }
+ 
+            <span class="c">// remove separators: these are not valid token characters</span>
+            <span class="r0 r">tokenChars</span>[(<b>byte</b>)<span class="s">&#39;(&#39;</span>] = <b>false</b>;
+            <span class="r0 r">tokenChars</span>[(<b>byte</b>)<span class="s">&#39;)&#39;</span>] = <b>false</b>;
+            <span class="r0 r">tokenChars</span>[(<b>byte</b>)<span class="s">&#39;&lt;&#39;</span>] = <b>false</b>;
+            <span class="r0 r">tokenChars</span>[(<b>byte</b>)<span class="s">&#39;&gt;&#39;</span>] = <b>false</b>;
+            <span class="r0 r">tokenChars</span>[(<b>byte</b>)<span class="s">&#39;@&#39;</span>] = <b>false</b>;
+            <span class="r0 r">tokenChars</span>[(<b>byte</b>)<span class="s">&#39;,&#39;</span>] = <b>false</b>;
+            <span class="r0 r">tokenChars</span>[(<b>byte</b>)<span class="s">&#39;;&#39;</span>] = <b>false</b>;
+            <span class="r0 r">tokenChars</span>[(<b>byte</b>)<span class="s">&#39;:&#39;</span>] = <b>false</b>;
+            <span class="r0 r">tokenChars</span>[(<b>byte</b>)<span class="s">&#39;\\&#39;</span>] = <b>false</b>;
+            <span class="r0 r">tokenChars</span>[(<b>byte</b>)<span class="s">&#39;&quot;&#39;</span>] = <b>false</b>;
+            <span class="r0 r">tokenChars</span>[(<b>byte</b>)<span class="s">&#39;/&#39;</span>] = <b>false</b>;
+            <span class="r0 r">tokenChars</span>[(<b>byte</b>)<span class="s">&#39;[&#39;</span>] = <b>false</b>;
+            <span class="r0 r">tokenChars</span>[(<b>byte</b>)<span class="s">&#39;]&#39;</span>] = <b>false</b>;
+            <span class="r0 r">tokenChars</span>[(<b>byte</b>)<span class="s">&#39;?&#39;</span>] = <b>false</b>;
+            <span class="r0 r">tokenChars</span>[(<b>byte</b>)<span class="s">&#39;=&#39;</span>] = <b>false</b>;
+            <span class="r0 r">tokenChars</span>[(<b>byte</b>)<span class="s">&#39;{&#39;</span>] = <b>false</b>;
+            <span class="r0 r">tokenChars</span>[(<b>byte</b>)<span class="s">&#39;}&#39;</span>] = <b>false</b>;
+ 
+            <b>return</b> <span class="r0 r">tokenChars</span>;
+        }
+ 
+        <b>internal static bool</b> <a id="0df1a6c261e00a47" href="../R/0df1a6c261e00a47.html" target="n" data-glyph="74,1" class="i method">IsTokenChar</a>(<b>char</b> <span id="r2 rd" class="r2 r">character</span>)
+        {
+            <span class="c">// Must be between &#39;space&#39; (32) and &#39;DEL&#39; (127)</span>
+            <b>if</b> (<span class="r2 r">character</span> &gt; 127)
+            {
+                <b>return</b> <b>false</b>;
+            }
+ 
+            <b>return</b> <a href="#2e4cf4a1d8a1c926" class="i field">TokenChars</a>[<span class="r2 r">character</span>];
+        }
+ 
+        [<a href="@1@netstandard/A.html#4281f47f8d63a881" class="t constructor">Pure</a>]
+        <b>internal static int</b> <a id="a8ee38d5d1490b1f" href="../R/a8ee38d5d1490b1f.html" target="n" data-glyph="74,1" class="i method">GetTokenLength</a>(<a href="StringSegment.cs.html#e646f02038a27e62" class="t t">StringSegment</a> <span id="r3 rd" class="r3 r">input</span>, <b>int</b> <span id="r4 rd" class="r4 r">startIndex</span>)
+        {
+            <a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#1f51ef07e80c9b68" class="i method">Requires</a>(<span class="r3 r">input</span> != <b>null</b>);
+            <a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#c8c75671e9ed971a" class="i method">Ensures</a>((<a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#a23ea8823a7fe41c" class="i method">Result</a>&lt;<b>int</b>&gt;() &gt;= 0) &amp;&amp; (<a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#a23ea8823a7fe41c" class="i method">Result</a>&lt;<b>int</b>&gt;() &lt;= (<span class="r3 r">input</span>.<a href="StringSegment.cs.html#fc26bc5e8c68c667" class="i property">Length</a> - <span class="r4 r">startIndex</span>)));
+ 
+            <b>if</b> (<span class="r4 r">startIndex</span> &gt;= <span class="r3 r">input</span>.<a href="StringSegment.cs.html#fc26bc5e8c68c667" class="i property">Length</a>)
+            {
+                <b>return</b> 0;
+            }
+ 
+            <a href="@1@netstandard/A.html#225942ed7b7a3252" class="k">var</a> <span id="r5 rd" class="r5 r">current</span> = <span class="r4 r">startIndex</span>;
+ 
+            <b>while</b> (<span class="r5 r">current</span> &lt; <span class="r3 r">input</span>.<a href="StringSegment.cs.html#fc26bc5e8c68c667" class="i property">Length</a>)
+            {
+                <b>if</b> (!<a href="#0df1a6c261e00a47" class="i method">IsTokenChar</a>(<span class="r3 r">input</span><a href="StringSegment.cs.html#082fd93c33d8dcf9">[</a><span class="r5 r">current</span>]))
+                {
+                    <b>return</b> <span class="r5 r">current</span> - <span class="r4 r">startIndex</span>;
+                }
+                <span class="r5 r">current</span>++;
+            }
+            <b>return</b> <span class="r3 r">input</span>.<a href="StringSegment.cs.html#fc26bc5e8c68c667" class="i property">Length</a> - <span class="r4 r">startIndex</span>;
+        }
+ 
+        <b>internal static int</b> <a id="aa08733b07353cff" href="../R/aa08733b07353cff.html" target="n" data-glyph="74,1" class="i method">GetWhitespaceLength</a>(<a href="StringSegment.cs.html#e646f02038a27e62" class="t t">StringSegment</a> <span id="r6 rd" class="r6 r">input</span>, <b>int</b> <span id="r7 rd" class="r7 r">startIndex</span>)
+        {
+            <a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#1f51ef07e80c9b68" class="i method">Requires</a>(<span class="r6 r">input</span> != <b>null</b>);
+            <a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#c8c75671e9ed971a" class="i method">Ensures</a>((<a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#a23ea8823a7fe41c" class="i method">Result</a>&lt;<b>int</b>&gt;() &gt;= 0) &amp;&amp; (<a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#a23ea8823a7fe41c" class="i method">Result</a>&lt;<b>int</b>&gt;() &lt;= (<span class="r6 r">input</span>.<a href="StringSegment.cs.html#fc26bc5e8c68c667" class="i property">Length</a> - <span class="r7 r">startIndex</span>)));
+ 
+            <b>if</b> (<span class="r7 r">startIndex</span> &gt;= <span class="r6 r">input</span>.<a href="StringSegment.cs.html#fc26bc5e8c68c667" class="i property">Length</a>)
+            {
+                <b>return</b> 0;
+            }
+ 
+            <a href="@1@netstandard/A.html#225942ed7b7a3252" class="k">var</a> <span id="r8 rd" class="r8 r">current</span> = <span class="r7 r">startIndex</span>;
+ 
+            <b>char</b> <span id="r9 rd" class="r9 r">c</span>;
+            <b>while</b> (<span class="r8 r">current</span> &lt; <span class="r6 r">input</span>.<a href="StringSegment.cs.html#fc26bc5e8c68c667" class="i property">Length</a>)
+            {
+                <span class="r9 r">c</span> = <span class="r6 r">input</span><a href="StringSegment.cs.html#082fd93c33d8dcf9">[</a><span class="r8 r">current</span>];
+ 
+                <b>if</b> ((<span class="r9 r">c</span> == <a href="#78da35c9294375c3" class="i field">SP</a>) || (<span class="r9 r">c</span> == <a href="#97d52754475f6770" class="i field">Tab</a>))
+                {
+                    <span class="r8 r">current</span>++;
+                    <b>continue</b>;
+                }
+ 
+                <b>if</b> (<span class="r9 r">c</span> == <a href="#b2f06f99de91dd7b" class="i field">CR</a>)
+                {
+                    <span class="c">// If we have a #13 char, it must be followed by #10 and then at least one SP or HT.</span>
+                    <b>if</b> ((<span class="r8 r">current</span> + 2 &lt; <span class="r6 r">input</span>.<a href="StringSegment.cs.html#fc26bc5e8c68c667" class="i property">Length</a>) &amp;&amp; (<span class="r6 r">input</span><a href="StringSegment.cs.html#082fd93c33d8dcf9">[</a><span class="r8 r">current</span> + 1] == <a href="#5ecd2f1f8a789047" class="i field">LF</a>))
+                    {
+                        <b>char</b> <span id="r10 rd" class="r10 r">spaceOrTab</span> = <span class="r6 r">input</span><a href="StringSegment.cs.html#082fd93c33d8dcf9">[</a><span class="r8 r">current</span> + 2];
+                        <b>if</b> ((<span class="r10 r">spaceOrTab</span> == <a href="#78da35c9294375c3" class="i field">SP</a>) || (<span class="r10 r">spaceOrTab</span> == <a href="#97d52754475f6770" class="i field">Tab</a>))
+                        {
+                            <span class="r8 r">current</span> += 3;
+                            <b>continue</b>;
+                        }
+                    }
+                }
+ 
+                <b>return</b> <span class="r8 r">current</span> - <span class="r7 r">startIndex</span>;
+            }
+ 
+            <span class="c">// All characters between startIndex and the end of the string are LWS characters.</span>
+            <b>return</b> <span class="r6 r">input</span>.<a href="StringSegment.cs.html#fc26bc5e8c68c667" class="i property">Length</a> - <span class="r7 r">startIndex</span>;
+        }
+ 
+        <b>internal static int</b> <a id="264b58269df14615" href="../R/264b58269df14615.html" target="n" data-glyph="74,1" class="i method">GetNumberLength</a>(<a href="StringSegment.cs.html#e646f02038a27e62" class="t t">StringSegment</a> <span id="r11 rd" class="r11 r">input</span>, <b>int</b> <span id="r12 rd" class="r12 r">startIndex</span>, <b>bool</b> <span id="r13 rd" class="r13 r">allowDecimal</span>)
+        {
+            <a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#1f51ef07e80c9b68" class="i method">Requires</a>(<span class="r11 r">input</span> != <b>null</b>);
+            <a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#1f51ef07e80c9b68" class="i method">Requires</a>((<span class="r12 r">startIndex</span> &gt;= 0) &amp;&amp; (<span class="r12 r">startIndex</span> &lt; <span class="r11 r">input</span>.<a href="StringSegment.cs.html#fc26bc5e8c68c667" class="i property">Length</a>));
+            <a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#c8c75671e9ed971a" class="i method">Ensures</a>((<a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#a23ea8823a7fe41c" class="i method">Result</a>&lt;<b>int</b>&gt;() &gt;= 0) &amp;&amp; (<a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#a23ea8823a7fe41c" class="i method">Result</a>&lt;<b>int</b>&gt;() &lt;= (<span class="r11 r">input</span>.<a href="StringSegment.cs.html#fc26bc5e8c68c667" class="i property">Length</a> - <span class="r12 r">startIndex</span>)));
+ 
+            <a href="@1@netstandard/A.html#225942ed7b7a3252" class="k">var</a> <span id="r14 rd" class="r14 r">current</span> = <span class="r12 r">startIndex</span>;
+            <b>char</b> <span id="r15 rd" class="r15 r">c</span>;
+ 
+            <span class="c">// If decimal values are not allowed, we pretend to have read the &#39;.&#39; character already. I.e. if a dot is</span>
+            <span class="c">// found in the string, parsing will be aborted.</span>
+            <a href="@1@netstandard/A.html#f1b135ff6c380b37" class="k">var</a> <span id="r16 rd" class="r16 r">haveDot</span> = !<span class="r13 r">allowDecimal</span>;
+ 
+            <span class="c">// The RFC doesn&#39;t allow decimal values starting with dot. I.e. value &quot;.123&quot; is invalid. It must be in the</span>
+            <span class="c">// form &quot;0.123&quot;. Also, there are no negative values defined in the RFC. So we&#39;ll just parse non-negative</span>
+            <span class="c">// values.</span>
+            <span class="c">// The RFC only allows decimal dots not &#39;,&#39; characters as decimal separators. Therefore value &quot;1,23&quot; is</span>
+            <span class="c">// considered invalid and must be represented as &quot;1.23&quot;.</span>
+            <b>if</b> (<span class="r11 r">input</span><a href="StringSegment.cs.html#082fd93c33d8dcf9">[</a><span class="r14 r">current</span>] == <span class="s">&#39;.&#39;</span>)
+            {
+                <b>return</b> 0;
+            }
+ 
+            <b>while</b> (<span class="r14 r">current</span> &lt; <span class="r11 r">input</span>.<a href="StringSegment.cs.html#fc26bc5e8c68c667" class="i property">Length</a>)
+            {
+                <span class="r15 r">c</span> = <span class="r11 r">input</span><a href="StringSegment.cs.html#082fd93c33d8dcf9">[</a><span class="r14 r">current</span>];
+                <b>if</b> ((<span class="r15 r">c</span> &gt;= <span class="s">&#39;0&#39;</span>) &amp;&amp; (<span class="r15 r">c</span> &lt;= <span class="s">&#39;9&#39;</span>))
+                {
+                    <span class="r14 r">current</span>++;
+                }
+                <b>else</b> <b>if</b> (!<span class="r16 r">haveDot</span> &amp;&amp; (<span class="r15 r">c</span> == <span class="s">&#39;.&#39;</span>))
+                {
+                    <span class="c">// Note that value &quot;1.&quot; is valid.</span>
+                    <span class="r16 r">haveDot</span> = <b>true</b>;
+                    <span class="r14 r">current</span>++;
+                }
+                <b>else</b>
+                {
+                    <b>break</b>;
+                }
+            }
+ 
+            <b>return</b> <span class="r14 r">current</span> - <span class="r12 r">startIndex</span>;
+        }
+ 
+        <b>internal static</b> <a href="HttpParseResult.cs.html#78a37fa38e6cfc9c" class="t t">HttpParseResult</a> <a id="fd14bf54204e47c5" href="../R/fd14bf54204e47c5.html" target="n" data-glyph="74,1" class="i method">GetQuotedStringLength</a>(<a href="StringSegment.cs.html#e646f02038a27e62" class="t t">StringSegment</a> <span id="r17 rd" class="r17 r">input</span>, <b>int</b> <span id="r18 rd" class="r18 r">startIndex</span>, <b>out int</b> <span id="r19 rd" class="r19 r">length</span>)
+        {
+            <a href="@1@netstandard/A.html#225942ed7b7a3252" class="k">var</a> <span id="r20 rd" class="r20 r">nestedCount</span> = 0;
+            <b>return</b> <a href="#daa5c59c8796213d" class="i method">GetExpressionLength</a>(<span class="r17 r">input</span>, <span class="r18 r">startIndex</span>, <span class="s">&#39;&quot;&#39;</span>, <span class="s">&#39;&quot;&#39;</span>, <b>false</b>, <b>ref</b> <span class="r20 r">nestedCount</span>, <b>out</b> <span class="r19 r">length</span>);
+        }
+ 
+        <span class="c">// quoted-pair = &quot;\&quot; CHAR</span>
+        <span class="c">// CHAR = &lt;any US-ASCII character (octets 0 - 127)&gt;</span>
+        <b>internal static</b> <a href="HttpParseResult.cs.html#78a37fa38e6cfc9c" class="t t">HttpParseResult</a> <a id="eab18eacb5a5219f" href="../R/eab18eacb5a5219f.html" target="n" data-glyph="74,1" class="i method">GetQuotedPairLength</a>(<a href="StringSegment.cs.html#e646f02038a27e62" class="t t">StringSegment</a> <span id="r21 rd" class="r21 r">input</span>, <b>int</b> <span id="r22 rd" class="r22 r">startIndex</span>, <b>out int</b> <span id="r23 rd" class="r23 r">length</span>)
+        {
+            <a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#1f51ef07e80c9b68" class="i method">Requires</a>(<span class="r21 r">input</span> != <b>null</b>);
+            <a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#1f51ef07e80c9b68" class="i method">Requires</a>((<span class="r22 r">startIndex</span> &gt;= 0) &amp;&amp; (<span class="r22 r">startIndex</span> &lt; <span class="r21 r">input</span>.<a href="StringSegment.cs.html#fc26bc5e8c68c667" class="i property">Length</a>));
+            <a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#c8c75671e9ed971a" class="i method">Ensures</a>((<a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#f9ca2063dddc41bf" class="i method">ValueAtReturn</a>(<b>out</b> <span class="r23 r">length</span>) &gt;= 0) &amp;&amp;
+                (<a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#f9ca2063dddc41bf" class="i method">ValueAtReturn</a>(<b>out</b> <span class="r23 r">length</span>) &lt;= (<span class="r21 r">input</span>.<a href="StringSegment.cs.html#fc26bc5e8c68c667" class="i property">Length</a> - <span class="r22 r">startIndex</span>)));
+ 
+            <span class="r23 r">length</span> = 0;
+ 
+            <b>if</b> (<span class="r21 r">input</span><a href="StringSegment.cs.html#082fd93c33d8dcf9">[</a><span class="r22 r">startIndex</span>] != <span class="s">&#39;\\&#39;</span>)
+            {
+                <b>return</b> <a href="HttpParseResult.cs.html#78a37fa38e6cfc9c" class="t t">HttpParseResult</a>.<a href="HttpParseResult.cs.html#66737b5e126c820c" class="i field">NotParsed</a>;
+            }
+ 
+            <span class="c">// Quoted-char has 2 characters. Check whether there are 2 chars left (&#39;\&#39; + char)</span>
+            <span class="c">// If so, check whether the character is in the range 0-127. If not, it&#39;s an invalid value.</span>
+            <b>if</b> ((<span class="r22 r">startIndex</span> + 2 &gt; <span class="r21 r">input</span>.<a href="StringSegment.cs.html#fc26bc5e8c68c667" class="i property">Length</a>) || (<span class="r21 r">input</span><a href="StringSegment.cs.html#082fd93c33d8dcf9">[</a><span class="r22 r">startIndex</span> + 1] &gt; 127))
+            {
+                <b>return</b> <a href="HttpParseResult.cs.html#78a37fa38e6cfc9c" class="t t">HttpParseResult</a>.<a href="HttpParseResult.cs.html#19d12c7ff321e2a5" class="i field">InvalidFormat</a>;
+            }
+ 
+            <span class="c">// We don&#39;t care what the char next to &#39;\&#39; is.</span>
+            <span class="r23 r">length</span> = 2;
+            <b>return</b> <a href="HttpParseResult.cs.html#78a37fa38e6cfc9c" class="t t">HttpParseResult</a>.<a href="HttpParseResult.cs.html#e7da688eb9a8e5ad" class="i field">Parsed</a>;
+        }
+ 
+        <span class="c">// Try the various date formats in the order listed above.</span>
+        <span class="c">// We should accept a wide verity of common formats, but only output RFC 1123 style dates.</span>
+        <b>internal static bool</b> <a id="a32cda39c959367d" href="../R/a32cda39c959367d.html" target="n" data-glyph="74,1" class="i method">TryStringToDate</a>(<a href="StringSegment.cs.html#e646f02038a27e62" class="t t">StringSegment</a> <span id="r24 rd" class="r24 r">input</span>, <b>out</b> <a href="@1@netstandard/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a> <span id="r25 rd" class="r25 r">result</span>) =&gt;
+            <a href="@1@netstandard/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@1@netstandard/A.html#36b67f8b5c52d36c" class="i method">TryParseExact</a>(<span class="r24 r">input</span>.<a href="StringSegment.cs.html#aa8272fa8c62ce4e" class="i method">ToString</a>(), <a href="#b94c782cbe35c2d8" class="i field">DateFormats</a>, <a href="@1@netstandard/A.html#a1da93c5a4a8c4e3" class="t t">DateTimeFormatInfo</a>.<a href="@1@netstandard/A.html#8ced51e92df8961c" class="i property">InvariantInfo</a>,
+                <a href="@1@netstandard/A.html#0052cfe5031c0372" class="t t">DateTimeStyles</a>.<a href="@1@netstandard/A.html#41bf60a621650598" class="i field">AllowWhiteSpaces</a> | <a href="@1@netstandard/A.html#0052cfe5031c0372" class="t t">DateTimeStyles</a>.<a href="@1@netstandard/A.html#8fdefe28260ae6eb" class="i field">AssumeUniversal</a>, <b>out</b> <span class="r25 r">result</span>);
+ 
+        <span class="c">// TEXT = &lt;any OCTET except CTLs, but including LWS&gt;</span>
+        <span class="c">// LWS = [CRLF] 1*( SP | HT )</span>
+        <span class="c">// CTL = &lt;any US-ASCII control character (octets 0 - 31) and DEL (127)&gt;</span>
+        <span class="c">//</span>
+        <span class="c">// Since we don&#39;t really care about the content of a quoted string or comment, we&#39;re more tolerant and</span>
+        <span class="c">// allow these characters. We only want to find the delimiters (&#39;&quot;&#39; for quoted string and &#39;(&#39;, &#39;)&#39; for comment).</span>
+        <span class="c">//</span>
+        <span class="c">// &#39;nestedCount&#39;: Comments can be nested. We allow a depth of up to 5 nested comments, i.e. something like</span>
+        <span class="c">// &quot;(((((comment)))))&quot;. If we wouldn&#39;t define a limit an attacker could send a comment with hundreds of nested</span>
+        <span class="c">// comments, resulting in a stack overflow exception. In addition having more than 1 nested comment (if any)</span>
+        <span class="c">// is unusual.</span>
+        <b>private static</b> <a href="HttpParseResult.cs.html#78a37fa38e6cfc9c" class="t t">HttpParseResult</a> <a id="daa5c59c8796213d" href="../R/daa5c59c8796213d.html" target="n" data-glyph="76,1" class="i method">GetExpressionLength</a>(
+            <a href="StringSegment.cs.html#e646f02038a27e62" class="t t">StringSegment</a> <span id="r26 rd" class="r26 r">input</span>,
+            <b>int</b> <span id="r27 rd" class="r27 r">startIndex</span>,
+            <b>char</b> <span id="r28 rd" class="r28 r">openChar</span>,
+            <b>char</b> <span id="r29 rd" class="r29 r">closeChar</span>,
+            <b>bool</b> <span id="r30 rd" class="r30 r">supportsNesting</span>,
+            <b>ref int</b> <span id="r31 rd" class="r31 r">nestedCount</span>,
+            <b>out int</b> <span id="r32 rd" class="r32 r">length</span>)
+        {
+            <a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#1f51ef07e80c9b68" class="i method">Requires</a>(<span class="r26 r">input</span> != <b>null</b>);
+            <a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#1f51ef07e80c9b68" class="i method">Requires</a>((<span class="r27 r">startIndex</span> &gt;= 0) &amp;&amp; (<span class="r27 r">startIndex</span> &lt; <span class="r26 r">input</span>.<a href="StringSegment.cs.html#fc26bc5e8c68c667" class="i property">Length</a>));
+            <a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#c8c75671e9ed971a" class="i method">Ensures</a>((<a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#a23ea8823a7fe41c" class="i method">Result</a>&lt;<a href="HttpParseResult.cs.html#78a37fa38e6cfc9c" class="t t">HttpParseResult</a>&gt;() != <a href="HttpParseResult.cs.html#78a37fa38e6cfc9c" class="t t">HttpParseResult</a>.<a href="HttpParseResult.cs.html#e7da688eb9a8e5ad" class="i field">Parsed</a>) ||
+                (<a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#f9ca2063dddc41bf" class="i method">ValueAtReturn</a>&lt;<b>int</b>&gt;(<b>out</b> <span class="r32 r">length</span>) &gt; 0));
+ 
+            <span class="r32 r">length</span> = 0;
+ 
+            <b>if</b> (<span class="r26 r">input</span><a href="StringSegment.cs.html#082fd93c33d8dcf9">[</a><span class="r27 r">startIndex</span>] != <span class="r28 r">openChar</span>)
+            {
+                <b>return</b> <a href="HttpParseResult.cs.html#78a37fa38e6cfc9c" class="t t">HttpParseResult</a>.<a href="HttpParseResult.cs.html#66737b5e126c820c" class="i field">NotParsed</a>;
+            }
+ 
+            <a href="@1@netstandard/A.html#225942ed7b7a3252" class="k">var</a> <span id="r33 rd" class="r33 r">current</span> = <span class="r27 r">startIndex</span> + 1; <span class="c">// Start parsing with the character next to the first open-char</span>
+            <b>while</b> (<span class="r33 r">current</span> &lt; <span class="r26 r">input</span>.<a href="StringSegment.cs.html#fc26bc5e8c68c667" class="i property">Length</a>)
+            {
+                <span class="c">// Only check whether we have a quoted char, if we have at least 3 characters left to read (i.e.</span>
+                <span class="c">// quoted char + closing char). Otherwise the closing char may be considered part of the quoted char.</span>
+                <a href="@1@netstandard/A.html#225942ed7b7a3252" class="k">var</a> <span id="r34 rd" class="r34 r">quotedPairLength</span> = 0;
+                <b>if</b> ((<span class="r33 r">current</span> + 2 &lt; <span class="r26 r">input</span>.<a href="StringSegment.cs.html#fc26bc5e8c68c667" class="i property">Length</a>) &amp;&amp;
+                    (<a href="#eab18eacb5a5219f" class="i method">GetQuotedPairLength</a>(<span class="r26 r">input</span>, <span class="r33 r">current</span>, <b>out</b> <span class="r34 r">quotedPairLength</span>) == <a href="HttpParseResult.cs.html#78a37fa38e6cfc9c" class="t t">HttpParseResult</a>.<a href="HttpParseResult.cs.html#e7da688eb9a8e5ad" class="i field">Parsed</a>))
+                {
+                    <span class="c">// We ignore invalid quoted-pairs. Invalid quoted-pairs may mean that it looked like a quoted pair,</span>
+                    <span class="c">// but we actually have a quoted-string: e.g. &quot;\Ã¼&quot; (&#39;\&#39; followed by a char &gt;127 - quoted-pair only</span>
+                    <span class="c">// allows ASCII chars after &#39;\&#39;; qdtext allows both &#39;\&#39; and &gt;127 chars).</span>
+                    <span class="r33 r">current</span> = <span class="r33 r">current</span> + <span class="r34 r">quotedPairLength</span>;
+                    <b>continue</b>;
+                }
+ 
+                <span class="c">// If we support nested expressions and we find an open-char, then parse the nested expressions.</span>
+                <b>if</b> (<span class="r30 r">supportsNesting</span> &amp;&amp; (<span class="r26 r">input</span><a href="StringSegment.cs.html#082fd93c33d8dcf9">[</a><span class="r33 r">current</span>] == <span class="r28 r">openChar</span>))
+                {
+                    <span class="r31 r">nestedCount</span>++;
+                    <b>try</b>
+                    {
+                        <span class="c">// Check if we exceeded the number of nested calls.</span>
+                        <b>if</b> (<span class="r31 r">nestedCount</span> &gt; <a href="#bbf77f78f6a84f85" class="i field">MaxNestedCount</a>)
+                        {
+                            <b>return</b> <a href="HttpParseResult.cs.html#78a37fa38e6cfc9c" class="t t">HttpParseResult</a>.<a href="HttpParseResult.cs.html#19d12c7ff321e2a5" class="i field">InvalidFormat</a>;
+                        }
+ 
+                        <a href="@1@netstandard/A.html#225942ed7b7a3252" class="k">var</a> <span id="r35 rd" class="r35 r">nestedLength</span> = 0;
+                        <a href="HttpParseResult.cs.html#78a37fa38e6cfc9c" class="t t">HttpParseResult</a> <span id="r36 rd" class="r36 r">nestedResult</span> = <a href="#daa5c59c8796213d" class="i method">GetExpressionLength</a>(<span class="r26 r">input</span>, <span class="r33 r">current</span>, <span class="r28 r">openChar</span>, <span class="r29 r">closeChar</span>,
+                            <span class="r30 r">supportsNesting</span>, <b>ref</b> <span class="r31 r">nestedCount</span>, <b>out</b> <span class="r35 r">nestedLength</span>);
+ 
+                        <b>switch</b> (<span class="r36 r">nestedResult</span>)
+                        {
+                            <b>case</b> <a href="HttpParseResult.cs.html#78a37fa38e6cfc9c" class="t t">HttpParseResult</a>.<a href="HttpParseResult.cs.html#e7da688eb9a8e5ad" class="i field">Parsed</a>:
+                                <span class="r33 r">current</span> += <span class="r35 r">nestedLength</span>; <span class="c">// add the length of the nested expression and continue.</span>
+                                <b>break</b>;
+ 
+                            <b>case</b> <a href="HttpParseResult.cs.html#78a37fa38e6cfc9c" class="t t">HttpParseResult</a>.<a href="HttpParseResult.cs.html#66737b5e126c820c" class="i field">NotParsed</a>:
+                                <a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#e1f5696175c73b50" class="i method">Assert</a>(<b>false</b>, <span class="s">&quot;&#39;NotParsed&#39; is unexpected: We started nested expression &quot;</span> +
+                                    <span class="s">&quot;parsing, because we found the open-char. So either it&#39;s a valid nested &quot;</span> +
+                                    <span class="s">&quot;expression or it has invalid format.&quot;</span>);
+                                <b>break</b>;
+ 
+                            <b>case</b> <a href="HttpParseResult.cs.html#78a37fa38e6cfc9c" class="t t">HttpParseResult</a>.<a href="HttpParseResult.cs.html#19d12c7ff321e2a5" class="i field">InvalidFormat</a>:
+                                <span class="c">// If the nested expression is invalid, we can&#39;t continue, so we fail with invalid format.</span>
+                                <b>return</b> <a href="HttpParseResult.cs.html#78a37fa38e6cfc9c" class="t t">HttpParseResult</a>.<a href="HttpParseResult.cs.html#19d12c7ff321e2a5" class="i field">InvalidFormat</a>;
+ 
+                            <b>default</b>:
+                                <a href="@1@netstandard/A.html#c575dbe300e57438" class="t t">Contract</a>.<a href="@1@netstandard/A.html#e1f5696175c73b50" class="i method">Assert</a>(<b>false</b>, <span class="s">&quot;Unknown enum result: &quot;</span> + <span class="r36 r">nestedResult</span>);
+                                <b>break</b>;
+                        }
+                    }
+                    <b>finally</b>
+                    {
+                        <span class="r31 r">nestedCount</span>--;
+                    }
+                }
+ 
+                <b>if</b> (<span class="r26 r">input</span><a href="StringSegment.cs.html#082fd93c33d8dcf9">[</a><span class="r33 r">current</span>] == <span class="r29 r">closeChar</span>)
+                {
+                    <span class="r32 r">length</span> = <span class="r33 r">current</span> - <span class="r27 r">startIndex</span> + 1;
+                    <b>return</b> <a href="HttpParseResult.cs.html#78a37fa38e6cfc9c" class="t t">HttpParseResult</a>.<a href="HttpParseResult.cs.html#e7da688eb9a8e5ad" class="i field">Parsed</a>;
+                }
+                <span class="r33 r">current</span>++;
+            }
+ 
+            <span class="c">// We didn&#39;t see the final quote, therefore we have an invalid expression string.</span>
+            <b>return</b> <a href="HttpParseResult.cs.html#78a37fa38e6cfc9c" class="t t">HttpParseResult</a>.<a href="HttpParseResult.cs.html#19d12c7ff321e2a5" class="i field">InvalidFormat</a>;
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

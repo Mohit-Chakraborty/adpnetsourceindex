@@ -1,0 +1,494 @@
+﻿<!DOCTYPE html>
+<html><head><title>UrlExpressionVisitor.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(485);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Rest.ClientRuntime.Azure/OData/UrlExpressionVisitor.cs" target="_top">OData\UrlExpressionVisitor.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Rest.ClientRuntime.Azure" target="_top">..\..\ClientRuntime.Azure\ClientRuntime.Azure\Microsoft.Rest.ClientRuntime.Azure.csproj</a> (Microsoft.Rest.ClientRuntime.Azure)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Globalization</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>.<span class="i n">Expressions</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Reflection</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Xml</span>;
+<b>using</b> <span class="i">Newtonsoft</span>.<span class="i">Json</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Rest</span>.<span class="i n">Azure</span>.<span class="i n">OData</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Expression visitor class that generates OData style $filter parameter.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>public class</b> <a id="e80db47e998a1628" href="../R/e80db47e998a1628.html" target="n" data-glyph="0,0" class="t t">UrlExpressionVisitor</a> : <a href="@0@System.Core/A.html#f0615a823a9efe36" class="t t">ExpressionVisitor</a>
+    {
+        <b>private const string</b> <a id="8f8aeba57c58ac14" href="../R/8f8aeba57c58ac14.html" target="n" data-glyph="10,1" class="i field">DefaultDateTimeFormat</a> = <span class="s">&quot;yyyy-MM-ddTHH:mm:ssZ&quot;</span>;
+        <b>private const string</b> <a id="5d2289e78bafe878" href="../R/5d2289e78bafe878.html" target="n" data-glyph="10,1" class="i field">PropertiesNode</a> = <span class="s">&quot;properties&quot;</span>;
+        <b>private readonly</b> <a href="@0@System/A.html#c5371bef044c6ab6" class="t t">Stack</a>&lt;<a href="@0@mscorlib/A.html#adf60ee46ebd299f" class="t t">StringBuilder</a>&gt; <a id="c117d328c2a4cdf8" href="../R/c117d328c2a4cdf8.html" target="n" data-glyph="46,1" class="i field">_fullExpressionStack</a> = <b>new</b> <a href="@0@System/A.html#692a18e31afb7ef9" class="t constructor">Stack</a>&lt;<a href="@0@mscorlib/A.html#adf60ee46ebd299f" class="t t">StringBuilder</a>&gt;();
+        <b>private</b> <a href="@0@mscorlib/A.html#adf60ee46ebd299f" class="t t">StringBuilder</a> <a id="dd7eead004f426d5" href="../R/dd7eead004f426d5.html" target="n" data-glyph="46,1" class="i field">_currentExpressionString</a> = <b>new</b> <a href="@0@mscorlib/A.html#6e631639c1e2746b" class="t constructor">StringBuilder</a>();
+        <b>private bool</b> <a id="eea083ed283d270c" href="../R/eea083ed283d270c.html" target="n" data-glyph="46,1" class="i field">_currentExpressionContainsNull</a>;
+        <b>private</b> <a href="@0@mscorlib/A.html#f3f0ea5f89a8f162" class="t t">PropertyInfo</a> <a id="133e2b69d9b080e5" href="../R/133e2b69d9b080e5.html" target="n" data-glyph="46,1" class="i field">_currentProperty</a>;
+        <b>private readonly</b> <a href="@0@System.Core/A.html#39a9b098482b765d" class="t t">Expression</a> <a id="6fbdd75c7b7011ef" href="../R/6fbdd75c7b7011ef.html" target="n" data-glyph="46,1" class="i field">_baseExpression</a>;
+        <b>private readonly bool</b> <a id="ea01d5c71612bcb3" href="../R/ea01d5c71612bcb3.html" target="n" data-glyph="46,1" class="i field">_skipNullFilterParameters</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Initializes a new instance of UrlExpressionVisitor. Skips null parameters.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">baseExpression</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Base expression.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="6e814c278eaf8f95" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">UrlExpressionVisitor</a>(<a href="@0@System.Core/A.html#39a9b098482b765d" class="t t">Expression</a> <span id="r0 rd" class="r0 r">baseExpression</span>) : <a href="#f311cf0f6fee1628" class="k">this</a>(<span class="r0 r">baseExpression</span>, <b>true</b>)
+        { }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Initializes a new instance of UrlExpressionVisitor.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">baseExpression</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Base expression.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">skipNullFilterParameters</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Value indicating whether null values should be skipped.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="f311cf0f6fee1628" href="../R/f311cf0f6fee1628.html" target="n" data-glyph="72,1" class="t constructor">UrlExpressionVisitor</a>(<a href="@0@System.Core/A.html#39a9b098482b765d" class="t t">Expression</a> <span id="r1 rd" class="r1 r">baseExpression</span>, <b>bool</b> <span id="r2 rd" class="r2 r">skipNullFilterParameters</span>)
+        {
+            <a href="#6fbdd75c7b7011ef" class="i field">_baseExpression</a> = <span class="r1 r">baseExpression</span>;
+            <a href="#ea01d5c71612bcb3" class="i field">_skipNullFilterParameters</a> = <span class="r2 r">skipNullFilterParameters</span>;
+            
+            <span class="c">// For binary expression add current string to a stack</span>
+            <span class="c">// so that if the expression contains null it can be cleared</span>
+            <a href="#c117d328c2a4cdf8" class="i field">_fullExpressionStack</a>.<a href="@0@System/A.html#83b1a3864aaa7198" class="i method">Push</a>(<a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>);
+            <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a> = <b>new</b> <a href="@0@mscorlib/A.html#6e631639c1e2746b" class="t constructor">StringBuilder</a>();
+            <a href="#eea083ed283d270c" class="i field">_currentExpressionContainsNull</a> = <b>false</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Visits binary expression (e.g. ==, </span><span class="c">&amp;amp;</span><span class="c">&amp;amp;</span><span class="c">, &gt;, etc).</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">node</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Node to visit.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Original node.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>protected override</b> <a href="@0@System.Core/A.html#39a9b098482b765d" class="t t">Expression</a> <a id="29069210ea671e0e" href="../R/29069210ea671e0e.html" target="n" data-glyph="75,1" class="i method">VisitBinary</a>(<a href="@0@System.Core/A.html#f1f4bde6b61efaa0" class="t t">BinaryExpression</a> <span id="r3 rd" class="r3 r">node</span>)
+        {
+            <b>if</b> (<span class="r3 r">node</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>(<span class="s">&quot;node&quot;</span>);
+            }
+ 
+            <span class="c">// For binary expression add current string to a stack</span>
+            <span class="c">// so that if the expression contains null it can be cleared</span>
+            <a href="#c117d328c2a4cdf8" class="i field">_fullExpressionStack</a>.<a href="@0@System/A.html#83b1a3864aaa7198" class="i method">Push</a>(<a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>);
+            <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a> = <b>new</b> <a href="@0@mscorlib/A.html#6e631639c1e2746b" class="t constructor">StringBuilder</a>();
+            <a href="#eea083ed283d270c" class="i field">_currentExpressionContainsNull</a> = <b>false</b>;
+ 
+            <a href="#e80db47e998a1628" class="k">this</a>.<a href="@0@System.Core/A.html#fd021c4965d900f0" class="i method">Visit</a>(<span class="r3 r">node</span>.<a href="@0@System.Core/A.html#ff5aec70228b5487" class="i property">Left</a>);
+            <a href="#24b205bf9d38c66f" class="i method">CloseUnaryBooleanOperator</a>(<span class="r3 r">node</span>.<a href="@0@System.Core/A.html#70a7ede4faadee85" class="i property">NodeType</a>);
+            <a href="@0@mscorlib/A.html#adf60ee46ebd299f" class="k">var</a> <span id="r4 rd" class="r4 r">leftExpressionString</span> = <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>;
+            <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a> = <b>new</b> <a href="@0@mscorlib/A.html#6e631639c1e2746b" class="t constructor">StringBuilder</a>();
+ 
+            <a href="#e80db47e998a1628" class="k">this</a>.<a href="@0@System.Core/A.html#fd021c4965d900f0" class="i method">Visit</a>(<span class="r3 r">node</span>.<a href="@0@System.Core/A.html#d026cf5bbee85bdc" class="i property">Right</a>);
+            <a href="#24b205bf9d38c66f" class="i method">CloseUnaryBooleanOperator</a>(<span class="r3 r">node</span>.<a href="@0@System.Core/A.html#70a7ede4faadee85" class="i property">NodeType</a>);
+            <a href="@0@mscorlib/A.html#adf60ee46ebd299f" class="k">var</a> <span id="r5 rd" class="r5 r">rightExpressionString</span> = <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>;
+            <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a> = <b>new</b> <a href="@0@mscorlib/A.html#6e631639c1e2746b" class="t constructor">StringBuilder</a>();
+ 
+            <b>if</b> (<span class="r4 r">leftExpressionString</span>.<a href="@0@mscorlib/A.html#7d7729bd88adac53" class="i property">Length</a> &gt; 0)
+            {
+                <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#7685cb28f3648166" class="i method">Append</a>(<span class="r4 r">leftExpressionString</span>);
+            }
+            <b>if</b> (<span class="r4 r">leftExpressionString</span>.<a href="@0@mscorlib/A.html#7d7729bd88adac53" class="i property">Length</a> &gt; 0 &amp;&amp; <span class="r5 r">rightExpressionString</span>.<a href="@0@mscorlib/A.html#7d7729bd88adac53" class="i property">Length</a> &gt; 0)
+            {
+                <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<span class="s">&quot; &quot;</span> + <a href="#6263b07714154ca1" class="i method">GetODataOperatorName</a>(<span class="r3 r">node</span>.<a href="@0@System.Core/A.html#70a7ede4faadee85" class="i property">NodeType</a>) + <span class="s">&quot; &quot;</span>);
+            }
+            <b>if</b> (<span class="r5 r">rightExpressionString</span>.<a href="@0@mscorlib/A.html#7d7729bd88adac53" class="i property">Length</a> &gt; 0)
+            {
+                <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#7685cb28f3648166" class="i method">Append</a>(<span class="r5 r">rightExpressionString</span>);
+            }
+ 
+            <span class="c">// Merge expression back into the top expression from the stack</span>
+            <a href="#4bb42120ae6961cf" class="i method">MergeExpressionsWithStack</a>();
+            <a href="#eea083ed283d270c" class="i field">_currentExpressionContainsNull</a> = <b>false</b>;
+            <a href="#133e2b69d9b080e5" class="i field">_currentProperty</a> = <b>null</b>;
+ 
+            <b>return</b> <span class="r3 r">node</span>;
+        }
+ 
+        <b>private void</b> <a id="4bb42120ae6961cf" href="../R/4bb42120ae6961cf.html" target="n" data-glyph="76,1" class="i method">MergeExpressionsWithStack</a>()
+        {
+            <b>if</b> (<a href="#c117d328c2a4cdf8" class="i field">_fullExpressionStack</a>.<a href="@0@System/A.html#47350acaee6be7b6" class="i property">Count</a> != 0)
+            {
+                <a href="@0@mscorlib/A.html#adf60ee46ebd299f" class="k">var</a> <span id="r6 rd" class="r6 r">lastExpression</span> = <a href="#c117d328c2a4cdf8" class="i field">_fullExpressionStack</a>.<a href="@0@System/A.html#fd86d7436e55c84b" class="i method">Pop</a>();
+                <b>if</b> (!<a href="#eea083ed283d270c" class="i field">_currentExpressionContainsNull</a> || !<a href="#ea01d5c71612bcb3" class="i field">_skipNullFilterParameters</a>)
+                {
+                    <span class="r6 r">lastExpression</span>.<a href="@0@mscorlib/A.html#7685cb28f3648166" class="i method">Append</a>(<a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>);
+                }
+                <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a> = <span class="r6 r">lastExpression</span>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Visits unary expression (e.g. !foo).</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">node</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Node to visit.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Original node.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>protected override</b> <a href="@0@System.Core/A.html#39a9b098482b765d" class="t t">Expression</a> <a id="f05e434260ad1889" href="../R/f05e434260ad1889.html" target="n" data-glyph="75,1" class="i method">VisitUnary</a>(<a href="@0@System.Core/A.html#249779eee7261f1f" class="t t">UnaryExpression</a> <span id="r7 rd" class="r7 r">node</span>)
+        {
+            <b>if</b> (<span class="r7 r">node</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>(<span class="s">&quot;node&quot;</span>);
+            }
+            <b>if</b> (<span class="r7 r">node</span>.<a href="@0@System.Core/A.html#92188889c72f3b36" class="i property">NodeType</a> == <a href="@0@System.Core/A.html#2b72e9fccb3368b2" class="t t">ExpressionType</a>.<a href="@0@System.Core/A.html#a0947c23e079614f" class="i field">Not</a>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#3d3c2c03118be4f8" class="t constructor">NotSupportedException</a>(
+                    <span class="s">&quot;Unary expressions are not supported. Please use binary expressions (e.g. Property == false) instead.&quot;</span>);
+            }
+            <b>else</b>
+            {
+                <b>return</b> <a href="@0@System.Core/A.html#f0615a823a9efe36" class="k">base</a>.<a href="@0@System.Core/A.html#3443abc0a420ded3" class="i method">VisitUnary</a>(<span class="r7 r">node</span>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Visits conditional expression (e.g. foo == true ? bar : fee). Throws NotSupportedException.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">node</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Node to visit.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Throws NotSupportedException.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>protected override</b> <a href="@0@System.Core/A.html#39a9b098482b765d" class="t t">Expression</a> <a id="b272da1bd98f4166" href="../R/b272da1bd98f4166.html" target="n" data-glyph="75,1" class="i method">VisitConditional</a>(<a href="@0@System.Core/A.html#df1fc73732cbaf7c" class="t t">ConditionalExpression</a> <span id="r8 rd" class="r8 r">node</span>)
+        {
+            <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#3d3c2c03118be4f8" class="t constructor">NotSupportedException</a>(
+                    <span class="s">&quot;Conditional sub-expressions are not supported.&quot;</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Visits new object expression (e.g. new DateTime()).</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">node</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Node to visit.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Original node.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>protected override</b> <a href="@0@System.Core/A.html#39a9b098482b765d" class="t t">Expression</a> <a id="c75aa4427fa541a7" href="../R/c75aa4427fa541a7.html" target="n" data-glyph="75,1" class="i method">VisitNew</a>(<a href="@0@System.Core/A.html#1d8501cdde70b9f4" class="t t">NewExpression</a> <span id="r9 rd" class="r9 r">node</span>)
+        {
+            <b>if</b> (<span class="r9 r">node</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>(<span class="s">&quot;node&quot;</span>);
+            }
+            <a href="@0@mscorlib/A.html#d9262ceecc1719ab" class="k">var</a> <span id="r10 rd" class="r10 r">newObject</span> = <span class="r9 r">node</span>.<a href="@0@System.Core/A.html#47ed63eb8492234c" class="i property">Constructor</a>.<a href="@0@mscorlib/A.html#2c515982c196f40a" class="i method">Invoke</a>(<span class="r9 r">node</span>.<a href="@0@System.Core/A.html#e3ac11fe8bc1fa0c" class="i property">Arguments</a>.<a href="@0@System.Core/A.html#5c652c53e80df013" class="i method">Select</a>(<span id="r11 rd" class="r11 r">a</span> =&gt; ((<a href="@0@System.Core/A.html#c3ac4c4d7e847ad9" class="t t">ConstantExpression</a>)<span class="r11 r">a</span>).<a href="@0@System.Core/A.html#d18072aa45164344" class="i property">Value</a>).<a href="@0@System.Core/A.html#783a052330e7d48d" class="i method">ToArray</a>());
+            <a href="#a0fd11e112e85d35" class="i method">PrintConstant</a>(<span class="r10 r">newObject</span>);
+ 
+            <b>return</b> <span class="r9 r">node</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Visits constants (e.g. &#39;a&#39; or 123).</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">node</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Node to visit.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Original node.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>protected override</b> <a href="@0@System.Core/A.html#39a9b098482b765d" class="t t">Expression</a> <a id="88ef426f6127326d" href="../R/88ef426f6127326d.html" target="n" data-glyph="75,1" class="i method">VisitConstant</a>(<a href="@0@System.Core/A.html#c3ac4c4d7e847ad9" class="t t">ConstantExpression</a> <span id="r12 rd" class="r12 r">node</span>)
+        {
+            <b>if</b> (<span class="r12 r">node</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>(<span class="s">&quot;node&quot;</span>);
+            }
+            <a href="#a0fd11e112e85d35" class="i method">PrintConstant</a>(<span class="r12 r">node</span>.<a href="@0@System.Core/A.html#d18072aa45164344" class="i property">Value</a>);
+            <b>return</b> <span class="r12 r">node</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Visits object members (e.g. p.Foo or dateTime.Hour).</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">node</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Node to visit.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Original node.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>protected override</b> <a href="@0@System.Core/A.html#39a9b098482b765d" class="t t">Expression</a> <a id="7d8a4aac27b2e708" href="../R/7d8a4aac27b2e708.html" target="n" data-glyph="75,1" class="i method">VisitMember</a>(<a href="@0@System.Core/A.html#8760a057e74485a8" class="t t">MemberExpression</a> <span id="r13 rd" class="r13 r">node</span>)
+        {
+            <b>if</b> (<span class="r13 r">node</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>(<span class="s">&quot;node&quot;</span>);
+            }
+            <span class="c">// Assumes that left side expression parameters are properties like p.Foo</span>
+            <b>if</b> (<a href="#7d860650a06f1215" class="i method">ShouldBuildExpression</a>(<span class="r13 r">node</span>))
+            {
+                <b>if</b> (<span class="r13 r">node</span>.<a href="@0@System.Core/A.html#68eee84426991159" class="i property">Expression</a>.<a href="@0@System.Core/A.html#70a7ede4faadee85" class="i property">NodeType</a> == <a href="@0@System.Core/A.html#2b72e9fccb3368b2" class="t t">ExpressionType</a>.<a href="@0@System.Core/A.html#85c31a1a1d7794d0" class="i field">Parameter</a>)
+                {
+                    <a href="@0@mscorlib/A.html#f3f0ea5f89a8f162" class="k">var</a> <span id="r14 rd" class="r14 r">nodeMemberProperty</span> = <span class="r13 r">node</span>.<a href="@0@System.Core/A.html#464f3eb0ff158aae" class="i property">Member</a> <b>as</b> <a href="@0@mscorlib/A.html#f3f0ea5f89a8f162" class="t t">PropertyInfo</a>;
+                    <a href="#249e731628203623" class="i method">PrintProperty</a>(<span class="r14 r">nodeMemberProperty</span>);
+                }
+                <b>else</b>
+                {
+                    <a href="#e80db47e998a1628" class="k">this</a>.<a href="@0@System.Core/A.html#fd021c4965d900f0" class="i method">Visit</a>(<span class="r13 r">node</span>.<a href="@0@System.Core/A.html#68eee84426991159" class="i property">Expression</a>);
+                    <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<span class="s">&quot;/&quot;</span>);
+ 
+                    <a href="@0@mscorlib/A.html#f3f0ea5f89a8f162" class="k">var</a> <span id="r15 rd" class="r15 r">nodeMemberProperty</span> = <span class="r13 r">node</span>.<a href="@0@System.Core/A.html#464f3eb0ff158aae" class="i property">Member</a> <b>as</b> <a href="@0@mscorlib/A.html#f3f0ea5f89a8f162" class="t t">PropertyInfo</a>;
+                    <a href="#249e731628203623" class="i method">PrintProperty</a>(<span class="r15 r">nodeMemberProperty</span>);
+                }
+            }
+            <b>else</b>
+            {
+                <span class="c">// This fork is executed when right side of the expression is not a constant</span>
+ 
+                <b>if</b> (!(<span class="r13 r">node</span>.<a href="@0@System.Core/A.html#464f3eb0ff158aae" class="i property">Member</a> <b>is</b> <a href="@0@mscorlib/A.html#f3f0ea5f89a8f162" class="t t">PropertyInfo</a>) &amp;&amp; !(<span class="r13 r">node</span>.<a href="@0@System.Core/A.html#464f3eb0ff158aae" class="i property">Member</a> <b>is</b> <a href="@0@mscorlib/A.html#329d417f4b15c86c" class="t t">FieldInfo</a>))
+                {
+                    <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#3d3c2c03118be4f8" class="t constructor">NotSupportedException</a>(<span class="s">&quot;Not supported expression: &quot;</span> + <span class="r13 r">node</span>.<a href="@0@System.Core/A.html#464f3eb0ff158aae" class="i property">Member</a>.<a href="@0@mscorlib/A.html#3eb1391de297c1a8" class="i property">DeclaringType</a>);
+                }
+                <a href="#a0fd11e112e85d35" class="i method">PrintConstant</a>(<a href="@0@System.Core/A.html#39a9b098482b765d" class="t t">Expression</a>.<a href="@0@System.Core/A.html#a6707495339f7920" class="i method">Lambda</a>(<span class="r13 r">node</span>).<a href="@0@System.Core/A.html#b6f33ba738236c8d" class="i method">Compile</a>().<a href="@0@mscorlib/A.html#694e2fd4786195a1" class="i method">DynamicInvoke</a>());
+            }
+ 
+            <b>return</b> <span class="r13 r">node</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Visits object property.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r16 r">property</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Property to print.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="249e731628203623" href="../R/249e731628203623.html" target="n" data-glyph="76,1" class="i method">PrintProperty</a>(<a href="@0@mscorlib/A.html#f3f0ea5f89a8f162" class="t t">PropertyInfo</a> <span id="r16 rd" class="r16 r">property</span>)
+        {
+            <b>if</b> (<span class="r16 r">property</span> != <b>null</b>)
+            {
+                <a href="#133e2b69d9b080e5" class="i field">_currentProperty</a> = <span class="r16 r">property</span>;
+                <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<a href="#786faba96a7e69af" class="i method">GetPropertyName</a>(<span class="r16 r">property</span>));
+            }
+            <b>else</b>
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#3d3c2c03118be4f8" class="t constructor">NotSupportedException</a>(<span class="s">&quot;Only properties are supported as parameters.&quot;</span>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Visits method calls including Contains, StartsWith, and EndWith. </span>
+        <span class="c">///</span><span class="c"> Methods that are not supported will throw an exception.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r17 r">node</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Node to visit.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Original node.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>protected override</b> <a href="@0@System.Core/A.html#39a9b098482b765d" class="t t">Expression</a> <a id="5ee9e87b35bea3a7" href="../R/5ee9e87b35bea3a7.html" target="n" data-glyph="75,1" class="i method">VisitMethodCall</a>(<a href="@0@System.Core/A.html#9769c0ae4c630fa2" class="t t">MethodCallExpression</a> <span id="r17 rd" class="r17 r">node</span>)
+        {
+            <b>if</b> (<span class="r17 r">node</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>(<span class="s">&quot;node&quot;</span>);
+            }
+            <b>if</b> (<span class="r17 r">node</span>.<a href="@0@System.Core/A.html#775e246f1f1cf3a7" class="i property">Method</a>.<a href="@0@mscorlib/A.html#aa4f112f79364b6e" class="i property">Name</a> == <span class="s">&quot;Contains&quot;</span> &amp;&amp; 
+                (<span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a>.<a href="@0@mscorlib/A.html#7e2071514968aca1" class="i property">Count</a> == 2 ||
+                <span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a>.<a href="@0@mscorlib/A.html#7e2071514968aca1" class="i property">Count</a> == 1))
+            {
+                <a href="@0@System.Core/A.html#39a9b098482b765d" class="t t">Expression</a> <span id="r18 rd" class="r18 r">leftSide</span> = <span class="r17 r">node</span>.<a href="@0@System.Core/A.html#028524ce6b731ba1" class="i property">Object</a>;
+                <a href="@0@System.Core/A.html#39a9b098482b765d" class="t t">Expression</a> <span id="r19 rd" class="r19 r">rightSide</span> = <span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a>[0];
+                <b>if</b> (<span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a>.<a href="@0@mscorlib/A.html#7e2071514968aca1" class="i property">Count</a> == 2)
+                {
+                    <span class="r18 r">leftSide</span> = <span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a>[0];
+                    <span class="r19 r">rightSide</span> = <span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a>[1];
+                }
+                <a href="@0@System.Core/A.html#fd021c4965d900f0" class="i method">Visit</a>(<span class="r18 r">leftSide</span>);
+                <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<span class="s">&quot;/any(c: c eq &quot;</span>);
+                <a href="@0@System.Core/A.html#fd021c4965d900f0" class="i method">Visit</a>(<span class="r19 r">rightSide</span>);
+                <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<span class="s">&quot;)&quot;</span>);
+                <b>return</b> <span class="r17 r">node</span>;
+            }
+ 
+            <b>if</b> (<span class="r17 r">node</span>.<a href="@0@System.Core/A.html#775e246f1f1cf3a7" class="i property">Method</a>.<a href="@0@mscorlib/A.html#aa4f112f79364b6e" class="i property">Name</a> == <span class="s">&quot;StartsWith&quot;</span> &amp;&amp;
+                (<span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a>.<a href="@0@mscorlib/A.html#7e2071514968aca1" class="i property">Count</a> == 2 ||
+                 <span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a>.<a href="@0@mscorlib/A.html#7e2071514968aca1" class="i property">Count</a> == 1))
+            {
+                <a href="@0@System.Core/A.html#39a9b098482b765d" class="t t">Expression</a> <span id="r20 rd" class="r20 r">leftSide</span> = <span class="r17 r">node</span>.<a href="@0@System.Core/A.html#028524ce6b731ba1" class="i property">Object</a>;
+                <a href="@0@System.Core/A.html#39a9b098482b765d" class="t t">Expression</a> <span id="r21 rd" class="r21 r">rightSide</span> = <span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a>[0];
+                <b>if</b> (<span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a>.<a href="@0@mscorlib/A.html#7e2071514968aca1" class="i property">Count</a> == 2)
+                {
+                    <span class="r20 r">leftSide</span> = <span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a>[0];
+                    <span class="r21 r">rightSide</span> = <span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a>[1];
+                }
+ 
+                <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<span class="s">&quot;startswith(&quot;</span>);
+                <a href="@0@System.Core/A.html#fd021c4965d900f0" class="i method">Visit</a>(<span class="r20 r">leftSide</span>);
+                <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<span class="s">&quot;,&quot;</span>);
+                <a href="@0@System.Core/A.html#fd021c4965d900f0" class="i method">Visit</a>(<span class="r21 r">rightSide</span>);
+                <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<span class="s">&quot;)&quot;</span>);
+                <b>return</b> <span class="r17 r">node</span>;
+            }
+ 
+            <b>if</b> (<span class="r17 r">node</span>.<a href="@0@System.Core/A.html#775e246f1f1cf3a7" class="i property">Method</a>.<a href="@0@mscorlib/A.html#aa4f112f79364b6e" class="i property">Name</a> == <span class="s">&quot;EndsWith&quot;</span> &amp;&amp;
+                (<span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a>.<a href="@0@mscorlib/A.html#7e2071514968aca1" class="i property">Count</a> == 2 ||
+                 <span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a>.<a href="@0@mscorlib/A.html#7e2071514968aca1" class="i property">Count</a> == 1))
+            {
+                <a href="@0@System.Core/A.html#39a9b098482b765d" class="t t">Expression</a> <span id="r22 rd" class="r22 r">leftSide</span> = <span class="r17 r">node</span>.<a href="@0@System.Core/A.html#028524ce6b731ba1" class="i property">Object</a>;
+                <a href="@0@System.Core/A.html#39a9b098482b765d" class="t t">Expression</a> <span id="r23 rd" class="r23 r">rightSide</span> = <span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a>[0];
+                <b>if</b> (<span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a>.<a href="@0@mscorlib/A.html#7e2071514968aca1" class="i property">Count</a> == 2)
+                {
+                    <span class="r22 r">leftSide</span> = <span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a>[0];
+                    <span class="r23 r">rightSide</span> = <span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a>[1];
+                }
+ 
+                <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<span class="s">&quot;endswith(&quot;</span>);
+                <a href="@0@System.Core/A.html#fd021c4965d900f0" class="i method">Visit</a>(<span class="r22 r">leftSide</span>);
+                <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<span class="s">&quot;, &quot;</span>);
+                <a href="@0@System.Core/A.html#fd021c4965d900f0" class="i method">Visit</a>(<span class="r23 r">rightSide</span>);
+                <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<span class="s">&quot;)&quot;</span>);
+                <b>return</b> <span class="r17 r">node</span>;
+            }
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r24 rd" class="r24 r">methodName</span> = <span class="r17 r">node</span>.<a href="@0@System.Core/A.html#775e246f1f1cf3a7" class="i property">Method</a>.<a href="@0@mscorlib/A.html#aa4f112f79364b6e" class="i property">Name</a>;
+            <b>if</b> (<span class="r17 r">node</span>.<a href="@0@System.Core/A.html#775e246f1f1cf3a7" class="i property">Method</a>.<a href="@0@mscorlib/A.html#1ffe18a9b0190ab3" class="i method">GetCustomAttributes</a>&lt;<a href="ODataMethodAttribute.cs.html#560398e17618f7ab" class="t t">ODataMethodAttribute</a>&gt;().<a href="@0@System.Core/A.html#8788153112b7ffd0" class="i method">Any</a>())
+            {
+                <span class="r24 r">methodName</span> = <span class="r17 r">node</span>.<a href="@0@System.Core/A.html#775e246f1f1cf3a7" class="i property">Method</a>.<a href="@0@mscorlib/A.html#0497c27b6539bfd9" class="i method">GetCustomAttribute</a>&lt;<a href="ODataMethodAttribute.cs.html#560398e17618f7ab" class="t t">ODataMethodAttribute</a>&gt;().<a href="ODataMethodAttribute.cs.html#8499977b47e2c971" class="i property">MethodName</a>;
+            }
+            <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<span class="r24 r">methodName</span> + <span class="s">&quot;(&quot;</span>);
+            <b>for</b> (<a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r25 rd" class="r25 r">i</span> = 0; <span class="r25 r">i</span> &lt; <span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a>.<a href="@0@mscorlib/A.html#7e2071514968aca1" class="i property">Count</a>; <span class="r25 r">i</span>++)
+            {
+                <a href="@0@System.Core/A.html#39a9b098482b765d" class="k">var</a> <span id="r26 rd" class="r26 r">argument</span> = <span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a><a href="@0@mscorlib/A.html#6c5b571f8784e13b">[</a><span class="r25 r">i</span>];
+                <a href="@0@System.Core/A.html#fd021c4965d900f0" class="i method">Visit</a>(<span class="r26 r">argument</span>);
+                <b>if</b> (<span class="r25 r">i</span> != <span class="r17 r">node</span>.<a href="@0@System.Core/A.html#be28459e87b3bdb2" class="i property">Arguments</a>.<a href="@0@mscorlib/A.html#7e2071514968aca1" class="i property">Count</a> - 1)
+                {
+                    <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<span class="s">&quot;, &quot;</span>);
+                }
+            }
+            <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<span class="s">&quot;)&quot;</span>);
+            <b>return</b> <span class="r17 r">node</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Appends &#39;eq true&#39; to Boolean unary operators.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="24b205bf9d38c66f" href="../R/24b205bf9d38c66f.html" target="n" data-glyph="76,1" class="i method">CloseUnaryBooleanOperator</a>(<a href="@0@System.Core/A.html#2b72e9fccb3368b2" class="t t">ExpressionType</a> <span id="r27 rd" class="r27 r">expressionType</span>)
+        {
+            <b>if</b> (<a href="#133e2b69d9b080e5" class="i field">_currentProperty</a> != <b>null</b>)
+            {
+                <span class="c">// Reset unary operator if and/or node type</span>
+                <b>if</b> (<span class="r27 r">expressionType</span> == <a href="@0@System.Core/A.html#2b72e9fccb3368b2" class="t t">ExpressionType</a>.<a href="@0@System.Core/A.html#436f4e66d926f39c" class="i field">And</a> || <span class="r27 r">expressionType</span> == <a href="@0@System.Core/A.html#2b72e9fccb3368b2" class="t t">ExpressionType</a>.<a href="@0@System.Core/A.html#a86b0aafb4b0ebc7" class="i field">AndAlso</a> ||
+                    <span class="r27 r">expressionType</span> == <a href="@0@System.Core/A.html#2b72e9fccb3368b2" class="t t">ExpressionType</a>.<a href="@0@System.Core/A.html#6dd6a06778942789" class="i field">Or</a> || <span class="r27 r">expressionType</span> == <a href="@0@System.Core/A.html#2b72e9fccb3368b2" class="t t">ExpressionType</a>.<a href="@0@System.Core/A.html#f9bc62b4f050b4e1" class="i field">OrElse</a>)
+                {
+                    <b>if</b> (<a href="#133e2b69d9b080e5" class="i field">_currentProperty</a>.<a href="@0@mscorlib/A.html#c9d06b39de74ade6" class="i property">PropertyType</a> == <b>typeof</b> (<b>bool</b>))
+                    {
+                        <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<span class="s">&quot; eq true&quot;</span>);
+                    }
+                    <a href="#133e2b69d9b080e5" class="i field">_currentProperty</a> = <b>null</b>;
+                }
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Helper method to print constant.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r28 r">val</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Object to print.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        [<span class="i n">System</span>.<span class="i n">Diagnostics</span>.<span class="i n">CodeAnalysis</span>.<a href="@0@mscorlib/A.html#5e00de6576fb9ce7" class="t constructor">SuppressMessage</a>(<span class="s">&quot;Microsoft.Performance&quot;</span>, <span class="s">&quot;CA1800:DoNotCastUnnecessarily&quot;</span>)]
+        <b>private void</b> <a id="a0fd11e112e85d35" href="../R/a0fd11e112e85d35.html" target="n" data-glyph="76,1" class="i method">PrintConstant</a>(<b>object</b> <span id="r28 rd" class="r28 r">val</span>)
+        {
+            <b>if</b> (<span class="r28 r">val</span> == <b>null</b>)
+            {
+                <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<span class="s">&quot;null&quot;</span>);
+                <a href="#eea083ed283d270c" class="i field">_currentExpressionContainsNull</a> = <b>true</b>;
+            }
+            <b>else</b>
+            {
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r29 rd" class="r29 r">formattedString</span>;
+                <b>if</b> (<span class="r28 r">val</span> <b>is</b> <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a>)
+                {
+                    <span class="r28 r">val</span> = ((<a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a>)<span class="r28 r">val</span>).<a href="@0@mscorlib/A.html#fddce8be2da82dfc" class="i method">ToUniversalTime</a>();
+                    <span class="r29 r">formattedString</span> = <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#691a34e179b91fdb" class="i method">Format</a>(<a href="@0@mscorlib/A.html#e319c6636909012f" class="t t">CultureInfo</a>.<a href="@0@mscorlib/A.html#26ef1c020f0dbb7a" class="i property">InvariantCulture</a>, 
+                        <span class="s">&quot;{0:&quot;</span> + <a href="#8f8aeba57c58ac14" class="i field">DefaultDateTimeFormat</a> + <span class="s">&quot;}&quot;</span>, <span class="r28 r">val</span>);
+                }
+                <b>else</b> <b>if</b> (<span class="r28 r">val</span> <b>is</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>)
+                {
+                    <span class="r29 r">formattedString</span> = <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#691a34e179b91fdb" class="i method">Format</a>(<a href="@0@mscorlib/A.html#e319c6636909012f" class="t t">CultureInfo</a>.<a href="@0@mscorlib/A.html#26ef1c020f0dbb7a" class="i property">InvariantCulture</a>, 
+                        <span class="s">&quot;duration&#39;{0}&#39;&quot;</span>, <a href="@0@System.Xml/A.html#a86aaa213fe90295" class="t t">XmlConvert</a>.<a href="@0@System.Xml/A.html#c9a9be0d549ba0df" class="i method">ToString</a>((<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>)<span class="r28 r">val</span>));
+                }
+                <b>else</b>
+                {
+                    <span class="r29 r">formattedString</span> = <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#691a34e179b91fdb" class="i method">Format</a>(<a href="@0@mscorlib/A.html#e319c6636909012f" class="t t">CultureInfo</a>.<a href="@0@mscorlib/A.html#26ef1c020f0dbb7a" class="i property">InvariantCulture</a>, 
+                        <span class="s">&quot;{0}&quot;</span>, <span class="r28 r">val</span>);
+                }
+ 
+                <b>if</b> (<span class="r28 r">val</span> <b>is int</b> ||
+                    <span class="r28 r">val</span> <b>is bool</b> ||
+                    <span class="r28 r">val</span> <b>is long</b> ||
+                    <span class="r28 r">val</span> <b>is short</b>)
+                {
+                    <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<span class="r29 r">formattedString</span>.<a href="@0@mscorlib/A.html#2d51c212cb09178e" class="i method">ToLowerInvariant</a>());
+                }
+                <b>else</b> <b>if</b> (<span class="r28 r">val</span> <b>is</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>)
+                {
+                    <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#e8eaef3c361184bc" class="i method">Append</a>(<span class="r29 r">formattedString</span>);
+                }
+                <b>else</b>
+                {
+                    <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#b2e417523e4a69a5" class="i method">AppendFormat</a>(<a href="@0@mscorlib/A.html#e319c6636909012f" class="t t">CultureInfo</a>.<a href="@0@mscorlib/A.html#26ef1c020f0dbb7a" class="i property">InvariantCulture</a>, <span class="s">&quot;&#39;{0}&#39;&quot;</span>, <a href="@0@System/A.html#991565dd25f47c90" class="t t">Uri</a>.<a href="@0@System/A.html#39926dc8cc434ff4" class="i method">EscapeDataString</a>(<span class="r29 r">formattedString</span>));
+                }
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Helper method to generate property name.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r30 r">propertyInfo</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Property to examine.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Property name or value specified in the FilterParameterAttribute.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private static string</b> <a id="786faba96a7e69af" href="../R/786faba96a7e69af.html" target="n" data-glyph="76,1" class="i method">GetPropertyName</a>(<a href="@0@mscorlib/A.html#f3f0ea5f89a8f162" class="t t">PropertyInfo</a> <span id="r30 rd" class="r30 r">propertyInfo</span>)
+        {
+            <b>if</b> (<span class="r30 r">propertyInfo</span> == <b>null</b>)
+            {
+                <b>return</b> <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#c9f70a27facb27cf" class="i field">Empty</a>;
+            }
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r31 rd" class="r31 r">propertyName</span> = <span class="r30 r">propertyInfo</span>.<a href="@0@mscorlib/A.html#aa4f112f79364b6e" class="i property">Name</a>;
+            <b>if</b> (<span class="r30 r">propertyInfo</span>.<a href="@0@mscorlib/A.html#1ffe18a9b0190ab3" class="i method">GetCustomAttributes</a>&lt;<span class="i">JsonPropertyAttribute</span>&gt;().<a href="@0@System.Core/A.html#8788153112b7ffd0" class="i method">Any</a>())
+            {
+                <span class="r31 r">propertyName</span> = <span class="r30 r">propertyInfo</span>.<a href="@0@mscorlib/A.html#0497c27b6539bfd9" class="i method">GetCustomAttribute</a>&lt;<span class="i">JsonPropertyAttribute</span>&gt;().<span class="i">PropertyName</span>;
+            }
+            <b>if</b> (<b>typeof</b>(<a href="../CommonModels/IResource.cs.html#5cb924d5cdc797cc" class="t t">IResource</a>).<a href="@0@mscorlib/A.html#e4a35c1ec2b91f27" class="i method">GetTypeInfo</a>().<a href="@0@mscorlib/A.html#1b8edda5671d0b83" class="i method">IsAssignableFrom</a>(<span class="r30 r">propertyInfo</span>.<a href="@0@mscorlib/A.html#3eb1391de297c1a8" class="i property">DeclaringType</a>.<a href="@0@mscorlib/A.html#e4a35c1ec2b91f27" class="i method">GetTypeInfo</a>()))
+            {
+                <span class="r31 r">propertyName</span> = <span class="r31 r">propertyName</span>.<a href="@0@mscorlib/A.html#69fc1d0aa6df8a90" class="i method">Replace</a>(<a href="#5d2289e78bafe878" class="i field">PropertiesNode</a> + <span class="s">&quot;.&quot;</span>, <a href="#5d2289e78bafe878" class="i field">PropertiesNode</a> + <span class="s">&quot;/&quot;</span>);
+            }
+            <b>return</b> <span class="r31 r">propertyName</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Returns string representation of the current expression.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public override string</b> <a id="85c4a938ad976b34" href="../R/85c4a938ad976b34.html" target="n" data-glyph="72,1" class="i method">ToString</a>()
+        {
+            <a href="#24b205bf9d38c66f" class="i method">CloseUnaryBooleanOperator</a>(<a href="@0@System.Core/A.html#2b72e9fccb3368b2" class="t t">ExpressionType</a>.<a href="@0@System.Core/A.html#436f4e66d926f39c" class="i field">And</a>);
+            <a href="#4bb42120ae6961cf" class="i method">MergeExpressionsWithStack</a>();
+            <b>return</b> <a href="#dd7eead004f426d5" class="i field">_currentExpressionString</a>.<a href="@0@mscorlib/A.html#5a97da49a158a3c9" class="i method">ToString</a>();
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Returns OData representation of the the ExpressionType. </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r32 r">exprType</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Expression type.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">OData representation of the the ExpressionType.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private static string</b> <a id="6263b07714154ca1" href="../R/6263b07714154ca1.html" target="n" data-glyph="76,1" class="i method">GetODataOperatorName</a>(<a href="@0@System.Core/A.html#2b72e9fccb3368b2" class="t t">ExpressionType</a> <span id="r32 rd" class="r32 r">exprType</span>)
+        {
+            <b>switch</b> (<span class="r32 r">exprType</span>)
+            {
+                <b>case</b> <a href="@0@System.Core/A.html#2b72e9fccb3368b2" class="t t">ExpressionType</a>.<a href="@0@System.Core/A.html#bc1f7c08e83f869e" class="i field">GreaterThan</a>:
+                    <b>return</b> <span class="s">&quot;gt&quot;</span>;
+                <b>case</b> <a href="@0@System.Core/A.html#2b72e9fccb3368b2" class="t t">ExpressionType</a>.<a href="@0@System.Core/A.html#130974d89104cb90" class="i field">GreaterThanOrEqual</a>:
+                    <b>return</b> <span class="s">&quot;ge&quot;</span>;
+                <b>case</b> <a href="@0@System.Core/A.html#2b72e9fccb3368b2" class="t t">ExpressionType</a>.<a href="@0@System.Core/A.html#6612654da235f8e3" class="i field">LessThan</a>:
+                    <b>return</b> <span class="s">&quot;lt&quot;</span>;
+                <b>case</b> <a href="@0@System.Core/A.html#2b72e9fccb3368b2" class="t t">ExpressionType</a>.<a href="@0@System.Core/A.html#137dcb13ef95dd3c" class="i field">LessThanOrEqual</a>:
+                    <b>return</b> <span class="s">&quot;le&quot;</span>;
+                <b>case</b> <a href="@0@System.Core/A.html#2b72e9fccb3368b2" class="t t">ExpressionType</a>.<a href="@0@System.Core/A.html#436f4e66d926f39c" class="i field">And</a>:
+                <b>case</b> <a href="@0@System.Core/A.html#2b72e9fccb3368b2" class="t t">ExpressionType</a>.<a href="@0@System.Core/A.html#a86b0aafb4b0ebc7" class="i field">AndAlso</a>:
+                    <b>return</b> <span class="s">&quot;and&quot;</span>;
+                <b>case</b> <a href="@0@System.Core/A.html#2b72e9fccb3368b2" class="t t">ExpressionType</a>.<a href="@0@System.Core/A.html#6dd6a06778942789" class="i field">Or</a>:
+                <b>case</b> <a href="@0@System.Core/A.html#2b72e9fccb3368b2" class="t t">ExpressionType</a>.<a href="@0@System.Core/A.html#f9bc62b4f050b4e1" class="i field">OrElse</a>:
+                    <b>return</b> <span class="s">&quot;or&quot;</span>;
+                <b>case</b> <a href="@0@System.Core/A.html#2b72e9fccb3368b2" class="t t">ExpressionType</a>.<a href="@0@System.Core/A.html#28bcbde355b64b77" class="i field">Equal</a>:
+                    <b>return</b> <span class="s">&quot;eq&quot;</span>;
+                <b>case</b> <a href="@0@System.Core/A.html#2b72e9fccb3368b2" class="t t">ExpressionType</a>.<a href="@0@System.Core/A.html#bf6c2918a92d1bd3" class="i field">NotEqual</a>:
+                    <b>return</b> <span class="s">&quot;ne&quot;</span>;
+                <b>default</b>:
+                    <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#3d3c2c03118be4f8" class="t constructor">NotSupportedException</a>(<span class="s">&quot;Cannot get name for: &quot;</span> + <span class="r32 r">exprType</span>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Returns true if base expression matches _baseExpression</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r33 r">expression</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private bool</b> <a id="7d860650a06f1215" href="../R/7d860650a06f1215.html" target="n" data-glyph="76,1" class="i method">ShouldBuildExpression</a>(<a href="@0@System.Core/A.html#8760a057e74485a8" class="t t">MemberExpression</a> <span id="r33 rd" class="r33 r">expression</span>)
+        {
+            <a href="@0@System.Core/A.html#8760a057e74485a8" class="k">var</a> <span id="r34 rd" class="r34 r">parentExpression</span> = <span class="r33 r">expression</span>.<a href="@0@System.Core/A.html#68eee84426991159" class="i property">Expression</a> <b>as</b> <a href="@0@System.Core/A.html#8760a057e74485a8" class="t t">MemberExpression</a>;
+            <b>if</b> (<span class="r34 r">parentExpression</span> != <b>null</b>)
+            {
+                <b>return</b> <a href="#7d860650a06f1215" class="i method">ShouldBuildExpression</a>(<span class="r34 r">parentExpression</span>);
+            }
+            <b>if</b> (<span class="r33 r">expression</span>.<a href="@0@System.Core/A.html#68eee84426991159" class="i property">Expression</a> == <a href="#6fbdd75c7b7011ef" class="i field">_baseExpression</a>)
+            {
+                <b>return</b> <b>true</b>;
+            }
+            <b>return</b> <b>false</b>;
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

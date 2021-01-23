@@ -1,0 +1,353 @@
+﻿<!DOCTYPE html>
+<html><head><title>SessionReceivePump.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(344);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.ServiceBus/SessionReceivePump.cs" target="_top">SessionReceivePump.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.ServiceBus" target="_top">src\Microsoft.Azure.ServiceBus.csproj</a> (Microsoft.Azure.ServiceBus)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft. All rights reserved.</span>
+<span class="c">// Licensed under the MIT license. See LICENSE file in the project root for full license information.</span>
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">ServiceBus</span>
+{
+    <b>using</b> <span class="i">System</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+    <b>using</b> <span class="i n">Primitives</span>;
+ 
+    <b>sealed class</b> <a id="17f50eaa1ce352f4" href="R/17f50eaa1ce352f4.html" target="n" data-glyph="2,0" class="t t">SessionReceivePump</a>
+    {
+        <b>public readonly</b> <span class="i">SemaphoreSlim</span> <a id="9b83452a02b3eec4" href="R/9b83452a02b3eec4.html" target="n" data-glyph="42,1" class="i field">maxConcurrentSessionsSemaphoreSlim</a>;
+        <b>public readonly</b> <span class="i">SemaphoreSlim</span> <a id="76a9290d4f2c1e61" href="R/76a9290d4f2c1e61.html" target="n" data-glyph="42,1" class="i field">maxPendingAcceptSessionsSemaphoreSlim</a>;
+        <b>public readonly</b> <a href="SessionHandlerOptions.cs.html#6626e016a3aac115" class="t t">SessionHandlerOptions</a> <a id="29f4764b3eb5b645" href="R/29f4764b3eb5b645.html" target="n" data-glyph="42,1" class="i field">sessionHandlerOptions</a>;
+        <b>readonly string</b> <a id="e7c27c0c6cc775db" href="R/e7c27c0c6cc775db.html" target="n" data-glyph="46,1" class="i field">clientId</a>;
+        <b>readonly</b> <a href="ISessionClient.cs.html#ec1e03f734d1bf10" class="t t">ISessionClient</a> <a id="b6ff984cb763556a" href="R/b6ff984cb763556a.html" target="n" data-glyph="46,1" class="i field">client</a>;
+        <b>readonly</b> <span class="i">Func</span>&lt;<a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a>, <a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>, <span class="i">CancellationToken</span>, <span class="i">Task</span>&gt; <a id="b3d3fe0411dc7fd2" href="R/b3d3fe0411dc7fd2.html" target="n" data-glyph="46,1" class="i field">userOnSessionCallback</a>;
+        <b>readonly string</b> <a id="cc2f718b27420c19" href="R/cc2f718b27420c19.html" target="n" data-glyph="46,1" class="i field">endpoint</a>;
+        <b>readonly string</b> <a id="72bc999884d1e73e" href="R/72bc999884d1e73e.html" target="n" data-glyph="46,1" class="i field">entityPath</a>;
+        <b>readonly</b> <span class="i">CancellationToken</span> <a id="a8cc82173ba71bfa" href="R/a8cc82173ba71bfa.html" target="n" data-glyph="46,1" class="i field">pumpCancellationToken</a>;
+        <b>readonly</b> <span class="i">CancellationToken</span> <a id="1faf58c5bc2060f3" href="R/1faf58c5bc2060f3.html" target="n" data-glyph="46,1" class="i field">runningTaskCancellationToken</a>;
+        <b>private readonly</b> <a href="ServiceBusDiagnosticsSource.cs.html#8b0a5b6d28151a22" class="t t">ServiceBusDiagnosticSource</a> <a id="8dd59b1d75df4589" href="R/8dd59b1d75df4589.html" target="n" data-glyph="46,1" class="i field">diagnosticSource</a>;
+ 
+        <b>public</b> <a id="49b7a3b572e1441b" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">SessionReceivePump</a>(<b>string</b> <span id="r0 rd" class="r0 r">clientId</span>,
+            <a href="ISessionClient.cs.html#ec1e03f734d1bf10" class="t t">ISessionClient</a> <span id="r1 rd" class="r1 r">client</span>,
+            <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a> <span id="r2 rd" class="r2 r">receiveMode</span>,
+            <a href="SessionHandlerOptions.cs.html#6626e016a3aac115" class="t t">SessionHandlerOptions</a> <span id="r3 rd" class="r3 r">sessionHandlerOptions</span>,
+            <span class="i">Func</span>&lt;<a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a>, <a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>, <span class="i">CancellationToken</span>, <span class="i">Task</span>&gt; <span id="r4 rd" class="r4 r">callback</span>,
+            <span class="i">Uri</span> <span id="r5 rd" class="r5 r">endpoint</span>,
+            <span class="i">CancellationToken</span> <span id="r6 rd" class="r6 r">pumpToken</span>,
+            <span class="i">CancellationToken</span> <span id="r7 rd" class="r7 r">runningTaskToken</span>)
+        {
+            <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#b6ff984cb763556a" class="i field">client</a> = <span class="r1 r">client</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentException</span>(<b>nameof</b>(<span class="r1 r">client</span>));
+            <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#e7c27c0c6cc775db" class="i field">clientId</a> = <span class="r0 r">clientId</span>;
+            <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#59ab81bf1d231fd7" class="i property">ReceiveMode</a> = <span class="r2 r">receiveMode</span>;
+            <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#29f4764b3eb5b645" class="i field">sessionHandlerOptions</a> = <span class="r3 r">sessionHandlerOptions</span>;
+            <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#b3d3fe0411dc7fd2" class="i field">userOnSessionCallback</a> = <span class="r4 r">callback</span>;
+            <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#cc2f718b27420c19" class="i field">endpoint</a> = <span class="r5 r">endpoint</span>.<span class="i">Authority</span>;
+            <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#72bc999884d1e73e" class="i field">entityPath</a> = <span class="r1 r">client</span>.<a href="ISessionClient.cs.html#7f710e288f355492" class="i property">EntityPath</a>;
+            <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#a8cc82173ba71bfa" class="i field">pumpCancellationToken</a> = <span class="r6 r">pumpToken</span>;
+            <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#1faf58c5bc2060f3" class="i field">runningTaskCancellationToken</a> = <span class="r7 r">runningTaskToken</span>;
+            <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#9b83452a02b3eec4" class="i field">maxConcurrentSessionsSemaphoreSlim</a> = <b>new</b> <span class="i">SemaphoreSlim</span>(<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#29f4764b3eb5b645" class="i field">sessionHandlerOptions</a>.<a href="SessionHandlerOptions.cs.html#93d2275f2d2da2d0" class="i property">MaxConcurrentSessions</a>);
+            <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#76a9290d4f2c1e61" class="i field">maxPendingAcceptSessionsSemaphoreSlim</a> = <b>new</b> <span class="i">SemaphoreSlim</span>(<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#29f4764b3eb5b645" class="i field">sessionHandlerOptions</a>.<a href="SessionHandlerOptions.cs.html#137ab55911a6cd9f" class="i property">MaxConcurrentAcceptSessionCalls</a>);
+            <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#8dd59b1d75df4589" class="i field">diagnosticSource</a> = <b>new</b> <a href="ServiceBusDiagnosticsSource.cs.html#5e2002e923a0f339" class="t constructor">ServiceBusDiagnosticSource</a>(<span class="r1 r">client</span>.<a href="ISessionClient.cs.html#7f710e288f355492" class="i property">EntityPath</a>, <span class="r5 r">endpoint</span>);
+        }
+ 
+        <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a> <a id="59ab81bf1d231fd7" href="R/59ab81bf1d231fd7.html" target="n" data-glyph="106,1" class="i property">ReceiveMode</a> { <b>get</b>; }
+ 
+        <b>public void</b> <a id="03863f53d5e668c7" href="R/03863f53d5e668c7.html" target="n" data-glyph="72,1" class="i method">StartPump</a>()
+        {
+            <span class="c">// Schedule Tasks for doing PendingAcceptSession calls</span>
+            <b>for</b> (<b>var</b> <span id="r8 rd" class="r8 r">i</span> = 0; <span class="r8 r">i</span> &lt; <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#29f4764b3eb5b645" class="i field">sessionHandlerOptions</a>.<a href="SessionHandlerOptions.cs.html#137ab55911a6cd9f" class="i property">MaxConcurrentAcceptSessionCalls</a>; <span class="r8 r">i</span>++)
+            {
+                <a href="Primitives/TaskExtensionHelper.cs.html#8b0c4faca1e95bf2" class="t t">TaskExtensionHelper</a>.<span class="i">Schedule</span>(<a href="#17f50eaa1ce352f4" class="k">this</a>.<span class="i">SessionPumpTaskAsync</span>);
+            }
+        }
+ 
+        <b>static void</b> <a id="399e1bb1af5f97cd" href="R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">CancelAutoRenewLock</a>(<b>object</b> <span id="r9 rd" class="r9 r">state</span>)
+        {
+            <b>var</b> <span id="r10 rd" class="r10 r">renewCancellationTokenSource</span> = (<span class="i">CancellationTokenSource</span>)<span class="r9 r">state</span>;
+ 
+            <b>try</b>
+            {
+                <span class="r10 r">renewCancellationTokenSource</span>.<span class="i">Cancel</span>();
+            }
+            <b>catch</b> (<span class="i">ObjectDisposedException</span>)
+            {
+                <span class="c">// Ignore this race.</span>
+            }
+        }
+ 
+        <b>bool</b> <a id="80e467653ca3bcb8" href="R/80e467653ca3bcb8.html" target="n" data-glyph="76,1" class="i method">ShouldRenewSessionLock</a>()
+        {
+            <b>return</b>
+                <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#59ab81bf1d231fd7" class="i property">ReceiveMode</a> == <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a>.<a href="ReceiveMode.cs.html#d43dbf05f584f89c" class="i field">PeekLock</a> &amp;&amp;
+                <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#29f4764b3eb5b645" class="i field">sessionHandlerOptions</a>.<a href="SessionHandlerOptions.cs.html#d96cdec69aa41715" class="i property">AutoRenewLock</a>;
+        }
+ 
+        <span class="i">Task</span> <a id="4de04df20a73bcc5" href="R/4de04df20a73bcc5.html" target="n" data-glyph="76,1" class="i method">RaiseExceptionReceived</a>(<span class="i">Exception</span> <span id="r11 rd" class="r11 r">e</span>, <b>string</b> <span id="r12 rd" class="r12 r">action</span>)
+        {
+            <a href="ExceptionReceivedEventArgs.cs.html#01e408e41b2c7c71" class="k">var</a> <span id="r13 rd" class="r13 r">eventArgs</span> = <b>new</b> <a href="ExceptionReceivedEventArgs.cs.html#c28dd61812bdfa08" class="t constructor">ExceptionReceivedEventArgs</a>(<span class="r11 r">e</span>, <span class="r12 r">action</span>, <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#cc2f718b27420c19" class="i field">endpoint</a>, <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#72bc999884d1e73e" class="i field">entityPath</a>, <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#e7c27c0c6cc775db" class="i field">clientId</a>);
+            <b>return</b> <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#29f4764b3eb5b645" class="i field">sessionHandlerOptions</a>.<a href="SessionHandlerOptions.cs.html#51eb35501802daea" class="i method">RaiseExceptionReceived</a>(<span class="r13 r">eventArgs</span>);
+        }
+ 
+        <b>async</b> <span class="i">Task</span> <a id="23e0837c6cbf4d66" href="R/23e0837c6cbf4d66.html" target="n" data-glyph="76,1" class="i method">CompleteMessageIfNeededAsync</a>(<a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a> <span id="r14 rd" class="r14 r">session</span>, <a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a> <span id="r15 rd" class="r15 r">message</span>)
+        {
+            <b>try</b>
+            {
+                <b>if</b> (<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#59ab81bf1d231fd7" class="i property">ReceiveMode</a> == <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a>.<a href="ReceiveMode.cs.html#d43dbf05f584f89c" class="i field">PeekLock</a> &amp;&amp;
+                    <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#29f4764b3eb5b645" class="i field">sessionHandlerOptions</a>.<a href="SessionHandlerOptions.cs.html#af8748e7b29d18ad" class="i property">AutoComplete</a>)
+                {
+                    <b>await</b> <span class="r14 r">session</span>.<span class="i">CompleteAsync</span>(<b>new</b>[] { <span class="r15 r">message</span>.<a href="Message.cs.html#5b973fca03337aea" class="i property">SystemProperties</a>.<a href="Message.cs.html#df44fd4ab3d58bb5" class="i property">LockToken</a> }).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r16 rd" class="r16 r">exception</span>)
+            {
+                <b>await</b> <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#4de04df20a73bcc5" class="i method">RaiseExceptionReceived</a>(<span class="r16 r">exception</span>, <a href="ExceptionReceivedEventArgsAction.cs.html#20c83e23f7c3e1a1" class="t t">ExceptionReceivedEventArgsAction</a>.<a href="ExceptionReceivedEventArgsAction.cs.html#2ff6b9fbfd614267" class="i field">Complete</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+        }
+ 
+        <b>async</b> <span class="i">Task</span> <a id="6ed10b0990b19358" href="R/6ed10b0990b19358.html" target="n" data-glyph="76,1" class="i method">AbandonMessageIfNeededAsync</a>(<a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a> <span id="r17 rd" class="r17 r">session</span>, <a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a> <span id="r18 rd" class="r18 r">message</span>)
+        {
+            <b>try</b>
+            {
+                <b>if</b> (<span class="r17 r">session</span>.<a href="Core/IReceiverClient.cs.html#de85a8b250a9e503" class="i property">ReceiveMode</a> == <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a>.<a href="ReceiveMode.cs.html#d43dbf05f584f89c" class="i field">PeekLock</a>)
+                {
+                    <b>await</b> <span class="r17 r">session</span>.<a href="Core/IReceiverClient.cs.html#f9c841dd2a7cadec" class="i method">AbandonAsync</a>(<span class="r18 r">message</span>.<a href="Message.cs.html#5b973fca03337aea" class="i property">SystemProperties</a>.<a href="Message.cs.html#df44fd4ab3d58bb5" class="i property">LockToken</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r19 rd" class="r19 r">exception</span>)
+            {
+                <b>await</b> <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#4de04df20a73bcc5" class="i method">RaiseExceptionReceived</a>(<span class="r19 r">exception</span>, <a href="ExceptionReceivedEventArgsAction.cs.html#20c83e23f7c3e1a1" class="t t">ExceptionReceivedEventArgsAction</a>.<a href="ExceptionReceivedEventArgsAction.cs.html#d24664012b4eb84e" class="i field">Abandon</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+        }
+ 
+        <b>async</b> <span class="i">Task</span> <a id="934e46bcc8d56559" href="R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">SessionPumpTaskAsync</a>()
+        {
+            <b>while</b> (!<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#a8cc82173ba71bfa" class="i field">pumpCancellationToken</a>.<span class="i">IsCancellationRequested</span>)
+            {
+                <b>var</b> <span id="r20 rd" class="r20 r">concurrentSessionSemaphoreAcquired</span> = <b>false</b>;
+                <b>try</b>
+                {
+                    <b>await</b> <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#9b83452a02b3eec4" class="i field">maxConcurrentSessionsSemaphoreSlim</a>.<span class="i">WaitAsync</span>(<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#a8cc82173ba71bfa" class="i field">pumpCancellationToken</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    <span class="r20 r">concurrentSessionSemaphoreAcquired</span> = <b>true</b>;
+ 
+                    <b>await</b> <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#76a9290d4f2c1e61" class="i field">maxPendingAcceptSessionsSemaphoreSlim</a>.<span class="i">WaitAsync</span>(<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#a8cc82173ba71bfa" class="i field">pumpCancellationToken</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    <b>var</b> <span id="r21 rd" class="r21 r">session</span> = <b>await</b> <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#b6ff984cb763556a" class="i field">client</a>.<a href="ISessionClient.cs.html#dcd1363ce657763b" class="i method">AcceptMessageSessionAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    <b>if</b> (<span class="r21 r">session</span> == <b>null</b>)
+                    {
+                        <b>await</b> <span class="i">Task</span>.<span class="i">Delay</span>(<a href="Constants.cs.html#6e9a057faa1690df" class="t t">Constants</a>.<a href="Constants.cs.html#d51a7c501b715800" class="i field">NoMessageBackoffTimeSpan</a>, <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#a8cc82173ba71bfa" class="i field">pumpCancellationToken</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        <b>continue</b>;
+                    }
+ 
+                    <span class="c">// `session` needs to be copied to another local variable before passing to Schedule</span>
+                    <span class="c">// because of the way variables are captured. (Refer &#39;Captured variables&#39;)</span>
+                    <b>var</b> <span id="r22 rd" class="r22 r">messageSession</span> = <span class="r21 r">session</span>;
+                    <a href="Primitives/TaskExtensionHelper.cs.html#8b0c4faca1e95bf2" class="t t">TaskExtensionHelper</a>.<span class="i">Schedule</span>(() =&gt; <a href="#17f50eaa1ce352f4" class="k">this</a>.<span class="i">MessagePumpTaskAsync</span>(<span class="r22 r">messageSession</span>));
+                }
+                <b>catch</b> (<span class="i">Exception</span> <span id="r23 rd" class="r23 r">exception</span>)
+                {
+                    <a href="MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="MessagingEventSource.cs.html#40582656d695d577" class="i method">SessionReceivePumpSessionReceiveException</a>(<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#e7c27c0c6cc775db" class="i field">clientId</a>, <span class="r23 r">exception</span>);
+ 
+                    <b>if</b> (<span class="r20 r">concurrentSessionSemaphoreAcquired</span>)
+                    {
+                        <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#9b83452a02b3eec4" class="i field">maxConcurrentSessionsSemaphoreSlim</a>.<span class="i">Release</span>();
+                    }
+ 
+                    <b>if</b> (<span class="r23 r">exception</span> <b>is</b> <a href="ServiceBusTimeoutException.cs.html#f685944f3f0d665e" class="t t">ServiceBusTimeoutException</a>)
+                    {
+                        <b>await</b> <span class="i">Task</span>.<span class="i">Delay</span>(<a href="Constants.cs.html#6e9a057faa1690df" class="t t">Constants</a>.<a href="Constants.cs.html#d51a7c501b715800" class="i field">NoMessageBackoffTimeSpan</a>, <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#a8cc82173ba71bfa" class="i field">pumpCancellationToken</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    }
+                    <b>else</b>
+                    {
+                        <b>if</b> (!(<span class="r23 r">exception</span> <b>is</b> <span class="i">ObjectDisposedException</span> &amp;&amp; <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#a8cc82173ba71bfa" class="i field">pumpCancellationToken</a>.<span class="i">IsCancellationRequested</span>))
+                        {
+                            <b>await</b> <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#4de04df20a73bcc5" class="i method">RaiseExceptionReceived</a>(<span class="r23 r">exception</span>, <a href="ExceptionReceivedEventArgsAction.cs.html#20c83e23f7c3e1a1" class="t t">ExceptionReceivedEventArgsAction</a>.<a href="ExceptionReceivedEventArgsAction.cs.html#6c7e482f1a2bf57a" class="i field">AcceptMessageSession</a>).<span class="i">ConfigureAwait</span>(<b>false</b>); 
+                        }
+                        <b>if</b> (!<a href="MessagingUtilities.cs.html#7a4c546c869c0fb2" class="t t">MessagingUtilities</a>.<a href="MessagingUtilities.cs.html#0f237707d6c98f06" class="i method">ShouldRetry</a>(<span class="r23 r">exception</span>))
+                        {
+                            <b>await</b> <span class="i">Task</span>.<span class="i">Delay</span>(<a href="Constants.cs.html#6e9a057faa1690df" class="t t">Constants</a>.<a href="Constants.cs.html#d51a7c501b715800" class="i field">NoMessageBackoffTimeSpan</a>, <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#a8cc82173ba71bfa" class="i field">pumpCancellationToken</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        }
+                    }
+                }
+                <b>finally</b>
+                {
+                    <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#76a9290d4f2c1e61" class="i field">maxPendingAcceptSessionsSemaphoreSlim</a>.<span class="i">Release</span>();
+                }
+            }
+        }
+ 
+        <b>async</b> <span class="i">Task</span> <a id="370afcb07dcf2c91" href="R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">MessagePumpTaskAsync</a>(<a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a> <span id="r24 rd" class="r24 r">session</span>)
+        {
+            <b>if</b> (<span class="r24 r">session</span> == <b>null</b>)
+            {
+                <b>return</b>;
+            }
+ 
+            <b>var</b> <span id="r25 rd" class="r25 r">renewLockCancellationTokenSource</span> = <b>new</b> <span class="i">CancellationTokenSource</span>();
+            <b>if</b> (<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#80e467653ca3bcb8" class="i method">ShouldRenewSessionLock</a>())
+            {
+                <a href="Primitives/TaskExtensionHelper.cs.html#8b0c4faca1e95bf2" class="t t">TaskExtensionHelper</a>.<span class="i">Schedule</span>(() =&gt; <a href="#17f50eaa1ce352f4" class="k">this</a>.<span class="i">RenewSessionLockTaskAsync</span>(<span class="r24 r">session</span>, <span class="r25 r">renewLockCancellationTokenSource</span>.<span class="i">Token</span>));
+            }
+ 
+            <b>var</b> <span id="r26 rd" class="r26 r">autoRenewLockCancellationTimer</span> = <b>new</b> <span class="i">Timer</span>(
+                <span class="i">CancelAutoRenewLock</span>,
+                <span class="r25 r">renewLockCancellationTokenSource</span>,
+                <span class="i">Timeout</span>.<span class="i">Infinite</span>,
+                <span class="i">Timeout</span>.<span class="i">Infinite</span>);
+ 
+            <b>try</b>
+            {
+                <b>while</b> (!<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#a8cc82173ba71bfa" class="i field">pumpCancellationToken</a>.<span class="i">IsCancellationRequested</span> &amp;&amp; !<span class="r24 r">session</span>.<a href="IClientEntity.cs.html#700f5cbbab50b77d" class="i property">IsClosedOrClosing</a>)
+                {
+                    <a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a> <span id="r27 rd" class="r27 r">message</span>;
+                    <b>try</b>
+                    {
+                        <span class="r27 r">message</span> = <b>await</b> <span class="r24 r">session</span>.<a href="Core/IMessageReceiver.cs.html#dfea452134532e8e" class="i method">ReceiveAsync</a>(<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#29f4764b3eb5b645" class="i field">sessionHandlerOptions</a>.<a href="SessionHandlerOptions.cs.html#87d617f690487224" class="i property">MessageWaitTimeout</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    }
+                    <b>catch</b> (<span class="i">Exception</span> <span id="r28 rd" class="r28 r">exception</span>)
+                    {
+                        <a href="MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="MessagingEventSource.cs.html#b33cf4ee8e16a0f7" class="i method">MessageReceivePumpTaskException</a>(<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#e7c27c0c6cc775db" class="i field">clientId</a>, <span class="r24 r">session</span>.<a href="IMessageSession.cs.html#f8d2be0dbd369bb5" class="i property">SessionId</a>, <span class="r28 r">exception</span>);
+                        <b>if</b> (<span class="r28 r">exception</span> <b>is</b> <a href="ServiceBusTimeoutException.cs.html#f685944f3f0d665e" class="t t">ServiceBusTimeoutException</a>)
+                        {
+                            <span class="c">// Timeout Exceptions are pretty common. Not alerting the User on this.</span>
+                            <b>continue</b>;
+                        }
+ 
+                        <b>if</b> (!(<span class="r28 r">exception</span> <b>is</b> <span class="i">ObjectDisposedException</span> &amp;&amp; <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#a8cc82173ba71bfa" class="i field">pumpCancellationToken</a>.<span class="i">IsCancellationRequested</span>))
+                        {
+                            <b>await</b> <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#4de04df20a73bcc5" class="i method">RaiseExceptionReceived</a>(<span class="r28 r">exception</span>, <a href="ExceptionReceivedEventArgsAction.cs.html#20c83e23f7c3e1a1" class="t t">ExceptionReceivedEventArgsAction</a>.<a href="ExceptionReceivedEventArgsAction.cs.html#ad0603edbd1bb581" class="i field">Receive</a>).<span class="i">ConfigureAwait</span>(<b>false</b>); 
+                        }
+                        <b>break</b>;
+                    }
+ 
+                    <b>if</b> (<span class="r27 r">message</span> == <b>null</b>)
+                    {
+                        <a href="MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="MessagingEventSource.cs.html#9d1eef0a174ab1e1" class="i method">SessionReceivePumpSessionEmpty</a>(<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#e7c27c0c6cc775db" class="i field">clientId</a>, <span class="r24 r">session</span>.<a href="IMessageSession.cs.html#f8d2be0dbd369bb5" class="i property">SessionId</a>);
+                        <b>break</b>;
+                    }
+ 
+                    <b>bool</b> <span id="r29 rd" class="r29 r">isDiagnosticSourceEnabled</span> = <a href="ServiceBusDiagnosticsSource.cs.html#8b0a5b6d28151a22" class="t t">ServiceBusDiagnosticSource</a>.<a href="ServiceBusDiagnosticsSource.cs.html#1ef66eeeefb94a5f" class="i method">IsEnabled</a>();
+                    <span class="i">Activity</span> <span id="r30 rd" class="r30 r">activity</span> = <span class="r29 r">isDiagnosticSourceEnabled</span> ? <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#8dd59b1d75df4589" class="i field">diagnosticSource</a>.<a href="ServiceBusDiagnosticsSource.cs.html#7203fe482a53134c" class="i method">ProcessSessionStart</a>(<span class="r24 r">session</span>, <span class="r27 r">message</span>) : <b>null</b>;
+                    <span class="i">Task</span> <span id="r31 rd" class="r31 r">processTask</span> = <b>null</b>;
+ 
+                    <b>try</b>
+                    {
+                        <span class="c">// Set the timer</span>
+                        <span class="r26 r">autoRenewLockCancellationTimer</span>.<span class="i">Change</span>(<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#29f4764b3eb5b645" class="i field">sessionHandlerOptions</a>.<a href="SessionHandlerOptions.cs.html#0dc1d73b54d62555" class="i property">MaxAutoRenewDuration</a>,
+                            <span class="i">TimeSpan</span>.<span class="i">FromMilliseconds</span>(-1));
+                        <b>var</b> <span id="r32 rd" class="r32 r">callbackExceptionOccurred</span> = <b>false</b>;
+                        <b>try</b>
+                        {
+                            <span class="r31 r">processTask</span> = <a href="#17f50eaa1ce352f4" class="k">this</a>.<span class="i">userOnSessionCallback</span>(<span class="r24 r">session</span>, <span class="r27 r">message</span>, <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#1faf58c5bc2060f3" class="i field">runningTaskCancellationToken</a>);
+                            <b>await</b> <span class="r31 r">processTask</span>.<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        }
+                        <b>catch</b> (<span class="i">Exception</span> <span id="r33 rd" class="r33 r">exception</span>)
+                        {
+                            <b>if</b> (<span class="r29 r">isDiagnosticSourceEnabled</span>)
+                            {
+                                <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#8dd59b1d75df4589" class="i field">diagnosticSource</a>.<a href="ServiceBusDiagnosticsSource.cs.html#1106e116e1c0feb0" class="i method">ReportException</a>(<span class="r33 r">exception</span>);
+                            }
+ 
+                            <a href="MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="MessagingEventSource.cs.html#b33cf4ee8e16a0f7" class="i method">MessageReceivePumpTaskException</a>(<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#e7c27c0c6cc775db" class="i field">clientId</a>, <span class="r24 r">session</span>.<a href="IMessageSession.cs.html#f8d2be0dbd369bb5" class="i property">SessionId</a>, <span class="r33 r">exception</span>);
+                            <b>await</b> <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#4de04df20a73bcc5" class="i method">RaiseExceptionReceived</a>(<span class="r33 r">exception</span>, <a href="ExceptionReceivedEventArgsAction.cs.html#20c83e23f7c3e1a1" class="t t">ExceptionReceivedEventArgsAction</a>.<a href="ExceptionReceivedEventArgsAction.cs.html#6dc5b0b75cc2075c" class="i field">UserCallback</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                            <span class="r32 r">callbackExceptionOccurred</span> = <b>true</b>;
+                            <b>if</b> (!(<span class="r33 r">exception</span> <b>is</b> <a href="MessageLockLostException.cs.html#e603b9dfe7c7189d" class="t t">MessageLockLostException</a> || <span class="r33 r">exception</span> <b>is</b> <a href="SessionLockLostException.cs.html#26f997db560b78e3" class="t t">SessionLockLostException</a>))
+                            {
+                                <b>await</b> <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#6ed10b0990b19358" class="i method">AbandonMessageIfNeededAsync</a>(<span class="r24 r">session</span>, <span class="r27 r">message</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                            }
+                        }
+                        <b>finally</b>
+                        {
+                            <span class="r26 r">autoRenewLockCancellationTimer</span>.<span class="i">Change</span>(<span class="i">Timeout</span>.<span class="i">Infinite</span>, <span class="i">Timeout</span>.<span class="i">Infinite</span>);
+                        }
+ 
+                        <b>if</b> (!<span class="r32 r">callbackExceptionOccurred</span>)
+                        {
+                            <b>await</b> <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#23e0837c6cbf4d66" class="i method">CompleteMessageIfNeededAsync</a>(<span class="r24 r">session</span>, <span class="r27 r">message</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        }
+                        <b>else</b> <b>if</b> (<span class="r24 r">session</span>.<a href="IClientEntity.cs.html#700f5cbbab50b77d" class="i property">IsClosedOrClosing</a>)
+                        {
+                            <span class="c">// If User closed the session as part of the callback, break out of the loop</span>
+                            <b>break</b>;
+                        }
+                    }
+                    <b>finally</b>
+                    {
+                        <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#8dd59b1d75df4589" class="i field">diagnosticSource</a>.<span class="i">ProcessSessionStop</span>(<span class="r30 r">activity</span>, <span class="r24 r">session</span>, <span class="r27 r">message</span>, <span class="r31 r">processTask</span>?.<span class="i">Status</span>);
+                    }
+                }
+            }
+            <b>finally</b>
+            {
+                <span class="r25 r">renewLockCancellationTokenSource</span>.<span class="i">Cancel</span>();
+                <span class="r25 r">renewLockCancellationTokenSource</span>.<span class="i">Dispose</span>();
+                <span class="r26 r">autoRenewLockCancellationTimer</span>.<span class="i">Dispose</span>();
+ 
+                <b>await</b> <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#b7cc87ba8694e7b5" class="i method">CloseSessionIfNeededAsync</a>(<span class="r24 r">session</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#9b83452a02b3eec4" class="i field">maxConcurrentSessionsSemaphoreSlim</a>.<span class="i">Release</span>();
+            }
+        }
+ 
+        <b>async</b> <span class="i">Task</span> <a id="b7cc87ba8694e7b5" href="R/b7cc87ba8694e7b5.html" target="n" data-glyph="76,1" class="i method">CloseSessionIfNeededAsync</a>(<a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a> <span id="r34 rd" class="r34 r">session</span>)
+        {
+            <b>if</b> (!<span class="r34 r">session</span>.<a href="IClientEntity.cs.html#700f5cbbab50b77d" class="i property">IsClosedOrClosing</a>)
+            {
+                <b>try</b>
+                {
+                    <b>await</b> <span class="r34 r">session</span>.<a href="IClientEntity.cs.html#20aed1f3e1c69e00" class="i method">CloseAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    <a href="MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="MessagingEventSource.cs.html#3347bba22f3fda2b" class="i method">SessionReceivePumpSessionClosed</a>(<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#e7c27c0c6cc775db" class="i field">clientId</a>, <span class="r34 r">session</span>.<a href="IMessageSession.cs.html#f8d2be0dbd369bb5" class="i property">SessionId</a>);
+                }
+                <b>catch</b> (<span class="i">Exception</span> <span id="r35 rd" class="r35 r">exception</span>)
+                {
+                    <a href="MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="MessagingEventSource.cs.html#ed4d1d451080320c" class="i method">SessionReceivePumpSessionCloseException</a>(<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#e7c27c0c6cc775db" class="i field">clientId</a>, <span class="r34 r">session</span>.<a href="IMessageSession.cs.html#f8d2be0dbd369bb5" class="i property">SessionId</a>, <span class="r35 r">exception</span>);
+                    <b>await</b> <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#4de04df20a73bcc5" class="i method">RaiseExceptionReceived</a>(<span class="r35 r">exception</span>, <a href="ExceptionReceivedEventArgsAction.cs.html#20c83e23f7c3e1a1" class="t t">ExceptionReceivedEventArgsAction</a>.<a href="ExceptionReceivedEventArgsAction.cs.html#e8ad152c611fcea6" class="i field">CloseMessageSession</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+            }
+        }
+ 
+        <b>async</b> <span class="i">Task</span> <a id="db802a8709f03c97" href="R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">RenewSessionLockTaskAsync</a>(<a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a> <span id="r36 rd" class="r36 r">session</span>, <span class="i">CancellationToken</span> <span id="r37 rd" class="r37 r">renewLockCancellationToken</span>)
+        {
+            <b>while</b> (!<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#a8cc82173ba71bfa" class="i field">pumpCancellationToken</a>.<span class="i">IsCancellationRequested</span> &amp;&amp;
+                   !<span class="r37 r">renewLockCancellationToken</span>.<span class="i">IsCancellationRequested</span>)
+            {
+                <b>try</b>
+                {
+                    <b>var</b> <span id="r38 rd" class="r38 r">amount</span> = <a href="MessagingUtilities.cs.html#7a4c546c869c0fb2" class="t t">MessagingUtilities</a>.<a href="MessagingUtilities.cs.html#ec5d75da3b482a30" class="i method">CalculateRenewAfterDuration</a>(<span class="r36 r">session</span>.<a href="IMessageSession.cs.html#9ce489c350b9d969" class="i property">LockedUntilUtc</a>);
+ 
+                    <a href="MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="MessagingEventSource.cs.html#fc157c6caf27f047" class="i method">SessionReceivePumpSessionRenewLockStart</a>(<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#e7c27c0c6cc775db" class="i field">clientId</a>, <span class="r36 r">session</span>.<a href="IMessageSession.cs.html#f8d2be0dbd369bb5" class="i property">SessionId</a>, <span class="r38 r">amount</span>);
+                    <b>await</b> <span class="i">Task</span>.<span class="i">Delay</span>(<span class="r38 r">amount</span>, <span class="r37 r">renewLockCancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                    <b>if</b> (!<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#a8cc82173ba71bfa" class="i field">pumpCancellationToken</a>.<span class="i">IsCancellationRequested</span> &amp;&amp;
+                        !<span class="r37 r">renewLockCancellationToken</span>.<span class="i">IsCancellationRequested</span>)
+                    {
+                        <b>await</b> <span class="r36 r">session</span>.<a href="IMessageSession.cs.html#de5d788979575170" class="i method">RenewSessionLockAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        <a href="MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="MessagingEventSource.cs.html#ebf74de9261d913a" class="i method">SessionReceivePumpSessionRenewLockStop</a>(<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#e7c27c0c6cc775db" class="i field">clientId</a>, <span class="r36 r">session</span>.<a href="IMessageSession.cs.html#f8d2be0dbd369bb5" class="i property">SessionId</a>);
+                    }
+                    <b>else</b>
+                    {
+                        <b>break</b>;
+                    }
+                }
+                <b>catch</b> (<span class="i">Exception</span> <span id="r39 rd" class="r39 r">exception</span>)
+                {
+                    <a href="MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="MessagingEventSource.cs.html#60d5be8eced98099" class="i method">SessionReceivePumpSessionRenewLockException</a>(<a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#e7c27c0c6cc775db" class="i field">clientId</a>, <span class="r36 r">session</span>.<a href="IMessageSession.cs.html#f8d2be0dbd369bb5" class="i property">SessionId</a>, <span class="r39 r">exception</span>);
+ 
+                    <span class="c">// TaskCanceled is expected here as renewTasks will be cancelled after the Complete call is made.</span>
+                    <span class="c">// ObjectDisposedException should only happen here because the CancellationToken was disposed at which point </span>
+                    <span class="c">// this renew exception is not relevant anymore. Lets not bother user with this exception.</span>
+                    <b>if</b> (!(<span class="r39 r">exception</span> <b>is</b> <span class="i">TaskCanceledException</span>) &amp;&amp; !(<span class="r39 r">exception</span> <b>is</b> <span class="i">ObjectDisposedException</span>))
+                    {
+                        <b>await</b> <a href="#17f50eaa1ce352f4" class="k">this</a>.<a href="#4de04df20a73bcc5" class="i method">RaiseExceptionReceived</a>(<span class="r39 r">exception</span>, <a href="ExceptionReceivedEventArgsAction.cs.html#20c83e23f7c3e1a1" class="t t">ExceptionReceivedEventArgsAction</a>.<a href="ExceptionReceivedEventArgsAction.cs.html#cfa05d4198d5ea6c" class="i field">RenewLock</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    }
+                    <b>if</b> (!<a href="MessagingUtilities.cs.html#7a4c546c869c0fb2" class="t t">MessagingUtilities</a>.<a href="MessagingUtilities.cs.html#0f237707d6c98f06" class="i method">ShouldRetry</a>(<span class="r39 r">exception</span>))
+                    {
+                        <b>break</b>;
+                    }
+                }
+            }
+        }
+    }
+}</pre></td></tr></table></div></body></html>

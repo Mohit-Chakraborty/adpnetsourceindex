@@ -1,0 +1,130 @@
+﻿<!DOCTYPE html>
+<html><head><title>AzureEventSourceLogForwarder.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(121);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Extensions.Azure/Internal/AzureEventSourceLogForwarder.cs" target="_top">Internal\AzureEventSourceLogForwarder.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Extensions.Azure" target="_top">..\..\extensions\Microsoft.Extensions.Azure\src\Microsoft.Extensions.Azure.csproj</a> (Microsoft.Extensions.Azure)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Concurrent</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>.<span class="i">Tracing</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i">Diagnostics</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Shared</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Logging</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i n">Azure</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> A type used to forward log messages from Azure SDK </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">EventSource</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">ILoggerFactory</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>public sealed class</b> <a id="358c38923cbf620c" href="../R/358c38923cbf620c.html" target="n" data-glyph="0,0" class="t t">AzureEventSourceLogForwarder</a>: <span class="i">IDisposable</span>
+    {
+        <b>private readonly</b> <span class="i">ILoggerFactory</span> <a id="6e129b8e7c6f8664" href="../R/6e129b8e7c6f8664.html" target="n" data-glyph="46,1" class="i field">_loggerFactory</a>;
+ 
+        <b>private readonly</b> <span class="i">ConcurrentDictionary</span>&lt;<b>string</b>, <span class="i">ILogger</span>&gt; <a id="ae37adb706cb46b5" href="../R/ae37adb706cb46b5.html" target="n" data-glyph="46,1" class="i field">_loggers</a> = <b>new</b> <span class="i">ConcurrentDictionary</span>&lt;<b>string</b>, <span class="i">ILogger</span>&gt;();
+ 
+        <b>private readonly</b> <span class="i">Func</span>&lt;<a href="#07e38370431334f6" class="t t">EventSourceEvent</a>, <span class="i">Exception</span>, <b>string</b>&gt; <a id="3b502dc5e8c2c655" href="../R/3b502dc5e8c2c655.html" target="n" data-glyph="46,1" class="i field">_formatMessage</a> = <span class="i">FormatMessage</span>;
+ 
+        <b>private</b> <span class="i">AzureEventSourceListener</span> <a id="6b3433c26a13604b" href="../R/6b3433c26a13604b.html" target="n" data-glyph="46,1" class="i field">_listener</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Initializes a new instance of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AzureComponentFactory.cs.html#a50d7862f0cd3fd9" class="t t">AzureComponentFactory</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> using a provided </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">ILoggerFactory</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">loggerFactory</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">ILoggerFactory</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to forward messages to.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="a7ce5cad7da53c26" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">AzureEventSourceLogForwarder</a>(<span class="i">ILoggerFactory</span> <span id="r0 rd" class="r0 r">loggerFactory</span>)
+        {
+            <a href="#6e129b8e7c6f8664" class="i field">_loggerFactory</a> = <span class="r0 r">loggerFactory</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Initiates the log forwarding from the Azure SDK event sources to a provided </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">ILoggerFactory</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">, call </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#40cf5b2ff24e9613" class="i method">Dispose</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to stop forwarding.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public void</b> <a id="beae7882ae2679b8" href="../R/beae7882ae2679b8.html" target="n" data-glyph="72,1" class="i method">Start</a>()
+        {
+            <a href="#6b3433c26a13604b" class="i field">_listener</a> ??= <b>new</b> <span class="i">AzureEventSourceListener</span>((<span id="r1 rd" class="r1 r">e</span>, <span id="r2 rd" class="r2 r">s</span>) =&gt; <span class="i">LogEvent</span>(<span class="r1 r">e</span>), <span class="i">EventLevel</span>.<span class="i">Verbose</span>);
+        }
+ 
+        <b>private void</b> <a id="84abb14aa75cebd8" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">LogEvent</a>(<span class="i">EventWrittenEventArgs</span> <span id="r3 rd" class="r3 r">eventData</span>)
+        {
+            <b>if</b> (<a href="#6e129b8e7c6f8664" class="i field">_loggerFactory</a> == <b>null</b>)
+            {
+                <b>return</b>;
+            }
+ 
+            <b>var</b> <span id="r4 rd" class="r4 r">logger</span> = <a href="#ae37adb706cb46b5" class="i field">_loggers</a>.<span class="i">GetOrAdd</span>(<span class="r3 r">eventData</span>.<span class="i">EventSource</span>.<span class="i">Name</span>, <span id="r5 rd" class="r5 r">name</span> =&gt; <a href="#6e129b8e7c6f8664" class="i field">_loggerFactory</a>.<span class="i">CreateLogger</span>(<span class="i">ToLoggerName</span>(<span class="r5 r">name</span>)));
+            <span class="r4 r">logger</span>.<span class="i">Log</span>(<span class="i">MapLevel</span>(<span class="r3 r">eventData</span>.<span class="i">Level</span>), <b>new</b> <span class="i">EventId</span>(<span class="r3 r">eventData</span>.<span class="i">EventId</span>, <span class="r3 r">eventData</span>.<span class="i">EventName</span>), <b>new</b> <a href="#2cbf8a5e04328f78" class="t constructor">EventSourceEvent</a>(<span class="r3 r">eventData</span>), <b>null</b>, <a href="#3b502dc5e8c2c655" class="i field">_formatMessage</a>);
+        }
+ 
+        <b>private static string</b> <a id="b583dd655496a4cf" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">ToLoggerName</a>(<b>string</b> <span id="r6 rd" class="r6 r">name</span>)
+        {
+            <b>return</b> <span class="r6 r">name</span>.<span class="i">Replace</span>(<span class="s">&#39;-&#39;</span>, <span class="s">&#39;.&#39;</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">inheritdoc</span> <span class="c">/&gt;</span>
+        <b>public void</b> <a id="40cf5b2ff24e9613" href="../R/40cf5b2ff24e9613.html" target="n" data-glyph="72,1" class="i method">Dispose</a>()
+        {
+            <a href="#6b3433c26a13604b" class="i field">_listener</a>?.<span class="i">Dispose</span>();
+        }
+ 
+        <b>private static</b> <span class="i">LogLevel</span> <a id="c6ae85713c87f759" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">MapLevel</a>(<span class="i">EventLevel</span> <span id="r7 rd" class="r7 r">level</span>)
+        {
+            <b>switch</b> (<span class="r7 r">level</span>)
+            {
+                <b>case</b> <span class="i">EventLevel</span>.<span class="i">Critical</span>:
+                    <b>return</b> <span class="i">LogLevel</span>.<span class="i">Critical</span>;
+                <b>case</b> <span class="i">EventLevel</span>.<span class="i">Error</span>:
+                    <b>return</b> <span class="i">LogLevel</span>.<span class="i">Error</span>;
+                <b>case</b> <span class="i">EventLevel</span>.<span class="i">Informational</span>:
+                    <b>return</b> <span class="i">LogLevel</span>.<span class="i">Information</span>;
+                <b>case</b> <span class="i">EventLevel</span>.<span class="i">Verbose</span>:
+                    <b>return</b> <span class="i">LogLevel</span>.<span class="i">Debug</span>;
+                <b>case</b> <span class="i">EventLevel</span>.<span class="i">Warning</span>:
+                    <b>return</b> <span class="i">LogLevel</span>.<span class="i">Warning</span>;
+                <b>case</b> <span class="i">EventLevel</span>.<span class="i">LogAlways</span>:
+                    <b>return</b> <span class="i">LogLevel</span>.<span class="i">Information</span>;
+                <b>default</b>:
+                    <b>throw</b> <b>new</b> <span class="i">ArgumentOutOfRangeException</span>(<b>nameof</b>(<span class="r7 r">level</span>), <span class="r7 r">level</span>, <b>null</b>);
+            }
+        }
+ 
+        <b>private static string</b> <a id="2acaf2ec8cb6b128" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">FormatMessage</a>(<a href="#07e38370431334f6" class="t t">EventSourceEvent</a> <span id="r8 rd" class="r8 r">eventSourceEvent</span>, <span class="i">Exception</span> <span id="r9 rd" class="r9 r">exception</span>)
+        {
+            <b>return</b> <a href="../EventSourceEventFormatting.cs.html#2a79b8a7b8fa50e5" class="t t">EventSourceEventFormatting</a>.<a href="../EventSourceEventFormatting.cs.html#e78402a5a65076ce" class="i method">Format</a>(<span class="r8 r">eventSourceEvent</span>.<a href="#4083cdb8d61c6d15" class="i property">EventData</a>);
+        }
+ 
+        <b>private readonly struct</b> <a id="07e38370431334f6" href="../R/07e38370431334f6.html" target="n" data-glyph="112,1" class="t t"><span id="504a670fca6aada2">EventSourceEvent</span></a>: <span class="i">IReadOnlyList</span>&lt;<span class="i">KeyValuePair</span>&lt;<b>string</b>, <b>object</b>&gt;&gt;
+        {
+            <b>public</b> <span class="i">EventWrittenEventArgs</span> <a id="4083cdb8d61c6d15" href="../R/4083cdb8d61c6d15.html" target="n" data-glyph="102,2" class="i property">EventData</a> { <b>get</b>; }
+ 
+            <b>public</b> <a id="2cbf8a5e04328f78" href="../R/2cbf8a5e04328f78.html" target="n" data-glyph="72,2" class="t constructor">EventSourceEvent</a>(<span class="i">EventWrittenEventArgs</span> <span id="r10 rd" class="r10 r">eventData</span>)
+            {
+                <a href="#4083cdb8d61c6d15" class="i property">EventData</a> = <span class="r10 r">eventData</span>;
+            }
+ 
+            <b>public</b> <span class="i">IEnumerator</span>&lt;<span class="i">KeyValuePair</span>&lt;<b>string</b>, <b>object</b>&gt;&gt; <a id="76abc00b0c46c0d4" href="../R/76abc00b0c46c0d4.html" target="n" data-glyph="72,2" class="i method">GetEnumerator</a>()
+            {
+                <b>for</b> (<b>int</b> <span id="r11 rd" class="r11 r">i</span> = 0; <span class="r11 r">i</span> &lt; <a href="#b9ada01b23d770fa" class="i property">Count</a>; <span class="r11 r">i</span>++)
+                {
+                    <b>yield</b> <b>return</b> <b>new</b> <span class="i">KeyValuePair</span>&lt;<b>string</b>, <b>object</b>&gt;(<a href="#4083cdb8d61c6d15" class="i property">EventData</a>.<span class="i">PayloadNames</span>[<span class="r11 r">i</span>], <a href="#4083cdb8d61c6d15" class="i property">EventData</a>.<span class="i">Payload</span>[<span class="r11 r">i</span>]);
+                }
+            }
+ 
+            <span class="i">IEnumerator</span> <span class="i">IEnumerable</span>.<a id="653fa9c6198c8f4c" href="../R/../../0000000000.html" target="n" data-glyph="76,2" class="i method">GetEnumerator</a>()
+            {
+                <b>return</b> <a href="#76abc00b0c46c0d4" class="i method">GetEnumerator</a>();
+            }
+ 
+            <b>public int</b> <a id="b9ada01b23d770fa" href="../R/b9ada01b23d770fa.html" target="n" data-glyph="102,2" class="i property">Count</a> =&gt; <a href="#4083cdb8d61c6d15" class="i property">EventData</a>.<span class="i">PayloadNames</span>.<span class="i">Count</span>;
+ 
+            <b>public</b> <span class="i">KeyValuePair</span>&lt;<b>string</b>, <b>object</b>&gt; <a id="1f6c3c665dc5af91" href="../R/../../0000000000.html" target="n" data-glyph="102,2" class="k">this</a>[<b>int</b> <span id="r12 rd" class="r12 r">index</span>] =&gt; <b>new</b> <span class="i">KeyValuePair</span>&lt;<b>string</b>, <b>object</b>&gt;(<a href="#4083cdb8d61c6d15" class="i property">EventData</a>.<span class="i">PayloadNames</span>[<span class="r12 r">index</span>], <a href="#4083cdb8d61c6d15" class="i property">EventData</a>.<span class="i">Payload</span>[<span class="r12 r">index</span>]);
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

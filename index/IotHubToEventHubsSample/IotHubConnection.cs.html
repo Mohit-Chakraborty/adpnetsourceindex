@@ -1,0 +1,314 @@
+﻿<!DOCTYPE html>
+<html><head><title>IotHubConnection.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(305);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#IotHubToEventHubsSample/IotHubConnection.cs" target="_top">IotHubConnection.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#IotHubToEventHubsSample" target="_top">IotHubToEventHubsSample.csproj</a> (IotHubToEventHubsSample)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Globalization</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Security</span>.<span class="i n">Cryptography</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>.<span class="i n">RegularExpressions</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">Azure</span>.<span class="i">Amqp</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">Azure</span>.<span class="i">Amqp</span>.<span class="i">Framing</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">Azure</span>.<span class="i">Amqp</span>.<span class="i">Sasl</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">Azure</span>.<span class="i">Amqp</span>.<span class="i">Transport</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">Azure</span>.<span class="i">Devices</span>;
+ 
+<b>namespace</b> <span class="i n">IotHubToEventHubsSample</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">   A transient connection to the IoT Hub service, providing a set of utility-type operations that</span>
+    <span class="c">///</span><span class="c">   span the service client and device roles.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <b>public static class</b> <a id="d626cf869e1c351f" href="R/d626cf869e1c351f.html" target="n" data-glyph="0,0" class="t t">IotHubConnection</a>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The regular expression used to parse the Event Hub name from the IoT Hub redirection address.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static readonly</b> <span class="t t">Regex</span> <a id="aaa20ced94df06c2" href="R/aaa20ced94df06c2.html" target="n" data-glyph="46,1" class="i field">EventHubNameExpression</a> = <b>new</b> <span class="t constructor">Regex</span>(<span class="s">@&quot;:\d+\/(?&lt;eventHubName&gt;.*)\/\$management&quot;</span>, <span class="t t">RegexOptions</span>.<span class="i field">IgnoreCase</span> | <span class="t t">RegexOptions</span>.<span class="i field">Compiled</span> | <span class="t t">RegexOptions</span>.<span class="i field">CultureInvariant</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Requests connection string for the built-in Event Hubs messaging endpoint of the associated IoT Hub.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">iotHubConnectionString</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The connection string for the IoT Hub instance to request the Event Hubs connection string from.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">timeout</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The maximum amount of time that the request and translation should be allowed to take.  If not provided, a default of 60 seconds will be assumed.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A connection string which can be used to connect to the Event Hubs service and interact with the IoT Hub messaging endpoint.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@System.Runtime/A.html#beac22dfca574cd4" class="t t">InvalidOperationException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The Event Hubs host information was not returned by the IoT Hub service.</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">href</span><span class="c">=</span><span class="c">&quot;</span><span class="c">https://docs.microsoft.com/en-us/azure/iot-hub/iot-hub-devguide-endpoints</span><span class="c">&quot;</span> <span class="c">/&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">href</span><span class="c">=</span><span class="c">&quot;</span><span class="c">https://docs.microsoft.com/en-us/azure/iot-hub/iot-hub-devguide-messages-read-builtin</span><span class="c">&quot;</span> <span class="c">/&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">href</span><span class="c">=</span><span class="c">&quot;</span><span class="c">https://docs.microsoft.com/en-us/azure/iot-hub/iot-hub-amqp-support#receive-telemetry-messages-service-client</span><span class="c">&quot;</span> <span class="c">/&gt;</span>
+        <span class="c">///</span>
+        <b>public static async</b> <a href="@1@System.Runtime/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="61b5358ae12d094d" href="R/61b5358ae12d094d.html" target="n" data-glyph="72,1" class="i method">RequestEventHubsConnectionStringAsync</a>(<a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r0 rd" class="r0 r">iotHubConnectionString</span>,
+                                                                               <a href="@1@System.Runtime/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>? <span id="r1 rd" class="r1 r">timeout</span> = <b>default</b>)
+        {
+            <span class="r1 r">timeout</span> ??= <a href="@1@System.Runtime/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@1@System.Runtime/A.html#ae74be5264df78d8" class="i method">FromMinutes</a>(1);
+ 
+            <b>if</b> (<a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@System.Runtime/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r0 r">iotHubConnectionString</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@1@System.Runtime/A.html#4b20cd3790b6426a" class="t constructor">ArgumentException</a>(<span class="s">&quot;The IoT Hub connection string must be provided.&quot;</span>, <b>nameof</b>(<span class="r0 r">iotHubConnectionString</span>));
+            }
+ 
+            <span class="c">// Parse the connection string into the necessary components, and ensure the information is available.</span>
+ 
+            <b>var</b> <span id="r2 rd" class="r2 r">parsedConnectionString</span> = <span class="i">IotHubConnectionStringBuilder</span>.<span class="i">Create</span>(<span class="r0 r">iotHubConnectionString</span>);
+            <b>var</b> <span id="r3 rd" class="r3 r">iotHubName</span> = <span class="r2 r">parsedConnectionString</span>.<span class="i">HostName</span>?.<span class="i">Substring</span>(0, <span class="r2 r">parsedConnectionString</span>.<span class="i">HostName</span>.<span class="i">IndexOf</span>(<span class="s">&#39;.&#39;</span>));
+ 
+            <b>if</b> ((<a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">string</a>.<span class="i">IsNullOrEmpty</span>(<span class="r2 r">parsedConnectionString</span>.<span class="i">HostName</span>)) || (<a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">string</a>.<span class="i">IsNullOrEmpty</span>(<span class="r2 r">parsedConnectionString</span>.<span class="i">SharedAccessKeyName</span>)) || (<a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">string</a>.<span class="i">IsNullOrEmpty</span>(<span class="r2 r">parsedConnectionString</span>.<span class="i">SharedAccessKey</span>)))
+            {
+                <b>throw</b> <b>new</b> <a href="@1@System.Runtime/A.html#4b20cd3790b6426a" class="t constructor">ArgumentException</a>(<span class="s">&quot;The IoT Hub connection string is not valid; it must contain the host, shared access key, and shared access key name.&quot;</span>, <b>nameof</b>(<span class="r0 r">iotHubConnectionString</span>));
+            }
+ 
+            <b>if</b> (<a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">string</a>.<span class="i">IsNullOrEmpty</span>(<span class="r3 r">iotHubName</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@1@System.Runtime/A.html#4b20cd3790b6426a" class="t constructor">ArgumentException</a>(<span class="s">&quot;Unable to parse the IoT Hub name from the connection string.&quot;</span>, <b>nameof</b>(<span class="r0 r">iotHubConnectionString</span>));
+            }
+ 
+            <span class="c">// Establish the IoT Hub connection via link to the necessary endpoint, which will trigger a redirect exception</span>
+            <span class="c">// from which the Event Hubs connection string can be built.</span>
+ 
+            <b>var</b> <span id="r4 rd" class="r4 r">stopWatch</span> = <span class="t t">Stopwatch</span>.<span class="i method">StartNew</span>();
+            <a href="@1@System.Runtime/A.html#991565dd25f47c90" class="k">var</a> <span id="r5 rd" class="r5 r">serviceEndpoint</span> = <b>new</b> <a href="@1@System.Runtime/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<span class="s">$&quot;</span>{ <span class="i">AmqpConstants</span>.<span class="i">SchemeAmqps</span> }<span class="s">://</span>{ <span class="r2 r">parsedConnectionString</span>.<span class="i">HostName</span> }<span class="s">/messages/events</span><span class="s">&quot;</span>);
+            <b>var</b> <span id="r6 rd" class="r6 r">connection</span> = <b>default</b>(<span class="i">AmqpConnection</span>);
+            <b>var</b> <span id="r7 rd" class="r7 r">link</span> = <b>default</b>(<span class="i">AmqpLink</span>);
+            <a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r8 rd" class="r8 r">eventHubsHost</span> = <b>default</b>(<a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">string</a>);
+            <a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r9 rd" class="r9 r">eventHubName</span> = <b>default</b>(<a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">string</a>);
+ 
+            <b>try</b>
+            {
+                <span class="r6 r">connection</span> = <b>await</b> <span class="i">CreateAndOpenConnectionAsync</span>(<span class="r5 r">serviceEndpoint</span>, <span class="r3 r">iotHubName</span>, <span class="r2 r">parsedConnectionString</span>.<span class="i">SharedAccessKeyName</span>, <span class="r2 r">parsedConnectionString</span>.<span class="i">SharedAccessKey</span>, <span class="r1 r">timeout</span>.<a href="@1@System.Runtime/A.html#7b38d1fa76071c95" class="i property">Value</a>).<a href="@1@System.Runtime/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                <span class="r7 r">link</span> = <b>await</b> <a href="#ccdd0394566f800e" class="i method">CreateRedirectLinkAsync</a>(<span class="r6 r">connection</span>, <span class="r5 r">serviceEndpoint</span>, <span class="r1 r">timeout</span>.<a href="@1@System.Runtime/A.html#7b38d1fa76071c95" class="i property">Value</a>.<a href="@1@System.Runtime/A.html#ff480b49f090b86e" class="i method">Subtract</a>(<span class="r4 r">stopWatch</span>.<span class="i property">Elapsed</span>)).<a href="@1@System.Runtime/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                <b>await</b> <span class="r7 r">link</span>.<span class="i">OpenAsync</span>(<span class="r1 r">timeout</span>.<a href="@1@System.Runtime/A.html#7b38d1fa76071c95" class="i property">Value</a>.<a href="@1@System.Runtime/A.html#ff480b49f090b86e" class="i method">Subtract</a>(<span class="r4 r">stopWatch</span>.<span class="i property">Elapsed</span>)).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>catch</b> (<span class="i">AmqpException</span> <span id="r10 rd" class="r10 r">ex</span>)
+                <b>when</b> ((<span class="r10 r">ex</span>?.<span class="i">Error</span>?.<span class="i">Condition</span>.<span class="i">Value</span> == <span class="i">AmqpErrorCode</span>.<span class="i">LinkRedirect</span>.<span class="i">Value</span>) &amp;&amp; (<span class="r10 r">ex</span>?.<span class="i">Error</span>?.<span class="i">Info</span> != <b>null</b>))
+            {
+                <span class="c">// The Event Hubs host is returned as a first-party element of the redirect information.</span>
+ 
+                <span class="r10 r">ex</span>.<span class="i">Error</span>.<span class="i">Info</span>.<span class="i">TryGetValue</span>(<span class="s">&quot;hostname&quot;</span>, <b>out</b> <span class="r8 r">eventHubsHost</span>);
+ 
+                <span class="c">// The Event Hub name is a variant of the IoT Hub name and must be parsed from the</span>
+                <span class="c">// full IoT Hub address returned by the redirect.</span>
+ 
+                <b>if</b> (<span class="r10 r">ex</span>.<span class="i">Error</span>.<span class="i">Info</span>.<span class="i">TryGetValue</span>(<span class="s">&quot;address&quot;</span>, <b>out string</b> <span id="r11 rd" class="r11 r">iotAddress</span>))
+                {
+                    <span class="c">//  If the address does not match the expected pattern, this will not result in an exception; the Event Hub</span>
+                    <span class="c">// name will remain null and trigger a failed validation later in the flow.</span>
+ 
+                    <span class="r9 r">eventHubName</span> = <a href="#aaa20ced94df06c2" class="i field">EventHubNameExpression</a>.<span class="i method">Match</span>(<span class="r11 r">iotAddress</span>).<span class="i property">Groups</span>[<span class="s">&quot;eventHubName&quot;</span>].<span class="i property">Value</span>;
+                }
+            }
+            <b>finally</b>
+            {
+                <span class="r4 r">stopWatch</span>.<span class="i method">Stop</span>();
+ 
+                <span class="r7 r">link</span>?.<span class="i">Session</span>?.<span class="i">SafeClose</span>();
+                <span class="r7 r">link</span>?.<span class="i">SafeClose</span>();
+                <span class="r6 r">connection</span>?.<span class="i">SafeClose</span>();
+            }
+ 
+            <span class="c">// Attempt to assemble the Event Hubs connection string using the IoT Hub components.</span>
+ 
+            <b>if</b> (<a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@System.Runtime/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r8 r">eventHubsHost</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@1@System.Runtime/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;The Event Hubs host was not returned by the IoT Hub service.&quot;</span>);
+            }
+ 
+            <b>if</b> (<a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@System.Runtime/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r9 r">eventHubName</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@1@System.Runtime/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;The Event Hub name was not returned by the IoT Hub service.&quot;</span>);
+            }
+ 
+            <b>return</b> <span class="s">$&quot;</span><span class="s">Endpoint=sb://</span>{ <span class="r8 r">eventHubsHost</span> }<span class="s">/;EntityPath=</span>{ <span class="r9 r">eventHubName</span> }<span class="s">;SharedAccessKeyName=</span>{ <span class="r2 r">parsedConnectionString</span>.<span class="i">SharedAccessKeyName</span> }<span class="s">;SharedAccessKey=</span>{ <span class="r2 r">parsedConnectionString</span>.<span class="i">SharedAccessKey</span> }<span class="s">&quot;</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Performs the tasks needed to build and open a connection to the IoT Hub</span>
+        <span class="c">///</span><span class="c">   service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">serviceEndpoint</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The endpoint of the IoT Hub service to connect to.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">iotHubName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the IoT Hub to connect to.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r14 r">sharedAccessKeyName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the shared access key being used for authentication.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">sharedAccessKey</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The shared access key being used for authentication.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r16 r">timeout</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The maximum amount of time that establishing the connection should be allowed to take.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">An </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">AmqpConnection</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> to the requested IoT Hub.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">href</span><span class="c">=</span><span class="c">&quot;</span><span class="c">https://docs.microsoft.com/en-us/azure/iot-hub/iot-hub-amqp-support</span><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <span class="c">///</span>
+        <b>private static async</b> <a href="@1@System.Runtime/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="i">AmqpConnection</span>&gt; <a id="96876a5bec9d729e" href="R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">CreateAndOpenConnectionAsync</a>(<a href="@1@System.Runtime/A.html#991565dd25f47c90" class="t t">Uri</a> <span id="r12 rd" class="r12 r">serviceEndpoint</span>,
+                                                                               <a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r13 rd" class="r13 r">iotHubName</span>,
+                                                                               <a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r14 rd" class="r14 r">sharedAccessKeyName</span>,
+                                                                               <a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r15 rd" class="r15 r">sharedAccessKey</span>,
+                                                                               <a href="@1@System.Runtime/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r16 rd" class="r16 r">timeout</span>)
+        {
+            <a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r17 rd" class="r17 r">hostName</span> = <span class="r12 r">serviceEndpoint</span>.<a href="@1@System.Runtime/A.html#c230833968da7179" class="i property">Host</a>;
+            <a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r18 rd" class="r18 r">userName</span> = <span class="s">$&quot;</span>{ <span class="r14 r">sharedAccessKeyName</span> }<span class="s">@sas.root.</span>{ <span class="r13 r">iotHubName</span> }<span class="s">&quot;</span>;
+            <a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r19 rd" class="r19 r">signature</span> = <a href="#e5976b69d34e5592" class="i method">BuildSignature</a>(<span class="s">$&quot;</span>{ <span class="r17 r">hostName</span> }{ <span class="r12 r">serviceEndpoint</span>.<a href="@1@System.Runtime/A.html#a25e99acb6b73c81" class="i property">AbsolutePath</a> }<span class="s">&quot;</span>, <span class="r14 r">sharedAccessKeyName</span>, <span class="r15 r">sharedAccessKey</span>, <a href="@1@System.Runtime/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@1@System.Runtime/A.html#ae74be5264df78d8" class="i method">FromMinutes</a>(5));
+            <a href="@1@System.Runtime/A.html#225942ed7b7a3252" class="k">var</a> <span id="r20 rd" class="r20 r">port</span> = 5671;
+ 
+            <span class="c">// Create the layers of settings needed to establish the connection.</span>
+ 
+            <a href="@1@System.Runtime/A.html#0c15515dfe051d35" class="k">var</a> <span id="r21 rd" class="r21 r">amqpVersion</span> = <b>new</b> <a href="@1@System.Runtime/A.html#403d9734551ca5a4" class="t constructor">Version</a>(1, 0, 0, 0);
+ 
+            <b>var</b> <span id="r22 rd" class="r22 r">tcpSettings</span> = <b>new</b> <span class="i">TcpTransportSettings</span>
+            {
+                <span class="i">Host</span> = <span class="r17 r">hostName</span>,
+                <span class="i">Port</span> = <span class="r20 r">port</span>,
+                <span class="i">ReceiveBufferSize</span> = <span class="i">AmqpConstants</span>.<span class="i">TransportBufferSize</span>,
+                <span class="i">SendBufferSize</span> = <span class="i">AmqpConstants</span>.<span class="i">TransportBufferSize</span>
+            };
+ 
+            <b>var</b> <span id="r23 rd" class="r23 r">transportSettings</span> = <b>new</b> <span class="i">TlsTransportSettings</span>(<span class="r22 r">tcpSettings</span>)
+            {
+                <span class="i">TargetHost</span> = <span class="r17 r">hostName</span>,
+            };
+ 
+            <b>var</b> <span id="r24 rd" class="r24 r">connectionSettings</span> = <b>new</b> <span class="i">AmqpConnectionSettings</span>
+            {
+                <span class="i">IdleTimeOut</span> = (<b>uint</b>)<a href="@1@System.Runtime/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@1@System.Runtime/A.html#ae74be5264df78d8" class="i method">FromMinutes</a>(1).<a href="@1@System.Runtime/A.html#0001a4a9e0a9b848" class="i property">TotalMilliseconds</a>,
+                <span class="i">MaxFrameSize</span> = <span class="i">AmqpConstants</span>.<span class="i">DefaultMaxFrameSize</span>,
+                <span class="i">ContainerId</span> = <a href="@1@System.Runtime/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@1@System.Runtime/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@1@System.Runtime/A.html#a6547a472def7796" class="i method">ToString</a>(),
+                <span class="i">HostName</span> = <span class="r17 r">hostName</span>
+            };
+ 
+            <b>var</b> <span id="r25 rd" class="r25 r">saslProvider</span> = <b>new</b> <span class="i">SaslTransportProvider</span>();
+            <span class="r25 r">saslProvider</span>.<span class="i">Versions</span>.<span class="i">Add</span>(<b>new</b> <span class="i">AmqpVersion</span>(<span class="r21 r">amqpVersion</span>));
+            <span class="r25 r">saslProvider</span>.<span class="i">AddHandler</span>(<b>new</b> <span class="i">SaslPlainHandler</span> { <span class="i">AuthenticationIdentity</span> = <span class="r18 r">userName</span>, <span class="i">Password</span> = <span class="r19 r">signature</span> });
+ 
+            <b>var</b> <span id="r26 rd" class="r26 r">amqpProvider</span> = <b>new</b> <span class="i">AmqpTransportProvider</span>();
+            <span class="r26 r">amqpProvider</span>.<span class="i">Versions</span>.<span class="i">Add</span>(<b>new</b> <span class="i">AmqpVersion</span>(<span class="r21 r">amqpVersion</span>));
+ 
+            <b>var</b> <span id="r27 rd" class="r27 r">amqpSettings</span> = <b>new</b> <span class="i">AmqpSettings</span>();
+            <span class="r27 r">amqpSettings</span>.<span class="i">TransportProviders</span>.<span class="i">Add</span>(<span class="r25 r">saslProvider</span>);
+            <span class="r27 r">amqpSettings</span>.<span class="i">TransportProviders</span>.<span class="i">Add</span>(<span class="r26 r">amqpProvider</span>);
+ 
+            <span class="c">// Create and open the connection, respecting the timeout constraint</span>
+            <span class="c">// that was received.</span>
+ 
+            <b>var</b> <span id="r28 rd" class="r28 r">stopWatch</span> = <span class="t t">Stopwatch</span>.<span class="i method">StartNew</span>();
+            <b>var</b> <span id="r29 rd" class="r29 r">initiator</span> = <b>new</b> <span class="i">AmqpTransportInitiator</span>(<span class="r27 r">amqpSettings</span>, <span class="r23 r">transportSettings</span>);
+            <b>var</b> <span id="r30 rd" class="r30 r">transport</span> = <b>await</b> <span class="r29 r">initiator</span>.<span class="i">ConnectTaskAsync</span>(<span class="r16 r">timeout</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+            <b>try</b>
+            {
+                <b>var</b> <span id="r31 rd" class="r31 r">connection</span> = <b>new</b> <span class="i">AmqpConnection</span>(<span class="r30 r">transport</span>, <span class="r27 r">amqpSettings</span>, <span class="r24 r">connectionSettings</span>);
+                <b>await</b> <span class="r31 r">connection</span>.<span class="i">OpenAsync</span>(<span class="r16 r">timeout</span>.<a href="@1@System.Runtime/A.html#ff480b49f090b86e" class="i method">Subtract</a>(<span class="r28 r">stopWatch</span>.<span class="i property">Elapsed</span>)).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <b>return</b> <span class="r31 r">connection</span>;
+            }
+            <b>catch</b>
+            {
+                <span class="r30 r">transport</span>.<span class="i">Abort</span>();
+                <b>throw</b>;
+            }
+            <b>finally</b>
+            {
+                <span class="r28 r">stopWatch</span>.<span class="i method">Stop</span>();
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Creates the AMQP link used to trigger a redirection response from the</span>
+        <span class="c">///</span><span class="c">   IoT Hub service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r32 r">connection</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The connection to the IoT Hub service to associate the link with.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r33 r">serviceEndpoint</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The endpoint of the IoT Hub service that the connection was made to.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r34 r">timeout</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The maximum amount of time that creating the link should be allowed to take.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">An </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">AmqpLink</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> to an IoT Hub resource that will trigger redirection when opened.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The link is not opened by this method; callers are required to open the link in order to trigger</span>
+        <span class="c">///</span><span class="c">   the redirection error.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">href</span><span class="c">=</span><span class="c">&quot;</span><span class="c">https://docs.microsoft.com/en-us/azure/iot-hub/iot-hub-amqp-support</span><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <span class="c">///</span>
+        <b>private static async</b> <a href="@1@System.Runtime/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="i">AmqpLink</span>&gt; <a id="ccdd0394566f800e" href="R/ccdd0394566f800e.html" target="n" data-glyph="76,1" class="i method">CreateRedirectLinkAsync</a>(<span class="i">AmqpConnection</span> <span id="r32 rd" class="r32 r">connection</span>,
+                                                                    <a href="@1@System.Runtime/A.html#991565dd25f47c90" class="t t">Uri</a> <span id="r33 rd" class="r33 r">serviceEndpoint</span>,
+                                                                    <a href="@1@System.Runtime/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r34 rd" class="r34 r">timeout</span>)
+        {
+            <a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r35 rd" class="r35 r">linkPath</span> = <span class="s">$&quot;</span>{ <span class="r33 r">serviceEndpoint</span>.<a href="@1@System.Runtime/A.html#a25e99acb6b73c81" class="i property">AbsolutePath</a> }<span class="s">/$management</span><span class="s">&quot;</span>;
+            <b>var</b> <span id="r36 rd" class="r36 r">session</span> = <b>default</b>(<span class="i">AmqpSession</span>);
+ 
+            <b>try</b>
+            {
+                <b>var</b> <span id="r37 rd" class="r37 r">sessionSettings</span> = <b>new</b> <span class="i">AmqpSessionSettings</span> { <span class="i">Properties</span> = <b>new</b> <span class="i">Fields</span>() };
+                <span class="r36 r">session</span> = <span class="r32 r">connection</span>.<span class="i">CreateSession</span>(<span class="r37 r">sessionSettings</span>);
+ 
+                <b>await</b> <span class="r36 r">session</span>.<span class="i">OpenAsync</span>(<span class="r34 r">timeout</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <b>var</b> <span id="r38 rd" class="r38 r">linkSettings</span> = <b>new</b> <span class="i">AmqpLinkSettings</span>
+                {
+                    <span class="i">Role</span> = <b>true</b>,
+                    <span class="i">TotalLinkCredit</span> = 1,
+                    <span class="i">AutoSendFlow</span> = <b>true</b>,
+                    <span class="i">SettleType</span> = <span class="i">SettleMode</span>.<span class="i">SettleOnSend</span>,
+                    <span class="i">Source</span> = <b>new</b> <span class="i">Source</span> { <span class="i">Address</span> = <span class="r35 r">linkPath</span> },
+                    <span class="i">Target</span> = <b>new</b> <span class="i">Target</span> { <span class="i">Address</span> = <span class="r33 r">serviceEndpoint</span>.<a href="@1@System.Runtime/A.html#e335fec0022465e6" class="i property">AbsoluteUri</a> }
+                };
+ 
+                <b>var</b> <span id="r39 rd" class="r39 r">link</span> = <b>new</b> <span class="i">ReceivingAmqpLink</span>(<span class="r38 r">linkSettings</span>);
+                <span class="r38 r">linkSettings</span>.<span class="i">LinkName</span> = <span class="s">$&quot;</span>{ <b>nameof</b>(<a href="#d626cf869e1c351f" class="t t">IotHubConnection</a>) }<span class="s">;</span>{ <span class="r32 r">connection</span>.<span class="i">Identifier</span> }<span class="s">:</span>{ <span class="r36 r">session</span>.<span class="i">Identifier</span> }<span class="s">:</span>{ <span class="r39 r">link</span>.<span class="i">Identifier</span> }<span class="s">&quot;</span>;
+                <span class="r39 r">link</span>.<span class="i">AttachTo</span>(<span class="r36 r">session</span>);
+ 
+                <b>return</b> <span class="r39 r">link</span>;
+            }
+            <b>catch</b>
+            {
+                <span class="r36 r">session</span>?.<span class="i">Abort</span>();
+                <b>throw</b>;
+            }
+        }
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Builds a shared access signature to use for authentication with the IoT Hub</span>
+        <span class="c">///</span><span class="c">   service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r40 r">resourceUri</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The address of the resource the signature is intended to authenticate for.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r41 r">keyName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Name of the shared access key to base the signature on.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r42 r">keyValue</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The value of the shared access key to base the signature on.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r43 r">validityDuration</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The amount of time that the signature should be considered valid; after this time a new signature would be needed.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The shared access signature, encoded and suitable for use as a credential in service communication.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">href</span><span class="c">=</span><span class="c">&quot;</span><span class="c">https://docs.microsoft.com/en-us/azure/iot-hub/iot-hub-devguide-security#security-tokens</span><span class="c">&quot;</span> <span class="c">/&gt;</span>
+        <span class="c">///</span>
+        <b>private static string</b> <a id="e5976b69d34e5592" href="R/e5976b69d34e5592.html" target="n" data-glyph="76,1" class="i method">BuildSignature</a>(<a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r40 rd" class="r40 r">resourceUri</span>,
+                                             <a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r41 rd" class="r41 r">keyName</span>,
+                                             <a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r42 rd" class="r42 r">keyValue</span>,
+                                             <a href="@1@System.Runtime/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r43 rd" class="r43 r">validityDuration</span>)
+        {
+            <b>using</b> <b>var</b> <span id="r44 rd" class="r44 r">hmac</span> = <b>new</b> <span class="t constructor">HMACSHA256</span>(<span class="t t">Convert</span>.<span class="i method">FromBase64String</span>(<span class="r42 r">keyValue</span>));
+ 
+            <a href="@1@System.Runtime/A.html#68b4bb83ce8d1c31" class="k">var</a> <span id="r45 rd" class="r45 r">epoch</span> = <b>new</b> <a href="@1@System.Runtime/A.html#c5a5d2a27921e551" class="t constructor">DateTimeOffset</a>(1970, 1, 1, 0, 0, 0, <a href="@1@System.Runtime/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@1@System.Runtime/A.html#225346b4cd3a8300" class="i field">Zero</a>);
+            <a href="@1@System.Runtime/A.html#e566178cce890c36" class="k">var</a> <span id="r46 rd" class="r46 r">expirationTime</span> = <span class="t t">Convert</span>.<span class="i method">ToInt64</span>((<a href="@1@System.Runtime/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@1@System.Runtime/A.html#04abe0cac293ebd0" class="i property">UtcNow</a>.<a href="@1@System.Runtime/A.html#5cff8f26f5c7c095" class="i method">Add</a>(<span class="r43 r">validityDuration</span>) - <span class="r45 r">epoch</span>).<a href="@1@System.Runtime/A.html#061d7498e3227cfb" class="i property">TotalSeconds</a>);
+            <a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r47 rd" class="r47 r">encodedAudience</span> = <span class="t t">WebUtility</span>.<span class="i method">UrlEncode</span>(<span class="r40 r">resourceUri</span>);
+            <a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r48 rd" class="r48 r">expiration</span> = <span class="t t">Convert</span>.<span class="i method">ToString</span>(<span class="r46 r">expirationTime</span>, <a href="@1@System.Runtime/A.html#e319c6636909012f" class="t t">CultureInfo</a>.<a href="@1@System.Runtime/A.html#26ef1c020f0dbb7a" class="i property">InvariantCulture</a>);
+            <a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r49 rd" class="r49 r">signature</span> = <span class="t t">Convert</span>.<span class="i method">ToBase64String</span>(<span class="r44 r">hmac</span>.<span class="i method">ComputeHash</span>(<a href="@1@System.Runtime/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@1@System.Runtime/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@1@System.Runtime/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<span class="s">$&quot;</span>{ <span class="r47 r">encodedAudience</span> }\n{ <span class="r48 r">expiration</span> }<span class="s">&quot;</span>)));
+ 
+            <b>return</b> <a href="@1@System.Runtime/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@System.Runtime/A.html#691a34e179b91fdb" class="i method">Format</a>(<a href="@1@System.Runtime/A.html#e319c6636909012f" class="t t">CultureInfo</a>.<a href="@1@System.Runtime/A.html#26ef1c020f0dbb7a" class="i property">InvariantCulture</a>, <span class="s">&quot;SharedAccessSignature sr={0}&amp;sig={1}&amp;se={2}&amp;skn={3}&quot;</span>,
+                <span class="r47 r">encodedAudience</span>,
+                <span class="t t">WebUtility</span>.<span class="i method">UrlEncode</span>(<span class="r49 r">signature</span>),
+                <span class="t t">WebUtility</span>.<span class="i method">UrlEncode</span>(<span class="r48 r">expiration</span>),
+                <span class="t t">WebUtility</span>.<span class="i method">UrlEncode</span>(<span class="r41 r">keyName</span>));
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

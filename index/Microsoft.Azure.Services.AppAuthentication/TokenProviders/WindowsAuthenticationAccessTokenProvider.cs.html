@@ -1,0 +1,115 @@
+﻿<!DOCTYPE html>
+<html><head><title>WindowsAuthenticationAccessTokenProvider.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(106);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.Services.AppAuthentication/TokenProviders/WindowsAuthenticationAccessTokenProvider.cs" target="_top">TokenProviders\WindowsAuthenticationAccessTokenProvider.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.Services.AppAuthentication" target="_top">Azure.Services.AppAuthentication\Microsoft.Azure.Services.AppAuthentication.csproj</a> (Microsoft.Azure.Services.AppAuthentication)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">IdentityModel</span>.<span class="i">Clients</span>.<span class="i">ActiveDirectory</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Services</span>.<span class="i n">AppAuthentication</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Uses Integrated Windows Authentication to get access token. </span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="df717586aa715870" href="../R/df717586aa715870.html" target="n" data-glyph="2,0" class="t t">WindowsAuthenticationAzureServiceTokenProvider</a> : <a href="NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="t t">NonInteractiveAzureServiceTokenProviderBase</a>
+    {
+        <b>private readonly</b> <a href="../Clients/IAuthenticationContext.cs.html#de2e64e2289e4107" class="t t">IAuthenticationContext</a> <a id="9d7caf9244893e03" href="../R/9d7caf9244893e03.html" target="n" data-glyph="46,1" class="i field">_authenticationContext</a>;
+        <b>private readonly string</b> <a id="40aaaab21f03beba" href="../R/40aaaab21f03beba.html" target="n" data-glyph="46,1" class="i field">_azureAdInstance</a>;
+        <b>private const string</b> <a id="fb3b224f44f69736" href="../R/fb3b224f44f69736.html" target="n" data-glyph="10,1" class="i field">ClientId</a> = <a href="../../GuidAssembly/R/d7813711-9094-4ad3-a062-cac3ec74ebe8.html" target="n" class="s">&quot;d7813711-9094-4ad3-a062-cac3ec74ebe8&quot;</a>;
+ 
+        <span class="c">// Current user&#39;s home tenant. </span>
+        <b>private static string</b> <a id="4651e8376a65ce79" href="../R/4651e8376a65ce79.html" target="n" data-glyph="46,1" class="i field">_currentUserTenant</a>;
+ 
+        <b>internal</b> <a id="1d1dd23ab031967a" href="../R/1d1dd23ab031967a.html" target="n" data-glyph="74,1" class="t constructor">WindowsAuthenticationAzureServiceTokenProvider</a>(<a href="../Clients/IAuthenticationContext.cs.html#de2e64e2289e4107" class="t t">IAuthenticationContext</a> <span id="r0 rd" class="r0 r">authenticationContext</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r1 rd" class="r1 r">azureAdInstance</span>)
+        {
+            <a href="#9d7caf9244893e03" class="i field">_authenticationContext</a> = <span class="r0 r">authenticationContext</span>;
+            <a href="#40aaaab21f03beba" class="i field">_azureAdInstance</a> = <span class="r1 r">azureAdInstance</span>;
+            
+            <a href="NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a> = <b>new</b> <a href="../Principal.cs.html#ee98ea95591837a0" class="t constructor">Principal</a> {<a href="../Principal.cs.html#d9e4b09403dc585a" class="i field">Type</a> = <span class="s">&quot;User&quot;</span>};
+        }
+        
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Get access token by authenticating to Azure AD using Integrated Windows Authentication (IWA), </span>
+        <span class="c">///</span><span class="c"> when domain is synced with Azure AD tenant. </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">resource</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Resource to access.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">authority</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Authority where resource is present.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public override async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="../AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="t t">AppAuthenticationResult</a>&gt; <a id="3b52f5c3ad2f22aa" href="../R/3b52f5c3ad2f22aa.html" target="n" data-glyph="72,1" class="i method">GetAuthResultAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r2 rd" class="r2 r">resource</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r3 rd" class="r3 r">authority</span>,
+            <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r4 rd" class="r4 r">cancellationToken</span> = <b>default</b>)
+        {
+            <span class="c">// If authority is not specified, start with common. Once known, after the first time token is acquired, use that. </span>
+            <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>(<span class="r3 r">authority</span>))
+            {
+                <span class="r3 r">authority</span> = <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<a href="#4651e8376a65ce79" class="i field">_currentUserTenant</a>) ? <span class="s">$&quot;</span>{<a href="#40aaaab21f03beba" class="i field">_azureAdInstance</a>}<span class="s">common</span><span class="s">&quot;</span> : <span class="s">$&quot;</span>{<a href="#40aaaab21f03beba" class="i field">_azureAdInstance</a>}{<a href="#4651e8376a65ce79" class="i field">_currentUserTenant</a>}<span class="s">&quot;</span>;
+            }
+ 
+            <span class="c">// Use ADAL&#39;s default token cache, instead of file based cache.</span>
+            <span class="c">// This prevents dependency on file and DPAPI, and enables service account scenarios. </span>
+            <a href="../AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="t t">AppAuthenticationResult</a> <span id="r5 rd" class="r5 r">authResult</span> = <b>null</b>;
+ 
+            <b>try</b>
+            {
+                <span class="c">// See if token is present in cache</span>
+                <span class="r5 r">authResult</span> = <b>await</b> <a href="#9d7caf9244893e03" class="i field">_authenticationContext</a>.<a href="../Clients/IAuthenticationContext.cs.html#81fa0c238a00b1bf" class="i method">AcquireTokenSilentAsync</a>(<span class="r3 r">authority</span>, <span class="r2 r">resource</span>, <a href="#fb3b224f44f69736" class="i field">ClientId</a>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            }
+            <b>catch</b>
+            {
+                <span class="c">// If fails, use AcquireTokenAsync</span>
+            }
+ 
+            <span class="c">// If token not in cache, acquire it</span>
+            <b>if</b> (<span class="r5 r">authResult</span> == <b>null</b>)
+            {
+                <span class="c">// This causes ADAL to use IWA</span>
+                <span class="i">UserCredential</span> <span id="r6 rd" class="r6 r">userCredential</span> = <b>new</b> <span class="i">UserCredential</span>();
+ 
+                <b>try</b>
+                {
+                    <span class="r5 r">authResult</span> = <b>await</b> <a href="#9d7caf9244893e03" class="i field">_authenticationContext</a>.<a href="../Clients/IAuthenticationContext.cs.html#1bbd4fc0eddf5c4b" class="i method">AcquireTokenAsync</a>(<span class="r3 r">authority</span>, <span class="r2 r">resource</span>, <a href="#fb3b224f44f69736" class="i field">ClientId</a>, <span class="r6 r">userCredential</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                }
+                <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r7 rd" class="r7 r">exp</span>)
+                {
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r8 rd" class="r8 r">message</span> = <span class="s">$&quot;</span>{<a href="../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a>.<a href="../AzureServiceTokenProviderException.cs.html#5ac1236031ae9320" class="i field">ActiveDirectoryIntegratedAuthUsed</a>}<span class="s"> </span><span class="s">&quot;</span> +
+                                     <span class="s">$&quot;</span>{<a href="../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a>.<a href="../AzureServiceTokenProviderException.cs.html#74c51a6320d16d98" class="i field">GenericErrorMessage</a>}<span class="s"> </span><span class="s">&quot;</span> +
+                                     <span class="s">$&quot;</span>{<span class="r7 r">exp</span>.<a href="@0@mscorlib/A.html#5fba0e16215b42a3" class="i property">Message</a>}<span class="s">&quot;</span>;
+ 
+                    <b>if</b> (<span class="r7 r">exp</span>.<a href="@0@mscorlib/A.html#89c20b39fb04108b" class="i property">InnerException</a> != <b>null</b>)
+                    {
+                        <span class="r8 r">message</span> += <span class="s">$&quot;</span><span class="s">Inner Exception : </span>{<span class="r7 r">exp</span>.<a href="@0@mscorlib/A.html#89c20b39fb04108b" class="i property">InnerException</a>.<a href="@0@mscorlib/A.html#5fba0e16215b42a3" class="i property">Message</a>}<span class="s">&quot;</span>;
+                    }
+ 
+                    <b>throw</b> <b>new</b> <a href="../AzureServiceTokenProviderException.cs.html#70a0a38c19f200fb" class="t constructor">AzureServiceTokenProviderException</a>(<a href="NonInteractiveAccessTokenProviderBase.cs.html#24367a95c4c1012b" class="i field">ConnectionString</a>, <span class="r2 r">resource</span>, <span class="r3 r">authority</span>, <span class="r8 r">message</span>);
+                }
+            }
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r9 rd" class="r9 r">accessToken</span> = <span class="r5 r">authResult</span>?.<a href="../AppAuthenticationResult.cs.html#bac23240ee26a0c7" class="i property">AccessToken</a>;
+ 
+            <b>if</b> (<span class="r9 r">accessToken</span> != <b>null</b>)
+            {
+                <a href="../AccessToken.cs.html#4bf4fd515869512d" class="t t">AccessToken</a> <span id="r10 rd" class="r10 r">token</span> = <a href="../AccessToken.cs.html#4bf4fd515869512d" class="t t">AccessToken</a>.<a href="../AccessToken.cs.html#6c1ca005586c3862" class="i method">Parse</a>(<span class="r9 r">accessToken</span>);
+ 
+                <a href="NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a>.<a href="../Principal.cs.html#c3eb3045f9426620" class="i field">UserPrincipalName</a> = !<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r10 r">token</span>.<a href="../AccessToken.cs.html#3f65a298f81520a5" class="i property">Upn</a>) ? <span class="r10 r">token</span>.<a href="../AccessToken.cs.html#3f65a298f81520a5" class="i property">Upn</a> : <span class="r10 r">token</span>.<a href="../AccessToken.cs.html#9277c8c1ede67f75" class="i property">Email</a>;
+                <a href="NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a>.<a href="../Principal.cs.html#64e7621ee7fb4766" class="i field">TenantId</a> = <a href="#4651e8376a65ce79" class="i field">_currentUserTenant</a> = <span class="r10 r">token</span>.<a href="../AccessToken.cs.html#665b479704e13887" class="i property">TenantId</a>;
+                <a href="NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a>.<a href="../Principal.cs.html#409d9406f1d3c582" class="i field">IsAuthenticated</a> = <b>true</b>;
+ 
+                <b>return</b> <span class="r5 r">authResult</span>;
+            }
+ 
+            <span class="c">// If result is null, token could not be acquired, and no exception was thrown. </span>
+            <b>throw</b> <b>new</b> <a href="../AzureServiceTokenProviderException.cs.html#70a0a38c19f200fb" class="t constructor">AzureServiceTokenProviderException</a>(<a href="NonInteractiveAccessTokenProviderBase.cs.html#24367a95c4c1012b" class="i field">ConnectionString</a>, <span class="r2 r">resource</span>, <span class="r3 r">authority</span>, 
+                <a href="../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a>.<a href="../AzureServiceTokenProviderException.cs.html#74c51a6320d16d98" class="i field">GenericErrorMessage</a>);
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

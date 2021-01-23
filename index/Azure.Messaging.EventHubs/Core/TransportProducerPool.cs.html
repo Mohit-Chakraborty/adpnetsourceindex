@@ -1,0 +1,351 @@
+﻿<!DOCTYPE html>
+<html><head><title>TransportProducerPool.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(342);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Messaging.EventHubs/Core/TransportProducerPool.cs" target="_top">Core\TransportProducerPool.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Messaging.EventHubs" target="_top">src\Azure.Messaging.EventHubs.csproj</a> (Azure.Messaging.EventHubs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Concurrent</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Linq</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Core</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">   A pool of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> instances that automatically expire after a period of inactivity.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <b>internal class</b> <a id="06f35c4320e1620b" href="../R/06f35c4320e1620b.html" target="n" data-glyph="2,0" class="t t">TransportProducerPool</a>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The period after which </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#1ee794f688ae2c8f" class="i method">CreateExpirationTimerCallback</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> is run.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static readonly</b> <span class="i">TimeSpan</span> <a id="63aff7ebece1409d" href="../R/63aff7ebece1409d.html" target="n" data-glyph="46,1" class="i field">DefaultPerformExpirationPeriod</a> = <span class="i">TimeSpan</span>.<span class="i">FromMinutes</span>(10);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   An abstracted Event Hub transport-specific producer that is associated with the</span>
+        <span class="c">///</span><span class="c">   Event Hub gateway rather than a specific partition; intended to perform delegated operations.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a href="TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a> <a id="26daf10c99a37c15" href="../R/26daf10c99a37c15.html" target="n" data-glyph="102,1" class="i property">EventHubProducer</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The set of active Event Hub transport-specific producers specific to a given partition;</span>
+        <span class="c">///</span><span class="c">   intended to perform delegated operations.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <span class="i">ConcurrentDictionary</span>&lt;<b>string</b>, <a href="#4def38409a7e68a7" class="t t">PoolItem</a>&gt; <a id="f6b97f91afb193b6" href="../R/f6b97f91afb193b6.html" target="n" data-glyph="106,1" class="i property">Pool</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   A reference to a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">Timer</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> periodically checking every </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#63aff7ebece1409d" class="i field">DefaultPerformExpirationPeriod</a><span class="c">&quot;</span> <span class="c">/&gt;</span>
+        <span class="c">///</span><span class="c">   the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> that are in use and those that can be closed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <span class="i">Timer</span> <a id="b7cc3367f0548ea3" href="../R/b7cc3367f0548ea3.html" target="n" data-glyph="106,1" class="i property">ExpirationTimer</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   A factory method for spawning a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> for a given partition.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <span class="i">Func</span>&lt;<b>string</b>, <a href="TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a>&gt; <a id="37a42e54181aca5d" href="../R/37a42e54181aca5d.html" target="n" data-glyph="106,1" class="i property">TransportProducerFactory</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#06f35c4320e1620b" class="t t">TransportProducerPool</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">transportProducerFactory</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A factory method for spawning a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> for a given partition.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">pool</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The pool of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#4def38409a7e68a7" class="t t">PoolItem</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> that is going to be used to store the partition specific </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">performExpirationPeriod</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The period after which </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#1ee794f688ae2c8f" class="i method">CreateExpirationTimerCallback</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> is run. Overrides </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#63aff7ebece1409d" class="i field">DefaultPerformExpirationPeriod</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">eventHubProducer</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An abstracted Event Hub transport-specific producer that is associated with the Event Hub gateway rather than a specific partition.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="3bf83ad076f1aae4" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">TransportProducerPool</a>(<span class="i">Func</span>&lt;<b>string</b>, <a href="TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a>&gt; <span id="r0 rd" class="r0 r">transportProducerFactory</span>,
+                                     <span class="i">ConcurrentDictionary</span>&lt;<b>string</b>, <a href="#4def38409a7e68a7" class="t t">PoolItem</a>&gt; <span id="r1 rd" class="r1 r">pool</span> = <b>default</b>,
+                                     <span class="i">TimeSpan</span>? <span id="r2 rd" class="r2 r">performExpirationPeriod</span> = <b>default</b>,
+                                     <a href="TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a> <span id="r3 rd" class="r3 r">eventHubProducer</span> = <b>default</b>)
+        {
+            <span class="r2 r">performExpirationPeriod</span> ??= <a href="#63aff7ebece1409d" class="i field">DefaultPerformExpirationPeriod</a>;
+ 
+            <a href="#f6b97f91afb193b6" class="i property">Pool</a> = <span class="r1 r">pool</span> ?? <b>new</b> <span class="i">ConcurrentDictionary</span>&lt;<b>string</b>, <a href="#4def38409a7e68a7" class="t t">PoolItem</a>&gt;();
+            <a href="#26daf10c99a37c15" class="i property">EventHubProducer</a> = <span class="r3 r">eventHubProducer</span> ?? <span class="r0 r">transportProducerFactory</span>(<b>null</b>);
+            <a href="#37a42e54181aca5d" class="i property">TransportProducerFactory</a> = <span class="r0 r">transportProducerFactory</span>;
+            <a href="#b7cc3367f0548ea3" class="i property">ExpirationTimer</a> = <b>new</b> <span class="i">Timer</span>(<a href="#1ee794f688ae2c8f" class="i method">CreateExpirationTimerCallback</a>(), <b>null</b>, <span class="r2 r">performExpirationPeriod</span>.<span class="i">Value</span>, <span class="r2 r">performExpirationPeriod</span>.<span class="i">Value</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#06f35c4320e1620b" class="t t">TransportProducerPool</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal</b> <a id="f24a5ca2822c3cf0" href="../R/../../0000000000.html" target="n" data-glyph="74,1" class="t constructor">TransportProducerPool</a>()
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Retrieves a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#6f70293ef8e7152c" class="t t">PooledProducer</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> for the requested partition,</span>
+        <span class="c">///</span><span class="c">   creating one if needed or extending the expiration for an existing instance.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">partitionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The unique identifier of a partition associated with the Event Hub.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">removeAfterDuration</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The period of inactivity after which a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#4def38409a7e68a7" class="t t">PoolItem</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> will become eligible for eviction. Overrides </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#4def38409a7e68a7" class="t t">PoolItem</a>.<a href="#fb2cfea75100eaa6" class="i field">DefaultRemoveAfterDuration</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#6f70293ef8e7152c" class="t t">PooledProducer</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> mapping to the partition id passed in as parameter.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   There is a slight probability that the returned producer may be closed at any time</span>
+        <span class="c">///</span><span class="c">   after it is returned and the caller may want to handle that scenario.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public virtual</b> <a href="#6f70293ef8e7152c" class="t t">PooledProducer</a> <a id="e96471f30beb57c5" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetPooledProducer</a>(<b>string</b> <span id="r4 rd" class="r4 r">partitionId</span>,
+                                                        <span class="i">TimeSpan</span>? <span id="r5 rd" class="r5 r">removeAfterDuration</span> = <b>default</b>)
+        {
+            <b>if</b> (<b>string</b>.<span class="i">IsNullOrEmpty</span>(<span class="r4 r">partitionId</span>))
+            {
+                <b>return</b> <b>new</b> <a href="#69d4157ca30ca64b" class="t constructor">PooledProducer</a>(<a href="#26daf10c99a37c15" class="i property">EventHubProducer</a>);
+            }
+ 
+            <b>var</b> <span id="r6 rd" class="r6 r">identifier</span> = <span class="i">Guid</span>.<span class="i">NewGuid</span>().<span class="i">ToString</span>();
+            <b>var</b> <span id="r7 rd" class="r7 r">item</span> = <a href="#f6b97f91afb193b6" class="i property">Pool</a>.<span class="i">GetOrAdd</span>(<span class="r4 r">partitionId</span>, <span id="r8 rd" class="r8 r">id</span> =&gt; <b>new</b> <span class="t">PoolItem</span>(<span class="r4 r">partitionId</span>, <span class="i">TransportProducerFactory</span>(<span class="r8 r">id</span>), <span class="r5 r">removeAfterDuration</span>));
+ 
+            <span class="c">// A race condition at this point may end with CloseAsync called on</span>
+            <span class="c">// the returned PoolItem if it had expired. The probability is very low and</span>
+            <span class="c">// possible exceptions should be handled by the invoking methods.</span>
+ 
+            <b>if</b> (<span class="r7 r">item</span>.<span class="i">PartitionProducer</span>.<span class="i">IsClosed</span> || !<span class="r7 r">item</span>.<span class="i">ActiveInstances</span>.<span class="i">TryAdd</span>(<span class="r6 r">identifier</span>, 0))
+            {
+                <span class="r6 r">identifier</span> = <span class="i">Guid</span>.<span class="i">NewGuid</span>().<span class="i">ToString</span>();
+                <span class="r7 r">item</span> = <a href="#f6b97f91afb193b6" class="i property">Pool</a>.<span class="i">GetOrAdd</span>(<span class="r4 r">partitionId</span>, <span id="r9 rd" class="r9 r">id</span> =&gt; <b>new</b> <span class="t">PoolItem</span>(<span class="r4 r">partitionId</span>, <span class="i">TransportProducerFactory</span>(<span class="r9 r">id</span>), <span class="r5 r">removeAfterDuration</span>));
+                <span class="r7 r">item</span>.<span class="i">ActiveInstances</span>.<span class="i">TryAdd</span>(<span class="r6 r">identifier</span>, 0);
+            }
+ 
+            <span class="r7 r">item</span>.<span class="i">ExtendRemoveAfter</span>(<span class="r5 r">removeAfterDuration</span>);
+ 
+            <b>return</b> <b>new</b> <span class="t">PooledProducer</span>(<span class="r7 r">item</span>.<span class="i">PartitionProducer</span>, <span class="i">cleanUp</span>: <span id="r10 rd" class="r10 r">producer</span> =&gt;
+            {
+                <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<span class="i">AssertNotNull</span>(<span class="r10 r">producer</span>, <b>nameof</b>(<span class="r10 r">producer</span>));
+ 
+                <b>if</b> (<a href="#f6b97f91afb193b6" class="i property">Pool</a>.<span class="i">TryGetValue</span>(<span class="r4 r">partitionId</span>, <b>out</b> <a href="#4def38409a7e68a7" class="t t">PoolItem</a> <span id="r11 rd" class="r11 r">pooledItem</span>))
+                {
+                    <span class="r11 r">pooledItem</span>.<a href="#ea695351a6d3df7b" class="i method">ExtendRemoveAfter</a>(<span class="r5 r">removeAfterDuration</span>);
+                }
+ 
+                <span class="c">// If TryRemove returned false the PoolItem would not be closed deterministically</span>
+                <span class="c">// and the ExpirationTimer callback would eventually remove it from the</span>
+                <span class="c">// Pool leaving to the Garbage Collector the responsibility of closing</span>
+                <span class="c">// the TransportProducer and the AMQP link.</span>
+ 
+                <span class="r7 r">item</span>.<span class="i">ActiveInstances</span>.<span class="i">TryRemove</span>(<span class="r6 r">identifier</span>, <b>out _</b>);
+ 
+                <span class="c">// The second TryGetValue runs after the extension would have been seen, so it</span>
+                <span class="c">// is intended to be sure that the item wasn&#39;t removed in the meantime.</span>
+ 
+                <b>if</b> (!<a href="#f6b97f91afb193b6" class="i property">Pool</a>.<span class="i">TryGetValue</span>(<span class="r4 r">partitionId</span>, <b>out _</b>) &amp;&amp; !<span class="r7 r">item</span>.<span class="i">ActiveInstances</span>.<span class="i">Any</span>())
+                {
+                    <b>return</b> <span class="r10 r">producer</span>.<span class="i">CloseAsync</span>(<span class="i">CancellationToken</span>.<span class="i">None</span>);
+                }
+ 
+                <b>return</b> <span class="i">Task</span>.<span class="i">CompletedTask</span>;
+            });
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Closes the producers in the pool and performs any cleanup necessary</span>
+        <span class="c">///</span><span class="c">   for resources used by the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#06f35c4320e1620b" class="t t">TransportProducerPool</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A task to be resolved on when the operation has completed.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public virtual async</b> <span class="i">Task</span> <a id="50d4acb2f8bc75f7" href="../R/50d4acb2f8bc75f7.html" target="n" data-glyph="72,1" class="i method">CloseAsync</a>(<span class="i">CancellationToken</span> <span id="r12 rd" class="r12 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>try</b>
+            {
+                <a href="#b7cc3367f0548ea3" class="i property">ExpirationTimer</a>.<span class="i">Dispose</span>();
+            }
+            <b>catch</b> (<span class="i">Exception</span>)
+            {
+            }
+ 
+            <b>var</b> <span id="r13 rd" class="r13 r">pendingCloses</span> = <b>new</b> <span class="i">List</span>&lt;<span class="i">Task</span>&gt;();
+ 
+            <span class="r13 r">pendingCloses</span>.<span class="i">Add</span>(<a href="#26daf10c99a37c15" class="i property">EventHubProducer</a>.<a href="TransportProducer.cs.html#a81eb03cfe6513e7" class="i method">CloseAsync</a>(<span class="r12 r">cancellationToken</span>));
+ 
+            <b>foreach</b> (<b>var</b> <span id="r14 rd" class="r14 r">poolItem</span> <b>in</b> <a href="#f6b97f91afb193b6" class="i property">Pool</a>.<span class="i">Values</span>)
+            {
+                <span class="r13 r">pendingCloses</span>.<span class="i">Add</span>(<span class="r14 r">poolItem</span>.<span class="i">PartitionProducer</span>.<span class="i">CloseAsync</span>(<span class="r12 r">cancellationToken</span>));
+            }
+ 
+            <a href="#f6b97f91afb193b6" class="i property">Pool</a>.<span class="i">Clear</span>();
+ 
+            <b>await</b> <span class="i">Task</span>.<span class="i">WhenAll</span>(<span class="r13 r">pendingCloses</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Returns a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">TimerCallback</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> that will search for all the expired </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#4def38409a7e68a7" class="t t">PoolItem</a><span class="c">&quot;</span> <span class="c">/&gt;</span>
+        <span class="c">///</span><span class="c">   in the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#f6b97f91afb193b6" class="i property">Pool</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> and will try to close those that have expired.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">TimerCallback</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> that is periodically run every </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#63aff7ebece1409d" class="i field">DefaultPerformExpirationPeriod</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <span class="i">TimerCallback</span> <a id="1ee794f688ae2c8f" href="../R/1ee794f688ae2c8f.html" target="n" data-glyph="76,1" class="i method">CreateExpirationTimerCallback</a>()
+        {
+            <b>return</b> <span id="r15 rd" class="r15 r">_</span> =&gt;
+            {
+                <span class="c">// Capture the time stamp to use a consistent value.</span>
+                <b>var</b> <span id="r16 rd" class="r16 r">now</span> = <span class="i">DateTimeOffset</span>.<span class="i">UtcNow</span>;
+ 
+                <b>foreach</b> (<b>var</b> <span id="r17 rd" class="r17 r">key</span> <b>in</b> <a href="#f6b97f91afb193b6" class="i property">Pool</a>.<span class="i">Keys</span>.<span class="i">ToList</span>())
+                {
+                    <b>if</b> (<a href="#f6b97f91afb193b6" class="i property">Pool</a>.<span class="i">TryGetValue</span>(<span class="r17 r">key</span>, <b>out</b> <b>var</b> <span id="r18 rd" class="r18 r">poolItem</span>))
+                    {
+                        <b>if</b> (<span class="r18 r">poolItem</span>.<span class="i">RemoveAfter</span> &lt;= <span class="r16 r">now</span>)
+                        {
+                            <b>if</b> (<a href="#f6b97f91afb193b6" class="i property">Pool</a>.<span class="i">TryRemove</span>(<span class="r17 r">key</span>, <b>out</b> <b>var</b> <b>_</b>) &amp;&amp; !<span class="r18 r">poolItem</span>.<span class="i">ActiveInstances</span>.<span class="i">Any</span>())
+                            {
+                                <span class="c">// At this point the pool item may have been closed already</span>
+                                <span class="c">// if there was a context switch between the if conditions</span>
+                                <span class="c">// and the pool item clean up kicked in.</span>
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">AZC0102</span> <span class="c">// Do not use GetAwaiter().GetResult(). Use the TaskExtensions.EnsureCompleted() extension method instead.</span>
+                                <span class="r18 r">poolItem</span>.<span class="i">PartitionProducer</span>.<span class="i">CloseAsync</span>(<span class="i">CancellationToken</span>.<span class="i">None</span>).<span class="i">GetAwaiter</span>().<span class="i">GetResult</span>();
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">AZC0102</span> <span class="c">// Do not use GetAwaiter().GetResult(). Use the TaskExtensions.EnsureCompleted() extension method instead.</span>
+                            }
+                        }
+                    }
+                }
+            };
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   An item of the pool, adding tracking information to a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal class</b> <a id="4def38409a7e68a7" href="../R/4def38409a7e68a7.html" target="n" data-glyph="2,1" class="t t">PoolItem</a>
+        {
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The period of inactivity after which an item would be removed from the pool.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <b>internal static readonly</b> <span class="i">TimeSpan</span> <a id="fb2cfea75100eaa6" href="../R/fb2cfea75100eaa6.html" target="n" data-glyph="44,2" class="i field">DefaultRemoveAfterDuration</a> = <span class="i">TimeSpan</span>.<span class="i">FromMinutes</span>(10);
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   An abstracted Event Hub transport-specific </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> that is associated with a specific partition.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>public</b> <a href="TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a> <a id="821077a1870eb2e8" href="../R/821077a1870eb2e8.html" target="n" data-glyph="102,2" class="i property">PartitionProducer</a> { <b>get</b>; <b>private set</b>; }
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   The unique identifier of a partition associated with the Event Hub.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>public string</b> <a id="fa4debf9f3c75b28" href="../R/fa4debf9f3c75b28.html" target="n" data-glyph="102,2" class="i property">PartitionId</a> { <b>get</b>; <b>private set</b>; }
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   A set of unique identifiers used to track which instances of a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#4def38409a7e68a7" class="t t">PoolItem</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> are active.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>public</b> <span class="i">ConcurrentDictionary</span>&lt;<b>string</b>, <b>byte</b>&gt; <a id="b1d1739961f752e7" href="../R/../../0000000000.html" target="n" data-glyph="102,2" class="i property">ActiveInstances</a> { <b>get</b>; } = <b>new</b> <span class="i">ConcurrentDictionary</span>&lt;<b>string</b>, <b>byte</b>&gt;();
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   The UTC date and time when a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#4def38409a7e68a7" class="t t">PoolItem</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> will become eligible for eviction.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>public</b> <span class="i">DateTimeOffset</span> <a id="c685e065de8bf8c7" href="../R/c685e065de8bf8c7.html" target="n" data-glyph="102,2" class="i property">RemoveAfter</a> { <b>get</b>; <b>set</b>; }
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   Extends the UTC date and time when </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#4def38409a7e68a7" class="t t">PoolItem</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> will become eligible for eviction.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r19 r">removeAfterDuration</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The period of inactivity after which a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#4def38409a7e68a7" class="t t">PoolItem</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> will become eligible for eviction.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>public void</b> <a id="ea695351a6d3df7b" href="../R/ea695351a6d3df7b.html" target="n" data-glyph="72,2" class="i method">ExtendRemoveAfter</a>(<span class="i">TimeSpan</span>? <span id="r19 rd" class="r19 r">removeAfterDuration</span>)
+            {
+                <a href="#c685e065de8bf8c7" class="i property">RemoveAfter</a> = <span class="i">DateTimeOffset</span>.<span class="i">UtcNow</span>.<span class="i">Add</span>(<span class="r19 r">removeAfterDuration</span> ?? <a href="#fb2cfea75100eaa6" class="i field">DefaultRemoveAfterDuration</a>);
+            }
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#4def38409a7e68a7" class="t t">PoolItem</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> class with a default timespan of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#fb2cfea75100eaa6" class="i field">DefaultRemoveAfterDuration</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r20 r">partitionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The unique identifier of a partition associated with the Event Hub.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r21 r">partitionProducer</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An Event Hub transport-specific producer specific to a given partition.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r22 r">removeAfterDuration</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The interval after which a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#4def38409a7e68a7" class="t t">PoolItem</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> will become eligible for eviction. Overrides </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#fb2cfea75100eaa6" class="i field">DefaultRemoveAfterDuration</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r23 r">removeAfter</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The UTC date and time when a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#4def38409a7e68a7" class="t t">PoolItem</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> will become eligible for eviction.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>public</b> <a id="37504977f33b59f1" href="../R/../../0000000000.html" target="n" data-glyph="72,2" class="t constructor">PoolItem</a>(<b>string</b> <span id="r20 rd" class="r20 r">partitionId</span>,
+                            <a href="TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a> <span id="r21 rd" class="r21 r">partitionProducer</span>,
+                            <span class="i">TimeSpan</span>? <span id="r22 rd" class="r22 r">removeAfterDuration</span> = <b>default</b>,
+                            <span class="i">DateTimeOffset</span>? <span id="r23 rd" class="r23 r">removeAfter</span> = <b>default</b>)
+            {
+                <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r20 r">partitionId</span>, <b>nameof</b>(<span class="r20 r">partitionId</span>));
+                <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r21 r">partitionProducer</span>, <b>nameof</b>(<span class="r21 r">partitionProducer</span>));
+ 
+                <a href="#821077a1870eb2e8" class="i property">PartitionProducer</a> = <span class="r21 r">partitionProducer</span>;
+                <a href="#fa4debf9f3c75b28" class="i property">PartitionId</a> = <span class="r20 r">partitionId</span>;
+ 
+                <b>if</b> (<span class="r23 r">removeAfter</span> == <b>default</b>)
+                {
+                    <a href="#ea695351a6d3df7b" class="i method">ExtendRemoveAfter</a>(<span class="r22 r">removeAfterDuration</span>);
+                }
+                <b>else</b>
+                {
+                    <a href="#c685e065de8bf8c7" class="i property">RemoveAfter</a> = <span class="r23 r">removeAfter</span>.<span class="i">Value</span>;
+                }
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   A class wrapping a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">Core</span>.<a href="TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">, triggering a clean-up when the object is disposed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal class</b> <a id="6f70293ef8e7152c" href="../R/6f70293ef8e7152c.html" target="n" data-glyph="2,1" class="t t">PooledProducer</a>: <span class="i">IAsyncDisposable</span>
+        {
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   A function responsible of cleaning up the resources in use.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>private</b> <span class="i">Func</span>&lt;<a href="TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a>, <span class="i">Task</span>&gt; <a id="6524d9955963ba2c" href="../R/6524d9955963ba2c.html" target="n" data-glyph="106,2" class="i property">CleanUp</a> { <b>get</b>; }
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   An abstracted Event Hub transport-specific producer that is associated with the</span>
+            <span class="c">///</span><span class="c">   Event Hub gateway or a specific partition.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>public</b> <a href="TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a> <a id="22fd7595026be5e3" href="../R/22fd7595026be5e3.html" target="n" data-glyph="102,2" class="i property">TransportProducer</a> { <b>get</b>; }
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#6f70293ef8e7152c" class="t t">PooledProducer</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> class.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r24 r">transportProducer</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An abstracted Event Hub transport-specific producer that is associated with the Event Hub gateway or a specific partition.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r25 r">cleanUp</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The function responsible of cleaning up the resources in use.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>public</b> <a id="69d4157ca30ca64b" href="../R/69d4157ca30ca64b.html" target="n" data-glyph="72,2" class="t constructor">PooledProducer</a>(<a href="TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a> <span id="r24 rd" class="r24 r">transportProducer</span>,
+                                  <span class="i">Func</span>&lt;<a href="TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a>, <span class="i">Task</span>&gt; <span id="r25 rd" class="r25 r">cleanUp</span> = <b>default</b>)
+            {
+                <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r24 r">transportProducer</span>, <b>nameof</b>(<span class="r24 r">transportProducer</span>));
+ 
+                <a href="#22fd7595026be5e3" class="i property">TransportProducer</a> = <span class="r24 r">transportProducer</span>;
+                <a href="#6524d9955963ba2c" class="i property">CleanUp</a> = <span class="r25 r">cleanUp</span>;
+            }
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   Performs the task needed to clean up resources used by the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#6f70293ef8e7152c" class="t t">PooledProducer</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A task to be resolved on when the operation has completed.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>public virtual</b> <span class="i">ValueTask</span> <a id="2142d875c4961a6b" href="../R/2142d875c4961a6b.html" target="n" data-glyph="72,2" class="i method">DisposeAsync</a>()
+            {
+                <b>if</b> (<a href="#6524d9955963ba2c" class="i property">CleanUp</a> != <b>default</b>)
+                {
+                    <b>return</b> <b>new</b> <span class="i">ValueTask</span>(<span class="i">CleanUp</span>(<a href="#22fd7595026be5e3" class="i property">TransportProducer</a>));
+                }
+ 
+                <b>return</b> <b>new</b> <span class="i">ValueTask</span>(<span class="i">Task</span>.<span class="i">CompletedTask</span>);
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

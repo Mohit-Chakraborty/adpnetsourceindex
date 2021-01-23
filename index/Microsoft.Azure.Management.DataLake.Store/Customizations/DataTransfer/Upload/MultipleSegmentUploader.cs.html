@@ -1,0 +1,264 @@
+﻿<!DOCTYPE html>
+<html><head><title>MultipleSegmentUploader.cs</title><link rel="stylesheet" href="../../../../styles.css"><script src="../../../../scripts.js"></script></head>
+<body class="cB" onload="i(255);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.Management.DataLake.Store/Customizations/DataTransfer/Upload/MultipleSegmentUploader.cs" target="_top">Customizations\DataTransfer\Upload\MultipleSegmentUploader.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.Management.DataLake.Store" target="_top">src\Microsoft.Azure.Management.DataLake.Store.csproj</a> (Microsoft.Azure.Management.DataLake.Store)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">Rest</span>;
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Concurrent</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Management</span>.<span class="i n">DataLake</span>.<span class="i n">Store</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Uploads a local file in parallel by splitting it into several segments, according to the given metadata.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="afadc6dda1c3408e" href="../../../R/afadc6dda1c3408e.html" target="n" data-glyph="2,0" class="t t">MultipleSegmentUploader</a>
+    {
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Private
+ 
+        <b>internal const int</b> <a id="8fbbdefcf10f6ab2" href="../../../R/8fbbdefcf10f6ab2.html" target="n" data-glyph="8,1" class="i field">MaxUploadAttemptCount</a> = 4;
+        <b>private readonly</b> <a href="../Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <a id="82e6b30b4be82683" href="../../../R/82e6b30b4be82683.html" target="n" data-glyph="46,1" class="i field">_metadata</a>;
+        <b>private readonly</b> <a href="../Common/IFrontEndAdapter.cs.html#d503d7a60084fa22" class="t t">IFrontEndAdapter</a> <a id="88fc998c6c5c7838" href="../../../R/88fc998c6c5c7838.html" target="n" data-glyph="46,1" class="i field">_frontEnd</a>;
+        <b>private readonly int</b> <a id="b529daeced2f7b74" href="../../../R/b529daeced2f7b74.html" target="n" data-glyph="46,1" class="i field">_maxThreadCount</a>;
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<a href="../Common/SegmentTransferProgress.cs.html#47a2d1611194ef16" class="t t">SegmentTransferProgress</a>&gt; <a id="c9edb47325984226" href="../../../R/c9edb47325984226.html" target="n" data-glyph="46,1" class="i field">_progressTracker</a>;
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <a id="29b34127f323506f" href="../../../R/29b34127f323506f.html" target="n" data-glyph="46,1" class="i field">_token</a>;
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Constructor
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new MultipleSegmentUploader.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">uploadMetadata</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The metadata that keeps track of the file upload.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">maxThreadCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The maximum number of threads to use. Note that in some cases, this number may not be reached.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">frontEnd</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A pointer to the Front End interface to perform the upload to.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">progressTracker</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">(Optional)A tracker that reports progress on each segment.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="11b616c94f6f6849" href="../../../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">MultipleSegmentUploader</a>(<a href="../Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <span id="r0 rd" class="r0 r">uploadMetadata</span>, <b>int</b> <span id="r1 rd" class="r1 r">maxThreadCount</span>, <a href="../Common/IFrontEndAdapter.cs.html#d503d7a60084fa22" class="t t">IFrontEndAdapter</a> <span id="r2 rd" class="r2 r">frontEnd</span>, <a href="@0@mscorlib/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<a href="../Common/SegmentTransferProgress.cs.html#47a2d1611194ef16" class="t t">SegmentTransferProgress</a>&gt; <span id="r3 rd" class="r3 r">progressTracker</span> = <b>null</b>) :
+            <a href="#c12144bdd1363f6f" class="k">this</a>(<span class="r0 r">uploadMetadata</span>, <span class="r1 r">maxThreadCount</span>, <span class="r2 r">frontEnd</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>, <span class="r3 r">progressTracker</span>)
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new MultipleSegmentUploader.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">uploadMetadata</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The metadata that keeps track of the file upload.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">maxThreadCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The maximum number of threads to use. Note that in some cases, this number may not be reached.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">frontEnd</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A pointer to the Front End interface to perform the upload to.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">token</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The cancellation token to use.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">progressTracker</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">(Optional)A tracker that reports progress on each segment.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="c12144bdd1363f6f" href="../../../R/c12144bdd1363f6f.html" target="n" data-glyph="72,1" class="t constructor">MultipleSegmentUploader</a>(<a href="../Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <span id="r4 rd" class="r4 r">uploadMetadata</span>, <b>int</b> <span id="r5 rd" class="r5 r">maxThreadCount</span>, <a href="../Common/IFrontEndAdapter.cs.html#d503d7a60084fa22" class="t t">IFrontEndAdapter</a> <span id="r6 rd" class="r6 r">frontEnd</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r7 rd" class="r7 r">token</span>, <a href="@0@mscorlib/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<a href="../Common/SegmentTransferProgress.cs.html#47a2d1611194ef16" class="t t">SegmentTransferProgress</a>&gt; <span id="r8 rd" class="r8 r">progressTracker</span> = <b>null</b>)
+        {
+            <a href="#82e6b30b4be82683" class="i field">_metadata</a> = <span class="r4 r">uploadMetadata</span>;
+            <a href="#b529daeced2f7b74" class="i field">_maxThreadCount</a> = <span class="r5 r">maxThreadCount</span>;
+            <a href="#88fc998c6c5c7838" class="i field">_frontEnd</a> = <span class="r6 r">frontEnd</span>;
+            <a href="#c9edb47325984226" class="i field">_progressTracker</a> = <span class="r8 r">progressTracker</span>;
+            <a href="#29b34127f323506f" class="i field">_token</a> = <span class="r7 r">token</span>;
+ 
+            <a href="#afadc6dda1c3408e" class="k">this</a>.<a href="#cb5da2b42b013ea1" class="i property">UseSegmentBlockBackOffRetryStrategy</a> = <b>true</b>;
+        } 
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Properties
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets a value indicating whether to use a back-off (exponenential) in case of individual block failures.</span>
+        <span class="c">///</span><span class="c"> The MultipleSegmentUploader does not use this directly; it passes it on to SingleSegmentUploader.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal bool</b> <a id="cb5da2b42b013ea1" href="../../../R/cb5da2b42b013ea1.html" target="n" data-glyph="104,1" class="i property">UseSegmentBlockBackOffRetryStrategy</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Upload logic
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Executes the upload of the segments in the file that were not already uploaded (i.e., those that are in a &#39;Pending&#39; state).</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public void</b> <a id="895d1a3fb5d19b75" href="../../../R/895d1a3fb5d19b75.html" target="n" data-glyph="72,1" class="i method">Upload</a>()
+        {
+            <a href="@0@System/A.html#aa3beab99b2e0db2" class="k">var</a> <span id="r9 rd" class="r9 r">pendingSegments</span> = <a href="#3289b0c0059fbed2" class="i method">GetPendingSegmentsToUpload</a>(<a href="#82e6b30b4be82683" class="i field">_metadata</a>);
+            <a href="@0@mscorlib/A.html#18bcbcbdddbcfdcb" class="k">var</a> <span id="r10 rd" class="r10 r">exceptions</span> = <b>new</b> <a href="@0@mscorlib/A.html#a773570b1b021cff" class="t constructor">ConcurrentQueue</a>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt;();
+ 
+            <b>int</b> <span id="r11 rd" class="r11 r">threadCount</span> = <a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#f441d55c88d635ad" class="i method">Min</a>(<span class="r9 r">pendingSegments</span>.<a href="@0@System/A.html#2d2504e4ca700843" class="i property">Count</a>, <a href="#b529daeced2f7b74" class="i field">_maxThreadCount</a>);
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r12 rd" class="r12 r">threads</span> = <b>new</b> <a href="@0@mscorlib/A.html#b65c1a07c4e5b13a" class="t constructor">List</a>&lt;<a href="@0@mscorlib/A.html#3980e012bae82e96" class="t t">Thread</a>&gt;(<span class="r11 r">threadCount</span>);
+ 
+            <span class="c">//start a bunch of new threads that pull from the pendingSegments and then wait for them to finish</span>
+            <b>for</b> (<b>int</b> <span id="r13 rd" class="r13 r">i</span> = 0; <span class="r13 r">i</span> &lt; <span class="r11 r">threadCount</span>; <span class="r13 r">i</span>++)
+            {
+                <a href="@0@mscorlib/A.html#3980e012bae82e96" class="k">var</a> <span id="r14 rd" class="r14 r">t</span> = <b>new</b> <a href="@0@mscorlib/A.html#76f340c84df6da8d" class="t constructor">Thread</a>(() =&gt; { <a href="#dee8261c778cac1f" class="i method">ProcessPendingSegments</a>(<span class="r9 r">pendingSegments</span>, <span class="r10 r">exceptions</span>); });
+                <span class="r14 r">t</span>.<a href="@0@mscorlib/A.html#cd2144b8dd6f4373" class="i method">Start</a>();
+                <span class="r12 r">threads</span>.<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r14 r">t</span>);
+            }
+ 
+            <b>foreach</b> (<a href="@0@mscorlib/A.html#3980e012bae82e96" class="k">var</a> <span id="r15 rd" class="r15 r">t</span> <b>in</b> <span class="r12 r">threads</span>)
+            {
+                <span class="r15 r">t</span>.<a href="@0@mscorlib/A.html#6f7bed56e0efe767" class="i method">Join</a>();
+            }
+ 
+ 
+            <span class="c">// aggregate any exceptions and throw them back at our caller</span>
+            <b>if</b> (<span class="r10 r">exceptions</span>.<a href="@0@mscorlib/A.html#f36684fa5c19fdfb" class="i property">Count</a> &gt; 0 &amp;&amp; !<a href="#29b34127f323506f" class="i field">_token</a>.<a href="@0@mscorlib/A.html#f32abbe8e2f1f6c1" class="i property">IsCancellationRequested</a>)
+            {
+                <a href="@0@mscorlib/A.html#be77e0a7fbc110e6" class="k">var</a> <span id="r16 rd" class="r16 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#4dbda9e082b19a1b" class="t constructor">AggregateException</a>(<span class="s">&quot;One or more segments could not be uploaded. Review the Upload Metadata to determine which segments failed&quot;</span>, <span class="r10 r">exceptions</span>);
+                <a href="../Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="../Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r16 r">ex</span>);
+ 
+                <b>throw</b> <span class="r16 r">ex</span>;
+            }
+ 
+            <span class="c">// Finally, throw the cancellation exception if the task was actually cancelled.</span>
+            <a href="#29b34127f323506f" class="i field">_token</a>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Processes the pending segments.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r17 r">pendingSegments</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The pending segments.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r18 r">exceptions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The exceptions.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="dee8261c778cac1f" href="../../../R/dee8261c778cac1f.html" target="n" data-glyph="76,1" class="i method">ProcessPendingSegments</a>(<a href="@0@System/A.html#aa3beab99b2e0db2" class="t t">Queue</a>&lt;<a href="#4127ac43fd1bdfe3" class="t t">SegmentQueueItem</a>&gt; <span id="r17 rd" class="r17 r">pendingSegments</span>, <a href="@0@mscorlib/A.html#18bcbcbdddbcfdcb" class="t t">ConcurrentQueue</a>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt; <span id="r18 rd" class="r18 r">exceptions</span>)
+        {
+            <b>while</b> (<span class="r17 r">pendingSegments</span>.<a href="@0@System/A.html#2d2504e4ca700843" class="i property">Count</a> &gt; 0)
+            {
+                <b>if</b> (<a href="#29b34127f323506f" class="i field">_token</a>.<a href="@0@mscorlib/A.html#f32abbe8e2f1f6c1" class="i property">IsCancellationRequested</a>)
+                {
+                    <b>break</b>;
+                }
+ 
+                <span class="c">//get the next item to process</span>
+                <a href="#4127ac43fd1bdfe3" class="t t">SegmentQueueItem</a> <span id="r19 rd" class="r19 r">toProcess</span>;
+                <b>lock</b> (<span class="r17 r">pendingSegments</span>)
+                {
+                    <b>if</b> (<span class="r17 r">pendingSegments</span>.<a href="@0@System/A.html#2d2504e4ca700843" class="i property">Count</a> == 0)
+                    {
+                        <b>break</b>;
+                    }
+                    <span class="r19 r">toProcess</span> = <span class="r17 r">pendingSegments</span>.<a href="@0@System/A.html#e68caf2d91344411" class="i method">Dequeue</a>();
+                }
+ 
+                <b>try</b>
+                {
+                    <span class="c">//execute it</span>
+                    <a href="#cc1325c9b9daa126" class="i method">UploadSegment</a>(<span class="r19 r">toProcess</span>.<a href="#c024d55e029944d2" class="i property">SegmentNumber</a>, <a href="#82e6b30b4be82683" class="i field">_metadata</a>);
+                }
+                <b>catch</b>(<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r20 rd" class="r20 r">ex</span>)
+                {
+                    <b>if</b> (<span class="r19 r">toProcess</span>.<a href="#86818089752a385a" class="i property">AttemptCount</a> + 1 &lt; <a href="#8fbbdefcf10f6ab2" class="i field">MaxUploadAttemptCount</a>)
+                    {
+                        <span class="c">//re-enqueue at the end, but with an incremented attempt count</span>
+                        <b>lock</b> (<span class="r17 r">pendingSegments</span>)
+                        {
+                            <span class="r17 r">pendingSegments</span>.<a href="@0@System/A.html#14c3cc45ceaf1566" class="i method">Enqueue</a>(<b>new</b> <a href="#d1ea8a3b5c5a679a" class="t constructor">SegmentQueueItem</a>(<span class="r19 r">toProcess</span>.<a href="#c024d55e029944d2" class="i property">SegmentNumber</a>, <span class="r19 r">toProcess</span>.<a href="#86818089752a385a" class="i property">AttemptCount</a> + 1));
+                        }
+                    }
+                    <b>else</b>
+                    {
+                        <span class="c">//keep track of the last exception for each segment and report it back</span>
+                        <b>lock</b> (<span class="r18 r">exceptions</span>)
+                        {
+                            <span class="r18 r">exceptions</span>.<a href="@0@mscorlib/A.html#62bea3a8141ed2a9" class="i method">Enqueue</a>(<span class="r20 r">ex</span>);
+                        }
+                    }
+                }
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Uploads the segment.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r21 r">segmentNumber</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The segment number.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r22 r">metadata</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The metadata.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="cc1325c9b9daa126" href="../../../R/cc1325c9b9daa126.html" target="n" data-glyph="76,1" class="i method">UploadSegment</a>(<b>int</b> <span id="r21 rd" class="r21 r">segmentNumber</span>, <a href="../Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <span id="r22 rd" class="r22 r">metadata</span>)
+        {
+            <span class="c">//mark the segment as &#39;InProgress&#39; in the metadata</span>
+            <a href="#4ff5d7846053f0c7" class="i method">UpdateSegmentMetadataStatus</a>(<span class="r22 r">metadata</span>, <span class="r21 r">segmentNumber</span>, <a href="../Common/SegmentTransferStatus.cs.html#f871cd80cd9814cc" class="t t">SegmentTransferStatus</a>.<a href="../Common/SegmentTransferStatus.cs.html#62e7d2a1d082e24a" class="i field">InProgress</a>);
+ 
+            <a href="SingleSegmentUploader.cs.html#62b7b26e3b4d119f" class="k">var</a> <span id="r23 rd" class="r23 r">segmentUploader</span> = <b>new</b> <a href="SingleSegmentUploader.cs.html#655fdceeb69cb8ed" class="t constructor">SingleSegmentUploader</a>(<span class="r21 r">segmentNumber</span>, <span class="r22 r">metadata</span>, <a href="#88fc998c6c5c7838" class="i field">_frontEnd</a>, <a href="#29b34127f323506f" class="i field">_token</a>, <a href="#c9edb47325984226" class="i field">_progressTracker</a>);
+            <span class="r23 r">segmentUploader</span>.<a href="SingleSegmentUploader.cs.html#1f3cfffd2c17dddb" class="i property">UseBackOffRetryStrategy</a> = <a href="#afadc6dda1c3408e" class="k">this</a>.<a href="#cb5da2b42b013ea1" class="i property">UseSegmentBlockBackOffRetryStrategy</a>;
+ 
+            <b>try</b>
+            {
+                <span class="r23 r">segmentUploader</span>.<a href="SingleSegmentUploader.cs.html#ce622d6d79e9b5c3" class="i method">Upload</a>();
+                
+                <span class="c">//if we reach this point, the upload was successful; mark it as such </span>
+                <a href="#4ff5d7846053f0c7" class="i method">UpdateSegmentMetadataStatus</a>(<span class="r22 r">metadata</span>, <span class="r21 r">segmentNumber</span>, <a href="../Common/SegmentTransferStatus.cs.html#f871cd80cd9814cc" class="t t">SegmentTransferStatus</a>.<a href="../Common/SegmentTransferStatus.cs.html#2c215e272001fbf1" class="i field">Complete</a>);
+            }
+            <b>catch</b>(<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r24 rd" class="r24 r">ex</span>)
+            {
+                <span class="c">//something horrible happened, mark the segment as failed and throw the original exception (the caller will handle it)</span>
+                <a href="#4ff5d7846053f0c7" class="i method">UpdateSegmentMetadataStatus</a>(<span class="r22 r">metadata</span>, <span class="r21 r">segmentNumber</span>, <a href="../Common/SegmentTransferStatus.cs.html#f871cd80cd9814cc" class="t t">SegmentTransferStatus</a>.<a href="../Common/SegmentTransferStatus.cs.html#41bdb0659dca2ea0" class="i field">Failed</a>);
+                <a href="../Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="../Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r24 r">ex</span>);
+ 
+                <b>throw</b> <span class="r24 r">ex</span>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the pending segments to upload.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r25 r">metadata</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The metadata.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private static</b> <a href="@0@System/A.html#aa3beab99b2e0db2" class="t t">Queue</a>&lt;<a href="#4127ac43fd1bdfe3" class="t t">SegmentQueueItem</a>&gt; <a id="3289b0c0059fbed2" href="../../../R/3289b0c0059fbed2.html" target="n" data-glyph="76,1" class="i method">GetPendingSegmentsToUpload</a>(<a href="../Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <span id="r25 rd" class="r25 r">metadata</span>)
+        {
+            <a href="@0@System/A.html#aa3beab99b2e0db2" class="k">var</a> <span id="r26 rd" class="r26 r">result</span> = <b>new</b> <a href="@0@System/A.html#a09109def640b7b1" class="t constructor">Queue</a>&lt;<a href="#4127ac43fd1bdfe3" class="t t">SegmentQueueItem</a>&gt;();
+            <b>foreach</b> (<a href="../Common/TransferSegmentMetadata.cs.html#4a50ebae0a9351d2" class="k">var</a> <span id="r27 rd" class="r27 r">segment</span> <b>in</b> <span class="r25 r">metadata</span>.<a href="../Common/TransferMetadata.cs.html#982540b694e3af39" class="i property">Segments</a>.<a href="@0@System.Core/A.html#e73922753675387a" class="i method">Where</a>(<span id="r28 rd" class="r28 r">segment</span> =&gt; <span class="r28 r">segment</span>.<a href="../Common/TransferSegmentMetadata.cs.html#dad6b56604dbe3f7" class="i property">Status</a> == <a href="../Common/SegmentTransferStatus.cs.html#f871cd80cd9814cc" class="t t">SegmentTransferStatus</a>.<a href="../Common/SegmentTransferStatus.cs.html#e8c6f082f267929a" class="i field">Pending</a>))
+            {
+                <span class="r26 r">result</span>.<a href="@0@System/A.html#14c3cc45ceaf1566" class="i method">Enqueue</a>(<b>new</b> <a href="#d1ea8a3b5c5a679a" class="t constructor">SegmentQueueItem</a>(<span class="r27 r">segment</span>.<a href="../Common/TransferSegmentMetadata.cs.html#b23a7e7d251e39e8" class="i property">SegmentNumber</a>, 0));
+            }
+            <b>return</b> <span class="r26 r">result</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Updates the segment metadata status.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r29 r">metadata</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The metadata.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r30 r">segmentNumber</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The segment number.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r31 r">newStatus</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The new status.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>private static void</b> <a id="4ff5d7846053f0c7" href="../../../R/4ff5d7846053f0c7.html" target="n" data-glyph="76,1" class="i method">UpdateSegmentMetadataStatus</a>(<a href="../Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <span id="r29 rd" class="r29 r">metadata</span>, <b>int</b> <span id="r30 rd" class="r30 r">segmentNumber</span>, <a href="../Common/SegmentTransferStatus.cs.html#f871cd80cd9814cc" class="t t">SegmentTransferStatus</a> <span id="r31 rd" class="r31 r">newStatus</span>)
+        {
+            <span class="r29 r">metadata</span>.<a href="../Common/TransferMetadata.cs.html#982540b694e3af39" class="i property">Segments</a>[<span class="r30 r">segmentNumber</span>].<a href="../Common/TransferSegmentMetadata.cs.html#dad6b56604dbe3f7" class="i property">Status</a> = <span class="r31 r">newStatus</span>;
+            <b>try</b>
+            {
+                <span class="r29 r">metadata</span>.<a href="../Common/TransferMetadata.cs.html#f0e950a431f9279e" class="i method">Save</a>();
+            }
+            <b>catch</b> { } <span class="c">//no need to crash the program if were unable to save the metadata; it is what&#39;s in memory that&#39;s important</span>
+        }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> SegmentQueueItem
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Represents a tuple that pairs a segment number with the number of times it was attempted for upload</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        [<a href="@0@mscorlib/A.html#761078d4519dc54e" class="t constructor">DebuggerDisplay</a>(<span class="s">&quot;Segment = {SegmentNumber}, Attempts = {AttemptCount}&quot;</span>)]
+        <b>private class</b> <a id="4127ac43fd1bdfe3" href="../../../R/4127ac43fd1bdfe3.html" target="n" data-glyph="4,1" class="t t">SegmentQueueItem</a>
+        {
+            <b>public</b> <a id="d1ea8a3b5c5a679a" href="../../../R/d1ea8a3b5c5a679a.html" target="n" data-glyph="72,2" class="t constructor">SegmentQueueItem</a>(<b>int</b> <span id="r32 rd" class="r32 r">segmentNumber</span>, <b>int</b> <span id="r33 rd" class="r33 r">attemptCount</span>)
+            {
+                <a href="#4127ac43fd1bdfe3" class="k">this</a>.<a href="#c024d55e029944d2" class="i property">SegmentNumber</a> = <span class="r32 r">segmentNumber</span>;
+                <a href="#4127ac43fd1bdfe3" class="k">this</a>.<a href="#86818089752a385a" class="i property">AttemptCount</a> = <span class="r33 r">attemptCount</span>;
+            }
+ 
+            <b>public int</b> <a id="c024d55e029944d2" href="../../../R/c024d55e029944d2.html" target="n" data-glyph="102,2" class="i property">SegmentNumber</a> { <b>get</b>; <b>private set</b>; }
+ 
+            <b>public int</b> <a id="86818089752a385a" href="../../../R/86818089752a385a.html" target="n" data-glyph="102,2" class="i property">AttemptCount</a> { <b>get</b>; <b>private set</b>; }
+        }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+    }
+}
+</pre></td></tr></table></div></body></html>

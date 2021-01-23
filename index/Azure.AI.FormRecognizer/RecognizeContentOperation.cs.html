@@ -1,0 +1,233 @@
+﻿<!DOCTYPE html>
+<html><head><title>RecognizeContentOperation.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(224);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.AI.FormRecognizer/RecognizeContentOperation.cs" target="_top">RecognizeContentOperation.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.AI.FormRecognizer" target="_top">src\Azure.AI.FormRecognizer.csproj</a> (Azure.AI.FormRecognizer)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Linq</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">AI</span>.<span class="i n">FormRecognizer</span>.<span class="i n">Models</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Tracks the status of a long-running operation for recognizing layout elements from forms.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>public class</b> <a id="e87a2ffc646ff7fb" href="R/e87a2ffc646ff7fb.html" target="n" data-glyph="0,0" class="t t">RecognizeContentOperation</a> : <span class="i">Operation</span>&lt;<a href="FormPageCollection.cs.html#b7995b73a43aee69" class="t t">FormPageCollection</a>&gt;
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">Provides communication with the Form Recognizer Azure Cognitive Service through its REST API.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly</b> <a href="Generated/FormRecognizerRestClient.cs.html#be5b3a6b4ec620b8" class="t t">FormRecognizerRestClient</a> <a id="0cbe296f55db724d" href="R/0cbe296f55db724d.html" target="n" data-glyph="46,1" class="i field">_serviceClient</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">Provides tools for exception creation in case of failure.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly</b> <a href="P/60221cb69e1f903a.html#60221cb69e1f903a" class="t t">ClientDiagnostics</a> <a id="e77bc307770dc43d" href="R/e77bc307770dc43d.html" target="n" data-glyph="46,1" class="i field">_diagnostics</a>;
+ 
+        <b>private</b> <span class="i">RequestFailedException</span> <a id="8efd62c0342ef8a4" href="R/8efd62c0342ef8a4.html" target="n" data-glyph="46,1" class="i field">_requestFailedException</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The last HTTP response received from the server. </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> until the first response is received.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private</b> <span class="i">Response</span> <a id="0e99e364708502e6" href="R/0e99e364708502e6.html" target="n" data-glyph="46,1" class="i field">_response</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The result of the long-running operation. </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> until result is received on status update.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private</b> <a href="FormPageCollection.cs.html#b7995b73a43aee69" class="t t">FormPageCollection</a> <a id="7092024120ac3ac6" href="R/7092024120ac3ac6.html" target="n" data-glyph="46,1" class="i field">_value</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the long-running operation has completed. Otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private bool</b> <a id="34b387faa4120e30" href="R/34b387faa4120e30.html" target="n" data-glyph="46,1" class="i field">_hasCompleted</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets an ID representing the operation that can be used to poll for the status</span>
+        <span class="c">///</span><span class="c"> of the long-running operation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public override string</b> <a id="d86c2d081d3212d7" href="R/d86c2d081d3212d7.html" target="n" data-glyph="102,1" class="i property">Id</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Final result of the long-running operation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> This property can be accessed only after the operation completes successfully (HasValue is true).</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public override</b> <a href="FormPageCollection.cs.html#b7995b73a43aee69" class="t t">FormPageCollection</a> <a id="d910bddd6e3ee698" href="R/d910bddd6e3ee698.html" target="n" data-glyph="102,1" class="i property">Value</a>
+        {
+            <b>get</b>
+            {
+                <b>if</b> (<a href="#480c87613dc5c234" class="i property">HasCompleted</a> &amp;&amp; !<a href="#30e0a51824435b43" class="i property">HasValue</a>)
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA1065</span> <span class="c">// Do not raise exceptions in unexpected locations</span>
+                    <b>throw</b> <a href="#8efd62c0342ef8a4" class="i field">_requestFailedException</a>;
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">CA1065</span> <span class="c">// Do not raise exceptions in unexpected locations</span>
+                <b>else</b>
+                    <b>return</b> <a href="Shared/OperationHelpers.cs.html#76d7b0b4b849036f" class="t t">OperationHelpers</a>.<a href="Shared/OperationHelpers.cs.html#2c4f34bea60486b8" class="i method">GetValue</a>(<b>ref</b> <a href="#7092024120ac3ac6" class="i field">_value</a>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Returns true if the long-running operation completed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public override bool</b> <a id="480c87613dc5c234" href="R/480c87613dc5c234.html" target="n" data-glyph="102,1" class="i property">HasCompleted</a> =&gt; <a href="#34b387faa4120e30" class="i field">_hasCompleted</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Returns true if the long-running operation completed successfully and has produced final result (accessible by Value property).</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public override bool</b> <a id="30e0a51824435b43" href="R/30e0a51824435b43.html" target="n" data-glyph="102,1" class="i property">HasValue</a> =&gt; <a href="#7092024120ac3ac6" class="i field">_value</a> != <b>null</b>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#e87a2ffc646ff7fb" class="t t">RecognizeContentOperation</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class which</span>
+        <span class="c">///</span><span class="c"> tracks the status of a long-running operation for recognizing layout elements from forms.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">operationId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The ID of this operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">client</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The client used to check for completion.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="c17ce23ddd73671b" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">RecognizeContentOperation</a>(<b>string</b> <span id="r0 rd" class="r0 r">operationId</span>, <a href="FormRecognizerClient.cs.html#368aca129340fc7d" class="t t">FormRecognizerClient</a> <span id="r1 rd" class="r1 r">client</span>)
+        {
+            <a href="Shared/Argument.cs.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="Shared/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r1 r">client</span>, <b>nameof</b>(<span class="r1 r">client</span>));
+ 
+            <a href="#d86c2d081d3212d7" class="i property">Id</a> = <span class="r0 r">operationId</span>;
+            <a href="#0cbe296f55db724d" class="i field">_serviceClient</a> = <span class="r1 r">client</span>.<a href="FormRecognizerClient.cs.html#0dbdf40aa4b7dd34" class="i field">ServiceClient</a>;
+            <a href="#e77bc307770dc43d" class="i field">_diagnostics</a> = <span class="r1 r">client</span>.<a href="FormRecognizerClient.cs.html#821da7dc2f2f4ec6" class="i field">Diagnostics</a>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#e87a2ffc646ff7fb" class="t t">RecognizeContentOperation</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">serviceClient</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The client for communicating with the Form Recognizer Azure Cognitive Service through its REST API.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">diagnostics</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The client diagnostics for exception creation in case of failure.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">operationLocation</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The address of the long-running operation. It can be obtained from the response headers upon starting the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>internal</b> <a id="f0258177bcd14afd" href="R/f0258177bcd14afd.html" target="n" data-glyph="74,1" class="t constructor">RecognizeContentOperation</a>(<a href="Generated/FormRecognizerRestClient.cs.html#be5b3a6b4ec620b8" class="t t">FormRecognizerRestClient</a> <span id="r2 rd" class="r2 r">serviceClient</span>, <a href="P/60221cb69e1f903a.html#60221cb69e1f903a" class="t t">ClientDiagnostics</a> <span id="r3 rd" class="r3 r">diagnostics</span>, <b>string</b> <span id="r4 rd" class="r4 r">operationLocation</span>)
+        {
+            <a href="#0cbe296f55db724d" class="i field">_serviceClient</a> = <span class="r2 r">serviceClient</span>;
+            <a href="#e77bc307770dc43d" class="i field">_diagnostics</a> = <span class="r3 r">diagnostics</span>;
+ 
+            <span class="c">// TODO: Add validation here</span>
+            <span class="c">// https://github.com/Azure/azure-sdk-for-net/issues/10385</span>
+            <a href="#d86c2d081d3212d7" class="i property">Id</a> = <span class="r4 r">operationLocation</span>.<span class="i">Split</span>(<span class="s">&#39;/&#39;</span>).<span class="i">Last</span>();
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The last HTTP response received from the server.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The last response returned from the server during the lifecycle of this instance.</span>
+        <span class="c">///</span><span class="c"> An instance of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#e87a2ffc646ff7fb" class="t t">RecognizeContentOperation</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> sends requests to a server in UpdateStatusAsync, UpdateStatus, and other methods.</span>
+        <span class="c">///</span><span class="c"> Responses from these requests can be accessed using GetRawResponse.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public override</b> <span class="i">Response</span> <a id="0333791585110cda" href="R/0333791585110cda.html" target="n" data-glyph="72,1" class="i method">GetRawResponse</a>() =&gt; <a href="#0e99e364708502e6" class="i field">_response</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Periodically calls the server till the long-running operation completes.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> used for the periodical service calls.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The last HTTP response received from the server.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> This method will periodically call UpdateStatusAsync till HasCompleted is true, then return the final result of the operation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public override</b> <span class="i">ValueTask</span>&lt;<span class="i">Response</span>&lt;<a href="FormPageCollection.cs.html#b7995b73a43aee69" class="t t">FormPageCollection</a>&gt;&gt; <a id="ae60ed8216cb8ee7" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">WaitForCompletionAsync</a>(<span class="i">CancellationToken</span> <span id="r5 rd" class="r5 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <a href="#e87a2ffc646ff7fb" class="k">this</a>.<span class="i">DefaultWaitForCompletionAsync</span>(<span class="r5 r">cancellationToken</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Periodically calls the server till the long-running operation completes.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">pollingInterval</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The interval between status requests to the server.</span>
+        <span class="c">///</span><span class="c"> The interval can change based on information returned from the server.</span>
+        <span class="c">///</span><span class="c"> For example, the server might communicate to the client that there is not reason to poll for status change sooner than some time.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> used for the periodical service calls.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The last HTTP response received from the server.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> This method will periodically call UpdateStatusAsync till HasCompleted is true, then return the final result of the operation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public override</b> <span class="i">ValueTask</span>&lt;<span class="i">Response</span>&lt;<a href="FormPageCollection.cs.html#b7995b73a43aee69" class="t t">FormPageCollection</a>&gt;&gt; <a id="074d534897b2ed59" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">WaitForCompletionAsync</a>(<span class="i">TimeSpan</span> <span id="r6 rd" class="r6 r">pollingInterval</span>, <span class="i">CancellationToken</span> <span id="r7 rd" class="r7 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <a href="#e87a2ffc646ff7fb" class="k">this</a>.<span class="i">DefaultWaitForCompletionAsync</span>(<span class="r6 r">pollingInterval</span>, <span class="r7 r">cancellationToken</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Calls the server to get updated status of the long-running operation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> used for the service call.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The HTTP response received from the server.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> This operation will update the value returned from GetRawResponse and might update HasCompleted, HasValue, and Value.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public override</b> <span class="i">Response</span> <a id="1ecc4659ca901b53" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">UpdateStatus</a>(<span class="i">CancellationToken</span> <span id="r8 rd" class="r8 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <a href="#472f6be62e0f0231" class="i method">UpdateStatusAsync</a>(<b>false</b>, <span class="r8 r">cancellationToken</span>).<span class="i">EnsureCompleted</span>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Calls the server to get updated status of the long-running operation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> used for the service call.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The HTTP response received from the server.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> This operation will update the value returned from GetRawResponse and might update HasCompleted, HasValue, and Value.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public override async</b> <span class="i">ValueTask</span>&lt;<span class="i">Response</span>&gt; <a id="a812224195c7243d" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">UpdateStatusAsync</a>(<span class="i">CancellationToken</span> <span id="r9 rd" class="r9 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <b>await</b> <a href="#472f6be62e0f0231" class="i method">UpdateStatusAsync</a>(<b>true</b>, <span class="r9 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Calls the server to get updated status of the long-running operation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r10 r">async</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">When </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">, the method will be executed asynchronously; otherwise, it will execute synchronously.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r11 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> used for the service call.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The HTTP response received from the server.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private async</b> <span class="i">ValueTask</span>&lt;<span class="i">Response</span>&gt; <a id="472f6be62e0f0231" href="R/472f6be62e0f0231.html" target="n" data-glyph="76,1" class="i method">UpdateStatusAsync</a>(<b>bool</b> <span id="r10 rd" class="r10 r">async</span>, <span class="i">CancellationToken</span> <span id="r11 rd" class="r11 r">cancellationToken</span>)
+        {
+            <b>if</b> (!<a href="#34b387faa4120e30" class="i field">_hasCompleted</a>)
+            {
+                <b>using</b> <a href="Shared/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r12 rd" class="r12 r">scope</span> = <a href="#e77bc307770dc43d" class="i field">_diagnostics</a>.<a href="Shared/DiagnosticScopeFactory.cs.html#74f1bd8b1f1143c8" class="i method">CreateScope</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="#e87a2ffc646ff7fb" class="t t">RecognizeContentOperation</a>)}<span class="s">.</span>{<b>nameof</b>(<span class="i">UpdateStatus</span>)}<span class="s">&quot;</span>);
+                <span class="r12 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
+ 
+                <b>try</b>
+                {
+                    <span class="i">Response</span>&lt;<a href="P/746895e85dadaa64.html#746895e85dadaa64" class="t t">AnalyzeOperationResult</a>&gt; <span id="r13 rd" class="r13 r">update</span> = <span class="r10 r">async</span>
+                        ? <b>await</b> <a href="#0cbe296f55db724d" class="i field">_serviceClient</a>.<a href="Generated/FormRecognizerRestClient.cs.html#600412d311f06ebe" class="i method">GetAnalyzeLayoutResultAsync</a>(<b>new</b> <span class="i">Guid</span>(<a href="#d86c2d081d3212d7" class="i property">Id</a>), <span class="r11 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>)
+                        : <a href="#0cbe296f55db724d" class="i field">_serviceClient</a>.<a href="Generated/FormRecognizerRestClient.cs.html#6e590dcbc130aa41" class="i method">GetAnalyzeLayoutResult</a>(<b>new</b> <span class="i">Guid</span>(<a href="#d86c2d081d3212d7" class="i property">Id</a>), <span class="r11 r">cancellationToken</span>);
+ 
+                    <a href="#0e99e364708502e6" class="i field">_response</a> = <span class="r13 r">update</span>.<span class="i">GetRawResponse</span>();
+ 
+                    <b>if</b> (<span class="r13 r">update</span>.<span class="i">Value</span>.<span class="i">Status</span> == <a href="Generated/Models/OperationStatus.cs.html#cb99c36d380fa6de" class="t t">OperationStatus</a>.<a href="Generated/Models/OperationStatus.cs.html#19110dd34dcbf1d6" class="i field">Succeeded</a>)
+                    {
+                        <span class="c">// we need to first assign a value and then mark the operation as completed to avoid race conditions</span>
+                        <a href="#7092024120ac3ac6" class="i field">_value</a> = <span class="i">ConvertValue</span>(<span class="r13 r">update</span>.<span class="i">Value</span>.<span class="i">AnalyzeResult</span>.<span class="i">PageResults</span>, <span class="r13 r">update</span>.<span class="i">Value</span>.<span class="i">AnalyzeResult</span>.<span class="i">ReadResults</span>);
+                        <a href="#34b387faa4120e30" class="i field">_hasCompleted</a> = <b>true</b>;
+                    }
+                    <b>else</b> <b>if</b> (<span class="r13 r">update</span>.<span class="i">Value</span>.<span class="i">Status</span> == <a href="Generated/Models/OperationStatus.cs.html#cb99c36d380fa6de" class="t t">OperationStatus</a>.<a href="Generated/Models/OperationStatus.cs.html#aa346f4c17c31c0c" class="i field">Failed</a>)
+                    {
+                        <a href="#8efd62c0342ef8a4" class="i field">_requestFailedException</a> = <b>await</b> <a href="ClientCommon.cs.html#772dfa3c5d7775ce" class="t t">ClientCommon</a>
+                            .<span class="i">CreateExceptionForFailedOperationAsync</span>(<span class="r10 r">async</span>, <a href="#e77bc307770dc43d" class="i field">_diagnostics</a>, <a href="#0e99e364708502e6" class="i field">_response</a>, <span class="r13 r">update</span>.<span class="i">Value</span>.<span class="i">AnalyzeResult</span>.<span class="i">Errors</span>)
+                            .<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        <a href="#34b387faa4120e30" class="i field">_hasCompleted</a> = <b>true</b>;
+                        <b>throw</b> <a href="#8efd62c0342ef8a4" class="i field">_requestFailedException</a>;
+                    }
+                }
+                <b>catch</b> (<span class="i">Exception</span> <span id="r14 rd" class="r14 r">e</span>)
+                {
+                    <span class="r12 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#1fc9b81e757b438c" class="i method">Failed</a>(<span class="r14 r">e</span>);
+                    <b>throw</b>;
+                }
+            }
+ 
+            <b>return</b> <a href="#0333791585110cda" class="i method">GetRawResponse</a>();
+        }
+ 
+        <b>private static</b> <a href="FormPageCollection.cs.html#b7995b73a43aee69" class="t t">FormPageCollection</a> <a id="7a2f222d5163778e" href="R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">ConvertValue</a>(<span class="i">IReadOnlyList</span>&lt;<a href="P/564cf3b3cf992f00.html#564cf3b3cf992f00" class="t t">PageResult</a>&gt; <span id="r15 rd" class="r15 r">pageResults</span>, <span class="i">IReadOnlyList</span>&lt;<a href="P/e79f60f554fd74df.html#e79f60f554fd74df" class="t t">ReadResult</a>&gt; <span id="r16 rd" class="r16 r">readResults</span>)
+        {
+            <span class="i">Debug</span>.<span class="i">Assert</span>(<span class="r15 r">pageResults</span>.<span class="i">Count</span> == <span class="r16 r">readResults</span>.<span class="i">Count</span>);
+ 
+            <span class="i">List</span>&lt;<a href="FormPage.cs.html#cb53c2f9c8be2f0f" class="t t">FormPage</a>&gt; <span id="r17 rd" class="r17 r">pages</span> = <b>new</b> <span class="i">List</span>&lt;<a href="FormPage.cs.html#cb53c2f9c8be2f0f" class="t t">FormPage</a>&gt;();
+            <span class="i">List</span>&lt;<a href="P/e79f60f554fd74df.html#e79f60f554fd74df" class="t t">ReadResult</a>&gt; <span id="r18 rd" class="r18 r">rawPages</span> = <span class="r16 r">readResults</span>.<span class="i">ToList</span>();
+ 
+            <b>for</b> (<b>var</b> <span id="r19 rd" class="r19 r">pageIndex</span> = 0; <span class="r19 r">pageIndex</span> &lt; <span class="r15 r">pageResults</span>.<span class="i">Count</span>; <span class="r19 r">pageIndex</span>++)
+            {
+                <span class="r17 r">pages</span>.<span class="i">Add</span>(<b>new</b> <span class="t">FormPage</span>(<span class="r15 r">pageResults</span>[<span class="r19 r">pageIndex</span>], <span class="r18 r">rawPages</span>, <span class="r19 r">pageIndex</span>));
+            }
+ 
+            <b>return</b> <b>new</b> <span class="t">FormPageCollection</span>(<span class="r17 r">pages</span>);
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

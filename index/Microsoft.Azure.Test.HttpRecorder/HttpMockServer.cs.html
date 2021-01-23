@@ -1,0 +1,355 @@
+﻿<!DOCTYPE html>
+<html><head><title>HttpMockServer.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(346);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.Test.HttpRecorder/HttpMockServer.cs" target="_top">HttpMockServer.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.Test.HttpRecorder" target="_top">..\..\TestFramework\Microsoft.Azure.Test.HttpRecorder\Microsoft.Azure.Test.HttpRecorder.csproj</a> (Microsoft.Azure.Test.HttpRecorder)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>.<span class="i n">Http</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Reflection</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Test</span>.<span class="i n">HttpRecorder</span>
+{
+    <b>public class</b> <a id="348d97248a265d2f" href="R/348d97248a265d2f.html" target="n" data-glyph="0,0" class="t t">HttpMockServer</a> : <span class="t t">DelegatingHandler</span>
+    {
+        <span class="c">// One of the enum values for HttpRecorderMode such as Record or Playback</span>
+        <b>private const string</b> <a id="9ad0819302d87bc6" href="R/9ad0819302d87bc6.html" target="n" data-glyph="10,1" class="i field">ModeEnvironmentVariableName</a> = <span class="s">&quot;AZURE_TEST_MODE&quot;</span>;
+        <b>private const string</b> <a id="f12e545d99126831" href="R/f12e545d99126831.html" target="n" data-glyph="10,1" class="i field">TEST_MODE_HEADER</a> = <span class="s">&quot;azSdkTestPlayBackMode&quot;</span>;
+        <b>private static</b> <a href="AssetNames.cs.html#548f7d737915f1af" class="t t">AssetNames</a> <a id="16cd9d6e31f361dc" href="R/16cd9d6e31f361dc.html" target="n" data-glyph="46,1" class="i field">names</a>;
+        <b>private static</b> <a href="Records.cs.html#83296eb748a9dea3" class="t t">Records</a> <a id="75c418c813d9232a" href="R/75c418c813d9232a.html" target="n" data-glyph="46,1" class="i field">records</a>;
+        <b>private static</b> <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="#348d97248a265d2f" class="t t">HttpMockServer</a>&gt; <a id="bb8524268d80582c" href="R/bb8524268d80582c.html" target="n" data-glyph="46,1" class="i field">servers</a>;
+        <b>private static bool</b> <a id="d2cb42c5388c569a" href="R/d2cb42c5388c569a.html" target="n" data-glyph="46,1" class="i field">initialized</a>;
+ 
+        <b>public static</b> <a href="HttpRecorderMode.cs.html#ba41c0be28bfd60b" class="t t">HttpRecorderMode</a> <a id="a74d951f775be518" href="R/a74d951f775be518.html" target="n" data-glyph="102,1" class="i property">Mode</a> { <b>get</b>; <b>set</b>; }
+        <b>public static</b> <a href="IRecordMatcher.cs.html#ba4fe9935054155d" class="t t">IRecordMatcher</a> <a id="63395b0cc3410a6a" href="R/63395b0cc3410a6a.html" target="n" data-glyph="102,1" class="i property">Matcher</a> { <b>get</b>; <b>set</b>; }
+        <b>public static string</b> <a id="a1918c32dad782cb" href="R/a1918c32dad782cb.html" target="n" data-glyph="102,1" class="i property">CallerIdentity</a> { <b>get</b>; <b>set</b>; }
+        <b>public static string</b> <a id="408e078796e9971a" href="R/408e078796e9971a.html" target="n" data-glyph="102,1" class="i property">TestIdentity</a> { <b>get</b>; <b>set</b>; }
+ 
+        <b>public static</b> <a href="FileSystemUtils.cs.html#e4c0626365dac272" class="t t">FileSystemUtils</a> <a id="e59a292832bbf5f1" href="R/e59a292832bbf5f1.html" target="n" data-glyph="102,1" class="i property">FileSystemUtilsObject</a> { <b>get</b>; <b>set</b>; }
+ 
+        <b>static</b> <a id="2fd120f9ff87c9f0" href="R/../../0000000000.html" target="n" data-glyph="76,1" class="t method">HttpMockServer</a>()
+        {
+            <a href="#63395b0cc3410a6a" class="i property">Matcher</a> = <b>new</b> <a href="SimpleRecordMatcher.cs.html#b230ee661c704df2" class="t constructor">SimpleRecordMatcher</a>(<span class="s">&quot;x-ms-version&quot;</span>);
+            <a href="#75c418c813d9232a" class="i field">records</a> = <b>new</b> <a href="Records.cs.html#40e1846aa5d33da8" class="t constructor">Records</a>(<a href="#63395b0cc3410a6a" class="i property">Matcher</a>);
+            <a href="#250f849780469e4f" class="i property">Variables</a> = <b>new</b> <a href="@0@mscorlib/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;();
+            <a href="#e5040add7964258d" class="i property">RecordsDirectory</a> = <span class="s">&quot;SessionRecords&quot;</span>;
+        }
+ 
+        <b>private</b> <a id="50e2da904e738ada" href="R/50e2da904e738ada.html" target="n" data-glyph="76,1" class="t constructor">HttpMockServer</a>() { }
+ 
+        <b>public static void</b> <a id="06047f05b398a02a" href="R/06047f05b398a02a.html" target="n" data-glyph="72,1" class="i method">Initialize</a>(<a href="@0@mscorlib/A.html#3d00eeab9feb80f3" class="t t">Type</a> <span id="r0 rd" class="r0 r">callerIdentity</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r1 rd" class="r1 r">testIdentity</span>)
+        {
+            <a href="#4e13004f4d558a33" class="i method">Initialize</a>(<span class="r0 r">callerIdentity</span>, <span class="r1 r">testIdentity</span>, <a href="#5f543caadb9af284" class="i method">GetCurrentMode</a>());
+        }
+ 
+        <b>public static void</b> <a id="b3032df4383004c0" href="R/b3032df4383004c0.html" target="n" data-glyph="72,1" class="i method">Initialize</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r2 rd" class="r2 r">callerIdentity</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r3 rd" class="r3 r">testIdentity</span>)
+        {
+            <a href="#ddbaed347b37cbed" class="i method">Initialize</a>(<span class="r2 r">callerIdentity</span>, <span class="r3 r">testIdentity</span>, <a href="#5f543caadb9af284" class="i method">GetCurrentMode</a>());
+        }
+ 
+        <b>public static void</b> <a id="4e13004f4d558a33" href="R/4e13004f4d558a33.html" target="n" data-glyph="72,1" class="i method">Initialize</a>(<a href="@0@mscorlib/A.html#3d00eeab9feb80f3" class="t t">Type</a> <span id="r4 rd" class="r4 r">callerIdentity</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r5 rd" class="r5 r">testIdentity</span>, <a href="HttpRecorderMode.cs.html#ba41c0be28bfd60b" class="t t">HttpRecorderMode</a> <span id="r6 rd" class="r6 r">mode</span>)
+        {
+            <a href="#ddbaed347b37cbed" class="i method">Initialize</a>(<span class="r4 r">callerIdentity</span>.<a href="@0@mscorlib/A.html#aa4f112f79364b6e" class="i property">Name</a>, <span class="r5 r">testIdentity</span>, <span class="r6 r">mode</span>);
+        }
+ 
+        <b>public static void</b> <a id="ddbaed347b37cbed" href="R/ddbaed347b37cbed.html" target="n" data-glyph="72,1" class="i method">Initialize</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r7 rd" class="r7 r">callerIdentity</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r8 rd" class="r8 r">testIdentity</span>, <a href="HttpRecorderMode.cs.html#ba41c0be28bfd60b" class="t t">HttpRecorderMode</a> <span id="r9 rd" class="r9 r">mode</span>)
+        {
+            <a href="#a1918c32dad782cb" class="i property">CallerIdentity</a> = <span class="r7 r">callerIdentity</span>;
+            <a href="#408e078796e9971a" class="i property">TestIdentity</a> = <span class="r8 r">testIdentity</span>;
+            <a href="#a74d951f775be518" class="i property">Mode</a> = <span class="r9 r">mode</span>;
+            <a href="#16cd9d6e31f361dc" class="i field">names</a> = <b>new</b> <a href="AssetNames.cs.html#8f6820b4466db879" class="t constructor">AssetNames</a>();
+            <a href="#bb8524268d80582c" class="i field">servers</a> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="#348d97248a265d2f" class="t t">HttpMockServer</a>&gt;();
+            <a href="#75c418c813d9232a" class="i field">records</a> = <b>new</b> <a href="Records.cs.html#40e1846aa5d33da8" class="t constructor">Records</a>(<a href="#63395b0cc3410a6a" class="i property">Matcher</a>);
+            <a href="#250f849780469e4f" class="i property">Variables</a> = <b>new</b> <a href="@0@mscorlib/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;();
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r10 rd" class="r10 r">location</span> = <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#c9f70a27facb27cf" class="i field">Empty</a>;
+ 
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">FullNetFx</span>
+            <b>var</b> <span id="r11 rd" class="r11 r">asmCollection</span> = <a href="@0@mscorlib/A.html#2e9e7922eace2be8" class="t t">AppDomain</a>.<a href="@0@mscorlib/A.html#0f1cf66beffbb219" class="i property">CurrentDomain</a>.<a href="@0@mscorlib/A.html#4aefe0d6a192742f" class="i method">GetAssemblies</a>();
+ 
+            <b>foreach</b> (<a href="@0@mscorlib/A.html#73b5be5e9c2474b2" class="t t">Assembly</a> <span id="r12 rd" class="r12 r">asm</span> <b>in</b> <span class="r11 r">asmCollection</span>)
+            {
+                <b>if</b> (<span class="r12 r">asm</span>.<a href="@0@mscorlib/A.html#d2c38740a6b7facd" class="i method">GetType</a>(<a href="#a1918c32dad782cb" class="i property">CallerIdentity</a>) != <b>null</b>)
+                {
+                    <span class="r10 r">location</span> = <span class="r12 r">asm</span>.<a href="@0@mscorlib/A.html#3faa3e0e41d8868b" class="i property">Location</a>;
+                    <b>break</b>;
+                }
+            }
+<span class="k preprocess">#</span><span class="k preprocess">elif</span> !<span class="i">FullNetFx</span>
+<span class="e">//netcoreapp11 || netcoreapp20
+            location = AppContext.BaseDirectory;
+</span><span class="k preprocess">#</span><span class="k preprocess">endif</span>
+            <a href="#e5040add7964258d" class="i property">RecordsDirectory</a> = <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#2d7263f86a526264" class="i method">Combine</a>(<span class="r10 r">location</span>, <a href="#e5040add7964258d" class="i property">RecordsDirectory</a>);
+ 
+            <b>if</b> (<a href="#a74d951f775be518" class="i property">Mode</a> == <a href="HttpRecorderMode.cs.html#ba41c0be28bfd60b" class="t t">HttpRecorderMode</a>.<a href="HttpRecorderMode.cs.html#1b1f7e769355ff17" class="i field">Playback</a>)
+            {
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r13 rd" class="r13 r">recordDir</span> = <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#2d7263f86a526264" class="i method">Combine</a>(<a href="#e5040add7964258d" class="i property">RecordsDirectory</a>, <a href="#a1918c32dad782cb" class="i property">CallerIdentity</a>);
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r14 rd" class="r14 r">fileName</span> = <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#1274738792cce835" class="i method">GetFullPath</a>(<a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#2d7263f86a526264" class="i method">Combine</a>(<span class="r13 r">recordDir</span>, <span class="r8 r">testIdentity</span>.<a href="@0@mscorlib/A.html#69fc1d0aa6df8a90" class="i method">Replace</a>(<span class="s">&quot;.json&quot;</span>,<span class="s">&quot;&quot;</span>) + <span class="s">&quot;.json&quot;</span>));
+                <b>if</b> (!<a href="#348d97248a265d2f" class="t t">HttpMockServer</a>.<a href="#e59a292832bbf5f1" class="i property">FileSystemUtilsObject</a>.<a href="FileSystemUtils.cs.html#d24b4293f39cbcd3" class="i method">DirectoryExists</a>(<span class="r13 r">recordDir</span>) ||
+                    !<a href="#348d97248a265d2f" class="t t">HttpMockServer</a>.<a href="#e59a292832bbf5f1" class="i property">FileSystemUtilsObject</a>.<a href="FileSystemUtils.cs.html#9b783eb1cd4fe149" class="i method">FileExists</a>(<span class="r14 r">fileName</span>))
+                {
+                    <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#4b20cd3790b6426a" class="t constructor">ArgumentException</a>(
+                        <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;Unable to find recorded mock file &#39;{0}&#39;.&quot;</span>, <span class="r14 r">fileName</span>), <span class="s">&quot;callerIdentity&quot;</span>);
+                }
+                <b>else</b>
+                { 
+                    <a href="RecordEntryPack.cs.html#609cc2b6b9971bf0" class="t t">RecordEntryPack</a> <span id="r15 rd" class="r15 r">pack</span> = <a href="RecordEntryPack.cs.html#609cc2b6b9971bf0" class="t t">RecordEntryPack</a>.<a href="RecordEntryPack.cs.html#5d50d51bd63decf6" class="i method">Deserialize</a>(<span class="r14 r">fileName</span>);
+                    <b>lock</b> (<a href="#75c418c813d9232a" class="i field">records</a>)
+                    {
+                        <b>foreach</b> (<a href="RecordEntry.cs.html#981f3fce422340fb" class="k">var</a> <span id="r16 rd" class="r16 r">entry</span> <b>in</b> <span class="r15 r">pack</span>.<a href="RecordEntryPack.cs.html#aaf21aa646c8aaf2" class="i property">Entries</a>)
+                        {
+                            <a href="#75c418c813d9232a" class="i field">records</a>.<a href="Records.cs.html#c8e0bd9230cdbb77" class="i method">Enqueue</a>(<span class="r16 r">entry</span>);
+                        }
+                    }
+                    <b>foreach</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r17 rd" class="r17 r">func</span> <b>in</b> <span class="r15 r">pack</span>.<a href="RecordEntryPack.cs.html#5081ecd36f62a885" class="i property">Names</a>.<a href="@0@mscorlib/A.html#9a3c0cb5c149c9f7" class="i property">Keys</a>)
+                    {
+                        <span class="r15 r">pack</span>.<a href="RecordEntryPack.cs.html#5081ecd36f62a885" class="i property">Names</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="r17 r">func</span>].<a href="RecorderUtilities.cs.html#ff34427fb924b9f0" class="i method">ForEach</a>(<span id="r18 rd" class="r18 r">n</span> =&gt; <a href="#16cd9d6e31f361dc" class="i field">names</a>.<a href="AssetNames.cs.html#8be51ddb9be8af6c" class="i method">Enqueue</a>(<span class="r17 r">func</span>, <span class="r18 r">n</span>));
+                    }
+                    <a href="#250f849780469e4f" class="i property">Variables</a> = <span class="r15 r">pack</span>.<a href="RecordEntryPack.cs.html#a067d35768d83a05" class="i property">Variables</a>;
+                    <b>if</b> (<a href="#250f849780469e4f" class="i property">Variables</a> == <b>null</b>)
+                    {
+                        <a href="#250f849780469e4f" class="i property">Variables</a> = <b>new</b> <a href="@0@mscorlib/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;();
+                    }
+                }
+            }
+ 
+            <a href="#d2cb42c5388c569a" class="i field">initialized</a> = <b>true</b>;
+        }
+ 
+        <b>public static</b> <a href="#348d97248a265d2f" class="t t">HttpMockServer</a> <a id="49eca8f951828559" href="R/49eca8f951828559.html" target="n" data-glyph="72,1" class="i method">CreateInstance</a>()
+        {
+            <b>if</b> (!<a href="#d2cb42c5388c569a" class="i field">initialized</a>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;HttpMockServer has not been initialized yet. Use HttpMockServer.Initialize() method to initialize the HttpMockServer.&quot;</span>);
+            }
+            <a href="#348d97248a265d2f" class="t t">HttpMockServer</a> <span id="r19 rd" class="r19 r">server</span> = <b>new</b> <a href="#50e2da904e738ada" class="t constructor">HttpMockServer</a>();
+            <a href="#bb8524268d80582c" class="i field">servers</a>.<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r19 r">server</span>);
+            <b>return</b> <span class="r19 r">server</span>;
+        }
+ 
+        <b>public static string</b> <a id="e5040add7964258d" href="R/e5040add7964258d.html" target="n" data-glyph="102,1" class="i property">RecordsDirectory</a> { <b>get</b>; <b>set</b>; }
+ 
+        <b>protected override</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="t t">HttpResponseMessage</span>&gt; <a id="dab155d8ca9b0f4b" href="R/dab155d8ca9b0f4b.html" target="n" data-glyph="75,1" class="i method">SendAsync</a>(<span class="t t">HttpRequestMessage</span> <span id="r20 rd" class="r20 r">request</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r21 rd" class="r21 r">cancellationToken</span>)
+        {
+            <b>if</b> (<a href="#a74d951f775be518" class="i property">Mode</a> == <a href="HttpRecorderMode.cs.html#ba41c0be28bfd60b" class="t t">HttpRecorderMode</a>.<a href="HttpRecorderMode.cs.html#1b1f7e769355ff17" class="i field">Playback</a>)
+            {
+                <span class="c">// Will throw KeyNotFoundException if the request is not recorded</span>
+                <b>lock</b> (<a href="#75c418c813d9232a" class="i field">records</a>)
+                {
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r22 rd" class="r22 r">key</span> = <a href="#63395b0cc3410a6a" class="i property">Matcher</a>.<a href="IRecordMatcher.cs.html#1dea85ea407be20f" class="i method">GetMatchingKey</a>(<span class="r20 r">request</span>);
+ 
+                    <a href="@0@System/A.html#aa3beab99b2e0db2" class="k">var</a> <span id="r23 rd" class="r23 r">queue</span> = <a href="#75c418c813d9232a" class="i field">records</a><a href="Records.cs.html#d8bc5fef3483334a">[</a><span class="r22 r">key</span>];
+                    <b>if</b> (!<span class="r23 r">queue</span>.<a href="@0@System.Core/A.html#8788153112b7ffd0" class="i method">Any</a>())
+                    {
+                        <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(
+                            <span class="s">&quot;Queue empty for request {0}&quot;</span>,
+                            <a href="RecorderUtilities.cs.html#e20ca9c89bbc14a8" class="t t">RecorderUtilities</a>.<a href="RecorderUtilities.cs.html#6cabffaa16dd692d" class="i method">DecodeBase64AsUri</a>(<span class="r22 r">key</span>)));
+                    }
+ 
+                    <span class="t t">HttpResponseMessage</span> <span id="r24 rd" class="r24 r">result</span> = <span class="r23 r">queue</span>.<a href="@0@System/A.html#e68caf2d91344411" class="i method">Dequeue</a>().<a href="RecordEntry.cs.html#95d1623637a76fc8" class="i method">GetResponse</a>();
+                    <span class="r24 r">result</span> = <a href="#59350b10c1faf741" class="i method">AddTestModeHeaders</a>(<span class="r24 r">result</span>);
+                    
+                    <span class="r24 r">result</span>.<span class="i property">RequestMessage</span> = <span class="r20 r">request</span>;
+                    <b>return</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#11a386e7d7cae64a" class="i method">FromResult</a>(<span class="r24 r">result</span>);
+                }
+            }
+            <b>else</b>
+            {
+                <b>lock</b> (<a href="#348d97248a265d2f" class="k">this</a>)
+                {
+                    <b>return</b> <b>base</b>.<span class="i method">SendAsync</span>(<span class="r20 r">request</span>, <span class="r21 r">cancellationToken</span>).<a href="@0@mscorlib/A.html#c75d2449d84896ec" class="i method">ContinueWith</a>&lt;<span class="t t">HttpResponseMessage</span>&gt;(<span id="r25 rd" class="r25 r">response</span> =&gt;
+                    {
+                        <span class="t t">HttpResponseMessage</span> <span id="r26 rd" class="r26 r">result</span> = <span class="r25 r">response</span>.<a href="@0@mscorlib/A.html#826690b09f24e719" class="i property">Result</a>;
+                        <b>if</b> (<a href="#a74d951f775be518" class="i property">Mode</a> == <a href="HttpRecorderMode.cs.html#ba41c0be28bfd60b" class="t t">HttpRecorderMode</a>.<a href="HttpRecorderMode.cs.html#6634c3afad27d401" class="i field">Record</a>)
+                        {
+                            <b>lock</b> (<a href="#75c418c813d9232a" class="i field">records</a>)
+                            {
+                                <a href="#75c418c813d9232a" class="i field">records</a>.<a href="Records.cs.html#c8e0bd9230cdbb77" class="i method">Enqueue</a>(<b>new</b> <a href="RecordEntry.cs.html#5c3e25e0887d827b" class="t constructor">RecordEntry</a>(<span class="r26 r">result</span>));
+                            }
+                        }
+ 
+                        <b>return</b> <span class="r26 r">result</span>;
+                    });
+                }
+            }
+        }
+ 
+        <b>private</b> <span class="t t">HttpResponseMessage</span> <a id="59350b10c1faf741" href="R/59350b10c1faf741.html" target="n" data-glyph="76,1" class="i method">AddTestModeHeaders</a>(<span class="t t">HttpResponseMessage</span> <span id="r27 rd" class="r27 r">response</span>)
+        {
+            <b>if</b>(<span class="r27 r">response</span> != <b>null</b>)
+            {
+                <span class="r27 r">response</span>?.<span class="i property">Headers</span>?.<span class="i method">Add</span>(<a href="#f12e545d99126831" class="i field">TEST_MODE_HEADER</a>, <span class="s">&quot;true&quot;</span>);
+            }
+ 
+            <b>return</b> <span class="r27 r">response</span>;
+        }
+ 
+        <b>private static</b> <a href="@0@mscorlib/A.html#bb77e610694e64ca" class="t t">Random</a> <a id="26de1c29b0162fed" href="R/26de1c29b0162fed.html" target="n" data-glyph="46,1" class="i field">randomGenerator</a> = <b>new</b> <a href="@0@mscorlib/A.html#5d22f8880fc9f8d9" class="t constructor">Random</a>();
+        <b>public static string</b> <a id="40aad6eb85eb8911" href="R/40aad6eb85eb8911.html" target="n" data-glyph="72,1" class="i method">GetAssetName</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r28 rd" class="r28 r">testName</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r29 rd" class="r29 r">prefix</span>)
+        {
+            <b>if</b> (<a href="#a74d951f775be518" class="i property">Mode</a> == <a href="HttpRecorderMode.cs.html#ba41c0be28bfd60b" class="t t">HttpRecorderMode</a>.<a href="HttpRecorderMode.cs.html#1b1f7e769355ff17" class="i field">Playback</a>)
+            {
+                <b>return</b> <a href="#16cd9d6e31f361dc" class="i field">names</a><a href="AssetNames.cs.html#a696e53a974805f2">[</a><span class="r28 r">testName</span>].<a href="@0@System/A.html#e68caf2d91344411" class="i method">Dequeue</a>();
+            }
+            <b>else</b>
+            {
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r30 rd" class="r30 r">generated</span> = <span class="r29 r">prefix</span> + <a href="#26de1c29b0162fed" class="i field">randomGenerator</a>.<a href="@0@mscorlib/A.html#8aeb183c03bdcdcf" class="i method">Next</a>(9999);
+ 
+                <b>if</b> (<a href="#a74d951f775be518" class="i property">Mode</a> == <a href="HttpRecorderMode.cs.html#ba41c0be28bfd60b" class="t t">HttpRecorderMode</a>.<a href="HttpRecorderMode.cs.html#6634c3afad27d401" class="i field">Record</a>)
+                {
+                    <b>if</b> (<a href="#16cd9d6e31f361dc" class="i field">names</a>.<a href="AssetNames.cs.html#ad40321f3fc071f4" class="i method">ContainsKey</a>(<span class="r28 r">testName</span>))
+                    {
+                        <b>while</b> (<a href="#16cd9d6e31f361dc" class="i field">names</a><a href="AssetNames.cs.html#a696e53a974805f2">[</a><span class="r28 r">testName</span>].<a href="@0@System.Core/A.html#6a1af7c3d17845e3" class="i method">Any</a>(<span id="r31 rd" class="r31 r">n</span> =&gt; <span class="r31 r">n</span>.<a href="@0@mscorlib/A.html#31b307b02a3bd6b9" class="i method">Equals</a>(<span class="r30 r">generated</span>)))
+                        {
+                            <span class="r30 r">generated</span> = <span class="r29 r">prefix</span> + <a href="#26de1c29b0162fed" class="i field">randomGenerator</a>.<a href="@0@mscorlib/A.html#8aeb183c03bdcdcf" class="i method">Next</a>(9999);
+                        }
+                    }
+                    <a href="#16cd9d6e31f361dc" class="i field">names</a>.<a href="AssetNames.cs.html#8be51ddb9be8af6c" class="i method">Enqueue</a>(<span class="r28 r">testName</span>, <span class="r30 r">generated</span>);
+                }
+ 
+                <b>return</b> <span class="r30 r">generated</span>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the asset unique identifier. This is used to store the GUID in the recording so it can be easily retrieved.</span>
+        <span class="c">///</span><span class="c"> This behaves the same as name generation, but if useful if the client is required to generate Guids for the service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r32 r">testName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Name of the test.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public static</b> <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a> <a id="2fc787edc73b6527" href="R/2fc787edc73b6527.html" target="n" data-glyph="72,1" class="i method">GetAssetGuid</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r32 rd" class="r32 r">testName</span>)
+        {
+            <b>if</b> (<a href="#a74d951f775be518" class="i property">Mode</a> == <a href="HttpRecorderMode.cs.html#ba41c0be28bfd60b" class="t t">HttpRecorderMode</a>.<a href="HttpRecorderMode.cs.html#1b1f7e769355ff17" class="i field">Playback</a>)
+            {
+                <b>return</b> <b>new</b> <a href="@0@mscorlib/A.html#4329442fa037af5c" class="t constructor">Guid</a>(<a href="#16cd9d6e31f361dc" class="i field">names</a><a href="AssetNames.cs.html#a696e53a974805f2">[</a><span class="r32 r">testName</span>].<a href="@0@System/A.html#e68caf2d91344411" class="i method">Dequeue</a>());
+            }
+            <b>else</b>
+            {
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r33 rd" class="r33 r">generated</span> = <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#a6547a472def7796" class="i method">ToString</a>();
+ 
+                <b>if</b> (<a href="#a74d951f775be518" class="i property">Mode</a> == <a href="HttpRecorderMode.cs.html#ba41c0be28bfd60b" class="t t">HttpRecorderMode</a>.<a href="HttpRecorderMode.cs.html#6634c3afad27d401" class="i field">Record</a>)
+                {
+                    <b>if</b> (<a href="#16cd9d6e31f361dc" class="i field">names</a>.<a href="AssetNames.cs.html#ad40321f3fc071f4" class="i method">ContainsKey</a>(<span class="r32 r">testName</span>))
+                    {
+                        <span class="c">// this should never happen, but just in case.</span>
+                        <b>while</b> (<a href="#16cd9d6e31f361dc" class="i field">names</a><a href="AssetNames.cs.html#a696e53a974805f2">[</a><span class="r32 r">testName</span>].<a href="@0@System.Core/A.html#6a1af7c3d17845e3" class="i method">Any</a>(<span id="r34 rd" class="r34 r">n</span> =&gt; <span class="r34 r">n</span>.<a href="@0@mscorlib/A.html#31b307b02a3bd6b9" class="i method">Equals</a>(<span class="r33 r">generated</span>)))
+                        {
+                            <span class="r33 r">generated</span> = <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#a6547a472def7796" class="i method">ToString</a>();
+                        }
+                    }
+                    <a href="#16cd9d6e31f361dc" class="i field">names</a>.<a href="AssetNames.cs.html#8be51ddb9be8af6c" class="i method">Enqueue</a>(<span class="r32 r">testName</span>, <span class="r33 r">generated</span>);
+                }
+ 
+                <b>return</b> <b>new</b> <a href="@0@mscorlib/A.html#4329442fa037af5c" class="t constructor">Guid</a>(<span class="r33 r">generated</span>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Returns stored variable or variableValue if variableName is not found.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r35 r">variableName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Variable name</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r36 r">variableValue</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Variable value to be preserved in recording mode.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public static string</b> <a id="6b5f3d2138fc3a07" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetVariable</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r35 rd" class="r35 r">variableName</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r36 rd" class="r36 r">variableValue</span>)
+        {
+            <b>if</b> (<a href="#a74d951f775be518" class="i property">Mode</a> == <a href="HttpRecorderMode.cs.html#ba41c0be28bfd60b" class="t t">HttpRecorderMode</a>.<a href="HttpRecorderMode.cs.html#6634c3afad27d401" class="i field">Record</a>)
+            {
+                <a href="#250f849780469e4f" class="i property">Variables</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="r35 r">variableName</span>] = <span class="r36 r">variableValue</span>;
+                <b>return</b> <span class="r36 r">variableValue</span>;
+            }
+            <b>else</b>
+            {
+                <b>if</b> (<a href="#250f849780469e4f" class="i property">Variables</a>.<a href="@0@mscorlib/A.html#22fd7cd7408aed6e" class="i method">ContainsKey</a>(<span class="r35 r">variableName</span>))
+                {
+                    <b>return</b> <a href="#250f849780469e4f" class="i property">Variables</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="r35 r">variableName</span>];
+                }
+                <b>else</b>
+                {
+                    <b>return</b> <span class="r36 r">variableValue</span>;
+                }
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Variables persistent across recording sessions.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public static</b> <a href="@0@mscorlib/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="250f849780469e4f" href="R/250f849780469e4f.html" target="n" data-glyph="102,1" class="i property">Variables</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <b>public void</b> <a id="a67934ce6abbc436" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">InjectRecordEntry</a>(<a href="RecordEntry.cs.html#981f3fce422340fb" class="t t">RecordEntry</a> <span id="r37 rd" class="r37 r">record</span>)
+        {
+            <b>if</b> (<a href="#a74d951f775be518" class="i property">Mode</a> == <a href="HttpRecorderMode.cs.html#ba41c0be28bfd60b" class="t t">HttpRecorderMode</a>.<a href="HttpRecorderMode.cs.html#1b1f7e769355ff17" class="i field">Playback</a>)
+            {
+                <b>lock</b> (<a href="#75c418c813d9232a" class="i field">records</a>)
+                {
+                    <a href="#75c418c813d9232a" class="i field">records</a>.<a href="Records.cs.html#c8e0bd9230cdbb77" class="i method">Enqueue</a>(<span class="r37 r">record</span>);
+                }
+            }
+        }
+ 
+        <b>public static string</b> <a id="a17ccf16e3cee634" href="R/a17ccf16e3cee634.html" target="n" data-glyph="72,1" class="i method">Flush</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r38 rd" class="r38 r">outputPath</span> = <b>null</b>)
+        {
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r39 rd" class="r39 r">fileName</span> = <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#c9f70a27facb27cf" class="i field">Empty</a>;
+            <b>if</b> (<a href="#a74d951f775be518" class="i property">Mode</a> == <a href="HttpRecorderMode.cs.html#ba41c0be28bfd60b" class="t t">HttpRecorderMode</a>.<a href="HttpRecorderMode.cs.html#6634c3afad27d401" class="i field">Record</a> &amp;&amp; <a href="#75c418c813d9232a" class="i field">records</a>.<a href="Records.cs.html#70622c85cace43b7" class="i property">Count</a> &gt; 0)
+            {
+                <a href="RecordEntryPack.cs.html#609cc2b6b9971bf0" class="t t">RecordEntryPack</a> <span id="r40 rd" class="r40 r">pack</span> = <b>new</b> <a href="RecordEntryPack.cs.html#f37607cdbc226d95" class="t constructor">RecordEntryPack</a>();
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r41 rd" class="r41 r">perfImpactFileName</span> = <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#c9f70a27facb27cf" class="i field">Empty</a>;
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r42 rd" class="r42 r">fileDirectory</span> = <span class="r38 r">outputPath</span> ?? <a href="#e5040add7964258d" class="i property">RecordsDirectory</a>;
+                <span class="r42 r">fileDirectory</span> = <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#2d7263f86a526264" class="i method">Combine</a>(<span class="r42 r">fileDirectory</span>, <a href="#a1918c32dad782cb" class="i property">CallerIdentity</a>);
+                <a href="RecorderUtilities.cs.html#e20ca9c89bbc14a8" class="t t">RecorderUtilities</a>.<a href="RecorderUtilities.cs.html#9363a7ae1cd04315" class="i method">EnsureDirectoryExists</a>(<span class="r42 r">fileDirectory</span>);
+ 
+                <b>lock</b> (<a href="#75c418c813d9232a" class="i field">records</a>)
+                {
+                    <b>foreach</b> (<a href="RecordEntry.cs.html#981f3fce422340fb" class="t t">RecordEntry</a> <span id="r43 rd" class="r43 r">recordEntry</span> <b>in</b> <a href="#75c418c813d9232a" class="i field">records</a>.<a href="Records.cs.html#47353eabed90982e" class="i method">GetAllEntities</a>())
+                    {
+                        <span class="r43 r">recordEntry</span>.<a href="RecordEntry.cs.html#f7cd0f9c8459c299" class="i property">RequestHeaders</a>.<a href="@0@mscorlib/A.html#a6db5ffdec557169" class="i method">Remove</a>(<span class="s">&quot;Authorization&quot;</span>);
+                        <span class="r43 r">recordEntry</span>.<a href="RecordEntry.cs.html#37e1e48f0515dfc0" class="i property">RequestUri</a> = <b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<span class="r43 r">recordEntry</span>.<a href="RecordEntry.cs.html#37e1e48f0515dfc0" class="i property">RequestUri</a>).<a href="@0@System/A.html#c202e346f185b3eb" class="i property">PathAndQuery</a>;
+                        <span class="r40 r">pack</span>.<a href="RecordEntryPack.cs.html#aaf21aa646c8aaf2" class="i property">Entries</a>.<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r43 r">recordEntry</span>);
+                    }
+                }
+ 
+                <span class="r39 r">fileName</span> = (<a href="#408e078796e9971a" class="i property">TestIdentity</a> ?? <span class="s">&quot;record&quot;</span>) + <span class="s">&quot;.json&quot;</span>;                
+                <span class="r39 r">fileName</span> = <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#2d7263f86a526264" class="i method">Combine</a>(<span class="r42 r">fileDirectory</span>, <span class="r39 r">fileName</span>);
+                <span class="r40 r">pack</span>.<a href="RecordEntryPack.cs.html#a067d35768d83a05" class="i property">Variables</a> = <a href="#250f849780469e4f" class="i property">Variables</a>;
+                <span class="r40 r">pack</span>.<a href="RecordEntryPack.cs.html#5081ecd36f62a885" class="i property">Names</a> = <a href="#16cd9d6e31f361dc" class="i field">names</a>.<a href="AssetNames.cs.html#e71835d6a3b86466" class="i property">Names</a>;
+ 
+                <span class="r40 r">pack</span>.<a href="RecordEntryPack.cs.html#99fcc2e3219b42cb" class="i method">Serialize</a>(<span class="r39 r">fileName</span>);
+            }
+ 
+            <a href="#bb8524268d80582c" class="i field">servers</a>.<a href="@0@mscorlib/A.html#0e5a9cf0a310b9e5" class="i method">ForEach</a>(<span id="r44 rd" class="r44 r">s</span> =&gt; <span class="r44 r">s</span>.<span class="i method">Dispose</span>());
+ 
+            <b>return</b> <span class="r39 r">fileName</span>;
+        }
+ 
+        <b>public static</b> <a href="HttpRecorderMode.cs.html#ba41c0be28bfd60b" class="t t">HttpRecorderMode</a> <a id="5f543caadb9af284" href="R/5f543caadb9af284.html" target="n" data-glyph="72,1" class="i method">GetCurrentMode</a>()
+        {
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r45 rd" class="r45 r">input</span> = <b>null</b>;
+            <a href="HttpRecorderMode.cs.html#ba41c0be28bfd60b" class="t t">HttpRecorderMode</a> <span id="r46 rd" class="r46 r">mode</span>;
+ 
+            <b>if</b>(<a href="#348d97248a265d2f" class="t t">HttpMockServer</a>.<a href="#e59a292832bbf5f1" class="i property">FileSystemUtilsObject</a> != <b>null</b>)
+            {
+                <span class="r45 r">input</span> = <a href="#348d97248a265d2f" class="t t">HttpMockServer</a>.<a href="#e59a292832bbf5f1" class="i property">FileSystemUtilsObject</a>.<a href="FileSystemUtils.cs.html#167b5f081f111a97" class="i method">GetEnvironmentVariable</a>(<a href="#9ad0819302d87bc6" class="i field">ModeEnvironmentVariableName</a>);
+            }
+ 
+            <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r45 r">input</span>))
+            {
+                <span class="r46 r">mode</span> = <a href="HttpRecorderMode.cs.html#ba41c0be28bfd60b" class="t t">HttpRecorderMode</a>.<a href="HttpRecorderMode.cs.html#1b1f7e769355ff17" class="i field">Playback</a>;
+            }
+            <b>else</b>
+            {
+                <span class="r46 r">mode</span> = (<a href="HttpRecorderMode.cs.html#ba41c0be28bfd60b" class="t t">HttpRecorderMode</a>)<a href="@0@mscorlib/A.html#36729210e317a805" class="t t">Enum</a>.<a href="@0@mscorlib/A.html#25a49abd9da136dd" class="i method">Parse</a>(<b>typeof</b>(<a href="HttpRecorderMode.cs.html#ba41c0be28bfd60b" class="t t">HttpRecorderMode</a>), <span class="r45 r">input</span>, <b>true</b>);
+            }
+ 
+            <b>return</b> <span class="r46 r">mode</span>;
+        }
+    }
+}</pre></td></tr></table></div></body></html>

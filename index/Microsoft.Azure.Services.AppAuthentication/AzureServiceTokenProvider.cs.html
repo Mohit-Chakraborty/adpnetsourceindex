@@ -1,0 +1,428 @@
+﻿<!DOCTYPE html>
+<html><head><title>AzureServiceTokenProvider.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(419);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.Services.AppAuthentication/AzureServiceTokenProvider.cs" target="_top">AzureServiceTokenProvider.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.Services.AppAuthentication" target="_top">Azure.Services.AppAuthentication\Microsoft.Azure.Services.AppAuthentication.csproj</a> (Microsoft.Azure.Services.AppAuthentication)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Globalization</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">IdentityModel</span>.<span class="i">Clients</span>.<span class="i">ActiveDirectory</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Services</span>.<span class="i n">AppAuthentication</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Gets access tokens to authenticate to Azure services using the developer&#39;s (Azure AD/ Microsoft) account during development, </span>
+    <span class="c">///</span><span class="c"> and using the app&#39;s identity (using OAuth 2.0 Client Credentials flow) when deployed to Azure.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>public class</b> <a id="ea6a1ef5cdeceae1" href="R/ea6a1ef5cdeceae1.html" target="n" data-glyph="0,0" class="t t">AzureServiceTokenProvider</a>
+    {
+        <b>private readonly string</b> <a id="b3514fcff506d642" href="R/b3514fcff506d642.html" target="n" data-glyph="46,1" class="i field">_connectionString</a>;
+        <b>private</b> <a href="Principal.cs.html#ee98ea95591837a0" class="t t">Principal</a> <a id="752996e13331df7b" href="R/752996e13331df7b.html" target="n" data-glyph="46,1" class="i field">_principalUsed</a>;
+        <b>private readonly string</b> <a id="034fdd9e8ea2e0a7" href="R/034fdd9e8ea2e0a7.html" target="n" data-glyph="46,1" class="i field">_azureAdInstance</a>;
+ 
+        <span class="c">// Base provider instance. A derived instance is selected based on the connection string or discovery. </span>
+        <b>private</b> <a href="TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="t t">NonInteractiveAzureServiceTokenProviderBase</a> <a id="0a2eeee7e32fd489" href="R/0a2eeee7e32fd489.html" target="n" data-glyph="46,1" class="i field">_selectedAccessTokenProvider</a>;
+ 
+        <span class="c">// List of potential token providers. </span>
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="t t">NonInteractiveAzureServiceTokenProviderBase</a>&gt; <a id="ed9179f5f5f5f03c" href="R/ed9179f5f5f5f03c.html" target="n" data-glyph="46,1" class="i field">_potentialAccessTokenProviders</a>;
+ 
+        <span class="c">// Ensures only one thread gets the token from the actual source. It is then cached, so other threads can get it from the cache. </span>
+        <b>private static readonly</b> <a href="@0@mscorlib/A.html#d57f52e0341a581f" class="t t">SemaphoreSlim</a> <a id="f190e022e5a82487" href="R/f190e022e5a82487.html" target="n" data-glyph="46,1" class="i field">Semaphore</a> = <b>new</b> <a href="@0@mscorlib/A.html#ed5ff10a1fcba4d4" class="t constructor">SemaphoreSlim</a>(1, 1);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Token callback for Key Vault. </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">authority</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">resource</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">scope</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public delegate</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="09994c56808fbb5a" href="R/09994c56808fbb5a.html" target="n" data-glyph="12,1" class="t t"><span id="c3f52cffd50b0a1a">TokenCallback</span></a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r0 rd" class="r0 r">authority</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r1 rd" class="r1 r">resource</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r2 rd" class="r2 r">scope</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> HTTP client factory to support HTTP proxy in ADAL</span>
+        <span class="c">///</span><span class="c"> Implemented as a static so that client apps can gain proxy support without having to wait for intermediate packages to support it.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public static</b> <span class="i">IHttpClientFactory</span> <a id="dcd2104945f1a831" href="R/dcd2104945f1a831.html" target="n" data-glyph="102,1" class="i property">HttpClientFactory</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Property to get authentication callback to be used with KeyVaultClient.  </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">example</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">code</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> KeyVaultClient keyVaultClient = new KeyVaultClient(new KeyVaultClient.AuthenticationCallback(azureServiceTokenProvider.KeyVaultTokenCallback));</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">code</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">example</span><span class="c">&gt;</span>
+        <b>public virtual</b> <a href="#09994c56808fbb5a" class="t t">TokenCallback</a> <a id="fc3e2628440da92e" href="R/fc3e2628440da92e.html" target="n" data-glyph="102,1" class="i property">KeyVaultTokenCallback</a> =&gt; <b>async</b> (<span id="r3 rd" class="r3 r">authority</span>, <span id="r4 rd" class="r4 r">resource</span>, <span id="r5 rd" class="r5 r">scope</span>) =&gt;
+        {
+            <a href="AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="k">var</a> <span id="r6 rd" class="r6 r">authResult</span> = <b>await</b> <a href="#510699b78cabc6db" class="i method">GetAuthResultAsyncImpl</a>(<span class="r4 r">resource</span>, <span class="r3 r">authority</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+            <b>return</b> <span class="r6 r">authResult</span>.<a href="AppAuthenticationResult.cs.html#bac23240ee26a0c7" class="i property">AccessToken</a>;
+        };
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The principal used to acquire token. This will be of type &quot;User&quot; for local development scenarios, and &quot;App&quot; when client credentials flow is used. </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public virtual</b> <a href="Principal.cs.html#ee98ea95591837a0" class="t t">Principal</a> <a id="b78f2d4fcc0556c1" href="R/b78f2d4fcc0556c1.html" target="n" data-glyph="102,1" class="i property">PrincipalUsed</a> =&gt; <a href="#752996e13331df7b" class="i field">_principalUsed</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates an instance of the AzureServiceTokenProvider class.</span>
+        <span class="c">///</span><span class="c"> If no connection string is specified, Managed Service Identity, Visual Studio, Azure CLI, and Integrated Windows Authentication are tried to get a token.</span>
+        <span class="c">///</span><span class="c"> Even If no connection string is specified in code, one can be specified in the AzureServicesAuthConnectionString environment variable. </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">connectionString</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Connection string to specify which option to use to get the token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">azureAdInstance</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Specify a value for clouds other than the Public Cloud.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">httpClientFactory</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Passed to ADAL to allow proxied connections. Takes precedence over the static </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#dcd2104945f1a831" class="i property">HttpClientFactory</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> property</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="f894e642da0e9791" href="R/f894e642da0e9791.html" target="n" data-glyph="72,1" class="t constructor">AzureServiceTokenProvider</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r7 rd" class="r7 r">connectionString</span> = <b>default</b>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r8 rd" class="r8 r">azureAdInstance</span> = <span class="s">&quot;https://login.microsoftonline.com/&quot;</span>, <span class="i">IHttpClientFactory</span> <span id="r9 rd" class="r9 r">httpClientFactory</span> = <b>default</b>)
+        {
+            <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r8 r">azureAdInstance</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>(<b>nameof</b>(<span class="r8 r">azureAdInstance</span>));
+            }
+ 
+            <b>if</b> (!<span class="r8 r">azureAdInstance</span>.<a href="@0@mscorlib/A.html#2d51c212cb09178e" class="i method">ToLowerInvariant</a>().<a href="@0@mscorlib/A.html#23804789ea4c9c0e" class="i method">StartsWith</a>(<span class="s">&quot;https&quot;</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">$&quot;</span><span class="s">azureAdInstance </span>{<span class="r8 r">azureAdInstance</span>}<span class="s"> is not valid. It must use https.</span><span class="s">&quot;</span>);
+            }
+ 
+            <a href="#034fdd9e8ea2e0a7" class="i field">_azureAdInstance</a> = <span class="r8 r">azureAdInstance</span>;
+ 
+            <span class="c">// Check the environment variable to see if a connection string is specified. </span>
+            <b>if</b> (<span class="r7 r">connectionString</span> == <b>default</b>)
+            {
+                <span class="r7 r">connectionString</span> = <a href="Helpers/EnvironmentHelper.cs.html#bf463f028e93a98e" class="t t">EnvironmentHelper</a>.<a href="Helpers/EnvironmentHelper.cs.html#396b4b5d7cfcb4a0" class="i method">GetEnvironmentVariable</a>(<span class="s">&quot;AzureServicesAuthConnectionString&quot;</span>);
+            }
+ 
+            <span class="c">// prefer parameter over static property</span>
+            <b>var</b> <span id="r10 rd" class="r10 r">factory</span> = <span class="r9 r">httpClientFactory</span> ?? <a href="#dcd2104945f1a831" class="i property">HttpClientFactory</a>;
+ 
+            <b>if</b> (!<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>(<span class="r7 r">connectionString</span>))
+            {
+                <a href="#0a2eeee7e32fd489" class="i field">_selectedAccessTokenProvider</a> = <a href="AzureServiceTokenProviderFactory.cs.html#048759c0b55b4288" class="t t">AzureServiceTokenProviderFactory</a>.<span class="i">Create</span>(<span class="r7 r">connectionString</span>, <span class="r8 r">azureAdInstance</span>, <span class="r10 r">factory</span>);
+                <a href="#b3514fcff506d642" class="i field">_connectionString</a> = <span class="r7 r">connectionString</span>;
+            }
+            <b>else</b>
+            {
+                <a href="#ed9179f5f5f5f03c" class="i field">_potentialAccessTokenProviders</a> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="t t">NonInteractiveAzureServiceTokenProviderBase</a>&gt;
+                {
+                    <b>new</b> <a href="TokenProviders/MsiAccessTokenProvider.cs.html#1a7c5b6067de8a61" class="t constructor">MsiAccessTokenProvider</a>(),
+                    <b>new</b> <a href="TokenProviders/VisualStudioAccessTokenProvider.cs.html#5a2bb68d9d598234" class="t constructor">VisualStudioAccessTokenProvider</a>(<b>new</b> <a href="Clients/ProcessManager.cs.html#17152cca322db3b5" class="t constructor">ProcessManager</a>()),
+                    <b>new</b> <a href="TokenProviders/AzureCliAccessTokenProvider.cs.html#0815045b687aff66" class="t constructor">AzureCliAccessTokenProvider</a>(<b>new</b> <a href="Clients/ProcessManager.cs.html#17152cca322db3b5" class="t constructor">ProcessManager</a>()),
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">FullNetFx</span>
+                    <b>new</b> <a href="TokenProviders/WindowsAuthenticationAccessTokenProvider.cs.html#1d1dd23ab031967a" class="t constructor">WindowsAuthenticationAzureServiceTokenProvider</a>(<b>new</b> <span class="t">AdalAuthenticationContext</span>(<span class="r10 r">factory</span>), <span class="r8 r">azureAdInstance</span>)
+<span class="k preprocess">#</span><span class="k preprocess">endif</span>
+                };
+            }
+ 
+        }
+ 
+        <b>public</b> <a id="54507b306bcfc8b8" href="R/54507b306bcfc8b8.html" target="n" data-glyph="72,1" class="t constructor">AzureServiceTokenProvider</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r11 rd" class="r11 r">connectionString</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r12 rd" class="r12 r">azureAdInstance</span>)
+            : <a href="#f894e642da0e9791" class="k">this</a>(<span class="r11 r">connectionString</span>, <span class="r12 r">azureAdInstance</span>, <b>default</b>)
+        {
+ 
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> This method is for testing only</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal</b> <a id="962ab7eabd1964a6" href="R/962ab7eabd1964a6.html" target="n" data-glyph="74,1" class="t constructor">AzureServiceTokenProvider</a>(<a href="TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="t t">NonInteractiveAzureServiceTokenProviderBase</a> <span id="r13 rd" class="r13 r">accessTokenProvider</span>)
+        {
+            <a href="#0a2eeee7e32fd489" class="i field">_selectedAccessTokenProvider</a> = <span class="r13 r">accessTokenProvider</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> This method is for testing only</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal</b> <a id="87a6cbde804e5dd4" href="R/87a6cbde804e5dd4.html" target="n" data-glyph="74,1" class="t constructor">AzureServiceTokenProvider</a>(<a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="t t">NonInteractiveAzureServiceTokenProviderBase</a>&gt; <span id="r14 rd" class="r14 r">accessTokenProviders</span>)
+        {
+            <a href="#ed9179f5f5f5f03c" class="i field">_potentialAccessTokenProviders</a> = <span class="r14 r">accessTokenProviders</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> This is the core method to get a token. It checks if the token is in cache, and if so, returns it. </span>
+        <span class="c">///</span><span class="c"> If not in cache, asks one or more token providers to get the token. </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">authority</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r16 r">resource</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="i">scope</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="t t">AppAuthenticationResult</a>&gt; <a id="510699b78cabc6db" href="R/510699b78cabc6db.html" target="n" data-glyph="76,1" class="i method">GetAuthResultAsyncImpl</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r16 rd" class="r16 r">resource</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r15 rd" class="r15 r">authority</span>,
+            <b>bool</b> <span id="r17 rd" class="r17 r">forceRefresh</span> = <b>false</b>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r18 rd" class="r18 r">cancellationToken</span> = <b>default</b>)
+        {
+            <span class="c">// Check if the auth result is present in cache, for the given connection string, authority, and resource</span>
+            <span class="c">// This is an in-memory global cache, that will be used across instances of this class. </span>
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r19 rd" class="r19 r">cacheKey</span> = <span class="s">$&quot;</span><span class="s">ConnectionString:</span>{<a href="#b3514fcff506d642" class="i field">_connectionString</a>}<span class="s">;Authority:</span>{<span class="r15 r">authority</span>}<span class="s">;Resource:</span>{<span class="r16 r">resource</span>}<span class="s">&quot;</span>;
+ 
+            <a href="@0@mscorlib/A.html#1806cf6634f5a371" class="t t">Tuple</a>&lt;<a href="AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="t t">AppAuthenticationResult</a>, <a href="Principal.cs.html#ee98ea95591837a0" class="t t">Principal</a>&gt; <span id="r20 rd" class="r20 r">cachedAuthResult</span> = <a href="Cache/AppAuthResultCache.cs.html#b0bec67bcef26262" class="t t">AppAuthResultCache</a>.<a href="Cache/AppAuthResultCache.cs.html#0a78730b038b0cf2" class="i method">Get</a>(<span class="r19 r">cacheKey</span>);
+ 
+            <b>if</b> (!<span class="r17 r">forceRefresh</span> &amp;&amp; <span class="r20 r">cachedAuthResult</span> != <b>null</b>)
+            {
+                <a href="#752996e13331df7b" class="i field">_principalUsed</a> = <span class="r20 r">cachedAuthResult</span>.<a href="@0@mscorlib/A.html#85ddc983cace902c" class="i property">Item2</a>;
+ 
+                <b>return</b> <span class="r20 r">cachedAuthResult</span>.<a href="@0@mscorlib/A.html#d1922db1cf9dcd03" class="i property">Item1</a>;
+            }
+ 
+            <span class="c">// If not in cache, lock. One of multiple threads that reach here will be allowed to get the token.</span>
+            <span class="c">// When the first thread gets the token, another thread will be let in the lock.</span>
+            <b>await</b> <a href="#f190e022e5a82487" class="i field">Semaphore</a>.<a href="@0@mscorlib/A.html#1af724aabf43d565" class="i method">WaitAsync</a>().<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <span class="c">// This is to store the list of exceptions while trying to get the token.</span>
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt; <span id="r21 rd" class="r21 r">exceptions</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt;();
+ 
+            <b>try</b>
+            {
+                <span class="c">// Check again if the auth result is in the cache now, the first thread may have gotten it.</span>
+                <a href="@0@mscorlib/A.html#1806cf6634f5a371" class="t t">Tuple</a>&lt;<a href="AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="t t">AppAuthenticationResult</a>, <a href="Principal.cs.html#ee98ea95591837a0" class="t t">Principal</a>&gt; <span id="r22 rd" class="r22 r">cachedAuthResult2</span> = <a href="Cache/AppAuthResultCache.cs.html#b0bec67bcef26262" class="t t">AppAuthResultCache</a>.<a href="Cache/AppAuthResultCache.cs.html#0a78730b038b0cf2" class="i method">Get</a>(<span class="r19 r">cacheKey</span>);
+ 
+                <span class="c">// If the cache has a hit and we are not forcing a refresh, or we are forcing a refresh but it</span>
+                <span class="c">// was already refreshed while waiting on the semaphore.</span>
+                <b>if</b> (<span class="r22 r">cachedAuthResult2</span> != <b>null</b>
+                    &amp;&amp; (!<span class="r17 r">forceRefresh</span> || !<b>object</b>.<a href="@0@mscorlib/A.html#4d607d6d56a93c7e" class="i method">ReferenceEquals</a>(<span class="r20 r">cachedAuthResult</span>?.<a href="@0@mscorlib/A.html#d1922db1cf9dcd03" class="i property">Item1</a>, <span class="r22 r">cachedAuthResult2</span>.<a href="@0@mscorlib/A.html#d1922db1cf9dcd03" class="i property">Item1</a>)))
+                {
+                    <a href="#752996e13331df7b" class="i field">_principalUsed</a> = <span class="r22 r">cachedAuthResult2</span>.<a href="@0@mscorlib/A.html#85ddc983cace902c" class="i property">Item2</a>;
+ 
+                    <b>return</b> <span class="r22 r">cachedAuthResult2</span>.<a href="@0@mscorlib/A.html#d1922db1cf9dcd03" class="i property">Item1</a>;
+                }
+ 
+                <span class="c">// If the auth result was not in cache, try to get it</span>
+                <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="t t">NonInteractiveAzureServiceTokenProviderBase</a>&gt; <span id="r23 rd" class="r23 r">tokenProviders</span> = <a href="#7466de8f6a66ee2e" class="i method">GetTokenProviders</a>();
+ 
+                <span class="c">// Try to get the token using the selected providers</span>
+                <b>foreach</b> (<a href="TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="k">var</a> <span id="r24 rd" class="r24 r">tokenProvider</span> <b>in</b> <span class="r23 r">tokenProviders</span>)
+                {
+                    <b>try</b>
+                    {
+                        <span class="c">// Get the auth result, add to the cache, and return the auth result.</span>
+                        <a href="AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="k">var</a> <span id="r25 rd" class="r25 r">authResult</span> = <b>await</b> <span class="r24 r">tokenProvider</span>.<a href="TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#13253d3aadebc42c" class="i method">GetAuthResultAsync</a>(<span class="r16 r">resource</span>, <span class="r15 r">authority</span>, <span class="r18 r">cancellationToken</span>)
+                            .<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                        <span class="c">// Set the token provider to the one that worked. </span>
+                        <span class="c">// Future calls to get token in this instance will directly use this provider.</span>
+                        <a href="#0a2eeee7e32fd489" class="i field">_selectedAccessTokenProvider</a> = <span class="r24 r">tokenProvider</span>;
+ 
+                        <a href="#752996e13331df7b" class="i field">_principalUsed</a> = <span class="r24 r">tokenProvider</span>.<a href="TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a>;
+ 
+                        <a href="Cache/AppAuthResultCache.cs.html#b0bec67bcef26262" class="t t">AppAuthResultCache</a>.<a href="Cache/AppAuthResultCache.cs.html#30cb42c56c0d2204" class="i method">AddOrUpdate</a>(<span class="r19 r">cacheKey</span>,
+                            <b>new</b> <a href="@0@mscorlib/A.html#ee1efa9bd0176f36" class="t constructor">Tuple</a>&lt;<a href="AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="t t">AppAuthenticationResult</a>, <a href="Principal.cs.html#ee98ea95591837a0" class="t t">Principal</a>&gt;(<span class="r25 r">authResult</span>, <span class="r24 r">tokenProvider</span>.<a href="TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a>));
+ 
+                        <b>return</b> <span class="r25 r">authResult</span>;
+                    }
+                    <b>catch</b> (<a href="AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a> <span id="r26 rd" class="r26 r">exp</span>)
+                    {
+                        <span class="r21 r">exceptions</span>.<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r26 r">exp</span>);
+                    }
+ 
+                }
+            }
+            <b>finally</b>
+            {
+                <span class="c">// Whichever way the try block exits, the semaphore must be released. </span>
+                <a href="#f190e022e5a82487" class="i field">Semaphore</a>.<a href="@0@mscorlib/A.html#f7527810bcfc0842" class="i method">Release</a>();
+            }
+ 
+            <span class="c">// Throw exception so that the caller knows why the token could not be acquired.</span>
+            <b>if</b> (<span class="r21 r">exceptions</span>.<a href="@0@mscorlib/A.html#78a69d857716bc68" class="i property">Count</a> == 1)
+            {
+                <b>throw</b> <span class="r21 r">exceptions</span>.<a href="@0@System.Core/A.html#bc8ae402a61dd9d6" class="i method">First</a>();
+            }
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r27 rd" class="r27 r">message</span> = <span class="s">$&quot;</span><span class="s">Tried the following </span>{<span class="r21 r">exceptions</span>.<a href="@0@mscorlib/A.html#78a69d857716bc68" class="i property">Count</a>}<span class="s"> methods to get an access token, but none of them worked.</span>{<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>}<span class="s">&quot;</span>;
+ 
+            <b>foreach</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="k">var</a> <span id="r28 rd" class="r28 r">exception</span> <b>in</b> <span class="r21 r">exceptions</span>)
+            {
+                <span class="r27 r">message</span> += <span class="s">$&quot;</span>{<span class="r28 r">exception</span>.<a href="@0@mscorlib/A.html#5fba0e16215b42a3" class="i property">Message</a>}{<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>}<span class="s">&quot;</span>;
+            }
+ 
+            <b>throw</b> <b>new</b> <a href="AzureServiceTokenProviderException.cs.html#70a0a38c19f200fb" class="t constructor">AzureServiceTokenProviderException</a>(<b>null</b>, <span class="r16 r">resource</span>, <span class="r15 r">authority</span>, <span class="r27 r">message</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> If a connection string was specified, or discovery of provider has already happened (in which case _selectedAccessTokenProvider would have been set),</span>
+        <span class="c">///</span><span class="c"> Use the appropriate access token provider. </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private</b> <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="t t">NonInteractiveAzureServiceTokenProviderBase</a>&gt; <a id="7466de8f6a66ee2e" href="R/7466de8f6a66ee2e.html" target="n" data-glyph="76,1" class="i method">GetTokenProviders</a>()
+        {
+            <b>return</b> <a href="#0a2eeee7e32fd489" class="i field">_selectedAccessTokenProvider</a> != <b>null</b>
+                ? <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="t t">NonInteractiveAzureServiceTokenProviderBase</a>&gt; { <a href="#0a2eeee7e32fd489" class="i field">_selectedAccessTokenProvider</a> }
+                : <a href="#ed9179f5f5f5f03c" class="i field">_potentialAccessTokenProviders</a>;
+        }
+ 
+        <span class="c">// &lt;summary&gt;</span>
+        <span class="c">///</span><span class="c"> Gets an access token to access the given Azure resource. </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/summary&gt;</span>
+        <span class="c">///</span><span class="c"> &lt;example&gt;</span>
+        <span class="c">///</span><span class="c"> &lt;code&gt;</span>
+        <span class="c">///</span><span class="c"> var azureServiceTokenProvider = new AzureServiceTokenProvider();</span>
+        <span class="c">///</span><span class="c"> string accessToken = await azureServiceTokenProvider.GetAccessTokenAsync(&quot;https://management.azure.com/&quot;).ConfigureAwait(false);</span>
+        <span class="c">///</span><span class="c"> &lt;/code&gt;</span>
+        <span class="c">///</span><span class="c"> &lt;/example&gt;</span>
+        <span class="c">///</span><span class="c"> &lt;param name=&quot;resource&quot;&gt;Resource to access. e.g. https://management.azure.com/.&lt;/param&gt;</span>
+        <span class="c">///</span><span class="c"> &lt;param name=&quot;tenantId&quot;&gt;If not specified, default tenant is used. Managed Service Identity REST protocols do not accept tenantId, so this can only be used with certificate and client secret based authentication.&lt;/param&gt;</span>
+        <span class="c">///</span><span class="c"> &lt;param name=&quot;forceRefresh&quot;&gt;True to force refresh this token. False to used a cache value if available.&lt;/param&gt; </span>
+        <span class="c">///</span><span class="c"> &lt;returns&gt;Access token&lt;/returns&gt;</span>
+        <span class="c">///</span><span class="c"> &lt;exception cref=&quot;ArgumentNullException&quot;&gt;Thrown if resource is null or empty.&lt;/exception&gt;</span>
+        <span class="c">///</span><span class="c"> &lt;exception cref=&quot;AzureServiceTokenProviderException&quot;&gt;Thrown if access token cannot be acquired.&lt;/exception&gt;</span>
+        <b>public virtual async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="6a7e131d015636e1" href="R/6a7e131d015636e1.html" target="n" data-glyph="72,1" class="i method">GetAccessTokenAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r29 rd" class="r29 r">resource</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r30 rd" class="r30 r">tenantId</span>, <b>bool</b> <span id="r31 rd" class="r31 r">forceRefresh</span>,
+            <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r32 rd" class="r32 r">cancellationToken</span> = <b>default</b>)
+        {
+            <a href="AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="k">var</a> <span id="r33 rd" class="r33 r">authResult</span> = <b>await</b> <a href="#c0c1fb2bf8985453" class="i method">GetAuthenticationResultAsync</a>(<span class="r29 r">resource</span>, <span class="r30 r">tenantId</span>, <span class="r31 r">forceRefresh</span>, <span class="r32 r">cancellationToken</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+            <b>return</b> <span class="r33 r">authResult</span>.<a href="AppAuthenticationResult.cs.html#bac23240ee26a0c7" class="i property">AccessToken</a>;
+        }
+ 
+        <span class="c">// &lt;summary&gt;</span>
+        <span class="c">///</span><span class="c"> Gets an access token to access the given Azure resource. </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/summary&gt;</span>
+        <span class="c">///</span><span class="c"> &lt;example&gt;</span>
+        <span class="c">///</span><span class="c"> &lt;code&gt;</span>
+        <span class="c">///</span><span class="c"> var azureServiceTokenProvider = new AzureServiceTokenProvider();</span>
+        <span class="c">///</span><span class="c"> string accessToken = await azureServiceTokenProvider.GetAccessTokenAsync(&quot;https://management.azure.com/&quot;).ConfigureAwait(false);</span>
+        <span class="c">///</span><span class="c"> &lt;/code&gt;</span>
+        <span class="c">///</span><span class="c"> &lt;/example&gt;</span>
+        <span class="c">///</span><span class="c"> &lt;param name=&quot;resource&quot;&gt;Resource to access. e.g. https://management.azure.com/.&lt;/param&gt;</span>
+        <span class="c">///</span><span class="c"> &lt;param name=&quot;forceRefresh&quot;&gt;True to force refresh this token. False to used a cache value if available.&lt;/param&gt; </span>
+        <span class="c">///</span><span class="c"> &lt;returns&gt;Access token&lt;/returns&gt;</span>
+        <span class="c">///</span><span class="c"> &lt;exception cref=&quot;ArgumentNullException&quot;&gt;Thrown if resource is null or empty.&lt;/exception&gt;</span>
+        <span class="c">///</span><span class="c"> &lt;exception cref=&quot;AzureServiceTokenProviderException&quot;&gt;Thrown if access token cannot be acquired.&lt;/exception&gt;</span>
+        <b>public virtual</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="43b4280a97d80925" href="R/43b4280a97d80925.html" target="n" data-glyph="72,1" class="i method">GetAccessTokenAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r34 rd" class="r34 r">resource</span>, <b>bool</b> <span id="r35 rd" class="r35 r">forceRefresh</span>,
+            <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r36 rd" class="r36 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>return</b> <a href="#6a7e131d015636e1" class="i method">GetAccessTokenAsync</a>(<span class="r34 r">resource</span>, <span class="r30 r">tenantId</span>: <b>null</b>, <span class="r35 r">forceRefresh</span>, <span class="r36 r">cancellationToken</span>);
+        }
+ 
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets an access token to access the given Azure resource. </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">example</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">code</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> var azureServiceTokenProvider = new AzureServiceTokenProvider();</span>
+        <span class="c">///</span><span class="c"> string accessToken = await azureServiceTokenProvider.GetAccessTokenAsync(&quot;https://management.azure.com/&quot;).ConfigureAwait(false);</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">code</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">example</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r37 r">resource</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Resource to access. e.g. https://management.azure.com/.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r38 r">tenantId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">If not specified, default tenant is used. Managed Service Identity REST protocols do not accept tenantId, so this can only be used with certificate and client secret based authentication.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Access token</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#c742289497493bb8" class="t t">ArgumentNullException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Thrown if resource is null or empty.</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Thrown if access token cannot be acquired.</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>public virtual</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="145481867d18d338" href="R/145481867d18d338.html" target="n" data-glyph="72,1" class="i method">GetAccessTokenAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r37 rd" class="r37 r">resource</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r38 rd" class="r38 r">tenantId</span> = <b>default</b>,
+            <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r39 rd" class="r39 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>return</b> <a href="#6a7e131d015636e1" class="i method">GetAccessTokenAsync</a>(<span class="r37 r">resource</span>, <span class="r38 r">tenantId</span>, <span class="r31 r">forceRefresh</span>: <b>false</b>, <span class="r39 r">cancellationToken</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets an access token to access the given Azure resource. </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">example</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">code</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> var azureServiceTokenProvider = new AzureServiceTokenProvider();</span>
+        <span class="c">///</span><span class="c"> string accessToken = await azureServiceTokenProvider.GetAccessTokenAsync(&quot;https://management.azure.com/&quot;).ConfigureAwait(false);</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">code</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">example</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r40 r">resource</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Resource to access. e.g. https://management.azure.com/.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r41 r">tenantId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">If not specified, default tenant is used. Managed Service Identity REST protocols do not accept tenantId, so this can only be used with certificate and client secret based authentication.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Access token</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#c742289497493bb8" class="t t">ArgumentNullException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Thrown if resource is null or empty.</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Thrown if access token cannot be acquired.</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>public virtual</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="7440141aa26f324a" href="R/7440141aa26f324a.html" target="n" data-glyph="72,1" class="i method">GetAccessTokenAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r40 rd" class="r40 r">resource</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r41 rd" class="r41 r">tenantId</span>)
+        {
+            <b>return</b> <a href="#145481867d18d338" class="i method">GetAccessTokenAsync</a>(<span class="r40 r">resource</span>, <span class="r41 r">tenantId</span>, <b>default</b>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets an authentication result which contains an access token to access the given Azure resource. </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">example</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">code</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> var azureServiceTokenProvider = new AzureServiceTokenProvider();</span>
+        <span class="c">///</span><span class="c"> var authResult = await azureServiceTokenProvider.GetAuthResultAsync(&quot;https://management.azure.com/&quot;).ConfigureAwait(false);</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">code</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">example</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r42 r">resource</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Resource to access. e.g. https://management.azure.com/.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r43 r">tenantId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">If not specified, default tenant is used. Managed Service Identity REST protocols do not accept tenantId, so this can only be used with certificate and client secret based authentication.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r44 r">forceRefresh</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">True to force refresh this token. False to used a cache value if available.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span><span class="c"> </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Access token</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#c742289497493bb8" class="t t">ArgumentNullException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Thrown if resource is null or empty.</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Thrown if access token cannot be acquired.</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>public virtual</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="t t">AppAuthenticationResult</a>&gt; <a id="c0c1fb2bf8985453" href="R/c0c1fb2bf8985453.html" target="n" data-glyph="72,1" class="i method">GetAuthenticationResultAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r42 rd" class="r42 r">resource</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r43 rd" class="r43 r">tenantId</span>,
+            <b>bool</b> <span id="r44 rd" class="r44 r">forceRefresh</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r45 rd" class="r45 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>(<span class="r42 r">resource</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>(<b>nameof</b>(<span class="r42 r">resource</span>));
+            }
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r46 rd" class="r46 r">authority</span> = <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r43 r">tenantId</span>) ? <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#c9f70a27facb27cf" class="i field">Empty</a> : <span class="s">$&quot;</span>{<a href="#034fdd9e8ea2e0a7" class="i field">_azureAdInstance</a>}{<span class="r43 r">tenantId</span>}<span class="s">&quot;</span>;
+ 
+            <b>return</b> <a href="#510699b78cabc6db" class="i method">GetAuthResultAsyncImpl</a>(<span class="r42 r">resource</span>, <span class="r46 r">authority</span>, <span class="r44 r">forceRefresh</span>, <span class="r45 r">cancellationToken</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets an authentication result which contains an access token to access the given Azure resource. </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">example</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">code</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> var azureServiceTokenProvider = new AzureServiceTokenProvider();</span>
+        <span class="c">///</span><span class="c"> var authResult = await azureServiceTokenProvider.GetAuthResultAsync(&quot;https://management.azure.com/&quot;).ConfigureAwait(false);</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">code</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">example</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r47 r">resource</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Resource to access. e.g. https://management.azure.com/.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r48 r">forceRefresh</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">True to force refresh this token. False to used a cache value if available.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span><span class="c"> </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Access token</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#c742289497493bb8" class="t t">ArgumentNullException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Thrown if resource is null or empty.</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Thrown if access token cannot be acquired.</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>public virtual</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="t t">AppAuthenticationResult</a>&gt; <a id="81ec6c38b766b84b" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetAuthenticationResultAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r47 rd" class="r47 r">resource</span>, <b>bool</b> <span id="r48 rd" class="r48 r">forceRefresh</span>,
+            <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r49 rd" class="r49 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>return</b> <a href="#c0c1fb2bf8985453" class="i method">GetAuthenticationResultAsync</a>(<span class="r47 r">resource</span>, <span class="r43 r">tenantId</span>: <b>null</b>, <span class="r48 r">forceRefresh</span>, <span class="r49 r">cancellationToken</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets an authentication result which contains an access token to access the given Azure resource. </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">example</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">code</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> var azureServiceTokenProvider = new AzureServiceTokenProvider();</span>
+        <span class="c">///</span><span class="c"> var authResult = await azureServiceTokenProvider.GetAuthResultAsync(&quot;https://management.azure.com/&quot;).ConfigureAwait(false);</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">code</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">example</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r50 r">resource</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Resource to access. e.g. https://management.azure.com/.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r51 r">tenantId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">If not specified, default tenant is used. Managed Service Identity REST protocols do not accept tenantId, so this can only be used with certificate and client secret based authentication.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Access token</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#c742289497493bb8" class="t t">ArgumentNullException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Thrown if resource is null or empty.</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Thrown if access token cannot be acquired.</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>public virtual</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="t t">AppAuthenticationResult</a>&gt; <a id="ad9af5c20bd48ea2" href="R/ad9af5c20bd48ea2.html" target="n" data-glyph="72,1" class="i method">GetAuthenticationResultAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r50 rd" class="r50 r">resource</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r51 rd" class="r51 r">tenantId</span> = <b>default</b>,
+            <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r52 rd" class="r52 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>return</b> <a href="#c0c1fb2bf8985453" class="i method">GetAuthenticationResultAsync</a>(<span class="r50 r">resource</span>, <span class="r51 r">tenantId</span>, <span class="r44 r">forceRefresh</span>: <b>false</b>, <span class="r52 r">cancellationToken</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets an authentication result which contains an access token to access the given Azure resource. </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">example</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">code</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> var azureServiceTokenProvider = new AzureServiceTokenProvider();</span>
+        <span class="c">///</span><span class="c"> var authResult = await azureServiceTokenProvider.GetAuthResultAsync(&quot;https://management.azure.com/&quot;).ConfigureAwait(false);</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">code</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">example</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r53 r">resource</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Resource to access. e.g. https://management.azure.com/.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r54 r">tenantId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">If not specified, default tenant is used. Managed Service Identity REST protocols do not accept tenantId, so this can only be used with certificate and client secret based authentication.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Access token</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#c742289497493bb8" class="t t">ArgumentNullException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Thrown if resource is null or empty.</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Thrown if access token cannot be acquired.</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>public virtual</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="t t">AppAuthenticationResult</a>&gt; <a id="8f928677f047687d" href="R/8f928677f047687d.html" target="n" data-glyph="72,1" class="i method">GetAuthenticationResultAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r53 rd" class="r53 r">resource</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r54 rd" class="r54 r">tenantId</span>)
+        {
+            <b>return</b> <a href="#ad9af5c20bd48ea2" class="i method">GetAuthenticationResultAsync</a>(<span class="r53 r">resource</span>, <span class="r54 r">tenantId</span>, <b>default</b>);
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

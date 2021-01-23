@@ -1,0 +1,148 @@
+﻿<!DOCTYPE html>
+<html><head><title>StorageLoadBalancerQueue.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(139);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs/StorageLoadBalancerQueue.cs" target="_top">StorageLoadBalancerQueue.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs" target="_top">Microsoft.Azure.WebJobs.Extensions.Storage.Blobs\src\Microsoft.Azure.WebJobs.Extensions.Storage.Blobs.csproj</a> (Microsoft.Azure.WebJobs.Extensions.Storage.Blobs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Queues</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Queues</span>.<span class="i n">Models</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Common</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Common</span>.<span class="i n">Listeners</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Common</span>.<span class="i n">Protocols</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Executors</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Listeners</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Protocols</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i n">Queues</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Timers</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Logging</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Options</span>;
+<b>using</b> <span class="i">Newtonsoft</span>.<span class="i">Json</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>
+{
+    <span class="c">// $$$ Review APIs</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CS0618</span> <span class="c">// Type or member is obsolete</span>
+    <b>internal class</b> <a id="5476a201af3e344c" href="R/5476a201af3e344c.html" target="n" data-glyph="2,0" class="t t">StorageLoadBalancerQueue</a> : <span class="i">ILoadBalancerQueue</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">CS0618</span> <span class="c">// Type or member is obsolete</span>
+    {
+        <span class="c">// this shared queue listener doesn&#39;t have a corresponding function, so we use</span>
+        <span class="c">// this constant for the scale monitor</span>
+        <b>private const string</b> <a id="1b86343db6210e51" href="R/1b86343db6210e51.html" target="n" data-glyph="10,1" class="i field">SharedLoadBalancerQueueListenerFunctionId</a> = <span class="s">&quot;SharedLoadBalancerQueueListener&quot;</span>;
+ 
+        <b>private readonly</b> <a href="Shared/Queues/QueuesOptions.cs.html#10aa607ae6dd925f" class="t t">QueuesOptions</a> <a id="5ea26dafb57423f1" href="R/5ea26dafb57423f1.html" target="n" data-glyph="46,1" class="i field">_queueOptions</a>;
+        <b>private readonly</b> <span class="i">ILoggerFactory</span> <a id="1abf5b2ecddd114a" href="R/1abf5b2ecddd114a.html" target="n" data-glyph="46,1" class="i field">_loggerFactory</a>;
+        <b>private readonly</b> <span class="i">IWebJobsExceptionHandler</span> <a id="0ebfb6901a672c91" href="R/0ebfb6901a672c91.html" target="n" data-glyph="46,1" class="i field">_exceptionHandler</a>;
+        <b>private readonly</b> <a href="Shared/Queues/SharedQueueWatcher.cs.html#85491c179e24020e" class="t t">SharedQueueWatcher</a> <a id="acb422e5ccdf0a90" href="R/acb422e5ccdf0a90.html" target="n" data-glyph="46,1" class="i field">_sharedWatcher</a>;
+        <b>private readonly</b> <a href="QueueServiceClientProvider.cs.html#3141989ad0c5f719" class="t t">QueueServiceClientProvider</a> <a id="bb6fe6b3df3da8fc" href="R/bb6fe6b3df3da8fc.html" target="n" data-glyph="46,1" class="i field">_queueServiceClientProvider</a>;
+ 
+        <b>public</b> <a id="876b4b7d6f7a2ac4" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">StorageLoadBalancerQueue</a>(
+               <a href="QueueServiceClientProvider.cs.html#3141989ad0c5f719" class="t t">QueueServiceClientProvider</a> <span id="r0 rd" class="r0 r">queueServiceClientProvider</span>,
+               <span class="i">IOptions</span>&lt;<a href="Shared/Queues/QueuesOptions.cs.html#10aa607ae6dd925f" class="t t">QueuesOptions</a>&gt; <span id="r1 rd" class="r1 r">queueOptions</span>,
+               <span class="i">IWebJobsExceptionHandler</span> <span id="r2 rd" class="r2 r">exceptionHandler</span>,
+               <a href="Shared/Queues/SharedQueueWatcher.cs.html#85491c179e24020e" class="t t">SharedQueueWatcher</a> <span id="r3 rd" class="r3 r">sharedWatcher</span>,
+               <span class="i">ILoggerFactory</span> <span id="r4 rd" class="r4 r">loggerFactory</span>)
+        {
+            <a href="#bb6fe6b3df3da8fc" class="i field">_queueServiceClientProvider</a> = <span class="r0 r">queueServiceClientProvider</span>;
+            <a href="#5ea26dafb57423f1" class="i field">_queueOptions</a> = <span class="r1 r">queueOptions</span>.<span class="i">Value</span>;
+            <a href="#0ebfb6901a672c91" class="i field">_exceptionHandler</a> = <span class="r2 r">exceptionHandler</span>;
+            <a href="#acb422e5ccdf0a90" class="i field">_sharedWatcher</a> = <span class="r3 r">sharedWatcher</span>;
+            <a href="#1abf5b2ecddd114a" class="i field">_loggerFactory</a> = <span class="r4 r">loggerFactory</span>;
+        }
+ 
+        <b>public</b> <span class="i">IAsyncCollector</span>&lt;<span class="r5 r t">T</span>&gt; <a id="3f7457f8c797c6cd" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetQueueWriter</a>&lt;<span id="r5 rd t" class="r5 r t">T</span>&gt;(<b>string</b> <span id="r6 rd" class="r6 r">queue</span>)
+        {
+            <b>return</b> <b>new</b> <a href="#b96567f514dc93bd" class="t constructor">QueueWriter</a>&lt;<span class="r5 r t">T</span>&gt;(<a href="#5476a201af3e344c" class="k">this</a>, <a href="#d55dde6ff88b78d3" class="i method">Convert</a>(<span class="r6 r">queue</span>));
+        }
+ 
+        <b>private class</b> <a id="a7d92f44a05c1aed" href="R/a7d92f44a05c1aed.html" target="n" data-glyph="4,1" class="t t">QueueWriter</a>&lt;<span id="r7 rd t" class="r7 r t">T</span>&gt; : <span class="i">IAsyncCollector</span>&lt;<span class="r7 r t">T</span>&gt;
+        {
+            <b>private readonly</b> <a href="#5476a201af3e344c" class="t t">StorageLoadBalancerQueue</a> <a id="8fa28d0c326150e9" href="R/8fa28d0c326150e9.html" target="n" data-glyph="46,2" class="i field">_parent</a>;
+            <b>private readonly</b> <a href="/Azure.Storage.Queues/A.html#9deade59b6175965" class="t t">QueueClient</a> <a id="32613dab5a5ecddb" href="R/32613dab5a5ecddb.html" target="n" data-glyph="46,2" class="i field">_queue</a>;
+ 
+            <b>public</b> <a id="b96567f514dc93bd" href="R/b96567f514dc93bd.html" target="n" data-glyph="72,2" class="t constructor">QueueWriter</a>(<a href="#5476a201af3e344c" class="t t">StorageLoadBalancerQueue</a> <span id="r8 rd" class="r8 r">parent</span>, <a href="/Azure.Storage.Queues/A.html#9deade59b6175965" class="t t">QueueClient</a> <span id="r9 rd" class="r9 r">queue</span>)
+            {
+                <a href="#a7d92f44a05c1aed" class="k">this</a>.<a href="#8fa28d0c326150e9" class="i field">_parent</a> = <span class="r8 r">parent</span>;
+                <a href="#a7d92f44a05c1aed" class="k">this</a>.<a href="#32613dab5a5ecddb" class="i field">_queue</a> = <span class="r9 r">queue</span>;
+            }
+ 
+            <b>public async</b> <span class="i">Task</span> <a id="160b8db08a60274d" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">AddAsync</a>(<span class="r7 r t">T</span> <span id="r10 rd" class="r10 r">item</span>, <span class="i">CancellationToken</span> <span id="r11 rd" class="r11 r">cancellationToken</span> = <b>default</b>(<span class="i">CancellationToken</span>))
+            {
+                <b>string</b> <span id="r12 rd" class="r12 r">contents</span> = <span class="i">JsonConvert</span>.<span class="i">SerializeObject</span>(
+                    <span class="r10 r">item</span>,
+                    <a href="Shared/JsonSerialization.cs.html#a69dd34e6ad10c49" class="t t">JsonSerialization</a>.<a href="Shared/JsonSerialization.cs.html#5c4abb971ba76c0d" class="i property">Settings</a>);
+ 
+                <b>await</b> <a href="#32613dab5a5ecddb" class="i field">_queue</a>.<span class="i">AddMessageAndCreateIfNotExistsAsync</span>(<span class="i">BinaryData</span>.<span class="i">FromString</span>(<span class="r12 r">contents</span>), <span class="r11 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <a href="#8fa28d0c326150e9" class="i field">_parent</a>.<a href="#acb422e5ccdf0a90" class="i field">_sharedWatcher</a>.<a href="Shared/Queues/SharedQueueWatcher.cs.html#051538f57d405859" class="i method">Notify</a>(<a href="#32613dab5a5ecddb" class="i field">_queue</a>.<a href="/Azure.Storage.Queues/A.html#d1847b1478db81e4" class="i property">Name</a>);
+            }
+ 
+            <b>public</b> <span class="i">Task</span> <a id="7c84d54c5c98ed52" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">FlushAsync</a>(<span class="i">CancellationToken</span> <span id="r13 rd" class="r13 r">cancellationToken</span> = <b>default</b>(<span class="i">CancellationToken</span>))
+            {
+                <b>return</b> <span class="i">Task</span>.<span class="i">CompletedTask</span>;
+            }
+        }
+ 
+        <b>private</b> <a href="/Azure.Storage.Queues/A.html#9deade59b6175965" class="t t">QueueClient</a> <a id="d55dde6ff88b78d3" href="R/d55dde6ff88b78d3.html" target="n" data-glyph="76,1" class="i method">Convert</a>(<b>string</b> <span id="r14 rd" class="r14 r">queueMoniker</span>)
+        {
+            <span class="c">// $$$ Review</span>
+            <a href="/Azure.Storage.Queues/A.html#ef0f353b721b0444" class="k">var</a> <span id="r15 rd" class="r15 r">queueServiceClient</span> = <a href="#bb6fe6b3df3da8fc" class="i field">_queueServiceClientProvider</a>.<span class="i">Get</span>(<span class="i">ConnectionStringNames</span>.<span class="i">Dashboard</span>);
+            <a href="/Azure.Storage.Queues/A.html#9deade59b6175965" class="k">var</a> <span id="r16 rd" class="r16 r">queue</span> = <span class="r15 r">queueServiceClient</span>.<span class="i">GetQueueClient</span>(<span class="r14 r">queueMoniker</span>);
+            <b>return</b> <span class="r16 r">queue</span>;
+        }
+ 
+        <b>public</b> <span class="i">IListener</span> <a id="254a155ae2617bc0" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">CreateQueueListenr</a>(
+            <b>string</b> <span id="r17 rd" class="r17 r">queue</span>,
+            <b>string</b> <span id="r18 rd" class="r18 r">poisonQueue</span>,
+            <span class="i">Func</span>&lt;<b>string</b>, <span class="i">CancellationToken</span>, <span class="i">Task</span>&lt;<span class="i">FunctionResult</span>&gt;&gt; <span id="r19 rd" class="r19 r">callback</span>
+            )
+        {
+            <span class="c">// Provide an upper bound on the maximum polling interval for run/abort from dashboard.</span>
+            <span class="c">// This ensures that if users have customized this value the Dashboard will remain responsive.</span>
+            <span class="i">TimeSpan</span> <span id="r20 rd" class="r20 r">maxPollingInterval</span> = <a href="Shared/Queues/QueuePollingIntervals.cs.html#790f6baff96d05cf" class="t t">QueuePollingIntervals</a>.<a href="Shared/Queues/QueuePollingIntervals.cs.html#9d6826b071ea2ae0" class="i field">DefaultMaximum</a>;
+ 
+            <a href="#300a1412d18ec3d9" class="k">var</a> <span id="r21 rd" class="r21 r">wrapper</span> = <b>new</b> <span class="t">Wrapper</span>
+            {
+                <a href="#f3fbbaef4a6566fb" class="i field">_callback</a> = <span class="r19 r">callback</span>
+            };
+ 
+            <a href="/Azure.Storage.Queues/A.html#9deade59b6175965" class="k">var</a> <span id="r22 rd" class="r22 r">queueClient</span> = <a href="#d55dde6ff88b78d3" class="i method">Convert</a>(<span class="r17 r">queue</span>);
+            <a href="/Azure.Storage.Queues/A.html#9deade59b6175965" class="k">var</a> <span id="r23 rd" class="r23 r">poisonQueueClient</span> = <a href="#d55dde6ff88b78d3" class="i method">Convert</a>(<span class="r18 r">poisonQueue</span>);
+            <a href="Shared/Queues/QueueProcessor.cs.html#0d92dbb32568bea4" class="k">var</a> <span id="r24 rd" class="r24 r">queueProcessor</span> = <b>new</b> <a href="Shared/Queues/QueueProcessor.cs.html#46c76f1f339f38c5" class="t constructor">QueueProcessor</a>(<b>new</b> <a href="Shared/Queues/QueueProcessorOptions.cs.html#cffbacaddee48833" class="t constructor">QueueProcessorOptions</a>(<span class="r22 r">queueClient</span>, <a href="#1abf5b2ecddd114a" class="i field">_loggerFactory</a>, <a href="#5ea26dafb57423f1" class="i field">_queueOptions</a>, <span class="r23 r">poisonQueueClient</span>));
+            <a href="P/b7371ab585831a7b.html#b7371ab585831a7b" class="t t">QueueListener</a>.<a href="Shared/Queues/QueueListener.cs.html#9c9bab45fef0f1d3" class="i method">RegisterSharedWatcherWithQueueProcessor</a>(<span class="r24 r">queueProcessor</span>, <a href="#acb422e5ccdf0a90" class="i field">_sharedWatcher</a>);
+            <span class="i">IListener</span> <span id="r25 rd" class="r25 r">listener</span> = <b>new</b> <span class="t">QueueListener</span>(<span class="r22 r">queueClient</span>,
+                <span class="i">poisonQueue</span>: <span class="r23 r">poisonQueueClient</span>,
+                <span class="i">triggerExecutor</span>: <span class="r21 r">wrapper</span>,
+                <span class="i">exceptionHandler</span>: <a href="#0ebfb6901a672c91" class="i field">_exceptionHandler</a>,
+                <span class="i">loggerFactory</span>: <a href="#1abf5b2ecddd114a" class="i field">_loggerFactory</a>,
+                <span class="i">sharedWatcher</span>: <a href="#acb422e5ccdf0a90" class="i field">_sharedWatcher</a>,
+                <span class="i">queueOptions</span>: <a href="#5ea26dafb57423f1" class="i field">_queueOptions</a>,
+                <span class="i">queueProcessor</span>: <span class="r24 r">queueProcessor</span>,
+                <span class="i">functionDescriptor</span>: <b>new</b> <span class="i">FunctionDescriptor</span> { <span class="i">Id</span> = <a href="#1b86343db6210e51" class="i field">SharedLoadBalancerQueueListenerFunctionId</a> },
+                <span class="i">maxPollingInterval</span>: <span class="r20 r">maxPollingInterval</span>);
+ 
+            <b>return</b> <span class="r25 r">listener</span>;
+        }
+ 
+        <span class="c">// $$$ cleanup</span>
+        <b>private class</b> <a id="300a1412d18ec3d9" href="R/300a1412d18ec3d9.html" target="n" data-glyph="4,1" class="t t"><span id="29dce3a929cc48f0">Wrapper</span></a> : <a href="Shared/Listeners/ITriggerExecutor.cs.html#7371353e2f184692" class="t t">ITriggerExecutor</a>&lt;<a href="/Azure.Storage.Queues/A.html#eb02c418d8194406" class="t t">QueueMessage</a>&gt;
+        {
+            <b>public</b> <span class="i">Func</span>&lt;<b>string</b>, <span class="i">CancellationToken</span>, <span class="i">Task</span>&lt;<span class="i">FunctionResult</span>&gt;&gt; <a id="f3fbbaef4a6566fb" href="R/f3fbbaef4a6566fb.html" target="n" data-glyph="42,2" class="i field">_callback</a>;
+ 
+            <b>public</b> <span class="i">Task</span>&lt;<span class="i">FunctionResult</span>&gt; <a id="1ad96f604469961a" href="R/1ad96f604469961a.html" target="n" data-glyph="72,2" class="i method">ExecuteAsync</a>(<a href="/Azure.Storage.Queues/A.html#eb02c418d8194406" class="t t">QueueMessage</a> <span id="r26 rd" class="r26 r">value</span>, <span class="i">CancellationToken</span> <span id="r27 rd" class="r27 r">cancellationToken</span>)
+            {
+                <b>return</b> <span class="i">_callback</span>(<span class="r26 r">value</span>.<a href="/Azure.Storage.Queues/A.html#ca6ccb0de2843484" class="i property">Body</a>.<span class="i">ToValidUTF8String</span>(), <span class="r27 r">cancellationToken</span>);
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

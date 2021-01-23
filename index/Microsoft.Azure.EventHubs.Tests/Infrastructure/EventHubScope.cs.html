@@ -1,0 +1,332 @@
+﻿<!DOCTYPE html>
+<html><head><title>EventHubScope.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(323);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.EventHubs.Tests/Infrastructure/EventHubScope.cs" target="_top">Infrastructure\EventHubScope.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.EventHubs.Tests" target="_top">Microsoft.Azure.EventHubs\tests\Microsoft.Azure.EventHubs.Tests.csproj</a> (Microsoft.Azure.EventHubs.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft. All rights reserved.</span>
+<span class="c">// Licensed under the MIT license. See LICENSE file in the project root for full license information.</span>
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">EventHubs</span>.<span class="i n">Tests</span>
+{
+    <b>using</b> <span class="i n">System</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>.<span class="i n">Http</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>.<span class="i n">Sockets</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Runtime</span>.<span class="i n">CompilerServices</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Security</span>.<span class="i n">Authentication</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">Management</span>.<span class="i">EventHub</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">Management</span>.<span class="i">EventHub</span>.<span class="i">Models</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">Management</span>.<span class="i">ResourceManager</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">Management</span>.<span class="i">Storage</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">Storage</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i">IdentityModel</span>.<span class="i">Clients</span>.<span class="i">ActiveDirectory</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i">Rest</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i">Rest</span>.<span class="i">Azure</span>;
+    <b>using</b> <span class="i">Polly</span>;
+ 
+    <b>using</b> <span class="i">StorageManagement</span> = <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">Management</span>.<span class="i">Storage</span>.<span class="i">Models</span>;
+ 
+    <b>internal sealed class</b> <a id="4c9b7b58ec842865" href="../R/4c9b7b58ec842865.html" target="n" data-glyph="2,0" class="t t">EventHubScope</a> : <span class="i">IAsyncDisposable</span>
+    {
+        <b>private const int</b> <a id="731216f701e818ef" href="../R/731216f701e818ef.html" target="n" data-glyph="10,1" class="i field">RetryMaximumAttempts</a> = 20;
+        <b>private const double</b> <a id="f75009cea7cc1b32" href="../R/f75009cea7cc1b32.html" target="n" data-glyph="10,1" class="i field">RetryExponentialBackoffSeconds</a> = 3.0;
+        <b>private const double</b> <a id="1d195a1e4d439819" href="../R/1d195a1e4d439819.html" target="n" data-glyph="10,1" class="i field">RetryBaseJitterSeconds</a> = 60.0;
+ 
+        <b>private static readonly</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="49bd2eefcd8412e4" href="../R/49bd2eefcd8412e4.html" target="n" data-glyph="46,1" class="i field">CredentialRefreshBuffer</a> = <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#ae74be5264df78d8" class="i method">FromMinutes</a>(5);
+        <b>private static readonly</b> <a href="@0@mscorlib/A.html#42021806b924c5cd" class="t t">ThreadLocal</a>&lt;<a href="@0@mscorlib/A.html#bb77e610694e64ca" class="t t">Random</a>&gt; <a id="91ebb219a1783b33" href="../R/91ebb219a1783b33.html" target="n" data-glyph="46,1" class="i field">RandomNumberGenerator</a> = <b>new</b> <a href="@0@mscorlib/A.html#28dd4e60dd02f687" class="t constructor">ThreadLocal</a>&lt;<a href="@0@mscorlib/A.html#bb77e610694e64ca" class="t t">Random</a>&gt;(() =&gt; <b>new</b> <a href="@0@mscorlib/A.html#92e3cf6e56571d5a" class="t constructor">Random</a>(<a href="@0@mscorlib/A.html#8792520ddc6dadcb" class="t t">Interlocked</a>.<a href="@0@mscorlib/A.html#09bb1e21afd76cf2" class="i method">Increment</a>(<b>ref</b> <a href="#3ba4a84335c5ed9c" class="i field">s_randomSeed</a>)), <b>false</b>);
+ 
+        <b>private static int</b> <a id="3ba4a84335c5ed9c" href="../R/3ba4a84335c5ed9c.html" target="n" data-glyph="46,1" class="i field">s_randomSeed</a> = <a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#39a839e5e9ca1f3f" class="i property">TickCount</a>;
+        <b>private static</b> <a href="#fe812bd72273ac94" class="t t">ManagementToken</a> <a id="7ead65a07f100a95" href="../R/7ead65a07f100a95.html" target="n" data-glyph="46,1" class="i field">s_managementToken</a>;
+ 
+        <b>private bool</b> <a id="003a674f4103851e" href="../R/003a674f4103851e.html" target="n" data-glyph="46,1" class="i field">_disposed</a> = <b>false</b>;
+ 
+        <b>internal string</b> <a id="8005a78a892ade08" href="../R/8005a78a892ade08.html" target="n" data-glyph="104,1" class="i property">EventHubName</a> { <b>get</b>; }
+ 
+        <b>internal</b> <a href="@0@mscorlib/A.html#b040fb780bdd59f4" class="t t">IReadOnlyList</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="735b536d5ac2d437" href="../R/735b536d5ac2d437.html" target="n" data-glyph="104,1" class="i property">ConsumerGroups</a> { <b>get</b>; }
+ 
+        <b>private</b> <a id="fc42536811828983" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="t constructor">EventHubScope</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r0 rd" class="r0 r">eventHubHame</span>,
+                              <a href="@0@mscorlib/A.html#b040fb780bdd59f4" class="t t">IReadOnlyList</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <span id="r1 rd" class="r1 r">consumerGroups</span>)
+        {
+            <a href="#8005a78a892ade08" class="i property">EventHubName</a> = <span class="r0 r">eventHubHame</span>;
+            <a href="#735b536d5ac2d437" class="i property">ConsumerGroups</a> = <span class="r1 r">consumerGroups</span>;
+        }
+ 
+        <b>public async</b> <span class="i">ValueTask</span> <a id="0cc9ee7dd19bc55d" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">DisposeAsync</a>()
+        {
+            <b>if</b> (<a href="#003a674f4103851e" class="i field">_disposed</a>)
+            {
+                <b>return</b>;
+            }
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r2 rd" class="r2 r">resourceGroup</span> = <a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#e07c5ce7c8de0411" class="i property">EventHubsResourceGroup</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r3 rd" class="r3 r">eventHubNamespace</span> = <a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#b82a491d94363b19" class="i property">EventHubsNamespace</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r4 rd" class="r4 r">token</span> = <b>await</b> <a href="#2a5251fd97dac8ae" class="i method">AquireManagementTokenAsync</a>();
+            <b>var</b> <span id="r5 rd" class="r5 r">client</span> = <b>new</b> <span class="i">EventHubManagementClient</span>(<a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#234464a85aff94cc" class="i property">ResourceManager</a>, <b>new</b> <span class="i">TokenCredentials</span>(<span class="r4 r">token</span>)) { <span class="i">SubscriptionId</span> = <a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#f526f405104290a2" class="i property">EventHubsSubscription</a> };
+ 
+            <b>try</b>
+            {
+                <b>await</b> <a href="#5072335d16215c89" class="i method">CreateRetryPolicy</a>().<span class="i">ExecuteAsync</span>(() =&gt; <span class="r5 r">client</span>.<span class="i">EventHubs</span>.<span class="i">DeleteAsync</span>(<span class="r2 r">resourceGroup</span>, <span class="r3 r">eventHubNamespace</span>, <a href="#8005a78a892ade08" class="i property">EventHubName</a>));
+            }
+            <b>catch</b>
+            {
+                <span class="c">// This should not be considered a critical failure that results in a test failure.  Due</span>
+                <span class="c">// to ARM being temperamental, some management operations may be rejected.  Throwing here</span>
+                <span class="c">// does not help to ensure resource cleanup only flags the test itself as a failure.</span>
+                <span class="c">//</span>
+                <span class="c">// If an Event Hub fails to be deleted, removing of the associated namespace at the end of the</span>
+                <span class="c">// test run will also remove the orphan.</span>
+            }
+            <b>finally</b>
+            {
+                <span class="r5 r">client</span>?.<span class="i">Dispose</span>();
+            }
+ 
+            <a href="#003a674f4103851e" class="i field">_disposed</a> = <b>true</b>;
+        }
+ 
+        <b>internal static</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="#4c9b7b58ec842865" class="t t">EventHubScope</a>&gt; <a id="fc500ef8b0ed81bf" href="../R/fc500ef8b0ed81bf.html" target="n" data-glyph="74,1" class="i method">CreateAsync</a>(<b>int</b> <span id="r6 rd" class="r6 r">partitionCount</span>,
+                                                       [<a href="@0@mscorlib/A.html#3b59f8cb5102fd8b" class="t constructor">CallerMemberName</a>] <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r7 rd" class="r7 r">caller</span> = <span class="s">&quot;&quot;</span>) =&gt; <a href="#fe578893259fbcd8" class="i method">CreateAsync</a>(<span class="r6 r">partitionCount</span>, <a href="@0@System.Core/A.html#577032c8811e20d3" class="t t">Enumerable</a>.<a href="@0@System.Core/A.html#4d026772cf3399f5" class="i method">Empty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(), <span class="r7 r">caller</span>);
+ 
+        <b>internal static</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="#4c9b7b58ec842865" class="t t">EventHubScope</a>&gt; <a id="da3cddcb3af837da" href="../R/../../0000000000.html" target="n" data-glyph="74,1" class="i method">CreateAsync</a>(<b>int</b> <span id="r8 rd" class="r8 r">partitionCount</span>,
+                                                        <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r9 rd" class="r9 r">consumerGroup</span>,
+                                                        [<a href="@0@mscorlib/A.html#3b59f8cb5102fd8b" class="t constructor">CallerMemberName</a>] <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r10 rd" class="r10 r">caller</span> = <span class="s">&quot;&quot;</span>) =&gt; <a href="#fe578893259fbcd8" class="i method">CreateAsync</a>(<span class="r8 r">partitionCount</span>, <b>new</b>[] { <span class="r9 r">consumerGroup</span> }, <span class="r10 r">caller</span>);
+        <b>internal static async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="#4c9b7b58ec842865" class="t t">EventHubScope</a>&gt; <a id="fe578893259fbcd8" href="../R/fe578893259fbcd8.html" target="n" data-glyph="74,1" class="i method">CreateAsync</a>(<b>int</b> <span id="r11 rd" class="r11 r">partitionCount</span>,
+                                                              <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <span id="r12 rd" class="r12 r">consumerGroups</span>,
+                                                              [<a href="@0@mscorlib/A.html#3b59f8cb5102fd8b" class="t constructor">CallerMemberName</a>] <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r13 rd" class="r13 r">caller</span> = <span class="s">&quot;&quot;</span>)
+        {
+            <span class="r13 r">caller</span> = (<span class="r13 r">caller</span>.<a href="@0@mscorlib/A.html#e13f5829ef28aa07" class="i property">Length</a> &lt; 16) ? <span class="r13 r">caller</span> : <span class="r13 r">caller</span>.<a href="@0@mscorlib/A.html#8124961f027d9ac9" class="i method">Substring</a>(0, 15);
+ 
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r14 rd" class="r14 r">groups</span> = (<span class="r12 r">consumerGroups</span> ?? <a href="@0@System.Core/A.html#577032c8811e20d3" class="t t">Enumerable</a>.<a href="@0@System.Core/A.html#4d026772cf3399f5" class="i method">Empty</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;()).<a href="@0@System.Core/A.html#e276d6892241255b" class="i method">ToList</a>();
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r15 rd" class="r15 r">resourceGroup</span> = <a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#e07c5ce7c8de0411" class="i property">EventHubsResourceGroup</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r16 rd" class="r16 r">eventHubNamespace</span> = <a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#b82a491d94363b19" class="i property">EventHubsNamespace</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r17 rd" class="r17 r">token</span> = <b>await</b> <a href="#2a5251fd97dac8ae" class="i method">AquireManagementTokenAsync</a>();
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <a id="696b1b710b4f4d52" href="../R/696b1b710b4f4d52.html" target="n" data-glyph="76,2" class="i method">CreateName</a>() =&gt; <span class="s">$&quot;</span>{ <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#8015cb30da6ca742" class="i method">ToString</a>(<span class="s">&quot;D&quot;</span>).<a href="@0@mscorlib/A.html#8124961f027d9ac9" class="i method">Substring</a>(0, 13) }<span class="s">-</span>{ <span class="r13 r">caller</span> }<span class="s">&quot;</span>;
+ 
+            <b>using</b> (<b>var</b> <span id="r18 rd" class="r18 r">client</span> = <b>new</b> <span class="i">EventHubManagementClient</span>(<a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#234464a85aff94cc" class="i property">ResourceManager</a>, <b>new</b> <span class="i">TokenCredentials</span>(<span class="r17 r">token</span>)) { <span class="i">SubscriptionId</span> = <a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#f526f405104290a2" class="i property">EventHubsSubscription</a> })
+            {
+                <b>var</b> <span id="r19 rd" class="r19 r">eventHub</span> = <b>new</b> <span class="i">Eventhub</span>(<span class="i">partitionCount</span>: <span class="r11 r">partitionCount</span>);
+                <span class="r19 r">eventHub</span> = <b>await</b> <a href="#8044ef236664ebae" class="i method">CreateRetryPolicy</a>&lt;<span class="i">Eventhub</span>&gt;().<span class="i">ExecuteAsync</span>(() =&gt; <span class="r18 r">client</span>.<span class="i">EventHubs</span>.<span class="i">CreateOrUpdateAsync</span>(<span class="r15 r">resourceGroup</span>, <span class="r16 r">eventHubNamespace</span>, <a href="#696b1b710b4f4d52" class="i method">CreateName</a>(), <span class="r19 r">eventHub</span>));
+ 
+                <b>var</b> <span id="r20 rd" class="r20 r">consumerPolicy</span> = <a href="#8044ef236664ebae" class="i method">CreateRetryPolicy</a>&lt;<span class="i">ConsumerGroup</span>&gt;();
+ 
+                <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<span class="i">WhenAll</span>
+                (
+                    <span class="r12 r">consumerGroups</span>.<span class="i">Select</span>(<span id="r21 rd" class="r21 r">groupName</span> =&gt;
+                    {
+                        <b>var</b> <span id="r22 rd" class="r22 r">group</span> = <b>new</b> <span class="i">ConsumerGroup</span>(<span class="i">name</span>: <span class="r21 r">groupName</span>);
+                        <b>return</b> <span class="r20 r">consumerPolicy</span>.<span class="i">ExecuteAsync</span>(() =&gt; <span class="r18 r">client</span>.<span class="i">ConsumerGroups</span>.<span class="i">CreateOrUpdateAsync</span>(<span class="r15 r">resourceGroup</span>, <span class="r16 r">eventHubNamespace</span>, <span class="r19 r">eventHub</span>.<span class="i">Name</span>, <span class="r21 r">groupName</span>, <span class="r22 r">group</span>));
+                    })
+                );
+ 
+                <b>return</b> <b>new</b> <span class="t">EventHubScope</span>(<span class="r19 r">eventHub</span>.<span class="i">Name</span>, <span class="r14 r">groups</span>);
+            }
+        }
+ 
+        <b>public static async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="#b7e390b335e10b6c" class="t t">AzureResourceProperties</a>&gt; <a id="4be6d0daf2eb60b3" href="../R/4be6d0daf2eb60b3.html" target="n" data-glyph="72,1" class="i method">CreateNamespaceAsync</a>()
+        {
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r23 rd" class="r23 r">subscription</span> = <a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#f526f405104290a2" class="i property">EventHubsSubscription</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r24 rd" class="r24 r">resourceGroup</span> = <a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#e07c5ce7c8de0411" class="i property">EventHubsResourceGroup</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r25 rd" class="r25 r">token</span> = <b>await</b> <a href="#2a5251fd97dac8ae" class="i method">AquireManagementTokenAsync</a>();
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <a id="696b1b710b4f4d52" href="../R/696b1b710b4f4d52.html" target="n" data-glyph="76,2" class="i method">CreateName</a>() =&gt; <span class="s">$&quot;</span><span class="s">net-eventhubs-track-one-</span>{ <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#8015cb30da6ca742" class="i method">ToString</a>(<span class="s">&quot;D&quot;</span>).<a href="@0@mscorlib/A.html#8124961f027d9ac9" class="i method">Substring</a>(0, 8) }<span class="s">&quot;</span>;
+ 
+            <b>using</b> (<b>var</b> <span id="r26 rd" class="r26 r">client</span> = <b>new</b> <span class="i">EventHubManagementClient</span>(<a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#234464a85aff94cc" class="i property">ResourceManager</a>, <b>new</b> <span class="i">TokenCredentials</span>(<span class="r25 r">token</span>)) { <span class="i">SubscriptionId</span> = <span class="r23 r">subscription</span> })
+            {
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r27 rd" class="r27 r">location</span> = <b>await</b> <a href="#bcb718305cfbce47" class="i method">QueryResourceGroupLocationAsync</a>(<span class="r25 r">token</span>, <span class="r24 r">resourceGroup</span>, <span class="r23 r">subscription</span>);
+ 
+                <b>var</b> <span id="r28 rd" class="r28 r">eventHubsNamespace</span> = <b>new</b> <span class="i">EHNamespace</span>(<span class="i">sku</span>: <b>new</b> <span class="i">Sku</span>(<span class="s">&quot;Standard&quot;</span>, <span class="s">&quot;Standard&quot;</span>, 12), <span class="i">tags</span>: <a href="#ade72e6c9b93a6e1" class="i method">GetResourceTags</a>(), <span class="i">isAutoInflateEnabled</span>: <b>true</b>, <span class="i">maximumThroughputUnits</span>: 20, <span class="i">location</span>: <span class="r27 r">location</span>);
+                <span class="r28 r">eventHubsNamespace</span> = <b>await</b> <a href="#8044ef236664ebae" class="i method">CreateRetryPolicy</a>&lt;<span class="i">EHNamespace</span>&gt;().<span class="i">ExecuteAsync</span>(() =&gt; <span class="r26 r">client</span>.<span class="i">Namespaces</span>.<span class="i">CreateOrUpdateAsync</span>(<span class="r24 r">resourceGroup</span>, <a href="#696b1b710b4f4d52" class="i method">CreateName</a>(), <span class="r28 r">eventHubsNamespace</span>));
+ 
+                <b>var</b> <span id="r29 rd" class="r29 r">accessKey</span> = <b>await</b> <a href="#8044ef236664ebae" class="i method">CreateRetryPolicy</a>&lt;<span class="i">AccessKeys</span>&gt;().<span class="i">ExecuteAsync</span>(() =&gt; <span class="r26 r">client</span>.<span class="i">Namespaces</span>.<span class="i">ListKeysAsync</span>(<span class="r24 r">resourceGroup</span>, <span class="r28 r">eventHubsNamespace</span>.<span class="i">Name</span>, <span class="s">&quot;RootManageSharedAccessKey&quot;</span>));
+                <b>return</b> <b>new</b> <span class="t">AzureResourceProperties</span>(<span class="r28 r">eventHubsNamespace</span>.<span class="i">Name</span>, <span class="r29 r">accessKey</span>.<span class="i">PrimaryConnectionString</span>, <b>true</b>);
+            }
+        }
+ 
+        <b>public static async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="49ad1cf741f2d4d4" href="../R/49ad1cf741f2d4d4.html" target="n" data-glyph="72,1" class="i method">DeleteNamespaceAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r30 rd" class="r30 r">namespaceName</span>)
+        {
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r31 rd" class="r31 r">subscription</span> = <a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#f526f405104290a2" class="i property">EventHubsSubscription</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r32 rd" class="r32 r">resourceGroup</span> = <a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#e07c5ce7c8de0411" class="i property">EventHubsResourceGroup</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r33 rd" class="r33 r">token</span> = <b>await</b> <a href="#2a5251fd97dac8ae" class="i method">AquireManagementTokenAsync</a>();
+ 
+            <b>using</b> (<b>var</b> <span id="r34 rd" class="r34 r">client</span> = <b>new</b> <span class="i">EventHubManagementClient</span>(<a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#234464a85aff94cc" class="i property">ResourceManager</a>, <b>new</b> <span class="i">TokenCredentials</span>(<span class="r33 r">token</span>)) { <span class="i">SubscriptionId</span> = <span class="r31 r">subscription</span> })
+            {
+                <b>await</b> <a href="#5072335d16215c89" class="i method">CreateRetryPolicy</a>().<span class="i">ExecuteAsync</span>(() =&gt; <span class="r34 r">client</span>.<span class="i">Namespaces</span>.<span class="i">DeleteAsync</span>(<span class="r32 r">resourceGroup</span>, <span class="r30 r">namespaceName</span>));
+                ;
+            }
+        }
+ 
+        <b>public static async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="#b7e390b335e10b6c" class="t t">AzureResourceProperties</a>&gt; <a id="bf10f5fb64f98af7" href="../R/bf10f5fb64f98af7.html" target="n" data-glyph="72,1" class="i method">CreateStorageAsync</a>()
+        {
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r35 rd" class="r35 r">subscription</span> = <a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#f526f405104290a2" class="i property">EventHubsSubscription</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r36 rd" class="r36 r">resourceGroup</span> = <a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#e07c5ce7c8de0411" class="i property">EventHubsResourceGroup</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r37 rd" class="r37 r">token</span> = <b>await</b> <a href="#2a5251fd97dac8ae" class="i method">AquireManagementTokenAsync</a>();
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <a id="696b1b710b4f4d52" href="../R/696b1b710b4f4d52.html" target="n" data-glyph="76,2" class="i method">CreateName</a>() =&gt; <span class="s">$&quot;</span><span class="s">neteventhubstrackone</span>{ <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#8015cb30da6ca742" class="i method">ToString</a>(<span class="s">&quot;D&quot;</span>).<a href="@0@mscorlib/A.html#8124961f027d9ac9" class="i method">Substring</a>(0, 4) }<span class="s">&quot;</span>;
+ 
+            <b>using</b> (<b>var</b> <span id="r38 rd" class="r38 r">client</span> = <b>new</b> <span class="i">StorageManagementClient</span>(<a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#234464a85aff94cc" class="i property">ResourceManager</a>, <b>new</b> <span class="i">TokenCredentials</span>(<span class="r37 r">token</span>)) { <span class="i">SubscriptionId</span> = <span class="r35 r">subscription</span> })
+            {
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r39 rd" class="r39 r">location</span> = <b>await</b> <a href="#bcb718305cfbce47" class="i method">QueryResourceGroupLocationAsync</a>(<span class="r37 r">token</span>, <span class="r36 r">resourceGroup</span>, <span class="r35 r">subscription</span>);
+ 
+                <b>var</b> <span id="r40 rd" class="r40 r">sku</span> = <b>new</b> <span class="i">StorageManagement</span>.<span class="i">Sku</span>(<span class="i">StorageManagement</span>.<span class="i">SkuName</span>.<span class="i">StandardLRS</span>, <span class="i">StorageManagement</span>.<span class="i">SkuTier</span>.<span class="i">Standard</span>);
+                <b>var</b> <span id="r41 rd" class="r41 r">parameters</span> = <b>new</b> <span class="i">StorageManagement</span>.<span class="i">StorageAccountCreateParameters</span>(<span class="r40 r">sku</span>, <span class="i">StorageManagement</span>.<span class="i">Kind</span>.<span class="i">BlobStorage</span>, <span class="i">location</span>: <span class="r39 r">location</span>, <span class="i">tags</span>: <a href="#ade72e6c9b93a6e1" class="i method">GetResourceTags</a>(), <span class="i">accessTier</span>: <span class="i">StorageManagement</span>.<span class="i">AccessTier</span>.<span class="i">Hot</span>);
+                <b>var</b> <span id="r42 rd" class="r42 r">storageAccount</span> = <b>await</b> <a href="#8044ef236664ebae" class="i method">CreateRetryPolicy</a>&lt;<span class="i">StorageManagement</span>.<span class="i">StorageAccount</span>&gt;().<span class="i">ExecuteAsync</span>(() =&gt; <span class="r38 r">client</span>.<span class="i">StorageAccounts</span>.<span class="i">CreateAsync</span>(<span class="r36 r">resourceGroup</span>, <a href="#696b1b710b4f4d52" class="i method">CreateName</a>(), <span class="r41 r">parameters</span>));
+ 
+                <b>var</b> <span id="r43 rd" class="r43 r">storageKeys</span> = <b>await</b> <a href="#8044ef236664ebae" class="i method">CreateRetryPolicy</a>&lt;<span class="i">StorageManagement</span>.<span class="i">StorageAccountListKeysResult</span>&gt;().<span class="i">ExecuteAsync</span>(() =&gt; <span class="r38 r">client</span>.<span class="i">StorageAccounts</span>.<span class="i">ListKeysAsync</span>(<span class="r36 r">resourceGroup</span>, <span class="r42 r">storageAccount</span>.<span class="i">Name</span>));
+                <b>return</b> <b>new</b> <span class="t">AzureResourceProperties</span>(<span class="r42 r">storageAccount</span>.<span class="i">Name</span>, <span class="s">$&quot;</span><span class="s">DefaultEndpointsProtocol=https;AccountName=</span>{ <span class="r42 r">storageAccount</span>.<span class="i">Name</span> }<span class="s">;AccountKey=</span>{ <span class="r43 r">storageKeys</span>.<span class="i">Keys</span>[0].<span class="i">Value</span> }<span class="s">;EndpointSuffix=</span>{ <a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#57984dc365bb21e0" class="i property">StorageEndpointSuffix</a> }<span class="s">&quot;</span>, <b>true</b>);
+            }
+        }
+ 
+        <b>public static async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="83ae45272530d802" href="../R/83ae45272530d802.html" target="n" data-glyph="72,1" class="i method">DeleteStorageAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r44 rd" class="r44 r">accountName</span>)
+        {
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r45 rd" class="r45 r">subscription</span> = <a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#f526f405104290a2" class="i property">EventHubsSubscription</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r46 rd" class="r46 r">resourceGroup</span> = <a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#e07c5ce7c8de0411" class="i property">EventHubsResourceGroup</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r47 rd" class="r47 r">token</span> = <b>await</b> <a href="#2a5251fd97dac8ae" class="i method">AquireManagementTokenAsync</a>();
+ 
+            <b>using</b> (<b>var</b> <span id="r48 rd" class="r48 r">client</span> = <b>new</b> <span class="i">StorageManagementClient</span>(<a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#234464a85aff94cc" class="i property">ResourceManager</a>, <b>new</b> <span class="i">TokenCredentials</span>(<span class="r47 r">token</span>)) { <span class="i">SubscriptionId</span> = <span class="r45 r">subscription</span> })
+            {
+                <b>await</b> <a href="#5072335d16215c89" class="i method">CreateRetryPolicy</a>().<span class="i">ExecuteAsync</span>(() =&gt; <span class="r48 r">client</span>.<span class="i">StorageAccounts</span>.<span class="i">DeleteAsync</span>(<span class="r46 r">resourceGroup</span>, <span class="r44 r">accountName</span>));
+            }
+        }
+ 
+        <b>private static async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="bcb718305cfbce47" href="../R/bcb718305cfbce47.html" target="n" data-glyph="76,1" class="i method">QueryResourceGroupLocationAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r49 rd" class="r49 r">accessToken</span>,
+                                                                          <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r50 rd" class="r50 r">resourceGroupName</span>,
+                                                                          <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r51 rd" class="r51 r">subscriptionId</span>)
+        {
+            <b>using</b> (<b>var</b> <span id="r52 rd" class="r52 r">client</span> = <b>new</b> <span class="i">ResourceManagementClient</span>(<a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#234464a85aff94cc" class="i property">ResourceManager</a>, <b>new</b> <span class="i">TokenCredentials</span>(<span class="r49 r">accessToken</span>)) { <span class="i">SubscriptionId</span> = <span class="r51 r">subscriptionId</span> })
+            {
+                <b>var</b> <span id="r53 rd" class="r53 r">resourceGroup</span> = <b>await</b> <a href="#8044ef236664ebae" class="i method">CreateRetryPolicy</a>&lt;<span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">Management</span>.<span class="i">ResourceManager</span>.<span class="i">Models</span>.<span class="i">ResourceGroup</span>&gt;().<span class="i">ExecuteAsync</span>(() =&gt; <span class="r52 r">client</span>.<span class="i">ResourceGroups</span>.<span class="i">GetAsync</span>(<span class="r50 r">resourceGroupName</span>));
+                <b>return</b> <span class="r53 r">resourceGroup</span>.<span class="i">Location</span>;
+            }
+        }
+ 
+        <b>private static</b> <a href="@0@mscorlib/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="ade72e6c9b93a6e1" href="../R/ade72e6c9b93a6e1.html" target="n" data-glyph="76,1" class="i method">GetResourceTags</a>() =&gt;
+             <b>new</b> <a href="@0@mscorlib/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;
+                {
+                    { <span class="s">&quot;source&quot;</span>, <b>typeof</b>(<a href="#4c9b7b58ec842865" class="t t">EventHubScope</a>).<a href="@0@mscorlib/A.html#e87d536bd07fab01" class="i property">Assembly</a>.<a href="@0@mscorlib/A.html#1fd23b897ffa9a75" class="i method">GetName</a>().<a href="@0@mscorlib/A.html#917bceeed23fe2ae" class="i property">Name</a> },
+                    { <span class="s">&quot;platform&quot;</span>, <span class="i n">System</span>.<span class="i n">Runtime</span>.<span class="i n">InteropServices</span>.<span class="t t">RuntimeInformation</span>.<span class="i property">OSDescription</span> },
+                    { <span class="s">&quot;framework&quot;</span>, <span class="i n">System</span>.<span class="i n">Runtime</span>.<span class="i n">InteropServices</span>.<span class="t t">RuntimeInformation</span>.<span class="i property">FrameworkDescription</span> },
+                    { <span class="s">&quot;created&quot;</span>, <span class="s">$&quot;</span>{ <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@0@mscorlib/A.html#04abe0cac293ebd0" class="i property">UtcNow</a>.<a href="@0@mscorlib/A.html#85b407cde54cb34e" class="i method">ToString</a>(<span class="s">&quot;s&quot;</span>) }<span class="s">Z</span><span class="s">&quot;</span> },
+                    { <span class="s">&quot;cleanup-after&quot;</span>, <span class="s">$&quot;</span>{ <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@0@mscorlib/A.html#04abe0cac293ebd0" class="i property">UtcNow</a>.<a href="@0@mscorlib/A.html#3e8c965efd4d9021" class="i method">AddDays</a>(1).<a href="@0@mscorlib/A.html#85b407cde54cb34e" class="i method">ToString</a>(<span class="s">&quot;s&quot;</span>) }<span class="s">Z</span><span class="s">&quot;</span> }
+                };
+ 
+        <b>private static</b> <span class="i">IAsyncPolicy</span>&lt;<span class="r54 r t">T</span>&gt; <a id="8044ef236664ebae" href="../R/8044ef236664ebae.html" target="n" data-glyph="76,1" class="i method">CreateRetryPolicy</a>&lt;<span id="r54 rd t" class="r54 r t">T</span>&gt;(<b>int</b> <span id="r55 rd" class="r55 r">maxRetryAttempts</span> = <a href="#731216f701e818ef" class="i field">RetryMaximumAttempts</a>, <b>double</b> <span id="r56 rd" class="r56 r">exponentialBackoffSeconds</span> = <a href="#f75009cea7cc1b32" class="i field">RetryExponentialBackoffSeconds</a>, <b>double</b> <span id="r57 rd" class="r57 r">baseJitterSeconds</span> = <a href="#1d195a1e4d439819" class="i field">RetryBaseJitterSeconds</a>) =&gt;
+           <span class="i">Policy</span>&lt;<span class="r54 r t">T</span>&gt;
+               .<span class="i">Handle</span>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt;(<span id="r58 rd" class="r58 r">ex</span> =&gt; <span class="i">ShouldRetry</span>(<span class="r58 r">ex</span>))
+               .<span class="i">WaitAndRetryAsync</span>(<span class="r55 r">maxRetryAttempts</span>, <span id="r59 rd" class="r59 r">attempt</span> =&gt; <span class="i">CalculateRetryDelay</span>(<span class="r59 r">attempt</span>, <span class="r56 r">exponentialBackoffSeconds</span>, <span class="r57 r">baseJitterSeconds</span>));
+ 
+        <b>private static</b> <span class="i">IAsyncPolicy</span> <a id="5072335d16215c89" href="../R/5072335d16215c89.html" target="n" data-glyph="76,1" class="i method">CreateRetryPolicy</a>(<b>int</b> <span id="r60 rd" class="r60 r">maxRetryAttempts</span> = <a href="#731216f701e818ef" class="i field">RetryMaximumAttempts</a>, <b>double</b> <span id="r61 rd" class="r61 r">exponentialBackoffSeconds</span> = <a href="#f75009cea7cc1b32" class="i field">RetryExponentialBackoffSeconds</a>, <b>double</b> <span id="r62 rd" class="r62 r">baseJitterSeconds</span> = <a href="#1d195a1e4d439819" class="i field">RetryBaseJitterSeconds</a>) =&gt;
+            <span class="i">Policy</span>
+                .<span class="i">Handle</span>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt;(<span id="r63 rd" class="r63 r">ex</span> =&gt; <span class="i">ShouldRetry</span>(<span class="r63 r">ex</span>))
+                .<span class="i">WaitAndRetryAsync</span>(<span class="r60 r">maxRetryAttempts</span>, <span id="r64 rd" class="r64 r">attempt</span> =&gt; <span class="i">CalculateRetryDelay</span>(<span class="r64 r">attempt</span>, <span class="r61 r">exponentialBackoffSeconds</span>, <span class="r62 r">baseJitterSeconds</span>));
+ 
+        <b>private static bool</b> <a id="ffbced6d87ce54f0" href="../R/ffbced6d87ce54f0.html" target="n" data-glyph="76,1" class="i method">IsRetriableStatus</a>(<a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a> <span id="r65 rd" class="r65 r">statusCode</span>) =&gt;
+            ((<span class="r65 r">statusCode</span> == <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#ba154261719bd41b" class="i field">Unauthorized</a>)
+                || (<span class="r65 r">statusCode</span> == ((<a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>)408))
+                || (<span class="r65 r">statusCode</span> == <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#a387765e716ffb3c" class="i field">Conflict</a>)
+                || (<span class="r65 r">statusCode</span> == ((<a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>)429))
+                || (<span class="r65 r">statusCode</span> == <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#f48e04e95b08331a" class="i field">InternalServerError</a>)
+                || (<span class="r65 r">statusCode</span> == <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#8eec2c06c869e523" class="i field">ServiceUnavailable</a>)
+                || (<span class="r65 r">statusCode</span> == <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#78abb6c689d101ad" class="i field">GatewayTimeout</a>));
+ 
+         <b>private static bool</b> <a id="a5abd978eee96ba0" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">ShouldRetry</a>(<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r66 rd" class="r66 r">ex</span>) =&gt;
+            ((<a href="#6687e9b1c3fb5f30" class="i method">IsRetriableException</a>(<span class="r66 r">ex</span>)) || (<a href="#6687e9b1c3fb5f30" class="i method">IsRetriableException</a>(<span class="r66 r">ex</span>?.<a href="@0@mscorlib/A.html#89c20b39fb04108b" class="i property">InnerException</a>)));
+ 
+        <b>private static bool</b> <a id="6687e9b1c3fb5f30" href="../R/6687e9b1c3fb5f30.html" target="n" data-glyph="76,1" class="i method">IsRetriableException</a>(<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r67 rd" class="r67 r">ex</span>)
+        {
+            <b>if</b> (<span class="r67 r">ex</span> == <b>null</b>)
+            {
+                <b>return</b> <b>false</b>;
+            }
+ 
+            <b>switch</b> (<span class="r67 r">ex</span>)
+            {
+                <b>case</b> <span class="i">ErrorResponseException</span> <span id="r68 rd" class="r68 r">erEx</span>:
+                    <b>return</b> <span class="i">IsRetriableStatus</span>(<span class="r68 r">erEx</span>.<span class="i">Response</span>.<span class="i">StatusCode</span>);
+ 
+                <b>case</b> <span class="i">CloudException</span> <span id="r69 rd" class="r69 r">clEx</span>:
+                    <b>return</b> <span class="i">IsRetriableStatus</span>(<span class="r69 r">clEx</span>.<span class="i">Response</span>.<span class="i">StatusCode</span>);
+ 
+                <b>case</b> <span class="i">StorageException</span> <span id="r70 rd" class="r70 r">stEx</span>:
+                    <b>return</b> <a href="#ffbced6d87ce54f0" class="i method">IsRetriableStatus</a>((<a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>)<span class="r70 r">stEx</span>.<span class="i">RequestInformation</span>.<span class="i">HttpStatusCode</span>);
+ 
+                <b>case</b> <a href="@0@mscorlib/A.html#43e40a96805cc4df" class="t t">TimeoutException</a> <b>_</b>:
+                <b>case</b> <a href="@0@mscorlib/A.html#30edb7a318d221fa" class="t t">TaskCanceledException</a> <b>_</b>:
+                <b>case</b> <a href="@0@mscorlib/A.html#a0a8b79c277cf327" class="t t">OperationCanceledException</a> <b>_</b>:
+                <b>case</b> <span class="t t">HttpRequestException</span> <b>_</b>:
+                <b>case</b> <a href="@0@System/A.html#47e37066345d8b7c" class="t t">WebException</a> <b>_</b>:
+                <b>case</b> <a href="@0@System/A.html#feed9e8ed7f20227" class="t t">SocketException</a> <b>_</b>:
+                <b>case</b> <a href="@0@mscorlib/A.html#bf546e435199e83c" class="t t">IOException</a> <b>_</b>:
+                    <b>return</b> <b>true</b>;
+ 
+                <b>default</b>:
+                    <b>return</b> <b>false</b>;
+            };
+        }
+ 
+        <b>private static</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="e1333f2f0f0180c9" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">CalculateRetryDelay</a>(<b>int</b> <span id="r71 rd" class="r71 r">attempt</span>, <b>double</b> <span id="r72 rd" class="r72 r">exponentialBackoffSeconds</span>, <b>double</b> <span id="r73 rd" class="r73 r">baseJitterSeconds</span>) =&gt;
+            <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>((<a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#95354113fadc3083" class="i method">Pow</a>(2, <span class="r71 r">attempt</span>) * <span class="r72 r">exponentialBackoffSeconds</span>) + (<a href="#91ebb219a1783b33" class="i field">RandomNumberGenerator</a>.<a href="@0@mscorlib/A.html#bf5157f54273c48c" class="i property">Value</a>.<a href="@0@mscorlib/A.html#c467f2953a8d2207" class="i method">NextDouble</a>() * <span class="r73 r">baseJitterSeconds</span>));
+ 
+        <b>private static async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="2a5251fd97dac8ae" href="../R/2a5251fd97dac8ae.html" target="n" data-glyph="76,1" class="i method">AquireManagementTokenAsync</a>()
+        {
+            <a href="#fe812bd72273ac94" class="k">var</a> <span id="r74 rd" class="r74 r">token</span> = <a href="#7ead65a07f100a95" class="i field">s_managementToken</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r75 rd" class="r75 r">authority</span> = <b>new</b> <a href="@0@System/A.html#67d3260816440b78" class="t constructor">Uri</a>(<b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#be28f1cbe9b0289b" class="i property">AuthorityHost</a>), <a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#b79b0dc5d5615dea" class="i property">EventHubsTenant</a>).<a href="@0@System/A.html#bf3caa11ab73e433" class="i method">ToString</a>();
+ 
+            <b>if</b> ((<span class="r74 r">token</span> == <b>null</b>) || (<span class="r74 r">token</span>.<a href="#4d3efdf5bab88a4c" class="i field">ExpiresOn</a> &lt;= <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@0@mscorlib/A.html#04abe0cac293ebd0" class="i property">UtcNow</a>.<a href="@0@mscorlib/A.html#5cff8f26f5c7c095" class="i method">Add</a>(<a href="#49bd2eefcd8412e4" class="i field">CredentialRefreshBuffer</a>)))
+            {
+                <b>var</b> <span id="r76 rd" class="r76 r">credential</span> = <b>new</b> <span class="i">ClientCredential</span>(<a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#c76a84352742de9d" class="i property">EventHubsClient</a>, <a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#f515845059450c37" class="i property">EventHubsSecret</a>);
+                <b>var</b> <span id="r77 rd" class="r77 r">context</span> = <b>new</b> <span class="i">AuthenticationContext</span>(<span class="r75 r">authority</span>);
+                <b>var</b> <span id="r78 rd" class="r78 r">result</span> = <b>await</b> <span class="r77 r">context</span>.<span class="i">AcquireTokenAsync</span>(<a href="TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="TestUtility.cs.html#032a2a51a4275770" class="i property">ServiceManagementUrl</a>, <span class="r76 r">credential</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <b>if</b> ((<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="t t">String</a>.<span class="i">IsNullOrEmpty</span>(<span class="r78 r">result</span>?.<span class="i">AccessToken</span>)))
+                {
+                    <b>throw</b> <b>new</b> <a href="@0@System/A.html#6749b117ae40d22c" class="t constructor">AuthenticationException</a>(<span class="s">&quot;Unable to acquire an Active Directory token for the Event Hubs management client.&quot;</span>);
+                }
+ 
+                <span class="r74 r">token</span> = <b>new</b> <span class="t">ManagementToken</span>(<span class="r78 r">result</span>.<span class="i">AccessToken</span>, <span class="r78 r">result</span>.<span class="i">ExpiresOn</span>);
+                <a href="@0@mscorlib/A.html#8792520ddc6dadcb" class="t t">Interlocked</a>.<a href="@0@mscorlib/A.html#19d00939423c949f" class="i method">Exchange</a>(<b>ref</b> <a href="#7ead65a07f100a95" class="i field">s_managementToken</a>, <span class="r74 r">token</span>);
+            }
+ 
+            <b>return</b> <span class="r74 r">token</span>.<a href="#b089dd4d40eb1284" class="i field">Token</a>;
+        }
+ 
+        <b>public struct</b> <a id="b7e390b335e10b6c" href="../R/b7e390b335e10b6c.html" target="n" data-glyph="108,1" class="t t"><span id="5f0e1bd27856f00f">AzureResourceProperties</span></a>
+        {
+            <b>public readonly string</b> <a id="1df3e4aef17e55ca" href="../R/1df3e4aef17e55ca.html" target="n" data-glyph="42,2" class="i field">Name</a>;
+            <b>public readonly string</b> <a id="4207c0c5a1839a9d" href="../R/4207c0c5a1839a9d.html" target="n" data-glyph="42,2" class="i field">ConnectionString</a>;
+            <b>public readonly bool</b> <a id="e621a2aeb82fd22e" href="../R/e621a2aeb82fd22e.html" target="n" data-glyph="42,2" class="i field">ShouldRemoveAtCompletion</a>;
+ 
+            <b>internal</b> <a id="7ace17aa0071d702" href="../R/7ace17aa0071d702.html" target="n" data-glyph="74,2" class="t constructor">AzureResourceProperties</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r79 rd" class="r79 r">name</span>,
+                                             <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r80 rd" class="r80 r">connectionString</span>,
+                                             <b>bool</b> <span id="r81 rd" class="r81 r">shouldRemoveAtCompletion</span>)
+            {
+                <a href="#1df3e4aef17e55ca" class="i field">Name</a> = <span class="r79 r">name</span>;
+                <a href="#4207c0c5a1839a9d" class="i field">ConnectionString</a> = <span class="r80 r">connectionString</span>;
+                <a href="#e621a2aeb82fd22e" class="i field">ShouldRemoveAtCompletion</a> = <span class="r81 r">shouldRemoveAtCompletion</span>;
+            }
+        }
+ 
+        <b>private class</b> <a id="fe812bd72273ac94" href="../R/fe812bd72273ac94.html" target="n" data-glyph="4,1" class="t t">ManagementToken</a>
+        {
+            <b>public readonly string</b> <a id="b089dd4d40eb1284" href="../R/b089dd4d40eb1284.html" target="n" data-glyph="42,2" class="i field">Token</a>;
+ 
+            <b>public readonly</b> <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a> <a id="4d3efdf5bab88a4c" href="../R/4d3efdf5bab88a4c.html" target="n" data-glyph="42,2" class="i field">ExpiresOn</a>;
+ 
+            <b>public</b> <a id="e0d5ed949da97af2" href="../R/../../0000000000.html" target="n" data-glyph="72,2" class="t constructor">ManagementToken</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r82 rd" class="r82 r">token</span>, <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a> <span id="r83 rd" class="r83 r">expiresOn</span>)
+            {
+                <a href="#b089dd4d40eb1284" class="i field">Token</a> = <span class="r82 r">token</span>;
+                <a href="#4d3efdf5bab88a4c" class="i field">ExpiresOn</a> = <span class="r83 r">expiresOn</span>;
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

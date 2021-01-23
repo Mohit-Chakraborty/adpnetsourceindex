@@ -1,0 +1,395 @@
+﻿<!DOCTYPE html>
+<html><head><title>SessionReceiverManager.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(386);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Messaging.ServiceBus/Processor/SessionReceiverManager.cs" target="_top">Processor\SessionReceiverManager.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Messaging.ServiceBus" target="_top">src\Azure.Messaging.ServiceBus.csproj</a> (Azure.Messaging.ServiceBus)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>.<span class="i n">Plugins</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Represents a thread-safe abstraction around a single session receiver that threads spawned</span>
+    <span class="c">///</span><span class="c"> by the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusSessionProcessor.cs.html#d8f6e4038c04b7be" class="t t">ServiceBusSessionProcessor</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> use to receive and process messages.</span>
+    <span class="c">///</span><span class="c"> If </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusSessionProcessor.cs.html#d8f6e4038c04b7be" class="t t">ServiceBusSessionProcessor</a>.<a href="ServiceBusSessionProcessor.cs.html#07c578cdf9745a81" class="i property">MaxConcurrentCallsPerSession</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> &gt; 1, there may be</span>
+    <span class="c">///</span><span class="c"> multiple threads using the same </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#cbe0e4e30523a606" class="t t">SessionReceiverManager</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">. The manager will delegate</span>
+    <span class="c">///</span><span class="c"> to the user provided callbacks and handle automatic locking of sessions.</span>
+    <span class="c">///</span><span class="c"> The receiver instance will only be closed when no other threads are using it, or when the user</span>
+    <span class="c">///</span><span class="c"> has called </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusSessionProcessor.cs.html#d8f6e4038c04b7be" class="t t">ServiceBusSessionProcessor</a>.<a href="ServiceBusSessionProcessor.cs.html#817174668e2f8f68" class="i method">StopProcessingAsync</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA1001</span> <span class="c">// Types that own disposable fields should be disposable.</span>
+    <span class="c">// Doesn&#39;t own _concurrentAcceptSessionsSemaphore</span>
+    <b>internal class</b> <a id="cbe0e4e30523a606" href="../R/cbe0e4e30523a606.html" target="n" data-glyph="2,0" class="t t">SessionReceiverManager</a> : <a href="ReceiverManager.cs.html#ccf80319c0706d5c" class="t t">ReceiverManager</a>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">CA1001</span> <span class="c">// Types that own disposable fields should be disposable</span>
+    {
+        <b>private int</b> <a id="8aeaab34b7ea1485" href="../R/8aeaab34b7ea1485.html" target="n" data-glyph="46,1" class="i field">_threadCount</a>;
+        <b>private readonly</b> <span class="i">Func</span>&lt;<a href="ProcessSessionEventArgs.cs.html#833b7a9c2dde6645" class="t t">ProcessSessionEventArgs</a>, <span class="i">Task</span>&gt; <a id="29d4866d82934117" href="../R/29d4866d82934117.html" target="n" data-glyph="46,1" class="i field">_sessionInitHandler</a>;
+        <b>private readonly</b> <span class="i">Func</span>&lt;<a href="ProcessSessionEventArgs.cs.html#833b7a9c2dde6645" class="t t">ProcessSessionEventArgs</a>, <span class="i">Task</span>&gt; <a id="e215ceabe59808c0" href="../R/e215ceabe59808c0.html" target="n" data-glyph="46,1" class="i field">_sessionCloseHandler</a>;
+        <b>private readonly</b> <span class="i">Func</span>&lt;<a href="ProcessSessionMessageEventArgs.cs.html#7ed608712705605f" class="t t">ProcessSessionMessageEventArgs</a>, <span class="i">Task</span>&gt; <a id="ccc6027f297a665a" href="../R/ccc6027f297a665a.html" target="n" data-glyph="46,1" class="i field">_messageHandler</a>;
+        <b>private readonly</b> <span class="i">SemaphoreSlim</span> <a id="0052d8f310876a90" href="../R/0052d8f310876a90.html" target="n" data-glyph="46,1" class="i field">_concurrentAcceptSessionsSemaphore</a>;
+        <b>private readonly int</b> <a id="4b19313d6b61ede6" href="../R/4b19313d6b61ede6.html" target="n" data-glyph="46,1" class="i field">_maxCallsPerSession</a>;
+        <b>private readonly</b> <a href="../Receiver/ServiceBusSessionReceiverOptions.cs.html#d3b387e66e66e570" class="t t">ServiceBusSessionReceiverOptions</a> <a id="9e34e6f746ff2924" href="../R/9e34e6f746ff2924.html" target="n" data-glyph="46,1" class="i field">_sessionReceiverOptions</a>;
+        <b>private readonly string</b> <a id="4328a959b526fea5" href="../R/4328a959b526fea5.html" target="n" data-glyph="46,1" class="i field">_sessionId</a>;
+        <b>private readonly bool</b> <a id="063d013ec0a416e1" href="../R/063d013ec0a416e1.html" target="n" data-glyph="46,1" class="i field">_keepOpenOnReceiveTimeout</a>;
+        <b>private</b> <a href="../Receiver/ServiceBusSessionReceiver.cs.html#bb715430551ca316" class="t t">ServiceBusSessionReceiver</a> <a id="7c8d59a5763886bd" href="../R/7c8d59a5763886bd.html" target="n" data-glyph="46,1" class="i field">_receiver</a>;
+        <b>private</b> <span class="i">CancellationTokenSource</span> <a id="c2c989529353e7d1" href="../R/c2c989529353e7d1.html" target="n" data-glyph="46,1" class="i field">_sessionLockRenewalCancellationSource</a>;
+        <b>private</b> <span class="i">Task</span> <a id="473559c7ea6cfb51" href="../R/473559c7ea6cfb51.html" target="n" data-glyph="46,1" class="i field">_sessionLockRenewalTask</a>;
+        <b>private</b> <span class="i">CancellationTokenSource</span> <a id="69f80777946c1e1f" href="../R/69f80777946c1e1f.html" target="n" data-glyph="46,1" class="i field">_sessionCancellationSource</a> = <b>new</b> <span class="i">CancellationTokenSource</span>();
+        <b>private bool</b> <a id="b059a11d35f9b138" href="../R/b059a11d35f9b138.html" target="n" data-glyph="46,1" class="i field">_receiveTimeout</a>;
+ 
+        <b>protected override</b> <a href="../Receiver/ServiceBusReceiver.cs.html#2224f17dabcb26c3" class="t t">ServiceBusReceiver</a> <a id="f0cd77fdcdc1309c" href="../R/f0cd77fdcdc1309c.html" target="n" data-glyph="105,1" class="i property">Receiver</a> =&gt; <a href="#7c8d59a5763886bd" class="i field">_receiver</a>;
+ 
+        <b>private readonly</b> <span class="i">SemaphoreSlim</span> <a id="91dd265f65e2089f" href="../R/91dd265f65e2089f.html" target="n" data-glyph="46,1" class="i field">_semaphore</a> = <b>new</b> <span class="i">SemaphoreSlim</span>(1, 1);
+ 
+        <b>public</b> <a id="73c742a866f93eb9" href="../R/73c742a866f93eb9.html" target="n" data-glyph="72,1" class="t constructor">SessionReceiverManager</a>(
+            <a href="../Primitives/ServiceBusConnection.cs.html#5fc67fb7b5056bea" class="t t">ServiceBusConnection</a> <span id="r0 rd" class="r0 r">connection</span>,
+            <b>string</b> <span id="r1 rd" class="r1 r">fullyQualifiedNamespace</span>,
+            <b>string</b> <span id="r2 rd" class="r2 r">entityPath</span>,
+            <b>string</b> <span id="r3 rd" class="r3 r">identifier</span>,
+            <b>string</b> <span id="r4 rd" class="r4 r">sessionId</span>,
+            <a href="ServiceBusProcessorOptions.cs.html#3ee0705bcc32cc6b" class="t t">ServiceBusProcessorOptions</a> <span id="r5 rd" class="r5 r">processorOptions</span>,
+            <span class="i">Func</span>&lt;<a href="ProcessSessionEventArgs.cs.html#833b7a9c2dde6645" class="t t">ProcessSessionEventArgs</a>, <span class="i">Task</span>&gt; <span id="r6 rd" class="r6 r">sessionInitHandler</span>,
+            <span class="i">Func</span>&lt;<a href="ProcessSessionEventArgs.cs.html#833b7a9c2dde6645" class="t t">ProcessSessionEventArgs</a>, <span class="i">Task</span>&gt; <span id="r7 rd" class="r7 r">sessionCloseHandler</span>,
+            <span class="i">Func</span>&lt;<a href="ProcessSessionMessageEventArgs.cs.html#7ed608712705605f" class="t t">ProcessSessionMessageEventArgs</a>, <span class="i">Task</span>&gt; <span id="r8 rd" class="r8 r">messageHandler</span>,
+            <span class="i">Func</span>&lt;<a href="ProcessErrorEventArgs.cs.html#6d0ae56c469cb1ba" class="t t">ProcessErrorEventArgs</a>, <span class="i">Task</span>&gt; <span id="r9 rd" class="r9 r">errorHandler</span>,
+            <span class="i">SemaphoreSlim</span> <span id="r10 rd" class="r10 r">concurrentAcceptSessionsSemaphore</span>,
+            <a href="../Diagnostics/EntityScopeFactory.cs.html#9100164b526814a3" class="t t">EntityScopeFactory</a> <span id="r11 rd" class="r11 r">scopeFactory</span>,
+            <span class="i">IList</span>&lt;<a href="../Plugins/ServiceBusPlugin.cs.html#5ee21a6788ad51aa" class="t t">ServiceBusPlugin</a>&gt; <span id="r12 rd" class="r12 r">plugins</span>,
+            <b>int</b> <span id="r13 rd" class="r13 r">maxCallsPerSession</span>,
+            <b>bool</b> <span id="r14 rd" class="r14 r">keepOpenOnReceiveTimeout</span>)
+            : <a href="ReceiverManager.cs.html#60f04c97f2c2211d" class="k">base</a>(<span class="r0 r">connection</span>, <span class="r1 r">fullyQualifiedNamespace</span>, <span class="r2 r">entityPath</span>, <span class="r3 r">identifier</span>, <span class="r5 r">processorOptions</span>, <b>default</b>, <span class="r9 r">errorHandler</span>,
+                  <span class="r11 r">scopeFactory</span>, <span class="r12 r">plugins</span>)
+        {
+            <a href="#29d4866d82934117" class="i field">_sessionInitHandler</a> = <span class="r6 r">sessionInitHandler</span>;
+            <a href="#e215ceabe59808c0" class="i field">_sessionCloseHandler</a> = <span class="r7 r">sessionCloseHandler</span>;
+            <a href="#ccc6027f297a665a" class="i field">_messageHandler</a> = <span class="r8 r">messageHandler</span>;
+            <a href="#0052d8f310876a90" class="i field">_concurrentAcceptSessionsSemaphore</a> = <span class="r10 r">concurrentAcceptSessionsSemaphore</span>;
+            <a href="#4b19313d6b61ede6" class="i field">_maxCallsPerSession</a> = <span class="r13 r">maxCallsPerSession</span>;
+            <a href="#9e34e6f746ff2924" class="i field">_sessionReceiverOptions</a> = <b>new</b> <span class="t">ServiceBusSessionReceiverOptions</span>
+            {
+                <a href="../Receiver/ServiceBusSessionReceiverOptions.cs.html#1c61d187411bd340" class="i property">ReceiveMode</a> = <a href="ReceiverManager.cs.html#76b4dd0da3776d75" class="i field">_processorOptions</a>.<a href="ServiceBusProcessorOptions.cs.html#d93d046d4cc17eff" class="i property">ReceiveMode</a>,
+                <a href="../Receiver/ServiceBusSessionReceiverOptions.cs.html#b64fd04c34027054" class="i property">PrefetchCount</a> = <a href="ReceiverManager.cs.html#76b4dd0da3776d75" class="i field">_processorOptions</a>.<a href="ServiceBusProcessorOptions.cs.html#4fa3116b8cfab82c" class="i property">PrefetchCount</a>,
+            };
+            <a href="#4328a959b526fea5" class="i field">_sessionId</a> = <span class="r4 r">sessionId</span>;
+            <a href="#063d013ec0a416e1" class="i field">_keepOpenOnReceiveTimeout</a> = <span class="r14 r">keepOpenOnReceiveTimeout</span>;
+        }
+ 
+        <b>private async</b> <span class="i">Task</span>&lt;<b>bool</b>&gt; <a id="2cd27404b5bbc298" href="../R/2cd27404b5bbc298.html" target="n" data-glyph="76,1" class="i method">EnsureCanProcess</a>(<span class="i">CancellationToken</span> <span id="r15 rd" class="r15 r">cancellationToken</span>)
+        {
+            <b>bool</b> <span id="r16 rd" class="r16 r">releaseSemaphore</span> = <b>false</b>;
+            <b>try</b>
+            {
+                <b>await</b> <a href="#b1e2f157fc097305" class="i method">WaitSemaphore</a>(<span class="r15 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <span class="r16 r">releaseSemaphore</span> = <b>true</b>;
+ 
+                <span class="c">// If a receive call timed out for this session, avoid adding more threads</span>
+                <span class="c">// if we don&#39;t intend to leave the receiver open on receive timeouts. This</span>
+                <span class="c">// will help ensure other sessions get a chance to be processed.</span>
+                <b>if</b> (<a href="#8aeaab34b7ea1485" class="i field">_threadCount</a> &gt;= <a href="#4b19313d6b61ede6" class="i field">_maxCallsPerSession</a> ||
+                    (<a href="#b059a11d35f9b138" class="i field">_receiveTimeout</a> &amp;&amp; !<a href="#063d013ec0a416e1" class="i field">_keepOpenOnReceiveTimeout</a>))
+                {
+                    <b>return</b> <b>false</b>;
+                }
+ 
+                <b>if</b> (<a href="#7c8d59a5763886bd" class="i field">_receiver</a> == <b>null</b>)
+                {
+                    <b>await</b> <a href="#3236f2f511c00991" class="i method">CreateAndInitializeSessionReceiver</a>(<span class="r15 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+                <a href="#8aeaab34b7ea1485" class="i field">_threadCount</a>++;
+                <b>return</b> <b>true</b>;
+            }
+            <b>finally</b>
+            {
+                <b>if</b> (<span class="r16 r">releaseSemaphore</span>)
+                {
+                    <a href="#91dd265f65e2089f" class="i field">_semaphore</a>.<span class="i">Release</span>();
+                }
+            }
+        }
+ 
+        <b>private async</b> <span class="i">Task</span> <a id="b1e2f157fc097305" href="../R/b1e2f157fc097305.html" target="n" data-glyph="76,1" class="i method">WaitSemaphore</a>(<span class="i">CancellationToken</span> <span id="r17 rd" class="r17 r">cancellationToken</span>)
+        {
+            <b>try</b>
+            {
+                <b>await</b> <a href="#91dd265f65e2089f" class="i field">_semaphore</a>.<span class="i">WaitAsync</span>(<span class="r17 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>catch</b> (<span class="i">OperationCanceledException</span>)
+            {
+                <span class="c">// propagate as TCE so can be handled by</span>
+                <span class="c">// caller</span>
+                <b>throw</b> <b>new</b> <span class="i">TaskCanceledException</span>();
+            }
+        }
+ 
+        <b>private async</b> <span class="i">Task</span> <a id="3236f2f511c00991" href="../R/3236f2f511c00991.html" target="n" data-glyph="76,1" class="i method">CreateAndInitializeSessionReceiver</a>(
+            <span class="i">CancellationToken</span> <span id="r18 rd" class="r18 r">processorCancellationToken</span>)
+        {
+            <b>await</b> <a href="#9b36f1e394deb166" class="i method">CreateReceiver</a>(<span class="r18 r">processorCancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            <a href="#69f80777946c1e1f" class="i field">_sessionCancellationSource</a> = <span class="i">CancellationTokenSource</span>.<span class="i">CreateLinkedTokenSource</span>(<span class="r18 r">processorCancellationToken</span>);
+ 
+            <b>if</b> (<a href="ReceiverManager.cs.html#0fb91255f19ffbce" class="i property">AutoRenewLock</a>)
+            {
+                <a href="#473559c7ea6cfb51" class="i field">_sessionLockRenewalTask</a> = <a href="#30006b16f0c856a9" class="i method">RenewSessionLock</a>();
+            }
+ 
+            <b>if</b> (<a href="#29d4866d82934117" class="i field">_sessionInitHandler</a> != <b>null</b>)
+            {
+                <a href="ProcessSessionEventArgs.cs.html#833b7a9c2dde6645" class="k">var</a> <span id="r19 rd" class="r19 r">args</span> = <b>new</b> <a href="ProcessSessionEventArgs.cs.html#3d04f1995062adc3" class="t constructor">ProcessSessionEventArgs</a>(<a href="#7c8d59a5763886bd" class="i field">_receiver</a>, <span class="r18 r">processorCancellationToken</span>);
+                <b>await</b> <span class="i">_sessionInitHandler</span>(<span class="r19 r">args</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+        }
+ 
+        <b>private async</b> <span class="i">Task</span> <a id="9b36f1e394deb166" href="../R/9b36f1e394deb166.html" target="n" data-glyph="76,1" class="i method">CreateReceiver</a>(<span class="i">CancellationToken</span> <span id="r20 rd" class="r20 r">processorCancellationToken</span>)
+        {
+            <b>bool</b> <span id="r21 rd" class="r21 r">releaseSemaphore</span> = <b>false</b>;
+            <b>try</b>
+            {
+                <b>await</b> <a href="#0052d8f310876a90" class="i field">_concurrentAcceptSessionsSemaphore</a>.<span class="i">WaitAsync</span>(<span class="r20 r">processorCancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <span class="c">// only attempt to release semaphore if WaitAsync is successful,</span>
+                <span class="c">// otherwise SemaphoreFullException can occur.</span>
+                <span class="r21 r">releaseSemaphore</span> = <b>true</b>;
+                <a href="#7c8d59a5763886bd" class="i field">_receiver</a> = <b>await</b> <a href="../Receiver/ServiceBusSessionReceiver.cs.html#bb715430551ca316" class="t t">ServiceBusSessionReceiver</a>.<a href="../Receiver/ServiceBusSessionReceiver.cs.html#7ef12d799930b33c" class="i method">CreateSessionReceiverAsync</a>(
+                    <span class="r22 r">entityPath</span>: <a href="ReceiverManager.cs.html#cbdcc3fa9bd5b8f9" class="i field">_entityPath</a>,
+                    <span class="r23 r">connection</span>: <a href="ReceiverManager.cs.html#125f9481195ccd58" class="i field">_connection</a>,
+                    <span class="r24 r">plugins</span>: <a href="ReceiverManager.cs.html#5b80973d8d4a7b94" class="i field">_plugins</a>,
+                    <span class="r25 r">options</span>: <a href="#9e34e6f746ff2924" class="i field">_sessionReceiverOptions</a>,
+                    <span class="r26 r">sessionId</span>: <a href="#4328a959b526fea5" class="i field">_sessionId</a>,
+                    <span class="r27 r">cancellationToken</span>: <span class="r20 r">processorCancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>catch</b> (<span class="i">OperationCanceledException</span>)
+            {
+                <span class="c">// propagate as TCE so it will be handled by the outer catch block</span>
+                <b>throw</b> <b>new</b> <span class="i">TaskCanceledException</span>();
+            }
+            <b>finally</b>
+            {
+                <b>if</b> (<span class="r21 r">releaseSemaphore</span>)
+                {
+                    <a href="#0052d8f310876a90" class="i field">_concurrentAcceptSessionsSemaphore</a>.<span class="i">Release</span>();
+                }
+            }
+        }
+ 
+        <b>public override async</b> <span class="i">Task</span> <a id="ae7c233bbe61a0e6" href="../R/ae7c233bbe61a0e6.html" target="n" data-glyph="72,1" class="i method">CloseReceiverIfNeeded</a>(
+            <span class="i">CancellationToken</span> <span id="r28 rd" class="r28 r">processorCancellationToken</span>,
+            <b>bool</b> <span id="r29 rd" class="r29 r">forceClose</span> = <b>false</b>)
+        {
+            <b>if</b> (<span class="r29 r">forceClose</span>)
+            {
+                <b>await</b> <a href="#b178fb083dd28ae2" class="i method">CloseReceiver</a>(<span class="r28 r">processorCancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <b>return</b>;
+            }
+            <b>bool</b> <span id="r30 rd" class="r30 r">releaseSemaphore</span> = <b>false</b>;
+            <b>try</b>
+            {
+                <span class="c">// Intentionally not including processor cancellation token as</span>
+                <span class="c">// we need to ensure that we at least attempt to close the receiver if needed.</span>
+                <b>await</b> <span class="i">WaitSemaphore</span>(<span class="i">CancellationToken</span>.<span class="i">None</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <span class="r30 r">releaseSemaphore</span> = <b>true</b>;
+                <b>if</b> (<a href="#7c8d59a5763886bd" class="i field">_receiver</a> == <b>null</b>)
+                {
+                    <b>return</b>;
+                }
+                <a href="#8aeaab34b7ea1485" class="i field">_threadCount</a>--;
+                <b>if</b> (<a href="#8aeaab34b7ea1485" class="i field">_threadCount</a> == 0 &amp;&amp; !<span class="r28 r">processorCancellationToken</span>.<span class="i">IsCancellationRequested</span>)
+                {
+                    <b>if</b> ((<a href="#b059a11d35f9b138" class="i field">_receiveTimeout</a> &amp;&amp; !<a href="#063d013ec0a416e1" class="i field">_keepOpenOnReceiveTimeout</a>) ||
+                        !<a href="ReceiverManager.cs.html#0fb91255f19ffbce" class="i property">AutoRenewLock</a> ||
+                        <a href="#c2c989529353e7d1" class="i field">_sessionLockRenewalCancellationSource</a>.<span class="i">IsCancellationRequested</span>)
+                    {
+                        <b>await</b> <a href="#b178fb083dd28ae2" class="i method">CloseReceiver</a>(<span class="r28 r">processorCancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    }
+                }
+            }
+            <b>finally</b>
+            {
+                <b>if</b> (<span class="r30 r">releaseSemaphore</span>)
+                {
+                    <a href="#91dd265f65e2089f" class="i field">_semaphore</a>.<span class="i">Release</span>();
+                }
+            }
+        }
+ 
+        <b>private async</b> <span class="i">Task</span> <a id="b178fb083dd28ae2" href="../R/b178fb083dd28ae2.html" target="n" data-glyph="76,1" class="i method">CloseReceiver</a>(<span class="i">CancellationToken</span> <span id="r31 rd" class="r31 r">cancellationToken</span>)
+        {
+            <b>if</b> (<a href="#7c8d59a5763886bd" class="i field">_receiver</a> == <b>null</b> || <a href="#7c8d59a5763886bd" class="i field">_receiver</a>.<a href="../Receiver/ServiceBusReceiver.cs.html#2fb390c9488d131a" class="i property">IsClosed</a>)
+            {
+                <b>return</b>;
+            }
+            <b>try</b>
+            {
+                <b>if</b> (<a href="#e215ceabe59808c0" class="i field">_sessionCloseHandler</a> != <b>null</b>)
+                {
+                    <a href="ProcessSessionEventArgs.cs.html#833b7a9c2dde6645" class="k">var</a> <span id="r32 rd" class="r32 r">args</span> = <b>new</b> <a href="ProcessSessionEventArgs.cs.html#3d04f1995062adc3" class="t constructor">ProcessSessionEventArgs</a>(<a href="#7c8d59a5763886bd" class="i field">_receiver</a>, <span class="r31 r">cancellationToken</span>);
+                    <b>await</b> <span class="i">_sessionCloseHandler</span>(<span class="r32 r">args</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r33 rd" class="r33 r">exception</span>)
+            {
+                <b>await</b> <a href="ReceiverManager.cs.html#a15c91142001593f" class="i method">RaiseExceptionReceived</a>(
+                    <b>new</b> <a href="ProcessErrorEventArgs.cs.html#1f9a332f223304f0" class="t constructor">ProcessErrorEventArgs</a>(
+                        <span class="r33 r">exception</span>,
+                        <a href="ServiceBusErrorSource.cs.html#a1216992e876bcea" class="t t">ServiceBusErrorSource</a>.<a href="ServiceBusErrorSource.cs.html#5ce99c6d2985521e" class="i field">CloseSession</a>,
+                        <a href="ReceiverManager.cs.html#2b15c4bea7e9d9c3" class="i field">_fullyQualifiedNamespace</a>,
+                        <a href="ReceiverManager.cs.html#cbdcc3fa9bd5b8f9" class="i field">_entityPath</a>,
+                        <span class="r31 r">cancellationToken</span>))
+                    .<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>finally</b>
+            {
+                <span class="c">// cancel the automatic session lock renewal</span>
+                <b>await</b> <a href="ReceiverManager.cs.html#2966863396f58659" class="i method">CancelTask</a>(<a href="#c2c989529353e7d1" class="i field">_sessionLockRenewalCancellationSource</a>, <a href="#473559c7ea6cfb51" class="i field">_sessionLockRenewalTask</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <span class="c">// Always at least attempt to dispose. If this fails, it won&#39;t be retried.</span>
+                <b>await</b> <a href="#7c8d59a5763886bd" class="i field">_receiver</a>.<a href="../Receiver/ServiceBusReceiver.cs.html#9aab2bee052c5c07" class="i method">DisposeAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <a href="#7c8d59a5763886bd" class="i field">_receiver</a> = <b>null</b>;
+                <a href="#b059a11d35f9b138" class="i field">_receiveTimeout</a> = <b>false</b>;
+            }
+        }
+ 
+        <b>public override async</b> <span class="i">Task</span> <a id="fa3fd6a12c620f46" href="../R/fa3fd6a12c620f46.html" target="n" data-glyph="72,1" class="i method">ReceiveAndProcessMessagesAsync</a>(<span class="i">CancellationToken</span> <span id="r34 rd" class="r34 r">processorCancellationToken</span>)
+        {
+            <a href="ServiceBusErrorSource.cs.html#a1216992e876bcea" class="t t">ServiceBusErrorSource</a> <span id="r35 rd" class="r35 r">errorSource</span> = <a href="ServiceBusErrorSource.cs.html#a1216992e876bcea" class="t t">ServiceBusErrorSource</a>.<a href="ServiceBusErrorSource.cs.html#ac6f48f2a7e9d251" class="i field">AcceptSession</a>;
+            <b>bool</b> <span id="r36 rd" class="r36 r">canProcess</span> = <b>false</b>;
+            <b>try</b>
+            {
+                <b>try</b>
+                {
+                    <span class="r36 r">canProcess</span> = <b>await</b> <a href="#2cd27404b5bbc298" class="i method">EnsureCanProcess</a>(<span class="r34 r">processorCancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    <b>if</b> (!<span class="r36 r">canProcess</span>)
+                    {
+                        <b>return</b>;
+                    }
+                }
+                <b>catch</b> (<a href="../Primitives/ServiceBusException.cs.html#a5716ddcbc4510f2" class="t t">ServiceBusException</a> <span id="r37 rd" class="r37 r">ex</span>)
+                <b>when</b> (<span class="r37 r">ex</span>.<a href="../Primitives/ServiceBusException.cs.html#b39014a14c98853e" class="i property">Reason</a> == <a href="../Primitives/ServiceBusFailureReason.cs.html#ac3a011acdeef28e" class="t t">ServiceBusFailureReason</a>.<a href="../Primitives/ServiceBusFailureReason.cs.html#da55c811dc6edc39" class="i field">ServiceTimeout</a>)
+                {
+                    <span class="c">// these exceptions are expected when no messages are available</span>
+                    <span class="c">// so simply return and allow this to be tried again on next thread</span>
+                    <b>return</b>;
+                }
+                <span class="c">// loop within the context of this thread</span>
+                <b>while</b> (!<a href="#69f80777946c1e1f" class="i field">_sessionCancellationSource</a>.<span class="i">Token</span>.<span class="i">IsCancellationRequested</span>)
+                {
+                    <span class="r35 r">errorSource</span> = <a href="ServiceBusErrorSource.cs.html#a1216992e876bcea" class="t t">ServiceBusErrorSource</a>.<a href="ServiceBusErrorSource.cs.html#827ea9e8b7628243" class="i field">Receive</a>;
+                    <a href="../Primitives/ServiceBusReceivedMessage.cs.html#347e87fb652ef164" class="t t">ServiceBusReceivedMessage</a> <span id="r38 rd" class="r38 r">message</span> = <b>await</b> <a href="#7c8d59a5763886bd" class="i field">_receiver</a>.<span class="i">ReceiveMessageAsync</span>(
+                        <a href="ReceiverManager.cs.html#aa8b20a36ea15a3c" class="i field">_maxReceiveWaitTime</a>,
+                        <a href="#69f80777946c1e1f" class="i field">_sessionCancellationSource</a>.<span class="i">Token</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    <b>if</b> (<span class="r38 r">message</span> == <b>null</b>)
+                    {
+                        <span class="c">// Break out of the loop to allow a new session to</span>
+                        <span class="c">// be processed.</span>
+                        <a href="#b059a11d35f9b138" class="i field">_receiveTimeout</a> = <b>true</b>;
+                        <b>break</b>;
+                    }
+                    <b>await</b> <span class="i">ProcessOneMessageWithinScopeAsync</span>(
+                        <span class="r38 r">message</span>,
+                        <a href="../Diagnostics/DiagnosticProperty.cs.html#97b04f181690465e" class="t t">DiagnosticProperty</a>.<a href="../Diagnostics/DiagnosticProperty.cs.html#8162b392d6e6b893" class="i property">ProcessSessionMessageActivityName</a>,
+                        <a href="#69f80777946c1e1f" class="i field">_sessionCancellationSource</a>.<span class="i">Token</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r39 rd" class="r39 r">ex</span>)
+            <b>when</b> (!(<span class="r39 r">ex</span> <b>is</b> <span class="i">TaskCanceledException</span>) ||
+            <span class="c">// If the user manually throws a TCE, then we should log it.</span>
+            (!<a href="#69f80777946c1e1f" class="i field">_sessionCancellationSource</a>.<span class="i">IsCancellationRequested</span> &amp;&amp;
+            <span class="c">// Even though the _sessionCancellationSource is linked to processorCancellationToken,</span>
+            <span class="c">// we need to check both here in case the processor token gets cancelled before the</span>
+            <span class="c">// session token is linked.</span>
+            !<span class="r34 r">processorCancellationToken</span>.<span class="i">IsCancellationRequested</span>))
+            {
+                <b>if</b> (<span class="r39 r">ex</span> <b>is</b> <a href="../Primitives/ServiceBusException.cs.html#a5716ddcbc4510f2" class="t t">ServiceBusException</a> <span id="r40 rd" class="r40 r">sbException</span> &amp;&amp; <span class="r40 r">sbException</span>.<a href="../Primitives/ServiceBusException.cs.html#672cb80c93689968" class="i property">ProcessorErrorSource</a>.<span class="i">HasValue</span>)
+                {
+                    <span class="r35 r">errorSource</span> = <span class="r40 r">sbException</span>.<a href="../Primitives/ServiceBusException.cs.html#672cb80c93689968" class="i property">ProcessorErrorSource</a>.<span class="i">Value</span>;
+ 
+                    <span class="c">// Signal cancellation so user event handlers can stop whatever processing they are doing</span>
+                    <span class="c">// as soon as we know the session lock has been lost. Note, we don&#39;t have analogous handling</span>
+                    <span class="c">// for message locks in ReceiverManager, because there is only ever one thread processing a</span>
+                    <span class="c">// single message at one time, so cancelling the token there would serve no purpose.</span>
+                    <b>if</b> (<span class="r40 r">sbException</span>.<a href="../Primitives/ServiceBusException.cs.html#b39014a14c98853e" class="i property">Reason</a> == <a href="../Primitives/ServiceBusFailureReason.cs.html#ac3a011acdeef28e" class="t t">ServiceBusFailureReason</a>.<a href="../Primitives/ServiceBusFailureReason.cs.html#154197a09721ceaf" class="i field">SessionLockLost</a>)
+                    {
+                        <a href="#69f80777946c1e1f" class="i field">_sessionCancellationSource</a>.<span class="i">Cancel</span>();
+                    }
+                }
+                <b>await</b> <a href="ReceiverManager.cs.html#a15c91142001593f" class="i method">RaiseExceptionReceived</a>(
+                    <b>new</b> <a href="ProcessErrorEventArgs.cs.html#1f9a332f223304f0" class="t constructor">ProcessErrorEventArgs</a>(
+                        <span class="r39 r">ex</span>,
+                        <span class="r35 r">errorSource</span>,
+                        <a href="ReceiverManager.cs.html#2b15c4bea7e9d9c3" class="i field">_fullyQualifiedNamespace</a>,
+                        <a href="ReceiverManager.cs.html#cbdcc3fa9bd5b8f9" class="i field">_entityPath</a>,
+                        <span class="r34 r">processorCancellationToken</span>))
+                    .<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>finally</b>
+            {
+                <b>if</b> (<span class="r36 r">canProcess</span>)
+                {
+                    <b>await</b> <a href="#ae7c233bbe61a0e6" class="i method">CloseReceiverIfNeeded</a>(
+                        <span class="r34 r">processorCancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private async</b> <span class="i">Task</span> <a id="30006b16f0c856a9" href="../R/30006b16f0c856a9.html" target="n" data-glyph="76,1" class="i method">RenewSessionLock</a>()
+        {
+            <a href="#c2c989529353e7d1" class="i field">_sessionLockRenewalCancellationSource</a> = <span class="i">CancellationTokenSource</span>.<span class="i">CreateLinkedTokenSource</span>(
+                <a href="#69f80777946c1e1f" class="i field">_sessionCancellationSource</a>.<span class="i">Token</span>);
+            <a href="#c2c989529353e7d1" class="i field">_sessionLockRenewalCancellationSource</a>.<span class="i">CancelAfter</span>(<a href="ReceiverManager.cs.html#76b4dd0da3776d75" class="i field">_processorOptions</a>.<a href="ServiceBusProcessorOptions.cs.html#1580e3ccf212e594" class="i property">MaxAutoLockRenewalDuration</a>);
+            <span class="i">CancellationToken</span> <span id="r41 rd" class="r41 r">sessionLockRenewalCancellationToken</span> = <a href="#c2c989529353e7d1" class="i field">_sessionLockRenewalCancellationSource</a>.<span class="i">Token</span>;
+            <b>while</b> (!<span class="r41 r">sessionLockRenewalCancellationToken</span>.<span class="i">IsCancellationRequested</span>)
+            {
+                <b>try</b>
+                {
+                    <a href="../Diagnostics/ServiceBusEventSource.cs.html#9f107e3f0d141c2b" class="t t">ServiceBusEventSource</a>.<a href="../Diagnostics/ServiceBusEventSource.cs.html#9494c77d3f8244ec" class="i property">Log</a>.<a href="../Diagnostics/ServiceBusEventSource.cs.html#8c8b92a4aaef8645" class="i method">ProcessorRenewSessionLockStart</a>(<a href="ReceiverManager.cs.html#e53ae1fb6233a2dc" class="i field">_identifier</a>, <a href="#7c8d59a5763886bd" class="i field">_receiver</a>.<a href="../Receiver/ServiceBusSessionReceiver.cs.html#3af927b70c1b25fd" class="i property">SessionId</a>);
+                    <span class="i">TimeSpan</span> <span id="r42 rd" class="r42 r">delay</span> = <a href="ReceiverManager.cs.html#448a74f53a4abf29" class="i method">CalculateRenewDelay</a>(<a href="#7c8d59a5763886bd" class="i field">_receiver</a>.<a href="../Receiver/ServiceBusSessionReceiver.cs.html#fa512a087653bb00" class="i property">SessionLockedUntil</a>);
+ 
+                    <b>await</b> <span class="i">Task</span>.<span class="i">Delay</span>(<span class="r42 r">delay</span>, <span class="r41 r">sessionLockRenewalCancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    <b>if</b> (<a href="#7c8d59a5763886bd" class="i field">_receiver</a>.<a href="../Receiver/ServiceBusReceiver.cs.html#2fb390c9488d131a" class="i property">IsClosed</a>)
+                    {
+                        <b>break</b>;
+                    }
+                    <b>await</b> <a href="#7c8d59a5763886bd" class="i field">_receiver</a>.<a href="../Receiver/ServiceBusSessionReceiver.cs.html#3720820d9a93bd2a" class="i method">RenewSessionLockAsync</a>(<span class="r41 r">sessionLockRenewalCancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    <a href="../Diagnostics/ServiceBusEventSource.cs.html#9f107e3f0d141c2b" class="t t">ServiceBusEventSource</a>.<a href="../Diagnostics/ServiceBusEventSource.cs.html#9494c77d3f8244ec" class="i property">Log</a>.<a href="../Diagnostics/ServiceBusEventSource.cs.html#2cd727e3950ef635" class="i method">ProcessorRenewSessionLockComplete</a>(<a href="ReceiverManager.cs.html#e53ae1fb6233a2dc" class="i field">_identifier</a>);
+                }
+ 
+                <b>catch</b> (<span class="i">Exception</span> <span id="r43 rd" class="r43 r">ex</span>) <b>when</b> (!(<span class="r43 r">ex</span> <b>is</b> <span class="i">TaskCanceledException</span>))
+                {
+                    <a href="../Diagnostics/ServiceBusEventSource.cs.html#9f107e3f0d141c2b" class="t t">ServiceBusEventSource</a>.<a href="../Diagnostics/ServiceBusEventSource.cs.html#9494c77d3f8244ec" class="i property">Log</a>.<span class="i">ProcessorRenewSessionLockException</span>(<a href="ReceiverManager.cs.html#e53ae1fb6233a2dc" class="i field">_identifier</a>, <span class="r43 r">ex</span>.<span class="i">ToString</span>());
+                    <b>await</b> <a href="ReceiverManager.cs.html#f463836b71348aa6" class="i method">HandleRenewLockException</a>(<span class="r43 r">ex</span>, <span class="r41 r">sessionLockRenewalCancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                    <span class="c">// if the error was not transient, break out of the loop</span>
+                    <b>if</b> (!(<span class="r43 r">ex</span> <b>as</b> <a href="../Primitives/ServiceBusException.cs.html#a5716ddcbc4510f2" class="t t">ServiceBusException</a>)?.<a href="../Primitives/ServiceBusException.cs.html#67d00fe10885d8e7" class="i property">IsTransient</a> == <b>true</b>)
+                    {
+                        <b>break</b>;
+                    }
+                }
+            }
+        }
+ 
+        <b>protected override async</b> <span class="i">Task</span> <a id="b3dd0c860d7ecc54" href="../R/b3dd0c860d7ecc54.html" target="n" data-glyph="75,1" class="i method">OnMessageHandler</a>(
+            <a href="../Primitives/ServiceBusReceivedMessage.cs.html#347e87fb652ef164" class="t t">ServiceBusReceivedMessage</a> <span id="r44 rd" class="r44 r">message</span>,
+            <span class="i">CancellationToken</span> <span id="r45 rd" class="r45 r">cancellationToken</span>)
+        {
+            <a href="ProcessSessionMessageEventArgs.cs.html#7ed608712705605f" class="k">var</a> <span id="r46 rd" class="r46 r">args</span> = <b>new</b> <a href="ProcessSessionMessageEventArgs.cs.html#0091604002ddebe3" class="t constructor">ProcessSessionMessageEventArgs</a>(
+                <span class="r44 r">message</span>,
+                <a href="#7c8d59a5763886bd" class="i field">_receiver</a>,
+                <span class="r45 r">cancellationToken</span>);
+            <b>await</b> <span class="i">_messageHandler</span>(<span class="r46 r">args</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

@@ -1,0 +1,412 @@
+﻿<!DOCTYPE html>
+<html><head><title>SessionClient.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(403);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.ServiceBus/SessionClient.cs" target="_top">SessionClient.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.ServiceBus" target="_top">src\Microsoft.Azure.ServiceBus.csproj</a> (Microsoft.Azure.ServiceBus)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft. All rights reserved.</span>
+<span class="c">// Licensed under the MIT license. See LICENSE file in the project root for full license information.</span>
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">ServiceBus</span>
+{
+    <b>using</b> <span class="i">System</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Linq</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+    <b>using</b> <span class="i n">Amqp</span>;
+    <b>using</b> <span class="i n">Azure</span>.<span class="i">Amqp</span>;
+    <b>using</b> <span class="i n">Core</span>;
+    <b>using</b> <span class="i n">Primitives</span>;
+ 
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> A session client can be used to accept session objects which can be used to interact with all messages with the same sessionId.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> You can accept any session or a given session (identified by </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a>.<a href="IMessageSession.cs.html#f8d2be0dbd369bb5" class="i property">SessionId</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> using a session client.</span>
+    <span class="c">///</span><span class="c"> Once you accept a session, you can use it as a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Core/MessageReceiver.cs.html#df59eb99899d6167" class="t t">MessageReceiver</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> which receives only messages having the same session id.</span>
+    <span class="c">///</span><span class="c"> See </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> for usage of session object.</span>
+    <span class="c">///</span><span class="c"> This uses AMQP protocol to communicate with the service.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">example</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> To create a new SessionClient</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">code</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> ISessionClient sessionClient = new SessionClient(</span>
+    <span class="c">///</span><span class="c">     namespaceConnectionString,</span>
+    <span class="c">///</span><span class="c">     queueName,</span>
+    <span class="c">///</span><span class="c">     ReceiveMode.PeekLock);</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">code</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c"> To receive a session object for a given sessionId</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">code</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> IMessageSession session = await sessionClient.AcceptMessageSessionAsync(sessionId);</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">code</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c"> To receive any session</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">code</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> IMessageSession session = await sessionClient.AcceptMessageSessionAsync();</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">code</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">example</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+    <b>public sealed class</b> <a id="665e503e2b872f1f" href="R/665e503e2b872f1f.html" target="n" data-glyph="0,0" class="t t">SessionClient</a> : <a href="ClientEntity.cs.html#88eab29996c9f54a" class="t t">ClientEntity</a>, <a href="ISessionClient.cs.html#ec1e03f734d1bf10" class="t t">ISessionClient</a>
+    {
+        <b>const int</b> <a id="79756c50b42e52bc" href="R/79756c50b42e52bc.html" target="n" data-glyph="10,1" class="i field">DefaultPrefetchCount</a> = 0;
+        <b>readonly</b> <a href="ServiceBusDiagnosticsSource.cs.html#8b0a5b6d28151a22" class="t t">ServiceBusDiagnosticSource</a> <a id="3130d492f8a44d5b" href="R/3130d492f8a44d5b.html" target="n" data-glyph="46,1" class="i field">diagnosticSource</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new SessionClient from a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusConnectionStringBuilder.cs.html#f5792d111dd93f0d" class="t t">ServiceBusConnectionStringBuilder</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">connectionStringBuilder</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusConnectionStringBuilder.cs.html#f5792d111dd93f0d" class="t t">ServiceBusConnectionStringBuilder</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> having entity level connection details.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">receiveMode</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#0048c2d17cbf82e6" class="i property">ReceiveMode</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> used to specify how messages are received. Defaults to PeekLock mode.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that will be used when communicating with ServiceBus. Defaults to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a>.<a href="RetryPolicy.cs.html#d5872bd857fd612e" class="i property">Default</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">prefetchCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#c03bac5a1da09de8" class="i property">PrefetchCount</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that specifies the upper limit of messages the session object</span>
+        <span class="c">///</span><span class="c"> will actively receive regardless of whether a receive operation is pending. Defaults to 0.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">Creates a new connection to the entity, which is used for all the sessions objects accepted using this client.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public</b> <a id="54309e1a399c1c21" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">SessionClient</a>(
+            <a href="ServiceBusConnectionStringBuilder.cs.html#f5792d111dd93f0d" class="t t">ServiceBusConnectionStringBuilder</a> <span id="r0 rd" class="r0 r">connectionStringBuilder</span>,
+            <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a> <span id="r1 rd" class="r1 r">receiveMode</span> = <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a>.<a href="ReceiveMode.cs.html#d43dbf05f584f89c" class="i field">PeekLock</a>,
+            <a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a> <span id="r2 rd" class="r2 r">retryPolicy</span> = <b>null</b>,
+            <b>int</b> <span id="r3 rd" class="r3 r">prefetchCount</span> = <a href="#79756c50b42e52bc" class="i field">DefaultPrefetchCount</a>)
+            : <b>this</b>(<span class="r0 r">connectionStringBuilder</span>?.<a href="ServiceBusConnectionStringBuilder.cs.html#667a4826f798998b" class="i method">GetNamespaceConnectionString</a>(), <span class="r0 r">connectionStringBuilder</span>?.<a href="ServiceBusConnectionStringBuilder.cs.html#07e91b5081d2efe4" class="i property">EntityPath</a>, <span class="r1 r">receiveMode</span>, <span class="r2 r">retryPolicy</span>, <span class="r3 r">prefetchCount</span>)
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new SessionClient from a specified connection string and entity path.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">connectionString</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Namespace connection string used to communicate with Service Bus. Must not contain entity details.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">entityPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The path of the entity for this receiver. For Queues this will be the name, but for Subscriptions this will be the full path.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">receiveMode</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#0048c2d17cbf82e6" class="i property">ReceiveMode</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> used to specify how messages are received. Defaults to PeekLock mode.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that will be used when communicating with ServiceBus. Defaults to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a>.<a href="RetryPolicy.cs.html#d5872bd857fd612e" class="i property">Default</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">prefetchCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#c03bac5a1da09de8" class="i property">PrefetchCount</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that specifies the upper limit of messages the session object</span>
+        <span class="c">///</span><span class="c"> will actively receive regardless of whether a receive operation is pending. Defaults to 0.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">Creates a new connection to the entity, which is used for all the sessions objects accepted using this client.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public</b> <a id="78d93e6b1d5ab399" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">SessionClient</a>(
+            <b>string</b> <span id="r4 rd" class="r4 r">connectionString</span>,
+            <b>string</b> <span id="r5 rd" class="r5 r">entityPath</span>,
+            <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a> <span id="r6 rd" class="r6 r">receiveMode</span> = <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a>.<a href="ReceiveMode.cs.html#d43dbf05f584f89c" class="i field">PeekLock</a>,
+            <a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a> <span id="r7 rd" class="r7 r">retryPolicy</span> = <b>null</b>,
+            <b>int</b> <span id="r8 rd" class="r8 r">prefetchCount</span> = <a href="#79756c50b42e52bc" class="i field">DefaultPrefetchCount</a>)
+            : <a href="#83624cbe94879369" class="k">this</a>(<b>nameof</b>(<a href="#665e503e2b872f1f" class="t t">SessionClient</a>),
+                  <span class="r5 r">entityPath</span>,
+                  <b>null</b>,
+                  <span class="r6 r">receiveMode</span>,
+                  <span class="r8 r">prefetchCount</span>,
+                  <b>new</b> <a href="ServiceBusConnection.cs.html#45472230a8f717ae" class="t constructor">ServiceBusConnection</a>(<span class="r4 r">connectionString</span>),
+                  <b>null</b>,
+                  <span class="r7 r">retryPolicy</span>,
+                  <b>null</b>)
+        {
+            <b>if</b> (<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r4 r">connectionString</span>))
+            {
+                <b>throw</b> <a href="Primitives/Fx.cs.html#c01e8844709e19c1" class="t t">Fx</a>.<a href="Primitives/Fx.cs.html#0793cb830fb5b201" class="i property">Exception</a>.<a href="Primitives/ExceptionUtility.cs.html#4ae6cf9072070b0b" class="i method">ArgumentNullOrWhiteSpace</a>(<span class="r4 r">connectionString</span>);
+            }
+ 
+            <a href="#665e503e2b872f1f" class="k">this</a>.<a href="ClientEntity.cs.html#29456179e6094c9e" class="i property">OwnsConnection</a> = <b>true</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new SessionClient from a specified endpoint, entity path, and token provider.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">endpoint</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Fully qualified domain name for Service Bus. Most likely, {yournamespace}.servicebus.windows.net</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r10 r">entityPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Queue path.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r11 r">tokenProvider</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Token provider which will generate security tokens for authorization.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">transportType</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Transport type.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">receiveMode</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Mode of receive of messages. Defaults to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#0048c2d17cbf82e6" class="i property">ReceiveMode</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.PeekLock.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r14 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Retry policy for queue operations. Defaults to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a>.<a href="RetryPolicy.cs.html#d5872bd857fd612e" class="i property">Default</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">prefetchCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#c03bac5a1da09de8" class="i property">PrefetchCount</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that specifies the upper limit of messages this receiver</span>
+        <span class="c">///</span><span class="c"> will actively receive regardless of whether a receive operation is pending. Defaults to 0.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">Creates a new connection to the entity, which is opened during the first operation.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public</b> <a id="fc3d75ff1e28a011" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">SessionClient</a>(
+            <b>string</b> <span id="r9 rd" class="r9 r">endpoint</span>,
+            <b>string</b> <span id="r10 rd" class="r10 r">entityPath</span>,
+            <a href="Primitives/ITokenProvider.cs.html#9e2a4877b63e4b8d" class="t t">ITokenProvider</a> <span id="r11 rd" class="r11 r">tokenProvider</span>,
+            <a href="TransportType.cs.html#0a715f93272561f8" class="t t">TransportType</a> <span id="r12 rd" class="r12 r">transportType</span> = <a href="TransportType.cs.html#0a715f93272561f8" class="t t">TransportType</a>.<a href="TransportType.cs.html#8cda352639a9c461" class="i field">Amqp</a>,
+            <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a> <span id="r13 rd" class="r13 r">receiveMode</span> = <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a>.<a href="ReceiveMode.cs.html#d43dbf05f584f89c" class="i field">PeekLock</a>,
+            <a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a> <span id="r14 rd" class="r14 r">retryPolicy</span> = <b>null</b>,
+            <b>int</b> <span id="r15 rd" class="r15 r">prefetchCount</span> = <a href="#79756c50b42e52bc" class="i field">DefaultPrefetchCount</a>)
+            : <a href="#83624cbe94879369" class="k">this</a>(<b>nameof</b>(<a href="#665e503e2b872f1f" class="t t">SessionClient</a>),
+                <span class="r10 r">entityPath</span>,
+                <b>null</b>,
+                <span class="r13 r">receiveMode</span>,
+                <span class="r15 r">prefetchCount</span>,
+                <b>new</b> <a href="ServiceBusConnection.cs.html#3d86832e26fa991b" class="t constructor">ServiceBusConnection</a>(<span class="r9 r">endpoint</span>, <span class="r12 r">transportType</span>, <span class="r14 r">retryPolicy</span>) {<a href="ServiceBusConnection.cs.html#13221390545f966d" class="i property">TokenProvider</a> = <span class="r11 r">tokenProvider</span>},
+                <b>null</b>,
+                <span class="r14 r">retryPolicy</span>,
+                <b>null</b>)
+        {
+            <a href="#665e503e2b872f1f" class="k">this</a>.<a href="ClientEntity.cs.html#29456179e6094c9e" class="i property">OwnsConnection</a> = <b>true</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new SessionClient on a given </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#c9ff9f54a3c1c212" class="i property">ServiceBusConnection</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r16 r">serviceBusConnection</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Connection object to the service bus namespace.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r17 r">entityPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The path of the entity for this receiver. For Queues this will be the name, but for Subscriptions this will be the full path.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r18 r">receiveMode</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#0048c2d17cbf82e6" class="i property">ReceiveMode</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> used to specify how messages are received. Defaults to PeekLock mode.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r19 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that will be used when communicating with ServiceBus. Defaults to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a>.<a href="RetryPolicy.cs.html#d5872bd857fd612e" class="i property">Default</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r20 r">prefetchCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#c03bac5a1da09de8" class="i property">PrefetchCount</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that specifies the upper limit of messages the session object</span>
+        <span class="c">///</span><span class="c"> will actively receive regardless of whether a receive operation is pending. Defaults to 0.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="cdbe3be052ee4cae" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">SessionClient</a>(
+            <a href="ServiceBusConnection.cs.html#d4af28baeaa553d8" class="t t">ServiceBusConnection</a> <span id="r16 rd" class="r16 r">serviceBusConnection</span>,
+            <b>string</b> <span id="r17 rd" class="r17 r">entityPath</span>,
+            <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a> <span id="r18 rd" class="r18 r">receiveMode</span>,
+            <a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a> <span id="r19 rd" class="r19 r">retryPolicy</span> = <b>null</b>,
+            <b>int</b> <span id="r20 rd" class="r20 r">prefetchCount</span> = <a href="#79756c50b42e52bc" class="i field">DefaultPrefetchCount</a>)
+            : <a href="#83624cbe94879369" class="k">this</a>(<b>nameof</b>(<a href="#665e503e2b872f1f" class="t t">SessionClient</a>),
+                <span class="r17 r">entityPath</span>,
+                <b>null</b>,
+                <span class="r18 r">receiveMode</span>,
+                <span class="r20 r">prefetchCount</span>,
+                <span class="r16 r">serviceBusConnection</span>,
+                <b>null</b>,
+                <span class="r19 r">retryPolicy</span>,
+                <b>null</b>)
+        {
+            <a href="#665e503e2b872f1f" class="k">this</a>.<a href="ClientEntity.cs.html#29456179e6094c9e" class="i property">OwnsConnection</a> = <b>false</b>;
+        }
+ 
+        <b>internal</b> <a id="83624cbe94879369" href="R/83624cbe94879369.html" target="n" data-glyph="74,1" class="t constructor">SessionClient</a>(
+            <b>string</b> <span id="r21 rd" class="r21 r">clientTypeName</span>,
+            <b>string</b> <span id="r22 rd" class="r22 r">entityPath</span>,
+            <a href="Primitives/MessagingEntityType.cs.html#03bc9354bc383d14" class="t t">MessagingEntityType</a>? <span id="r23 rd" class="r23 r">entityType</span>,
+            <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a> <span id="r24 rd" class="r24 r">receiveMode</span>,
+            <b>int</b> <span id="r25 rd" class="r25 r">prefetchCount</span>,
+            <a href="ServiceBusConnection.cs.html#d4af28baeaa553d8" class="t t">ServiceBusConnection</a> <span id="r26 rd" class="r26 r">serviceBusConnection</span>,
+            <span class="i">ICbsTokenProvider</span> <span id="r27 rd" class="r27 r">cbsTokenProvider</span>,
+            <a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a> <span id="r28 rd" class="r28 r">retryPolicy</span>,
+            <span class="i">IList</span>&lt;<a href="Core/ServiceBusPlugin.cs.html#467b28cbbe8148c5" class="t t">ServiceBusPlugin</a>&gt; <span id="r29 rd" class="r29 r">registeredPlugins</span>)
+            : <a href="ClientEntity.cs.html#912f05124af51638" class="k">base</a>(<span class="r21 r">clientTypeName</span>, <span class="r22 r">entityPath</span>, <span class="r28 r">retryPolicy</span> ?? <a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a>.<a href="RetryPolicy.cs.html#d5872bd857fd612e" class="i property">Default</a>)
+        {
+            <b>if</b> (<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r22 r">entityPath</span>))
+            {
+                <b>throw</b> <a href="Primitives/Fx.cs.html#c01e8844709e19c1" class="t t">Fx</a>.<a href="Primitives/Fx.cs.html#0793cb830fb5b201" class="i property">Exception</a>.<a href="Primitives/ExceptionUtility.cs.html#4ae6cf9072070b0b" class="i method">ArgumentNullOrWhiteSpace</a>(<span class="r22 r">entityPath</span>);
+            }
+ 
+            <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#c9ff9f54a3c1c212" class="i property">ServiceBusConnection</a> = <span class="r26 r">serviceBusConnection</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r26 r">serviceBusConnection</span>));
+            <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#4dae3f577e2a2bd5" class="i property">EntityPath</a> = <span class="r22 r">entityPath</span>;
+            <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#65779da201907e74" class="i property">EntityType</a> = <span class="r23 r">entityType</span>;
+            <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#0048c2d17cbf82e6" class="i property">ReceiveMode</a> = <span class="r24 r">receiveMode</span>;
+            <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#c03bac5a1da09de8" class="i property">PrefetchCount</a> = <span class="r25 r">prefetchCount</span>;
+            <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#c9ff9f54a3c1c212" class="i property">ServiceBusConnection</a>.<a href="ServiceBusConnection.cs.html#ce19b6c3bc0eb42e" class="i method">ThrowIfClosed</a>();
+ 
+            <b>if</b> (<span class="r27 r">cbsTokenProvider</span> != <b>null</b>)
+            {
+                <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#a4354f6dd4d7b891" class="i property">CbsTokenProvider</a> = <span class="r27 r">cbsTokenProvider</span>;
+            }
+            <b>else</b> <b>if</b> (<a href="#665e503e2b872f1f" class="k">this</a>.<a href="#c9ff9f54a3c1c212" class="i property">ServiceBusConnection</a>.<a href="ServiceBusConnection.cs.html#13221390545f966d" class="i property">TokenProvider</a> != <b>null</b>)
+            {
+                <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#a4354f6dd4d7b891" class="i property">CbsTokenProvider</a> = <b>new</b> <a href="Primitives/TokenProviderAdapter.cs.html#6253ee9453b7f995" class="t constructor">TokenProviderAdapter</a>(<a href="#665e503e2b872f1f" class="k">this</a>.<a href="#c9ff9f54a3c1c212" class="i property">ServiceBusConnection</a>.<a href="ServiceBusConnection.cs.html#13221390545f966d" class="i property">TokenProvider</a>, <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#c9ff9f54a3c1c212" class="i property">ServiceBusConnection</a>.<a href="ServiceBusConnection.cs.html#c7f7ecc4031ee56b" class="i property">OperationTimeout</a>);
+            }
+            <b>else</b>
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="#c9ff9f54a3c1c212" class="i property">ServiceBusConnection</a>)}<span class="s"> doesn&#39;t have a valid token provider</span><span class="s">&quot;</span>);
+            }
+ 
+            <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#3130d492f8a44d5b" class="i field">diagnosticSource</a> = <b>new</b> <a href="ServiceBusDiagnosticsSource.cs.html#5e2002e923a0f339" class="t constructor">ServiceBusDiagnosticSource</a>(<span class="r22 r">entityPath</span>, <span class="r26 r">serviceBusConnection</span>.<a href="ServiceBusConnection.cs.html#aa10f462e6ba95a8" class="i property">Endpoint</a>);
+ 
+            <span class="c">// Register plugins on the message session.</span>
+            <b>if</b> (<span class="r29 r">registeredPlugins</span> != <b>null</b>)
+            {
+                <b>foreach</b> (<b>var</b> <span id="r30 rd" class="r30 r">serviceBusPlugin</span> <b>in</b> <span class="r29 r">registeredPlugins</span>)
+                {
+                    <a href="#665e503e2b872f1f" class="k">this</a>.<span class="i">RegisterPlugin</span>(<span class="r30 r">serviceBusPlugin</span>);
+                }
+            }
+        }
+ 
+        <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a> <a id="0048c2d17cbf82e6" href="R/0048c2d17cbf82e6.html" target="n" data-glyph="106,1" class="i property">ReceiveMode</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the path of the entity. This is either the name of the queue, or the full path of the subscription.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public string</b> <a id="4dae3f577e2a2bd5" href="R/4dae3f577e2a2bd5.html" target="n" data-glyph="102,1" class="i property">EntityPath</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the path of the entity. This is either the name of the queue, or the full path of the subscription.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public override string</b> <a id="81206b07ca2b80e8" href="R/81206b07ca2b80e8.html" target="n" data-glyph="102,1" class="i property">Path</a> =&gt; <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#4dae3f577e2a2bd5" class="i property">EntityPath</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Duration after which individual operations will timeout.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public override</b> <span class="i">TimeSpan</span> <a id="747928910de9eac8" href="R/747928910de9eac8.html" target="n" data-glyph="102,1" class="i property">OperationTimeout</a>
+        {
+            <b>get</b> =&gt; <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#c9ff9f54a3c1c212" class="i property">ServiceBusConnection</a>.<a href="ServiceBusConnection.cs.html#c7f7ecc4031ee56b" class="i property">OperationTimeout</a>;
+            <b>set</b> =&gt; <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#c9ff9f54a3c1c212" class="i property">ServiceBusConnection</a>.<a href="ServiceBusConnection.cs.html#c7f7ecc4031ee56b" class="i property">OperationTimeout</a> = <b>value</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Connection object to the service bus namespace.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public override</b> <a href="ServiceBusConnection.cs.html#d4af28baeaa553d8" class="t t">ServiceBusConnection</a> <a id="c9ff9f54a3c1c212" href="R/c9ff9f54a3c1c212.html" target="n" data-glyph="102,1" class="i property">ServiceBusConnection</a> { <b>get</b>; }
+ 
+        <a href="Primitives/MessagingEntityType.cs.html#03bc9354bc383d14" class="t t">MessagingEntityType</a>? <a id="65779da201907e74" href="R/65779da201907e74.html" target="n" data-glyph="106,1" class="i property">EntityType</a> { <b>get</b>; }
+ 
+        <b>internal int</b> <a id="c03bac5a1da09de8" href="R/c03bac5a1da09de8.html" target="n" data-glyph="104,1" class="i property">PrefetchCount</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="i">ICbsTokenProvider</span> <a id="a4354f6dd4d7b891" href="R/a4354f6dd4d7b891.html" target="n" data-glyph="106,1" class="i property">CbsTokenProvider</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets a list of currently registered plugins.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public override</b> <span class="i">IList</span>&lt;<a href="Core/ServiceBusPlugin.cs.html#467b28cbbe8148c5" class="t t">ServiceBusPlugin</a>&gt; <a id="a55c319959a6ec5f" href="R/a55c319959a6ec5f.html" target="n" data-glyph="102,1" class="i property">RegisteredPlugins</a> { <b>get</b>; } = <b>new</b> <span class="i">List</span>&lt;<a href="Core/ServiceBusPlugin.cs.html#467b28cbbe8148c5" class="t t">ServiceBusPlugin</a>&gt;();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets a session object of any </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a>.<a href="IMessageSession.cs.html#f8d2be0dbd369bb5" class="i property">SessionId</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that can be used to receive messages for that sessionId.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">All plugins registered on </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#665e503e2b872f1f" class="t t">SessionClient</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> will be applied to each </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="MessageSession.cs.html#d4ed1e8d7d952352" class="t t">MessageSession</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that is accepted.</span>
+        <span class="c">///</span><span class="c"> Individual sessions can further register additional plugins.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public</b> <span class="i">Task</span>&lt;<a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a>&gt; <a id="b3cd61d764edb81a" href="R/b3cd61d764edb81a.html" target="n" data-glyph="72,1" class="i method">AcceptMessageSessionAsync</a>()
+        {
+            <b>return</b> <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#c2a3068464f3d027" class="i method">AcceptMessageSessionAsync</a>(<a href="#665e503e2b872f1f" class="k">this</a>.<a href="#c9ff9f54a3c1c212" class="i property">ServiceBusConnection</a>.<a href="ServiceBusConnection.cs.html#c7f7ecc4031ee56b" class="i property">OperationTimeout</a>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets a session object of any </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a>.<a href="IMessageSession.cs.html#f8d2be0dbd369bb5" class="i property">SessionId</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that can be used to receive messages for that sessionId.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r31 r">operationTimeout</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Amount of time for which the call should wait to fetch the next session.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">All plugins registered on </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#665e503e2b872f1f" class="t t">SessionClient</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> will be applied to each </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="MessageSession.cs.html#d4ed1e8d7d952352" class="t t">MessageSession</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that is accepted.</span>
+        <span class="c">///</span><span class="c"> Individual sessions can further register additional plugins.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public</b> <span class="i">Task</span>&lt;<a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a>&gt; <a id="c2a3068464f3d027" href="R/c2a3068464f3d027.html" target="n" data-glyph="72,1" class="i method">AcceptMessageSessionAsync</a>(<span class="i">TimeSpan</span> <span id="r31 rd" class="r31 r">operationTimeout</span>)
+        {
+            <b>return</b> <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#1832fcede0c47f70" class="i method">AcceptMessageSessionAsync</a>(<b>null</b>, <span class="r31 r">operationTimeout</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets a particular session object identified by </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r32 r">sessionId</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that can be used to receive messages for that sessionId.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r32 r">sessionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The sessionId present in all its messages.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">All plugins registered on </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#665e503e2b872f1f" class="t t">SessionClient</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> will be applied to each </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="MessageSession.cs.html#d4ed1e8d7d952352" class="t t">MessageSession</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that is accepted.</span>
+        <span class="c">///</span><span class="c"> Individual sessions can further register additional plugins.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public</b> <span class="i">Task</span>&lt;<a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a>&gt; <a id="f9ae818d4c31d6e2" href="R/f9ae818d4c31d6e2.html" target="n" data-glyph="72,1" class="i method">AcceptMessageSessionAsync</a>(<b>string</b> <span id="r32 rd" class="r32 r">sessionId</span>)
+        {
+            <b>return</b> <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#1832fcede0c47f70" class="i method">AcceptMessageSessionAsync</a>(<span class="r32 r">sessionId</span>, <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#c9ff9f54a3c1c212" class="i property">ServiceBusConnection</a>.<a href="ServiceBusConnection.cs.html#c7f7ecc4031ee56b" class="i property">OperationTimeout</a>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets a particular session object identified by </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r33 r">sessionId</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that can be used to receive messages for that sessionId.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r33 r">sessionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The sessionId present in all its messages.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r34 r">operationTimeout</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Amount of time for which the call should wait to fetch the next session.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">All plugins registered on </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#665e503e2b872f1f" class="t t">SessionClient</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> will be applied to each </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="MessageSession.cs.html#d4ed1e8d7d952352" class="t t">MessageSession</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that is accepted.</span>
+        <span class="c">///</span><span class="c"> Individual sessions can further register additional plugins.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public async</b> <span class="i">Task</span>&lt;<a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a>&gt; <a id="1832fcede0c47f70" href="R/1832fcede0c47f70.html" target="n" data-glyph="72,1" class="i method">AcceptMessageSessionAsync</a>(<b>string</b> <span id="r33 rd" class="r33 r">sessionId</span>, <span class="i">TimeSpan</span> <span id="r34 rd" class="r34 r">operationTimeout</span>)
+        {
+            <a href="#665e503e2b872f1f" class="k">this</a>.<a href="ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+ 
+            <a href="MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="MessagingEventSource.cs.html#4154a28f47bf7871" class="i method">AmqpSessionClientAcceptMessageSessionStart</a>(
+                <a href="#665e503e2b872f1f" class="k">this</a>.<a href="ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a>,
+                <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#4dae3f577e2a2bd5" class="i property">EntityPath</a>,
+                <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#0048c2d17cbf82e6" class="i property">ReceiveMode</a>,
+                <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#c03bac5a1da09de8" class="i property">PrefetchCount</a>,
+                <span class="r33 r">sessionId</span>);
+ 
+            <b>bool</b> <span id="r35 rd" class="r35 r">isDiagnosticSourceEnabled</span> = <a href="ServiceBusDiagnosticsSource.cs.html#8b0a5b6d28151a22" class="t t">ServiceBusDiagnosticSource</a>.<a href="ServiceBusDiagnosticsSource.cs.html#1ef66eeeefb94a5f" class="i method">IsEnabled</a>();
+            <span class="i">Activity</span> <span id="r36 rd" class="r36 r">activity</span> = <span class="r35 r">isDiagnosticSourceEnabled</span> ? <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#3130d492f8a44d5b" class="i field">diagnosticSource</a>.<a href="ServiceBusDiagnosticsSource.cs.html#fa8521fee75127eb" class="i method">AcceptMessageSessionStart</a>(<span class="r33 r">sessionId</span>) : <b>null</b>;
+            <span class="i">Task</span> <span id="r37 rd" class="r37 r">acceptMessageSessionTask</span> = <b>null</b>;
+ 
+            <a href="MessageSession.cs.html#d4ed1e8d7d952352" class="k">var</a> <span id="r38 rd" class="r38 r">session</span> = <b>new</b> <a href="MessageSession.cs.html#9283a937dcf1ab52" class="t constructor">MessageSession</a>(
+                <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#4dae3f577e2a2bd5" class="i property">EntityPath</a>,
+                <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#65779da201907e74" class="i property">EntityType</a>,
+                <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#0048c2d17cbf82e6" class="i property">ReceiveMode</a>,
+                <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#c9ff9f54a3c1c212" class="i property">ServiceBusConnection</a>,
+                <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#a4354f6dd4d7b891" class="i property">CbsTokenProvider</a>,
+                <a href="#665e503e2b872f1f" class="k">this</a>.<a href="ClientEntity.cs.html#5735f52e7564bf86" class="i property">RetryPolicy</a>,
+                <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#c03bac5a1da09de8" class="i property">PrefetchCount</a>,
+                <span class="r33 r">sessionId</span>,
+                <b>true</b>);
+ 
+            <b>try</b>
+            {
+                <span class="r37 r">acceptMessageSessionTask</span> = <a href="#665e503e2b872f1f" class="k">this</a>.<a href="ClientEntity.cs.html#5735f52e7564bf86" class="i property">RetryPolicy</a>.<span class="i">RunOperation</span>(
+                    () =&gt; <span class="r38 r">session</span>.<a href="Core/MessageReceiver.cs.html#b98ff9c225913fc6" class="i method">GetSessionReceiverLinkAsync</a>(<span class="r34 r">operationTimeout</span>),
+                    <span class="r34 r">operationTimeout</span>);
+                <b>await</b> <span class="r37 r">acceptMessageSessionTask</span>.<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r39 rd" class="r39 r">exception</span>)
+            {
+                <b>if</b> (<span class="r35 r">isDiagnosticSourceEnabled</span> &amp;&amp; !(<span class="r39 r">exception</span> <b>is</b> <a href="ServiceBusTimeoutException.cs.html#f685944f3f0d665e" class="t t">ServiceBusTimeoutException</a>))
+                {
+                    <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#3130d492f8a44d5b" class="i field">diagnosticSource</a>.<a href="ServiceBusDiagnosticsSource.cs.html#1106e116e1c0feb0" class="i method">ReportException</a>(<span class="r39 r">exception</span>);
+                }
+ 
+                <a href="MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="MessagingEventSource.cs.html#601338ae3c3f24d3" class="i method">AmqpSessionClientAcceptMessageSessionException</a>(
+                    <a href="#665e503e2b872f1f" class="k">this</a>.<a href="ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a>,
+                    <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#4dae3f577e2a2bd5" class="i property">EntityPath</a>,
+                    <span class="r39 r">exception</span>);
+ 
+                <b>await</b> <span class="r38 r">session</span>.<a href="ClientEntity.cs.html#fd1fcdcfdaf194dc" class="i method">CloseAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <b>throw</b> <a href="Amqp/AmqpExceptionHelper.cs.html#2d67e789261d8e30" class="t t">AmqpExceptionHelper</a>.<a href="Amqp/AmqpExceptionHelper.cs.html#0d3a4baf43cca82e" class="i method">GetClientException</a>(<span class="r39 r">exception</span>);
+            }
+            <b>finally</b>
+            {
+                <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#3130d492f8a44d5b" class="i field">diagnosticSource</a>.<span class="i">AcceptMessageSessionStop</span>(<span class="r36 r">activity</span>, <span class="r38 r">session</span>.<a href="MessageSession.cs.html#b5e8907bae9d0d78" class="i property">SessionId</a>, <span class="r37 r">acceptMessageSessionTask</span>?.<span class="i">Status</span>);
+            }
+ 
+            <a href="MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="MessagingEventSource.cs.html#fca9046313413b17" class="i method">AmqpSessionClientAcceptMessageSessionStop</a>(
+                <a href="#665e503e2b872f1f" class="k">this</a>.<a href="ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a>,
+                <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#4dae3f577e2a2bd5" class="i property">EntityPath</a>,
+                <span class="r38 r">session</span>.<a href="Core/MessageReceiver.cs.html#04bb862dbfa20bcf" class="i property">SessionIdInternal</a>);
+ 
+            <span class="r38 r">session</span>.<a href="ClientEntity.cs.html#ccc87b4d9b0835f5" class="i method">UpdateClientId</a>(<a href="ClientEntity.cs.html#88eab29996c9f54a" class="t t">ClientEntity</a>.<a href="ClientEntity.cs.html#429f031a41ee7d5e" class="i method">GenerateClientId</a>(<b>nameof</b>(<a href="MessageSession.cs.html#d4ed1e8d7d952352" class="t t">MessageSession</a>), <span class="s">$&quot;</span>{<a href="#665e503e2b872f1f" class="k">this</a>.<a href="#4dae3f577e2a2bd5" class="i property">EntityPath</a>}<span class="s">_</span>{<span class="r38 r">session</span>.<a href="MessageSession.cs.html#b5e8907bae9d0d78" class="i property">SessionId</a>}<span class="s">&quot;</span>));
+            <span class="c">// Register plugins on the message session.</span>
+            <b>foreach</b> (<b>var</b> <span id="r40 rd" class="r40 r">serviceBusPlugin</span> <b>in</b> <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#a55c319959a6ec5f" class="i property">RegisteredPlugins</a>)
+            {
+                <span class="r38 r">session</span>.<span class="i">RegisterPlugin</span>(<span class="r40 r">serviceBusPlugin</span>);
+            }
+ 
+            <b>return</b> <span class="r38 r">session</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Registers a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Core/ServiceBusPlugin.cs.html#467b28cbbe8148c5" class="t t">ServiceBusPlugin</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to be used with this receiver.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r41 r">serviceBusPlugin</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Core/ServiceBusPlugin.cs.html#467b28cbbe8148c5" class="t t">ServiceBusPlugin</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to register.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public override void</b> <a id="b579d389ff2ab27e" href="R/b579d389ff2ab27e.html" target="n" data-glyph="72,1" class="i method">RegisterPlugin</a>(<a href="Core/ServiceBusPlugin.cs.html#467b28cbbe8148c5" class="t t">ServiceBusPlugin</a> <span id="r41 rd" class="r41 r">serviceBusPlugin</span>)
+        {
+            <a href="#665e503e2b872f1f" class="k">this</a>.<a href="ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+ 
+            <b>if</b> (<span class="r41 r">serviceBusPlugin</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r41 r">serviceBusPlugin</span>), <a href="Resources.Designer.cs.html#8e0563579d43c165" class="t t">Resources</a>.<a href="Resources.Designer.cs.html#74ff1445adbade5e" class="i property">ArgumentNullOrWhiteSpace</a>.<a href="Primitives/StringUtility.cs.html#3a252e19ad9654c1" class="i method">FormatForUser</a>(<b>nameof</b>(<span class="r41 r">serviceBusPlugin</span>)));
+            }
+            <b>if</b> (<a href="#665e503e2b872f1f" class="k">this</a>.<a href="#a55c319959a6ec5f" class="i property">RegisteredPlugins</a>.<span class="i">Any</span>(<span id="r42 rd" class="r42 r">p</span> =&gt; <span class="r42 r">p</span>.<span class="i">Name</span> == <span class="r41 r">serviceBusPlugin</span>.<a href="Core/ServiceBusPlugin.cs.html#bd6bea073d8b269c" class="i property">Name</a>))
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentException</span>(<b>nameof</b>(<span class="r41 r">serviceBusPlugin</span>), <a href="Resources.Designer.cs.html#8e0563579d43c165" class="t t">Resources</a>.<a href="Resources.Designer.cs.html#bd15a8f93b31859b" class="i property">PluginAlreadyRegistered</a>.<a href="Primitives/StringUtility.cs.html#3a252e19ad9654c1" class="i method">FormatForUser</a>(<b>nameof</b>(<span class="r41 r">serviceBusPlugin</span>)));
+            }
+            <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#a55c319959a6ec5f" class="i property">RegisteredPlugins</a>.<span class="i">Add</span>(<span class="r41 r">serviceBusPlugin</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Unregisters a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Core/ServiceBusPlugin.cs.html#467b28cbbe8148c5" class="t t">ServiceBusPlugin</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r43 r">serviceBusPluginName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Core/ServiceBusPlugin.cs.html#467b28cbbe8148c5" class="t t">ServiceBusPlugin</a>.<a href="Core/ServiceBusPlugin.cs.html#bd6bea073d8b269c" class="i property">Name</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> of the plugin to be unregistered.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public override void</b> <a id="1a54a7508c8647c8" href="R/1a54a7508c8647c8.html" target="n" data-glyph="72,1" class="i method">UnregisterPlugin</a>(<b>string</b> <span id="r43 rd" class="r43 r">serviceBusPluginName</span>)
+        {
+            <a href="#665e503e2b872f1f" class="k">this</a>.<a href="ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+ 
+            <b>if</b> (<a href="#665e503e2b872f1f" class="k">this</a>.<a href="#a55c319959a6ec5f" class="i property">RegisteredPlugins</a> == <b>null</b>)
+            {
+                <b>return</b>;
+            }
+            <b>if</b> (<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r43 r">serviceBusPluginName</span>))
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r43 r">serviceBusPluginName</span>), <a href="Resources.Designer.cs.html#8e0563579d43c165" class="t t">Resources</a>.<a href="Resources.Designer.cs.html#74ff1445adbade5e" class="i property">ArgumentNullOrWhiteSpace</a>.<a href="Primitives/StringUtility.cs.html#3a252e19ad9654c1" class="i method">FormatForUser</a>(<b>nameof</b>(<span class="r43 r">serviceBusPluginName</span>)));
+            }
+            <b>if</b> (<a href="#665e503e2b872f1f" class="k">this</a>.<a href="#a55c319959a6ec5f" class="i property">RegisteredPlugins</a>.<span class="i">Any</span>(<span id="r44 rd" class="r44 r">p</span> =&gt; <span class="r44 r">p</span>.<span class="i">Name</span> == <span class="r43 r">serviceBusPluginName</span>))
+            {
+                <b>var</b> <span id="r45 rd" class="r45 r">plugin</span> = <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#a55c319959a6ec5f" class="i property">RegisteredPlugins</a>.<span class="i">First</span>(<span id="r46 rd" class="r46 r">p</span> =&gt; <span class="r46 r">p</span>.<span class="i">Name</span> == <span class="r43 r">serviceBusPluginName</span>);
+                <a href="#665e503e2b872f1f" class="k">this</a>.<a href="#a55c319959a6ec5f" class="i property">RegisteredPlugins</a>.<span class="i">Remove</span>(<span class="r45 r">plugin</span>);
+            }
+        }
+ 
+        <b>protected override</b> <span class="i">Task</span> <a id="488968ae6ad19a3d" href="R/488968ae6ad19a3d.html" target="n" data-glyph="75,1" class="i method">OnClosingAsync</a>()
+        {
+            <b>return</b> <span class="i">Task</span>.<span class="i">CompletedTask</span>;
+        }
+    }
+}</pre></td></tr></table></div></body></html>

@@ -1,0 +1,401 @@
+﻿<!DOCTYPE html>
+<html><head><title>PooledMemoryStream.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(392);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Storage.Files.DataLake/Shared/PooledMemoryStream.cs" target="_top">Shared\PooledMemoryStream.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Storage.Files.DataLake" target="_top">Azure.Storage.Files.DataLake\src\Azure.Storage.Files.DataLake.csproj</a> (Azure.Storage.Files.DataLake)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Buffers</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Shared</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Functions like a readable </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#1a4dcb744a23ba6f" class="t t">MemoryStream</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> but uses an ArrayPool to supply the backing memory.</span>
+    <span class="c">///</span><span class="c"> This stream support buffering long sizes.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="1b57485f6b2784fa" href="../R/1b57485f6b2784fa.html" target="n" data-glyph="2,0" class="t t">PooledMemoryStream</a> : <a href="SlicedStream.cs.html#1fc0b6cc1bb6f1c0" class="t t">SlicedStream</a>
+    {
+        <b>private const int</b> <a id="5486d3336f43e8d7" href="../R/5486d3336f43e8d7.html" target="n" data-glyph="10,1" class="i field">DefaultMaxArrayPoolRentalSize</a> = 128 * <a href="Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Constants.cs.html#f083580f332431a9" class="i field">MB</a>;
+ 
+        <b>private class</b> <a id="e4375e3348ca4fa2" href="../R/e4375e3348ca4fa2.html" target="n" data-glyph="4,1" class="t t"><span id="fcd48c5785ca340d">BufferPartition</span></a>
+        {
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> The buffer for this partition.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <b>public byte</b>[] <a id="f5f96e4561f13c79" href="../R/f5f96e4561f13c79.html" target="n" data-glyph="102,2" class="i property">Buffer</a> { <b>get</b>; <b>set</b>; }
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> Offset at which known data stops and undefined state begins.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <b>public int</b> <a id="a55809cfc894e712" href="../R/a55809cfc894e712.html" target="n" data-glyph="102,2" class="i property">DataLength</a> { <b>get</b>; <b>set</b>; }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Size to rent from MemoryPool.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public int</b> <a id="e40871ed1a3d9316" href="../R/e40871ed1a3d9316.html" target="n" data-glyph="102,1" class="i property">MaxArraySize</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The backing array pool.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <span class="t t">ArrayPool</span>&lt;<b>byte</b>&gt; <a id="8507d25411ccf425" href="../R/8507d25411ccf425.html" target="n" data-glyph="102,1" class="i property">ArrayPool</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Absolute position of this stream in the larger stream it was chunked from.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public override long</b> <a id="60ec40d11e4b2e54" href="../R/60ec40d11e4b2e54.html" target="n" data-glyph="102,1" class="i property">AbsolutePosition</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> List of arrays making up the overall buffer. Since ArrayPool may give us a larger array than needed,</span>
+        <span class="c">///</span><span class="c"> each array is paired with a count of the space actually used in the array. This </span><span class="c">&lt;</span><span class="c">b</span><span class="c">&gt;</span><span class="c">should</span><span class="c">&lt;/</span><span class="c">b</span><span class="c">&gt;</span><span class="c"> only</span>
+        <span class="c">///</span><span class="c"> be important for the final buffer.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private</b> <a href="@1@netstandard/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="#e4375e3348ca4fa2" class="t t">BufferPartition</a>&gt; <a id="acae95386260f79e" href="../R/acae95386260f79e.html" target="n" data-glyph="106,1" class="i property">BufferSet</a> { <b>get</b>; } = <b>new</b> <a href="@1@netstandard/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="#e4375e3348ca4fa2" class="t t">BufferPartition</a>&gt;();
+ 
+        <b>public</b> <a id="3ec4bbfffe6d9912" href="../R/3ec4bbfffe6d9912.html" target="n" data-glyph="72,1" class="t constructor">PooledMemoryStream</a>(<span class="t t">ArrayPool</span>&lt;<b>byte</b>&gt; <span id="r0 rd" class="r0 r">arrayPool</span>, <b>long</b> <span id="r1 rd" class="r1 r">absolutePosition</span>, <b>int</b> <span id="r2 rd" class="r2 r">maxArraySize</span>)
+        {
+            <a href="#60ec40d11e4b2e54" class="i property">AbsolutePosition</a> = <span class="r1 r">absolutePosition</span>;
+            <a href="#8507d25411ccf425" class="i property">ArrayPool</a> = <span class="r0 r">arrayPool</span>;
+            <a href="#e40871ed1a3d9316" class="i property">MaxArraySize</a> = <span class="r2 r">maxArraySize</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Parameterless constructor for mocking.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a id="3802032cf8c3e166" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">PooledMemoryStream</a>() { }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Buffers a portion of the given stream, returning the buffered stream partition.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">stream</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Stream to buffer from.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">minCount</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Minimum number of bytes to buffer. This method will not return until at least this many bytes have been read from </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">stream</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> or the stream completes.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">maxCount</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Maximum number of bytes to buffer.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">absolutePosition</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Current position of the stream, since </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a>.<a href="@1@netstandard/A.html#35112b2a53fb536a" class="i property">Position</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> throws if not seekable.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">arrayPool</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Pool to rent buffer space from.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">maxArrayPoolRentalSize</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Max size we can request from the array pool.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">async</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Whether to perform this operation asynchronously.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r10 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Cancellation token.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The buffered stream partition with memory backed by an array pool.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>internal static async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="#1b57485f6b2784fa" class="t t">PooledMemoryStream</a>&gt; <a id="f61575a4d786e80f" href="../R/f61575a4d786e80f.html" target="n" data-glyph="74,1" class="i method">BufferStreamPartitionInternal</a>(
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r3 rd" class="r3 r">stream</span>,
+            <b>long</b> <span id="r4 rd" class="r4 r">minCount</span>,
+            <b>long</b> <span id="r5 rd" class="r5 r">maxCount</span>,
+            <b>long</b> <span id="r6 rd" class="r6 r">absolutePosition</span>,
+            <span class="t t">ArrayPool</span>&lt;<b>byte</b>&gt; <span id="r7 rd" class="r7 r">arrayPool</span>,
+            <b>int</b>? <span id="r8 rd" class="r8 r">maxArrayPoolRentalSize</span>,
+            <b>bool</b> <span id="r9 rd" class="r9 r">async</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r10 rd" class="r10 r">cancellationToken</span>)
+        {
+            <b>long</b> <span id="r11 rd" class="r11 r">totalRead</span> = 0;
+            <a href="#1b57485f6b2784fa" class="k">var</a> <span id="r12 rd" class="r12 r">streamPartition</span> = <b>new</b> <a href="#3ec4bbfffe6d9912" class="t constructor">PooledMemoryStream</a>(<span class="r7 r">arrayPool</span>, <span class="r6 r">absolutePosition</span>, <span class="r8 r">maxArrayPoolRentalSize</span> ?? <a href="#5486d3336f43e8d7" class="i field">DefaultMaxArrayPoolRentalSize</a>);
+ 
+            <span class="c">// max count to write into a single array</span>
+            <b>int</b> <span id="r13 rd" class="r13 r">maxCountIndividualBuffer</span>;
+            <span class="c">// min count to write into a single array</span>
+            <b>int</b> <span id="r14 rd" class="r14 r">minCountIndividualBuffer</span>;
+            <span class="c">// the amount that was written into the current array</span>
+            <b>int</b> <span id="r15 rd" class="r15 r">readIndividualBuffer</span>;
+            <b>do</b>
+            {
+                <span class="c">// buffer to write to</span>
+                <b>byte</b>[] <span id="r16 rd" class="r16 r">buffer</span>;
+                <span class="c">// offset to start writing at</span>
+                <b>int</b> <span id="r17 rd" class="r17 r">offset</span>;
+                <a href="#e4375e3348ca4fa2" class="t t">BufferPartition</a> <span id="r18 rd" class="r18 r">latestBuffer</span> = <span class="r12 r">streamPartition</span>.<a href="#99aa48e4b50bd399" class="i method">GetLatestBufferWithAvailableSpaceOrDefault</a>();
+                <span class="c">// whether we got a brand new buffer to write into</span>
+                <b>bool</b> <span id="r19 rd" class="r19 r">newbuffer</span>;
+                <b>if</b> (<span class="r18 r">latestBuffer</span> != <b>default</b>)
+                {
+                    <span class="r16 r">buffer</span> = <span class="r18 r">latestBuffer</span>.<a href="#f5f96e4561f13c79" class="i property">Buffer</a>;
+                    <span class="r17 r">offset</span> = <span class="r18 r">latestBuffer</span>.<a href="#a55809cfc894e712" class="i property">DataLength</a>;
+                    <span class="r19 r">newbuffer</span> = <b>false</b>;
+                }
+                <b>else</b>
+                {
+                    <span class="r16 r">buffer</span> = <span class="r7 r">arrayPool</span>.<span class="i method">Rent</span>((<b>int</b>)<a href="@1@netstandard/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@1@netstandard/A.html#8cf0c6d1543ff08d" class="i method">Min</a>(<span class="r5 r">maxCount</span> - <span class="r11 r">totalRead</span>, <span class="r12 r">streamPartition</span>.<a href="#e40871ed1a3d9316" class="i property">MaxArraySize</a>));
+                    <span class="r17 r">offset</span> = 0;
+                    <span class="r19 r">newbuffer</span> = <b>true</b>;
+                }
+ 
+                <span class="c">// limit max and min count for this buffer by buffer length</span>
+                <span class="r13 r">maxCountIndividualBuffer</span> = (<b>int</b>)<a href="@1@netstandard/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@1@netstandard/A.html#8cf0c6d1543ff08d" class="i method">Min</a>(<span class="r5 r">maxCount</span> - <span class="r11 r">totalRead</span>, <span class="r16 r">buffer</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a> - <span class="r17 r">offset</span>);
+                <span class="c">// definitionally limited by max; we won&#39;t ever have a swapped min/max range</span>
+                <span class="r14 r">minCountIndividualBuffer</span> = (<b>int</b>)<a href="@1@netstandard/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@1@netstandard/A.html#8cf0c6d1543ff08d" class="i method">Min</a>(<span class="r4 r">minCount</span> - <span class="r11 r">totalRead</span>, <span class="r13 r">maxCountIndividualBuffer</span>);
+ 
+                <span class="r15 r">readIndividualBuffer</span> = <b>await</b> <a href="#e86a3c5184f95165" class="i method">ReadLoopInternal</a>(
+                    <span class="r3 r">stream</span>,
+                    <span class="r16 r">buffer</span>,
+                    <span class="r20 r">offset</span>: <span class="r17 r">offset</span>,
+                    <span class="r14 r">minCountIndividualBuffer</span>,
+                    <span class="r13 r">maxCountIndividualBuffer</span>,
+                    <span class="r9 r">async</span>,
+                    <span class="r10 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                <span class="c">// if nothing was placed in a brand new array</span>
+                <b>if</b> (<span class="r15 r">readIndividualBuffer</span> == 0 &amp;&amp; <span class="r19 r">newbuffer</span>)
+                {
+                    <span class="r7 r">arrayPool</span>.<span class="i method">Return</span>(<span class="r16 r">buffer</span>);
+                }
+                <span class="c">// if brand new array and we did place data in it</span>
+                <b>else</b> <b>if</b> (<span class="r19 r">newbuffer</span>)
+                {
+                    <span class="r12 r">streamPartition</span>.<a href="#acae95386260f79e" class="i property">BufferSet</a>.<a href="@1@netstandard/A.html#9cc11588bffd57c1" class="i method">Add</a>(<b>new</b> <a href="#e4375e3348ca4fa2" class="t constructor">BufferPartition</a>
+                    {
+                        <a href="#f5f96e4561f13c79" class="i property">Buffer</a> = <span class="r16 r">buffer</span>,
+                        <a href="#a55809cfc894e712" class="i property">DataLength</a> = <span class="r15 r">readIndividualBuffer</span>
+                    });
+                }
+                <span class="c">// added to an existing array that was not entirely filled</span>
+                <b>else</b>
+                {
+                    <span class="r18 r">latestBuffer</span>.<a href="#a55809cfc894e712" class="i property">DataLength</a> += <span class="r15 r">readIndividualBuffer</span>;
+                }
+ 
+                <span class="r11 r">totalRead</span> += <span class="r15 r">readIndividualBuffer</span>;
+ 
+            <span class="c">/* If we filled the buffer this loop, then quitting on min count is pointless. The point of quitting
+             * on min count is when the source stream doesn&#39;t have available bytes and we&#39;ve reached an amount worth
+             * sending instead of blocking on. If we filled the available array, we don&#39;t actually know whether more
+             * data is available yet, as we limited our read for reasons outside the stream state. We should therefore
+             * try another read regardless of whether we hit min count.
+             */</span>
+            } <b>while</b> (
+                <span class="c">// stream is done if this value is zero; no other check matters</span>
+                <span class="r15 r">readIndividualBuffer</span> != 0 &amp;&amp;
+                <span class="c">// stop filling the partition if we&#39;ve hit the max size of the partition</span>
+                <span class="r11 r">totalRead</span> &lt; <span class="r5 r">maxCount</span> &amp;&amp;
+                <span class="c">// stop filling the partition if we&#39;ve reached min count and we know we&#39;ve hit at least a pause in the stream</span>
+                (<span class="r11 r">totalRead</span> &lt; <span class="r4 r">minCount</span> || <span class="r15 r">readIndividualBuffer</span> == <span class="r13 r">maxCountIndividualBuffer</span>));
+ 
+            <b>return</b> <span class="r12 r">streamPartition</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Loops Read() calls into buffer until minCount is reached or stream returns 0.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Bytes read.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> This method may have read bytes even if it has reached the confirmed end of stream. You will have to call</span>
+        <span class="c">///</span><span class="c"> this method again and read zero bytes to get that confirmation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>private static async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>int</b>&gt; <a id="e86a3c5184f95165" href="../R/e86a3c5184f95165.html" target="n" data-glyph="76,1" class="i method">ReadLoopInternal</a>(<a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r21 rd" class="r21 r">stream</span>, <b>byte</b>[] <span id="r22 rd" class="r22 r">buffer</span>, <b>int</b> <span id="r20 rd" class="r20 r">offset</span>, <b>int</b> <span id="r23 rd" class="r23 r">minCount</span>, <b>int</b> <span id="r24 rd" class="r24 r">maxCount</span>, <b>bool</b> <span id="r25 rd" class="r25 r">async</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r26 rd" class="r26 r">cancellationToken</span>)
+        {
+            <b>if</b> (<span class="r23 r">minCount</span> &gt; <span class="r24 r">maxCount</span>)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="r23 r">minCount</span>)}<span class="s"> cannot be greater than </span>{<b>nameof</b>(<span class="r24 r">maxCount</span>)}<span class="s">.</span><span class="s">&quot;</span>);
+            }
+            <b>if</b> (<span class="r24 r">maxCount</span> &lt;= 0)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">&quot;Cannot read a non-positive number of bytes.&quot;</span>);
+            }
+ 
+            <b>int</b> <span id="r27 rd" class="r27 r">totalRead</span> = 0;
+            <b>do</b>
+            {
+                <b>int</b> <span id="r28 rd" class="r28 r">read</span> = <span class="r25 r">async</span>
+                    ? <b>await</b> <span class="r21 r">stream</span>.<a href="@1@netstandard/A.html#e224b4bec8748849" class="i method">ReadAsync</a>(<span class="r22 r">buffer</span>, <span class="r20 r">offset</span> + <span class="r27 r">totalRead</span>, <span class="r24 r">maxCount</span> - <span class="r27 r">totalRead</span>, <span class="r26 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>)
+                    : <span class="r21 r">stream</span>.<a href="@1@netstandard/A.html#6fb9c001d7524ba2" class="i method">Read</a>(<span class="r22 r">buffer</span>, <span class="r20 r">offset</span> + <span class="r27 r">totalRead</span>, <span class="r24 r">maxCount</span> - <span class="r27 r">totalRead</span>);
+                <span class="c">// either we have read maxCount in total or the stream has ended</span>
+                <b>if</b> (<span class="r28 r">read</span> == 0)
+                {
+                    <b>break</b>;
+                }
+                <span class="r27 r">totalRead</span> += <span class="r28 r">read</span>;
+            <span class="c">// we always request the number that will bring our total read to maxCount</span>
+            <span class="c">// if the stream can only give us so much at the moment and we&#39;ve at least hit minCount, we can exit</span>
+            } <b>while</b> (<span class="r27 r">totalRead</span> &lt; <span class="r23 r">minCount</span>);
+            <b>return</b> <span class="r27 r">totalRead</span>;
+        }
+ 
+        <b>public override bool</b> <a id="14e1d1390ecbda6a" href="../R/14e1d1390ecbda6a.html" target="n" data-glyph="102,1" class="i property">CanRead</a> =&gt; <b>true</b>;
+ 
+        <b>public override bool</b> <a id="1651124caa15dad3" href="../R/1651124caa15dad3.html" target="n" data-glyph="102,1" class="i property">CanSeek</a> =&gt; <b>true</b>;
+ 
+        <b>public override bool</b> <a id="40bd945cc55dd3e2" href="../R/40bd945cc55dd3e2.html" target="n" data-glyph="102,1" class="i property">CanWrite</a> =&gt; <b>true</b>;
+ 
+        <b>public override long</b> <a id="dac8aa48ce91c737" href="../R/dac8aa48ce91c737.html" target="n" data-glyph="102,1" class="i property">Length</a> =&gt; <a href="#acae95386260f79e" class="i property">BufferSet</a>.<a href="@1@netstandard/A.html#47c6324656bd90c5" class="i method">Sum</a>(<span id="r29 rd" class="r29 r">tuple</span> =&gt; (<b>long</b>)<span class="r29 r">tuple</span>.<a href="#a55809cfc894e712" class="i property">DataLength</a>);
+ 
+        <b>public override long</b> <a id="7837e3930028e944" href="../R/7837e3930028e944.html" target="n" data-glyph="102,1" class="i property">Position</a> { <b>get</b>; <b>set</b>; }
+ 
+        <b>public override void</b> <a id="5dcb6b7ce8b87093" href="../R/5dcb6b7ce8b87093.html" target="n" data-glyph="72,1" class="i method">Flush</a>()
+        {
+            <span class="c">// no-op, just like MemoryStream</span>
+        }
+ 
+        <b>public override int</b> <a id="57f28164bda3e7a7" href="../R/57f28164bda3e7a7.html" target="n" data-glyph="72,1" class="i method">Read</a>(<b>byte</b>[] <span id="r30 rd" class="r30 r">buffer</span>, <b>int</b> <span id="r31 rd" class="r31 r">offset</span>, <b>int</b> <span id="r32 rd" class="r32 r">count</span>)
+        {
+            <b>if</b> (<a href="#7837e3930028e944" class="i property">Position</a> &gt;= <a href="#dac8aa48ce91c737" class="i property">Length</a>)
+            {
+                <b>return</b> 0;
+            }
+ 
+            <b>int</b> <span id="r33 rd" class="r33 r">read</span> = 0;
+            <b>while</b> (<span class="r33 r">read</span> &lt; <span class="r32 r">count</span> &amp;&amp; <a href="#7837e3930028e944" class="i property">Position</a> &lt; <a href="#dac8aa48ce91c737" class="i property">Length</a>)
+            {
+                (<b>byte</b>[] <span id="r34 rd" class="r34 r">currentBuffer</span>, <b>int</b> <span id="r35 rd" class="r35 r">bufferCount</span>, <b>long</b> <span id="r36 rd" class="r36 r">offsetOfBuffer</span>) = <a href="#ecd2b712dc35634c" class="i method">GetBufferFromPosition</a>();
+ 
+                <b>int</b> <span id="r37 rd" class="r37 r">toCopy</span> = (<b>int</b>)<a href="#14fde2232bfbcf33" class="i method">Min</a>(
+                    <a href="#dac8aa48ce91c737" class="i property">Length</a> - <a href="#7837e3930028e944" class="i property">Position</a>,
+                    <span class="r35 r">bufferCount</span> - (<a href="#7837e3930028e944" class="i property">Position</a> - <span class="r36 r">offsetOfBuffer</span>),
+                    <span class="r32 r">count</span> - <span class="r33 r">read</span>);
+                <a href="@1@netstandard/A.html#156e066ecc4ccedf" class="t t">Array</a>.<a href="@1@netstandard/A.html#4476a43df5daa8c8" class="i method">Copy</a>(<span class="r34 r">currentBuffer</span>, <a href="#7837e3930028e944" class="i property">Position</a> - <span class="r36 r">offsetOfBuffer</span>, <span class="r30 r">buffer</span>, <span class="r33 r">read</span>, <span class="r37 r">toCopy</span>);
+                <span class="r33 r">read</span> += <span class="r37 r">toCopy</span>;
+                <a href="#7837e3930028e944" class="i property">Position</a> += <span class="r37 r">toCopy</span>;
+            }
+ 
+            <b>return</b> <span class="r33 r">read</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> According the the current </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#7837e3930028e944" class="i property">Position</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> of the stream, gets the correct buffer containing the byte</span>
+        <span class="c">///</span><span class="c"> at that position, as well as the stream position represented by the start of the array.</span>
+        <span class="c">///</span><span class="c"> Position - offsetOfBuffer is the index in the returned array of the current byte.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private</b> (<b>byte</b>[] <a id="d5bd349d2dbad653" href="../R/../../0000000000.html" target="n" data-glyph="42,1" class="i field">currentBuffer</a>, <b>int</b> <a id="1ea4cb7c428b9d41" href="../R/../../0000000000.html" target="n" data-glyph="42,1" class="i field">bufferCount</a>, <b>long</b> <a id="89f7f97e9052602f" href="../R/../../0000000000.html" target="n" data-glyph="42,1" class="i field">offsetOfBuffer</a>) <a id="ecd2b712dc35634c" href="../R/ecd2b712dc35634c.html" target="n" data-glyph="76,1" class="i method">GetBufferFromPosition</a>()
+        {
+            <a href="#766fe9099ef555c6" class="i method">AssertPositionInBounds</a>();
+ 
+            <b>long</b> <span id="r38 rd" class="r38 r">countingPosition</span> = 0;
+            <b>foreach</b> (<a href="#e4375e3348ca4fa2" class="k">var</a> <span id="r39 rd" class="r39 r">tuple</span> <b>in</b> <a href="#acae95386260f79e" class="i property">BufferSet</a>)
+            {
+                <b>if</b> (<span class="r38 r">countingPosition</span> + <span class="r39 r">tuple</span>.<a href="#a55809cfc894e712" class="i property">DataLength</a> &lt;= <a href="#7837e3930028e944" class="i property">Position</a>)
+                {
+                    <span class="r38 r">countingPosition</span> += <span class="r39 r">tuple</span>.<a href="#a55809cfc894e712" class="i property">DataLength</a>;
+                }
+                <b>else</b>
+                {
+                    <b>return</b> (<span class="r39 r">tuple</span>.<a href="#f5f96e4561f13c79" class="i property">Buffer</a>, <span class="r39 r">tuple</span>.<a href="#a55809cfc894e712" class="i property">DataLength</a>, <span class="r38 r">countingPosition</span>);
+                }
+            }
+ 
+            <span class="c">/* this.Length is defined as the sum of all counts.
+             * We already throw if this.Position &gt;= this.Length.
+             * We can only get here if this.Position is &gt;= the sum of all counts.
+             * We will never get here. */</span>
+            <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;Incorrect stream partition length.&quot;</span>);
+        }
+ 
+        <b>public override long</b> <a id="1e3d58ab4e93f275" href="../R/1e3d58ab4e93f275.html" target="n" data-glyph="72,1" class="i method">Seek</a>(<b>long</b> <span id="r40 rd" class="r40 r">offset</span>, <a href="@1@netstandard/A.html#2cc1cf6635f00a52" class="t t">SeekOrigin</a> <span id="r41 rd" class="r41 r">origin</span>)
+        {
+            <b>switch</b> (<span class="r41 r">origin</span>)
+            {
+                <b>case</b> <a href="@1@netstandard/A.html#2cc1cf6635f00a52" class="t t">SeekOrigin</a>.<a href="@1@netstandard/A.html#c29481af7c617299" class="i field">Begin</a>:
+                    <a href="#7837e3930028e944" class="i property">Position</a> = <span class="r40 r">offset</span>;
+                    <b>break</b>;
+                <b>case</b> <a href="@1@netstandard/A.html#2cc1cf6635f00a52" class="t t">SeekOrigin</a>.<a href="@1@netstandard/A.html#efa75a72affe543f" class="i field">Current</a>:
+                    <a href="#7837e3930028e944" class="i property">Position</a> += <span class="r40 r">offset</span>;
+                    <b>break</b>;
+                <b>case</b> <a href="@1@netstandard/A.html#2cc1cf6635f00a52" class="t t">SeekOrigin</a>.<a href="@1@netstandard/A.html#b6e266c635b89485" class="i field">End</a>:
+                    <a href="#7837e3930028e944" class="i property">Position</a> = <a href="#dac8aa48ce91c737" class="i property">Length</a> + <span class="r40 r">offset</span>;
+                    <b>break</b>;
+            }
+ 
+            <b>return</b> <a href="#7837e3930028e944" class="i property">Position</a>;
+        }
+ 
+        <b>public override void</b> <a id="978ed85b5f265f0a" href="../R/978ed85b5f265f0a.html" target="n" data-glyph="72,1" class="i method">SetLength</a>(<b>long</b> <span id="r42 rd" class="r42 r">value</span>)
+        {
+            <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#ab0acd5f99886747" class="t constructor">NotSupportedException</a>();
+        }
+ 
+        <b>public override void</b> <a id="c2d93dd5dd85f572" href="../R/c2d93dd5dd85f572.html" target="n" data-glyph="72,1" class="i method">Write</a>(<b>byte</b>[] <span id="r43 rd" class="r43 r">buffer</span>, <b>int</b> <span id="r44 rd" class="r44 r">offset</span>, <b>int</b> <span id="r45 rd" class="r45 r">count</span>)
+        {
+            <b>while</b> (<span class="r45 r">count</span> &gt; 0)
+            {
+                <a href="#e4375e3348ca4fa2" class="t t">BufferPartition</a> <span id="r46 rd" class="r46 r">currentBuffer</span> = <a href="#99aa48e4b50bd399" class="i method">GetLatestBufferWithAvailableSpaceOrDefault</a>();
+ 
+                <b>if</b> (<span class="r46 r">currentBuffer</span> == <b>default</b>)
+                {
+                    <b>byte</b>[] <span id="r47 rd" class="r47 r">newBytes</span> = <a href="#8507d25411ccf425" class="i property">ArrayPool</a>.<span class="i method">Rent</span>(<a href="#e40871ed1a3d9316" class="i property">MaxArraySize</a>);
+                    <span class="r46 r">currentBuffer</span> = <b>new</b> <a href="#e4375e3348ca4fa2" class="t constructor">BufferPartition</a>
+                    {
+                        <a href="#f5f96e4561f13c79" class="i property">Buffer</a> = <span class="r47 r">newBytes</span>,
+                        <a href="#a55809cfc894e712" class="i property">DataLength</a> = 0
+                    };
+                    <a href="#acae95386260f79e" class="i property">BufferSet</a>.<a href="@1@netstandard/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r46 r">currentBuffer</span>);
+                }
+ 
+                <b>int</b> <span id="r48 rd" class="r48 r">copied</span> = <a href="@1@netstandard/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@1@netstandard/A.html#f441d55c88d635ad" class="i method">Min</a>(<span class="r46 r">currentBuffer</span>.<a href="#f5f96e4561f13c79" class="i property">Buffer</a>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a> - <span class="r46 r">currentBuffer</span>.<a href="#a55809cfc894e712" class="i property">DataLength</a>, <span class="r45 r">count</span>);
+                <a href="@1@netstandard/A.html#156e066ecc4ccedf" class="t t">Array</a>.<a href="@1@netstandard/A.html#7441c6721593042c" class="i method">Copy</a>(<span class="r43 r">buffer</span>, <span class="r44 r">offset</span>, <span class="r46 r">currentBuffer</span>.<a href="#f5f96e4561f13c79" class="i property">Buffer</a>, <span class="r46 r">currentBuffer</span>.<a href="#a55809cfc894e712" class="i property">DataLength</a>, <span class="r48 r">copied</span>);
+                <span class="r46 r">currentBuffer</span>.<a href="#a55809cfc894e712" class="i property">DataLength</a> += <span class="r48 r">copied</span>;
+                <span class="r45 r">count</span> -= <span class="r48 r">copied</span>;
+                <span class="r44 r">offset</span> += <span class="r48 r">copied</span>;
+                <a href="#7837e3930028e944" class="i property">Position</a> += <span class="r48 r">copied</span>;
+            }
+        }
+ 
+        <b>protected override void</b> <a id="a7fc95db4890f3ef" href="../R/a7fc95db4890f3ef.html" target="n" data-glyph="75,1" class="i method">Dispose</a>(<b>bool</b> <span id="r49 rd" class="r49 r">disposing</span>)
+        {
+            <a href="SlicedStream.cs.html#1fc0b6cc1bb6f1c0" class="k">base</a>.<a href="@1@netstandard/A.html#f35c7d226df4a465" class="i method">Dispose</a>(<span class="r49 r">disposing</span>);
+            <a href="#c37d01e109c23387" class="i method">Clear</a>();
+        }
+ 
+        <b>public void</b> <a id="c37d01e109c23387" href="../R/c37d01e109c23387.html" target="n" data-glyph="72,1" class="i method">Clear</a>()
+        {
+            <b>foreach</b> (<a href="#e4375e3348ca4fa2" class="t t">BufferPartition</a> <span id="r50 rd" class="r50 r">buffer</span> <b>in</b> <a href="#acae95386260f79e" class="i property">BufferSet</a>)
+            {
+                <a href="#8507d25411ccf425" class="i property">ArrayPool</a>.<span class="i method">Return</span>(<span class="r50 r">buffer</span>.<a href="#f5f96e4561f13c79" class="i property">Buffer</a>);
+            }
+            <a href="#acae95386260f79e" class="i property">BufferSet</a>.<a href="@1@netstandard/A.html#ca7bce81a50b0aeb" class="i method">Clear</a>();
+            <a href="#7837e3930028e944" class="i property">Position</a> = 0;
+        }
+ 
+        <b>private void</b> <a id="766fe9099ef555c6" href="../R/766fe9099ef555c6.html" target="n" data-glyph="76,1" class="i method">AssertPositionInBounds</a>()
+        {
+            <b>if</b> (<a href="#7837e3930028e944" class="i property">Position</a> &gt;= <a href="#dac8aa48ce91c737" class="i property">Length</a> || <a href="#7837e3930028e944" class="i property">Position</a> &lt; 0)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;Cannot read outside the bounds of this stream.&quot;</span>);
+            }
+        }
+ 
+        <b>private</b> <a href="#e4375e3348ca4fa2" class="t t">BufferPartition</a> <a id="99aa48e4b50bd399" href="../R/99aa48e4b50bd399.html" target="n" data-glyph="76,1" class="i method">GetLatestBufferWithAvailableSpaceOrDefault</a>()
+        {
+            <a href="#e4375e3348ca4fa2" class="t t">BufferPartition</a> <span id="r51 rd" class="r51 r">latestBuffer</span> = <a href="#acae95386260f79e" class="i property">BufferSet</a>.<a href="@1@netstandard/A.html#981cccb3b4b716eb" class="i method">LastOrDefault</a>();
+ 
+            <b>if</b> (<span class="r51 r">latestBuffer</span> == <b>default</b> || <span class="r51 r">latestBuffer</span>.<a href="#a55809cfc894e712" class="i property">DataLength</a> &gt;= <span class="r51 r">latestBuffer</span>.<a href="#f5f96e4561f13c79" class="i property">Buffer</a>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>)
+            {
+                <b>return</b> <b>default</b>;
+            }
+ 
+            <b>return</b> <span class="r51 r">latestBuffer</span>;
+        }
+ 
+        <b>private static long</b> <a id="14fde2232bfbcf33" href="../R/14fde2232bfbcf33.html" target="n" data-glyph="76,1" class="i method">Min</a>(<b>long</b> <span id="r52 rd" class="r52 r">val1</span>, <b>long</b> <span id="r53 rd" class="r53 r">val2</span>, <b>long</b> <span id="r54 rd" class="r54 r">val3</span>)
+        {
+            <b>long</b> <span id="r55 rd" class="r55 r">result</span> = <a href="@1@netstandard/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@1@netstandard/A.html#8cf0c6d1543ff08d" class="i method">Min</a>(<span class="r52 r">val1</span>, <span class="r53 r">val2</span>);
+            <span class="r55 r">result</span> = <a href="@1@netstandard/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@1@netstandard/A.html#8cf0c6d1543ff08d" class="i method">Min</a>(<span class="r55 r">result</span>, <span class="r54 r">val3</span>);
+ 
+            <b>return</b> <span class="r55 r">result</span>;
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

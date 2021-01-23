@@ -1,0 +1,467 @@
+﻿<!DOCTYPE html>
+<html><head><title>AttestationAdministrationClient.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(458);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Security.Attestation/AttestationAdministrationClient.cs" target="_top">AttestationAdministrationClient.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Security.Attestation" target="_top">src\Azure.Security.Attestation.csproj</a> (Azure.Security.Attestation)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Runtime</span>.<span class="i">CompilerServices</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Security</span>.<span class="i">Cryptography</span>.<span class="i">X509Certificates</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Text</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Text</span>.<span class="i">Json</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Security</span>.<span class="i n">Attestation</span>.<span class="i n">Models</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Security</span>.<span class="i n">Attestation</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Attestation Client for the Microsoft Azure Attestation service.</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c"> The Attestation client contains the implementation of the &quot;Attest&quot; family of MAA apis.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>public class</b> <a id="a99baaa4028ac1c6" href="R/a99baaa4028ac1c6.html" target="n" data-glyph="0,0" class="t t">AttestationAdministrationClient</a>
+    {
+        <b>private readonly</b> <a href="AttestationClientOptions.cs.html#9d0ecd576a12aeef" class="t t">AttestationClientOptions</a> <a id="02b28a5ff521fa66" href="R/02b28a5ff521fa66.html" target="n" data-glyph="46,1" class="i field">_options</a>;
+        <b>private readonly</b> <span class="i">HttpPipeline</span> <a id="a72a98f35f789f43" href="R/a72a98f35f789f43.html" target="n" data-glyph="46,1" class="i field">_pipeline</a>;
+        <b>private readonly</b> <a href="Shared/ClientDiagnostics.cs.html#60221cb69e1f903a" class="t t">ClientDiagnostics</a> <a id="faab5a77f8b71b43" href="R/faab5a77f8b71b43.html" target="n" data-glyph="46,1" class="i field">_clientDiagnostics</a>;
+        <b>private readonly</b> <a href="Generated/PolicyRestClient.cs.html#e448f2e06edc9250" class="t t">PolicyRestClient</a> <a id="64ce84d1dc2eb402" href="R/64ce84d1dc2eb402.html" target="n" data-glyph="46,1" class="i field">_policyClient</a>;
+        <b>private readonly</b> <a href="Generated/PolicyCertificatesRestClient.cs.html#57578ecdb25041ed" class="t t">PolicyCertificatesRestClient</a> <a id="64ada79922f7aa1f" href="R/64ada79922f7aa1f.html" target="n" data-glyph="46,1" class="i field">_policyManagementClient</a>;
+        <b>private readonly</b> <a href="AttestationClient.cs.html#e26fa450a413a421" class="t t">AttestationClient</a> <a id="28ac14a2f1d08905" href="R/28ac14a2f1d08905.html" target="n" data-glyph="46,1" class="i field">_attestationClient</a>;
+ 
+        <b>private</b> <span class="i">IReadOnlyList</span>&lt;<a href="Models/AttestationSigner.cs.html#f9ef2caf091b7259" class="t t">AttestationSigner</a>&gt; <a id="3433c55686c690eb" href="R/3433c55686c690eb.html" target="n" data-glyph="46,1" class="i field">_signers</a>;
+        <b>private object</b> <a id="2c83ea81477d44d5" href="R/2c83ea81477d44d5.html" target="n" data-glyph="46,1" class="i field">_statelock</a> = <b>new</b> <b>object</b>();
+ 
+        <span class="c">// Default scope for data plane APIs.</span>
+        <b>private const string</b> <a id="95a8162c569e13cc" href="R/95a8162c569e13cc.html" target="n" data-glyph="10,1" class="i field">DefaultScope</a> = <span class="s">&quot;https://attest.azure.net/.default&quot;</span>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Returns the URI used to communicate with the service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <span class="i">Uri</span> <a id="b624d87275515435" href="R/b624d87275515435.html" target="n" data-glyph="102,1" class="i property">Endpoint</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AttestationClient.cs.html#e26fa450a413a421" class="t t">AttestationClient</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">endpoint</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Uri for the Microsoft Azure Attestation Service Instance to use.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">credential</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Credentials to be used in the Client.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA1801</span>
+        <b>public</b> <a id="3378d6aa372ac702" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">AttestationAdministrationClient</a>(<span class="i">Uri</span> <span id="r0 rd" class="r0 r">endpoint</span>, <span class="i">TokenCredential</span> <span id="r1 rd" class="r1 r">credential</span>)
+            : <a href="#e8ba5347c2218189" class="k">this</a>(<span class="r0 r">endpoint</span>, <span class="r1 r">credential</span>, <b>new</b> <a href="AttestationClientOptions.cs.html#192a4aa94240ab34" class="t constructor">AttestationClientOptions</a>())
+        {
+        }
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span>
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AttestationClient.cs.html#e26fa450a413a421" class="t t">AttestationClient</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">endpoint</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Uri for the Microsoft Azure Attestation Service Instance to use.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">credential</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Credentials to be used in the Client.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">options</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AttestationClientOptions.cs.html#9d0ecd576a12aeef" class="t t">AttestationClientOptions</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> used to configure the API client.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA1801</span>
+        <b>public</b> <a id="e8ba5347c2218189" href="R/e8ba5347c2218189.html" target="n" data-glyph="72,1" class="t constructor">AttestationAdministrationClient</a>(<span class="i">Uri</span> <span id="r2 rd" class="r2 r">endpoint</span>, <span class="i">TokenCredential</span> <span id="r3 rd" class="r3 r">credential</span>, <a href="AttestationClientOptions.cs.html#9d0ecd576a12aeef" class="t t">AttestationClientOptions</a> <span id="r4 rd" class="r4 r">options</span>)
+        {
+            <a href="Shared/Argument.cs.html#0198b1312554d2ed" class="t t">Argument</a>.<span class="i">AssertNotNull</span>(<span class="r2 r">endpoint</span>, <b>nameof</b>(<span class="r2 r">endpoint</span>));
+            <a href="Shared/Argument.cs.html#0198b1312554d2ed" class="t t">Argument</a>.<span class="i">AssertNotNull</span>(<span class="r3 r">credential</span>, <b>nameof</b>(<span class="r3 r">credential</span>));
+            <a href="Shared/Argument.cs.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="Shared/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r4 r">options</span>, <b>nameof</b>(<span class="r4 r">options</span>));
+ 
+            <a href="#02b28a5ff521fa66" class="i field">_options</a> = <span class="r4 r">options</span>;
+ 
+            <span class="c">// Add the authentication policy to our builder.</span>
+            <a href="#a72a98f35f789f43" class="i field">_pipeline</a> = <span class="i">HttpPipelineBuilder</span>.<span class="i">Build</span>(<span class="r4 r">options</span>, <b>new</b> <span class="i">BearerTokenAuthenticationPolicy</span>(<span class="r3 r">credential</span>, <a href="#95a8162c569e13cc" class="i field">DefaultScope</a>));
+ 
+            <span class="c">// Initialize the ClientDiagnostics.</span>
+            <a href="#faab5a77f8b71b43" class="i field">_clientDiagnostics</a> = <b>new</b> <span class="t">ClientDiagnostics</span>(<span class="r4 r">options</span>);
+ 
+            <a href="#b624d87275515435" class="i property">Endpoint</a> = <span class="r2 r">endpoint</span>;
+ 
+            <span class="c">// Initialize the Policy Rest Client.</span>
+            <a href="#64ce84d1dc2eb402" class="i field">_policyClient</a> = <b>new</b> <span class="t">PolicyRestClient</span>(<a href="#faab5a77f8b71b43" class="i field">_clientDiagnostics</a>, <a href="#a72a98f35f789f43" class="i field">_pipeline</a>, <a href="#b624d87275515435" class="i property">Endpoint</a>.<span class="i">AbsoluteUri</span>, <span class="r4 r">options</span>.<a href="AttestationClientOptions.cs.html#e606963c34425947" class="i property">Version</a>);
+ 
+            <span class="c">// Initialize the Certificates Rest Client.</span>
+            <a href="#64ada79922f7aa1f" class="i field">_policyManagementClient</a> = <b>new</b> <span class="t">PolicyCertificatesRestClient</span>(<a href="#faab5a77f8b71b43" class="i field">_clientDiagnostics</a>, <a href="#a72a98f35f789f43" class="i field">_pipeline</a>, <a href="#b624d87275515435" class="i property">Endpoint</a>.<span class="i">AbsoluteUri</span>, <span class="r4 r">options</span>.<a href="AttestationClientOptions.cs.html#e606963c34425947" class="i property">Version</a>);
+ 
+            <span class="c">// Initialize the Attestation Rest Client.</span>
+            <a href="#28ac14a2f1d08905" class="i field">_attestationClient</a> = <b>new</b> <a href="AttestationClient.cs.html#dd8669a9924b3f1f" class="t constructor">AttestationClient</a>(<span class="r2 r">endpoint</span>, <span class="r3 r">credential</span>, <span class="r4 r">options</span>);
+        }
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span>
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Parameterless constructor for mocking.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>protected</b> <a id="9022244ee490faf6" href="R/../../0000000000.html" target="n" data-glyph="75,1" class="t constructor">AttestationAdministrationClient</a>()
+        {
+        }
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA1822</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA1801</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Retrieves the attesttion policy for the specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Generated/Models/AttestationType.cs.html#c5fe1d921f42fb73" class="t t">AttestationType</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">attestationType</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Attestation Type to retrive.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">An </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>{<span class="r7 r t">StoredAttestationPolicy</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> with the policy for the specified attestation type.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public virtual</b> <a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>&lt;<a href="P/0b2375bb017064f5.html#0b2375bb017064f5" class="t t">StoredAttestationPolicy</a>&gt; <a id="5c74d2a7a740b442" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetPolicy</a>(<a href="Generated/Models/AttestationType.cs.html#c5fe1d921f42fb73" class="t t">AttestationType</a> <span id="r5 rd" class="r5 r">attestationType</span>, <span class="i">CancellationToken</span> <span id="r6 rd" class="r6 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>using</b> <a href="Shared/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r8 rd" class="r8 r">scope</span> = <a href="#faab5a77f8b71b43" class="i field">_clientDiagnostics</a>.<a href="Shared/DiagnosticScopeFactory.cs.html#74f1bd8b1f1143c8" class="i method">CreateScope</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="#a99baaa4028ac1c6" class="t t">AttestationAdministrationClient</a>)}<span class="s">.</span>{<b>nameof</b>(<span class="i">GetPolicy</span>)}<span class="s">&quot;</span>);
+            <span class="r8 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
+            <b>try</b>
+            {
+                <b>var</b> <span id="r9 rd" class="r9 r">result</span> = <a href="#64ce84d1dc2eb402" class="i field">_policyClient</a>.<a href="Generated/PolicyRestClient.cs.html#989746be65b043de" class="i method">Get</a>(<span class="r5 r">attestationType</span>, <span class="r6 r">cancellationToken</span>);
+                <a href="AttestationToken.cs.html#fe59844e2c351bcf" class="k">var</a> <span id="r10 rd" class="r10 r">token</span> = <b>new</b> <span class="t">AttestationToken</span>(<span class="r9 r">result</span>.<span class="i">Value</span>.<span class="i">Token</span>);
+                <b>if</b> (<a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#bbfb6a3f45aa6b85" class="i property">ValidateAttestationTokens</a>)
+                {
+                    <span class="r10 r">token</span>.<a href="AttestationToken.cs.html#7e9bbfc484893188" class="i method">ValidateToken</a>(<a href="#c70fc2278a1f62b9" class="i method">GetSigners</a>(), <a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#682d2880f6c5190d" class="i property">ValidationCallback</a>);
+                }
+ 
+                <b>using</b> <b>var</b> <span id="r11 rd" class="r11 r">document</span> = <span class="i">JsonDocument</span>.<span class="i">Parse</span>(<span class="r10 r">token</span>.<a href="AttestationToken.cs.html#66a76bf06b2e2675" class="i property">TokenBody</a>);
+                <a href="P/69c6251d979be5d2.html#69c6251d979be5d2" class="t t">PolicyResult</a> <span id="r12 rd" class="r12 r">policyResult</span> = <a href="P/69c6251d979be5d2.html#69c6251d979be5d2" class="t t">PolicyResult</a>.<span class="i">DeserializePolicyResult</span>(<span class="r11 r">document</span>.<span class="i">RootElement</span>);
+ 
+                <b>return</b> <b>new</b> <span class="t">AttestationResponse</span>&lt;<a href="P/0b2375bb017064f5.html#0b2375bb017064f5" class="t t">StoredAttestationPolicy</a>&gt;(<span class="r9 r">result</span>.<span class="i">GetRawResponse</span>(), <span class="r12 r">policyResult</span>.<a href="Models/PolicyResult.cs.html#bbc20a5309574f70" class="i property">PolicyToken</a>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r13 rd" class="r13 r">ex</span>)
+            {
+                <span class="r8 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#1fc9b81e757b438c" class="i method">Failed</a>(<span class="r13 r">ex</span>);
+                <b>throw</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Retrieves the attesttion policy for the specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Generated/Models/AttestationType.cs.html#c5fe1d921f42fb73" class="t t">AttestationType</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r14 r">attestationType</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Attestation Type to retrive.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">An </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>{<span class="r16 r t">StoredAttestationPolicy</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> with the policy for the specified attestation type.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public virtual async</b> <span class="i">Task</span>&lt;<a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>&lt;<a href="P/0b2375bb017064f5.html#0b2375bb017064f5" class="t t">StoredAttestationPolicy</a>&gt;&gt; <a id="f0160d80a0062d47" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetPolicyAsync</a>(<a href="Generated/Models/AttestationType.cs.html#c5fe1d921f42fb73" class="t t">AttestationType</a> <span id="r14 rd" class="r14 r">attestationType</span>, <span class="i">CancellationToken</span> <span id="r15 rd" class="r15 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>using</b> <a href="Shared/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r17 rd" class="r17 r">scope</span> = <a href="#faab5a77f8b71b43" class="i field">_clientDiagnostics</a>.<a href="Shared/DiagnosticScopeFactory.cs.html#74f1bd8b1f1143c8" class="i method">CreateScope</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="#a99baaa4028ac1c6" class="t t">AttestationAdministrationClient</a>)}<span class="s">.</span>{<b>nameof</b>(<span class="i">GetPolicy</span>)}<span class="s">&quot;</span>);
+            <span class="r17 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
+            <b>try</b>
+            {
+                <b>var</b> <span id="r18 rd" class="r18 r">result</span> = <b>await</b> <a href="#64ce84d1dc2eb402" class="i field">_policyClient</a>.<a href="Generated/PolicyRestClient.cs.html#99ccd9fce316a3c3" class="i method">GetAsync</a>(<span class="r14 r">attestationType</span>, <span class="r15 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <a href="AttestationToken.cs.html#fe59844e2c351bcf" class="k">var</a> <span id="r19 rd" class="r19 r">token</span> = <b>new</b> <span class="t">AttestationToken</span>(<span class="r18 r">result</span>.<span class="i">Value</span>.<span class="i">Token</span>);
+                <b>if</b> (<a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#bbfb6a3f45aa6b85" class="i property">ValidateAttestationTokens</a>)
+                {
+                    <span class="r19 r">token</span>.<a href="AttestationToken.cs.html#7e9bbfc484893188" class="i method">ValidateToken</a>(<a href="#c70fc2278a1f62b9" class="i method">GetSigners</a>(), <a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#682d2880f6c5190d" class="i property">ValidationCallback</a>);
+                }
+                <b>using</b> <b>var</b> <span id="r20 rd" class="r20 r">document</span> = <span class="i">JsonDocument</span>.<span class="i">Parse</span>(<span class="r19 r">token</span>.<a href="AttestationToken.cs.html#66a76bf06b2e2675" class="i property">TokenBody</a>);
+                <a href="P/69c6251d979be5d2.html#69c6251d979be5d2" class="t t">PolicyResult</a> <span id="r21 rd" class="r21 r">policyResult</span> = <a href="P/69c6251d979be5d2.html#69c6251d979be5d2" class="t t">PolicyResult</a>.<span class="i">DeserializePolicyResult</span>(<span class="r20 r">document</span>.<span class="i">RootElement</span>);
+                <b>return</b> <b>new</b> <span class="t">AttestationResponse</span>&lt;<a href="P/0b2375bb017064f5.html#0b2375bb017064f5" class="t t">StoredAttestationPolicy</a>&gt;(<span class="r18 r">result</span>.<span class="i">GetRawResponse</span>(), <span class="r21 r">policyResult</span>.<a href="Models/PolicyResult.cs.html#bbc20a5309574f70" class="i property">PolicyToken</a>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r22 rd" class="r22 r">ex</span>)
+            {
+                <span class="r17 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#1fc9b81e757b438c" class="i method">Failed</a>(<span class="r22 r">ex</span>);
+                <b>throw</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Sets the attesttion policy for the specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Generated/Models/AttestationType.cs.html#c5fe1d921f42fb73" class="t t">AttestationType</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r23 r">attestationType</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Generated/Models/AttestationType.cs.html#c5fe1d921f42fb73" class="t t">AttestationType</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> whose policy should be set.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r24 r">policyToSet</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AttestationToken.cs.html#fe59844e2c351bcf" class="t t">AttestationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> specifying the new stored attestation policy.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r25 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">An </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>{<span class="r26 r t">PolicyResult</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> with the policy for the specified attestation type.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public virtual</b> <a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>&lt;<a href="P/69c6251d979be5d2.html#69c6251d979be5d2" class="t t">PolicyResult</a>&gt; <a id="36e639d6272222bd" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">SetPolicy</a>(<a href="Generated/Models/AttestationType.cs.html#c5fe1d921f42fb73" class="t t">AttestationType</a> <span id="r23 rd" class="r23 r">attestationType</span>, <a href="AttestationToken.cs.html#fe59844e2c351bcf" class="t t">AttestationToken</a> <span id="r24 rd" class="r24 r">policyToSet</span>, <span class="i">CancellationToken</span> <span id="r25 rd" class="r25 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>using</b> <a href="Shared/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r27 rd" class="r27 r">scope</span> = <a href="#faab5a77f8b71b43" class="i field">_clientDiagnostics</a>.<a href="Shared/DiagnosticScopeFactory.cs.html#74f1bd8b1f1143c8" class="i method">CreateScope</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="#a99baaa4028ac1c6" class="t t">AttestationAdministrationClient</a>)}<span class="s">.</span>{<b>nameof</b>(<span class="i">SetPolicy</span>)}<span class="s">&quot;</span>);
+            <span class="r27 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
+            <b>try</b>
+            {
+                <b>var</b> <span id="r28 rd" class="r28 r">result</span> = <a href="#64ce84d1dc2eb402" class="i field">_policyClient</a>.<a href="Generated/PolicyRestClient.cs.html#0e6537047fae3212" class="i method">Set</a>(<span class="r23 r">attestationType</span>, <span class="r24 r">policyToSet</span>.<a href="AttestationToken.cs.html#60b26ef333128ae4" class="i method">ToString</a>(), <span class="r25 r">cancellationToken</span>);
+                <a href="AttestationToken.cs.html#fe59844e2c351bcf" class="k">var</a> <span id="r29 rd" class="r29 r">token</span> = <b>new</b> <span class="t">AttestationToken</span>(<span class="r28 r">result</span>.<span class="i">Value</span>.<span class="i">Token</span>);
+                <b>if</b> (<a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#bbfb6a3f45aa6b85" class="i property">ValidateAttestationTokens</a>)
+                {
+                    <span class="r29 r">token</span>.<a href="AttestationToken.cs.html#7e9bbfc484893188" class="i method">ValidateToken</a>(<a href="#c70fc2278a1f62b9" class="i method">GetSigners</a>(), <a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#682d2880f6c5190d" class="i property">ValidationCallback</a>);
+                }
+                <b>return</b> <b>new</b> <span class="t">AttestationResponse</span>&lt;<a href="P/69c6251d979be5d2.html#69c6251d979be5d2" class="t t">PolicyResult</a>&gt;(<span class="r28 r">result</span>.<span class="i">GetRawResponse</span>(), <span class="r29 r">token</span>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r30 rd" class="r30 r">ex</span>)
+            {
+                <span class="r27 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#1fc9b81e757b438c" class="i method">Failed</a>(<span class="r30 r">ex</span>);
+                <b>throw</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Sets the attesttion policy for the specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Generated/Models/AttestationType.cs.html#c5fe1d921f42fb73" class="t t">AttestationType</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r31 r">attestationType</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Generated/Models/AttestationType.cs.html#c5fe1d921f42fb73" class="t t">AttestationType</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> whose policy should be set.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r32 r">policyToSet</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AttestationToken.cs.html#fe59844e2c351bcf" class="t t">AttestationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> specifying the new stored attestation policy.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r33 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">An </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>{<span class="r34 r t">PolicyResult</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> with the policy for the specified attestation type.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public virtual async</b> <span class="i">Task</span>&lt;<a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>&lt;<a href="P/69c6251d979be5d2.html#69c6251d979be5d2" class="t t">PolicyResult</a>&gt;&gt; <a id="09ad875dfdecd3a5" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">SetPolicyAsync</a>(<a href="Generated/Models/AttestationType.cs.html#c5fe1d921f42fb73" class="t t">AttestationType</a> <span id="r31 rd" class="r31 r">attestationType</span>, <a href="AttestationToken.cs.html#fe59844e2c351bcf" class="t t">AttestationToken</a> <span id="r32 rd" class="r32 r">policyToSet</span>, <span class="i">CancellationToken</span> <span id="r33 rd" class="r33 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>using</b> <a href="Shared/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r35 rd" class="r35 r">scope</span> = <a href="#faab5a77f8b71b43" class="i field">_clientDiagnostics</a>.<a href="Shared/DiagnosticScopeFactory.cs.html#74f1bd8b1f1143c8" class="i method">CreateScope</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="#a99baaa4028ac1c6" class="t t">AttestationAdministrationClient</a>)}<span class="s">.</span>{<b>nameof</b>(<span class="i">SetPolicy</span>)}<span class="s">&quot;</span>);
+            <span class="r35 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
+            <b>try</b>
+            {
+                <b>var</b> <span id="r36 rd" class="r36 r">result</span> = <b>await</b> <a href="#64ce84d1dc2eb402" class="i field">_policyClient</a>.<a href="Generated/PolicyRestClient.cs.html#c5606cf0db07f311" class="i method">SetAsync</a>(<span class="r31 r">attestationType</span>, <span class="r32 r">policyToSet</span>.<a href="AttestationToken.cs.html#60b26ef333128ae4" class="i method">ToString</a>(), <span class="r33 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <a href="AttestationToken.cs.html#fe59844e2c351bcf" class="k">var</a> <span id="r37 rd" class="r37 r">token</span> = <b>new</b> <span class="t">AttestationToken</span>(<span class="r36 r">result</span>.<span class="i">Value</span>.<span class="i">Token</span>);
+                <b>if</b> (<a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#bbfb6a3f45aa6b85" class="i property">ValidateAttestationTokens</a>)
+                {
+                    <span class="r37 r">token</span>.<a href="AttestationToken.cs.html#7e9bbfc484893188" class="i method">ValidateToken</a>(<a href="#c70fc2278a1f62b9" class="i method">GetSigners</a>(), <a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#682d2880f6c5190d" class="i property">ValidationCallback</a>);
+                }
+                <b>return</b> <b>new</b> <span class="t">AttestationResponse</span>&lt;<a href="P/69c6251d979be5d2.html#69c6251d979be5d2" class="t t">PolicyResult</a>&gt;(<span class="r36 r">result</span>.<span class="i">GetRawResponse</span>(), <span class="r37 r">token</span>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r38 rd" class="r38 r">ex</span>)
+            {
+                <span class="r35 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#1fc9b81e757b438c" class="i method">Failed</a>(<span class="r38 r">ex</span>);
+                <b>throw</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Resets the policy for the specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Generated/Models/AttestationType.cs.html#c5fe1d921f42fb73" class="t t">AttestationType</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to the default value.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r39 r">attestationType</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Generated/Models/AttestationType.cs.html#c5fe1d921f42fb73" class="t t">AttestationType</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> whose policy should be reset.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r40 r">authorizationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Signed JSON Web Token signed by one of the policy management certificates used to verify the caller is authorized to reset policy to the default value..</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r41 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">An </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>{<span class="r42 r t">PolicyResult</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> with the policy for the specified attestation type.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public virtual</b> <a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>&lt;<a href="P/69c6251d979be5d2.html#69c6251d979be5d2" class="t t">PolicyResult</a>&gt; <a id="52a543115abe4ce4" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ResetPolicy</a>(<a href="Generated/Models/AttestationType.cs.html#c5fe1d921f42fb73" class="t t">AttestationType</a> <span id="r39 rd" class="r39 r">attestationType</span>, <a href="AttestationToken.cs.html#fe59844e2c351bcf" class="t t">AttestationToken</a> <span id="r40 rd" class="r40 r">authorizationToken</span> = <b>default</b>, <span class="i">CancellationToken</span> <span id="r41 rd" class="r41 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>using</b> <a href="Shared/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r43 rd" class="r43 r">scope</span> = <a href="#faab5a77f8b71b43" class="i field">_clientDiagnostics</a>.<a href="Shared/DiagnosticScopeFactory.cs.html#74f1bd8b1f1143c8" class="i method">CreateScope</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="#a99baaa4028ac1c6" class="t t">AttestationAdministrationClient</a>)}<span class="s">.</span>{<b>nameof</b>(<span class="i">ResetPolicy</span>)}<span class="s">&quot;</span>);
+            <span class="r43 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
+            <b>try</b>
+            {
+                <b>if</b> (<span class="r40 r">authorizationToken</span> == <b>null</b>)
+                {
+                    <span class="r40 r">authorizationToken</span> = <b>new</b> <a href="UnsecuredAttestationToken.cs.html#f2d1dcfa4e9eef13" class="t constructor">UnsecuredAttestationToken</a>();
+                }
+                <b>var</b> <span id="r44 rd" class="r44 r">result</span> = <a href="#64ce84d1dc2eb402" class="i field">_policyClient</a>.<a href="Generated/PolicyRestClient.cs.html#a009281c8be49b2f" class="i method">Reset</a>(<span class="r39 r">attestationType</span>, <span class="r40 r">authorizationToken</span>.<a href="AttestationToken.cs.html#60b26ef333128ae4" class="i method">ToString</a>(), <span class="r41 r">cancellationToken</span>);
+                <a href="AttestationToken.cs.html#fe59844e2c351bcf" class="k">var</a> <span id="r45 rd" class="r45 r">token</span> = <b>new</b> <span class="t">AttestationToken</span>(<span class="r44 r">result</span>.<span class="i">Value</span>.<span class="i">Token</span>);
+                <b>if</b> (<a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#bbfb6a3f45aa6b85" class="i property">ValidateAttestationTokens</a>)
+                {
+                    <span class="r45 r">token</span>.<a href="AttestationToken.cs.html#7e9bbfc484893188" class="i method">ValidateToken</a>(<a href="#c70fc2278a1f62b9" class="i method">GetSigners</a>(), <a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#682d2880f6c5190d" class="i property">ValidationCallback</a>);
+                }
+                <b>return</b> <b>new</b> <span class="t">AttestationResponse</span>&lt;<a href="P/69c6251d979be5d2.html#69c6251d979be5d2" class="t t">PolicyResult</a>&gt;(<span class="r44 r">result</span>.<span class="i">GetRawResponse</span>(), <span class="r45 r">token</span>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r46 rd" class="r46 r">ex</span>)
+            {
+                <span class="r43 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#1fc9b81e757b438c" class="i method">Failed</a>(<span class="r46 r">ex</span>);
+                <b>throw</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Resets the policy for the specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Generated/Models/AttestationType.cs.html#c5fe1d921f42fb73" class="t t">AttestationType</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to the default value.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r47 r">attestationType</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Generated/Models/AttestationType.cs.html#c5fe1d921f42fb73" class="t t">AttestationType</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> whose policy should be reset.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r48 r">authorizationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Signed JSON Web Token signed by one of the policy management certificates used to verify the caller is authorized to reset policy to the default value..</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r49 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">An </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>{<span class="r50 r t">PolicyCertificatesModificationResult</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> with the policy for the specified attestation type.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public virtual async</b> <span class="i">Task</span>&lt;<a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>&lt;<a href="P/69c6251d979be5d2.html#69c6251d979be5d2" class="t t">PolicyResult</a>&gt;&gt; <a id="bf8de5703246a48a" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ResetPolicyAsync</a>(<a href="Generated/Models/AttestationType.cs.html#c5fe1d921f42fb73" class="t t">AttestationType</a> <span id="r47 rd" class="r47 r">attestationType</span>, <a href="AttestationToken.cs.html#fe59844e2c351bcf" class="t t">AttestationToken</a> <span id="r48 rd" class="r48 r">authorizationToken</span> = <b>default</b>, <span class="i">CancellationToken</span> <span id="r49 rd" class="r49 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>using</b> <a href="Shared/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r51 rd" class="r51 r">scope</span> = <a href="#faab5a77f8b71b43" class="i field">_clientDiagnostics</a>.<a href="Shared/DiagnosticScopeFactory.cs.html#74f1bd8b1f1143c8" class="i method">CreateScope</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="#a99baaa4028ac1c6" class="t t">AttestationAdministrationClient</a>)}<span class="s">.</span>{<b>nameof</b>(<span class="i">ResetPolicy</span>)}<span class="s">&quot;</span>);
+            <span class="r51 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
+            <b>try</b>
+            {
+                <b>if</b> (<span class="r48 r">authorizationToken</span> == <b>null</b>)
+                {
+                    <span class="r48 r">authorizationToken</span> = <b>new</b> <a href="UnsecuredAttestationToken.cs.html#f2d1dcfa4e9eef13" class="t constructor">UnsecuredAttestationToken</a>();
+                }
+                <b>var</b> <span id="r52 rd" class="r52 r">result</span> = <b>await</b> <a href="#64ce84d1dc2eb402" class="i field">_policyClient</a>.<a href="Generated/PolicyRestClient.cs.html#77fb8395784e44f3" class="i method">ResetAsync</a>(<span class="r47 r">attestationType</span>, <span class="r48 r">authorizationToken</span>.<a href="AttestationToken.cs.html#60b26ef333128ae4" class="i method">ToString</a>(), <span class="r49 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <a href="AttestationToken.cs.html#fe59844e2c351bcf" class="k">var</a> <span id="r53 rd" class="r53 r">token</span> = <b>new</b> <span class="t">AttestationToken</span>(<span class="r52 r">result</span>.<span class="i">Value</span>.<span class="i">Token</span>);
+                <b>if</b> (<a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#bbfb6a3f45aa6b85" class="i property">ValidateAttestationTokens</a>)
+                {
+                    <span class="r53 r">token</span>.<a href="AttestationToken.cs.html#7e9bbfc484893188" class="i method">ValidateToken</a>(<a href="#c70fc2278a1f62b9" class="i method">GetSigners</a>(), <a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#682d2880f6c5190d" class="i property">ValidationCallback</a>);
+                }
+                <b>return</b> <b>new</b> <span class="t">AttestationResponse</span>&lt;<a href="P/69c6251d979be5d2.html#69c6251d979be5d2" class="t t">PolicyResult</a>&gt;(<span class="r52 r">result</span>.<span class="i">GetRawResponse</span>(), <span class="r53 r">token</span>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r54 rd" class="r54 r">ex</span>)
+            {
+                <span class="r51 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#1fc9b81e757b438c" class="i method">Failed</a>(<span class="r54 r">ex</span>);
+                <b>throw</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Returns the set of policy management certificates currently configured for the attestation service.</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> If the service is running in AAD mode, this list will be empty.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r55 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Cancellation token used to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A set of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">X509Certificate2</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> objects representing the set of root certificates for policy management.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public virtual</b> <a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>&lt;<a href="P/79192ff4270fe033.html#79192ff4270fe033" class="t t">PolicyCertificatesResult</a>&gt; <a id="3458bbff92e084d2" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetPolicyManagementCertificates</a>(<span class="i">CancellationToken</span> <span id="r55 rd" class="r55 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>using</b> <a href="Shared/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r56 rd" class="r56 r">scope</span> = <a href="#faab5a77f8b71b43" class="i field">_clientDiagnostics</a>.<a href="Shared/DiagnosticScopeFactory.cs.html#74f1bd8b1f1143c8" class="i method">CreateScope</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="#a99baaa4028ac1c6" class="t t">AttestationAdministrationClient</a>)}<span class="s">.</span>{<b>nameof</b>(<span class="i">GetPolicyManagementCertificates</span>)}<span class="s">&quot;</span>);
+            <span class="r56 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
+            <b>try</b>
+            {
+                <b>var</b> <span id="r57 rd" class="r57 r">result</span> = <a href="#64ada79922f7aa1f" class="i field">_policyManagementClient</a>.<a href="Generated/PolicyCertificatesRestClient.cs.html#f87602ff93a98b93" class="i method">Get</a>(<span class="r55 r">cancellationToken</span>);
+                <a href="AttestationToken.cs.html#fe59844e2c351bcf" class="k">var</a> <span id="r58 rd" class="r58 r">token</span> = <b>new</b> <span class="t">AttestationToken</span>(<span class="r57 r">result</span>.<span class="i">Value</span>.<span class="i">Token</span>);
+                <b>if</b> (<a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#bbfb6a3f45aa6b85" class="i property">ValidateAttestationTokens</a>)
+                {
+                    <span class="r58 r">token</span>.<a href="AttestationToken.cs.html#7e9bbfc484893188" class="i method">ValidateToken</a>(<a href="#c70fc2278a1f62b9" class="i method">GetSigners</a>(), <a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#682d2880f6c5190d" class="i property">ValidationCallback</a>);
+                }
+                <b>return</b> <b>new</b> <span class="t">AttestationResponse</span>&lt;<a href="P/79192ff4270fe033.html#79192ff4270fe033" class="t t">PolicyCertificatesResult</a>&gt;(<span class="r57 r">result</span>.<span class="i">GetRawResponse</span>(), <span class="r58 r">token</span>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r59 rd" class="r59 r">ex</span>)
+            {
+                <span class="r56 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#1fc9b81e757b438c" class="i method">Failed</a>(<span class="r59 r">ex</span>);
+                <b>throw</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Returns the set of policy management certificates currently configured for the attestation service.</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> If the service is running in AAD mode, this list will be empty.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r60 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Cancellation token used to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A set of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">X509Certificate2</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> objects representing the set of root certificates for policy management.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public virtual async</b> <span class="i">Task</span>&lt;<a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>&lt;<a href="P/79192ff4270fe033.html#79192ff4270fe033" class="t t">PolicyCertificatesResult</a>&gt;&gt; <a id="0587a7c7db4bf9b9" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetPolicyManagementCertificatesAsync</a>(<span class="i">CancellationToken</span> <span id="r60 rd" class="r60 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>using</b> <a href="Shared/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r61 rd" class="r61 r">scope</span> = <a href="#faab5a77f8b71b43" class="i field">_clientDiagnostics</a>.<a href="Shared/DiagnosticScopeFactory.cs.html#74f1bd8b1f1143c8" class="i method">CreateScope</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="#a99baaa4028ac1c6" class="t t">AttestationAdministrationClient</a>)}<span class="s">.</span>{<b>nameof</b>(<span class="i">GetPolicyManagementCertificates</span>)}<span class="s">&quot;</span>);
+            <span class="r61 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
+            <b>try</b>
+            {
+                <b>var</b> <span id="r62 rd" class="r62 r">result</span> = <b>await</b> <a href="#64ada79922f7aa1f" class="i field">_policyManagementClient</a>.<a href="Generated/PolicyCertificatesRestClient.cs.html#afed201c42665167" class="i method">GetAsync</a>(<span class="r60 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <a href="AttestationToken.cs.html#fe59844e2c351bcf" class="k">var</a> <span id="r63 rd" class="r63 r">token</span> = <b>new</b> <span class="t">AttestationToken</span>(<span class="r62 r">result</span>.<span class="i">Value</span>.<span class="i">Token</span>);
+                <b>if</b> (<a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#bbfb6a3f45aa6b85" class="i property">ValidateAttestationTokens</a>)
+                {
+                    <span class="r63 r">token</span>.<a href="AttestationToken.cs.html#7e9bbfc484893188" class="i method">ValidateToken</a>(<a href="#c70fc2278a1f62b9" class="i method">GetSigners</a>(), <a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#682d2880f6c5190d" class="i property">ValidationCallback</a>);
+                }
+                <b>return</b> <b>new</b> <span class="t">AttestationResponse</span>&lt;<a href="P/79192ff4270fe033.html#79192ff4270fe033" class="t t">PolicyCertificatesResult</a>&gt;(<span class="r62 r">result</span>.<span class="i">GetRawResponse</span>(), <span class="r63 r">token</span>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r64 rd" class="r64 r">ex</span>)
+            {
+                <span class="r61 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#1fc9b81e757b438c" class="i method">Failed</a>(<span class="r64 r">ex</span>);
+                <b>throw</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Retrieves the attesttion policy for the specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Generated/Models/AttestationType.cs.html#c5fe1d921f42fb73" class="t t">AttestationType</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r65 r">certificateToAdd</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Attestation Type to retrive.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r66 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">An </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>{<span class="r67 r t">PolicyCertificatesModificationResult</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> with the policy for the specified attestation type.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public virtual</b> <a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>&lt;<a href="P/9afdbef5cc115d52.html#9afdbef5cc115d52" class="t t">PolicyCertificatesModificationResult</a>&gt; <a id="c27f524e1ae8cae0" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">AddPolicyManagementCertificate</a>(<a href="SecuredAttestationToken.cs.html#38bbaec748e64882" class="t t">SecuredAttestationToken</a> <span id="r65 rd" class="r65 r">certificateToAdd</span>, <span class="i">CancellationToken</span> <span id="r66 rd" class="r66 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>using</b> <a href="Shared/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r68 rd" class="r68 r">scope</span> = <a href="#faab5a77f8b71b43" class="i field">_clientDiagnostics</a>.<a href="Shared/DiagnosticScopeFactory.cs.html#74f1bd8b1f1143c8" class="i method">CreateScope</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="#a99baaa4028ac1c6" class="t t">AttestationAdministrationClient</a>)}<span class="s">.</span>{<b>nameof</b>(<span class="i">AddPolicyManagementCertificate</span>)}<span class="s">&quot;</span>);
+            <span class="r68 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
+            <b>try</b>
+            {
+                <b>var</b> <span id="r69 rd" class="r69 r">result</span> = <a href="#64ada79922f7aa1f" class="i field">_policyManagementClient</a>.<a href="Generated/PolicyCertificatesRestClient.cs.html#802150a31568e047" class="i method">Add</a>(<span class="r65 r">certificateToAdd</span>.<a href="AttestationToken.cs.html#60b26ef333128ae4" class="i method">ToString</a>(), <span class="r66 r">cancellationToken</span>);
+                <a href="AttestationToken.cs.html#fe59844e2c351bcf" class="k">var</a> <span id="r70 rd" class="r70 r">token</span> = <b>new</b> <span class="t">AttestationToken</span>(<span class="r69 r">result</span>.<span class="i">Value</span>.<span class="i">Token</span>);
+                <b>if</b> (<a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#bbfb6a3f45aa6b85" class="i property">ValidateAttestationTokens</a>)
+                {
+                    <span class="r70 r">token</span>.<a href="AttestationToken.cs.html#7e9bbfc484893188" class="i method">ValidateToken</a>(<a href="#c70fc2278a1f62b9" class="i method">GetSigners</a>(), <a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#682d2880f6c5190d" class="i property">ValidationCallback</a>);
+                }
+                <b>return</b> <b>new</b> <span class="t">AttestationResponse</span>&lt;<a href="P/9afdbef5cc115d52.html#9afdbef5cc115d52" class="t t">PolicyCertificatesModificationResult</a>&gt;(<span class="r69 r">result</span>.<span class="i">GetRawResponse</span>(), <span class="r70 r">token</span>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r71 rd" class="r71 r">ex</span>)
+            {
+                <span class="r68 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#1fc9b81e757b438c" class="i method">Failed</a>(<span class="r71 r">ex</span>);
+                <b>throw</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Retrieves the attesttion policy for the specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Generated/Models/AttestationType.cs.html#c5fe1d921f42fb73" class="t t">AttestationType</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r72 r">certificateToAdd</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Attestation Type to retrive.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r73 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">An </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>{<span class="r74 r t">PolicyCertificatesModificationResult</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> with the policy for the specified attestation type.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public virtual async</b> <span class="i">Task</span>&lt;<a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>&lt;<a href="P/9afdbef5cc115d52.html#9afdbef5cc115d52" class="t t">PolicyCertificatesModificationResult</a>&gt;&gt; <a id="6b8f7b9262269df4" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">AddPolicyManagementCertificateAsync</a>(<a href="SecuredAttestationToken.cs.html#38bbaec748e64882" class="t t">SecuredAttestationToken</a> <span id="r72 rd" class="r72 r">certificateToAdd</span>, <span class="i">CancellationToken</span> <span id="r73 rd" class="r73 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>using</b> <a href="Shared/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r75 rd" class="r75 r">scope</span> = <a href="#faab5a77f8b71b43" class="i field">_clientDiagnostics</a>.<a href="Shared/DiagnosticScopeFactory.cs.html#74f1bd8b1f1143c8" class="i method">CreateScope</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="#a99baaa4028ac1c6" class="t t">AttestationAdministrationClient</a>)}<span class="s">.</span>{<b>nameof</b>(<span class="i">AddPolicyManagementCertificate</span>)}<span class="s">&quot;</span>);
+            <span class="r75 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
+            <b>try</b>
+            {
+                <b>var</b> <span id="r76 rd" class="r76 r">result</span> = <b>await</b> <a href="#64ada79922f7aa1f" class="i field">_policyManagementClient</a>.<a href="Generated/PolicyCertificatesRestClient.cs.html#9eb5bab0eb77420c" class="i method">AddAsync</a>(<span class="r72 r">certificateToAdd</span>.<a href="AttestationToken.cs.html#60b26ef333128ae4" class="i method">ToString</a>(), <span class="r73 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <a href="AttestationToken.cs.html#fe59844e2c351bcf" class="k">var</a> <span id="r77 rd" class="r77 r">token</span> = <b>new</b> <span class="t">AttestationToken</span>(<span class="r76 r">result</span>.<span class="i">Value</span>.<span class="i">Token</span>);
+                <b>if</b> (<a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#bbfb6a3f45aa6b85" class="i property">ValidateAttestationTokens</a>)
+                {
+                    <span class="r77 r">token</span>.<a href="AttestationToken.cs.html#7e9bbfc484893188" class="i method">ValidateToken</a>(<a href="#c70fc2278a1f62b9" class="i method">GetSigners</a>(), <a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#682d2880f6c5190d" class="i property">ValidationCallback</a>);
+                }
+                <b>return</b> <b>new</b> <span class="t">AttestationResponse</span>&lt;<a href="P/9afdbef5cc115d52.html#9afdbef5cc115d52" class="t t">PolicyCertificatesModificationResult</a>&gt;(<span class="r76 r">result</span>.<span class="i">GetRawResponse</span>(), <span class="r77 r">token</span>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r78 rd" class="r78 r">ex</span>)
+            {
+                <span class="r75 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#1fc9b81e757b438c" class="i method">Failed</a>(<span class="r78 r">ex</span>);
+                <b>throw</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Retrieves the attesttion policy for the specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Generated/Models/AttestationType.cs.html#c5fe1d921f42fb73" class="t t">AttestationType</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r79 r">certificateToAdd</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Attestation Type to retrive.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r80 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">An </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>{<span class="r81 r t">PolicyCertificatesModificationResult</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> with the policy for the specified attestation type.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public virtual</b> <a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>&lt;<a href="P/9afdbef5cc115d52.html#9afdbef5cc115d52" class="t t">PolicyCertificatesModificationResult</a>&gt; <a id="aef1a93dcb769925" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">RemovePolicyManagementCertificate</a>(<a href="SecuredAttestationToken.cs.html#38bbaec748e64882" class="t t">SecuredAttestationToken</a> <span id="r79 rd" class="r79 r">certificateToAdd</span>, <span class="i">CancellationToken</span> <span id="r80 rd" class="r80 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>using</b> <a href="Shared/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r82 rd" class="r82 r">scope</span> = <a href="#faab5a77f8b71b43" class="i field">_clientDiagnostics</a>.<a href="Shared/DiagnosticScopeFactory.cs.html#74f1bd8b1f1143c8" class="i method">CreateScope</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="#a99baaa4028ac1c6" class="t t">AttestationAdministrationClient</a>)}<span class="s">.</span>{<b>nameof</b>(<span class="i">RemovePolicyManagementCertificate</span>)}<span class="s">&quot;</span>);
+            <span class="r82 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
+            <b>try</b>
+            {
+                <b>var</b> <span id="r83 rd" class="r83 r">result</span> = <a href="#64ada79922f7aa1f" class="i field">_policyManagementClient</a>.<a href="Generated/PolicyCertificatesRestClient.cs.html#55394294be0f5915" class="i method">Remove</a>(<span class="r79 r">certificateToAdd</span>.<a href="AttestationToken.cs.html#60b26ef333128ae4" class="i method">ToString</a>(), <span class="r80 r">cancellationToken</span>);
+                <a href="AttestationToken.cs.html#fe59844e2c351bcf" class="k">var</a> <span id="r84 rd" class="r84 r">token</span> = <b>new</b> <span class="t">AttestationToken</span>(<span class="r83 r">result</span>.<span class="i">Value</span>.<span class="i">Token</span>);
+                <b>if</b> (<a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#bbfb6a3f45aa6b85" class="i property">ValidateAttestationTokens</a>)
+                {
+                    <span class="r84 r">token</span>.<a href="AttestationToken.cs.html#7e9bbfc484893188" class="i method">ValidateToken</a>(<a href="#c70fc2278a1f62b9" class="i method">GetSigners</a>(), <a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#682d2880f6c5190d" class="i property">ValidationCallback</a>);
+                }
+                <b>return</b> <b>new</b> <span class="t">AttestationResponse</span>&lt;<a href="P/9afdbef5cc115d52.html#9afdbef5cc115d52" class="t t">PolicyCertificatesModificationResult</a>&gt;(<span class="r83 r">result</span>.<span class="i">GetRawResponse</span>(), <span class="r84 r">token</span>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r85 rd" class="r85 r">ex</span>)
+            {
+                <span class="r82 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#1fc9b81e757b438c" class="i method">Failed</a>(<span class="r85 r">ex</span>);
+                <b>throw</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Removes one of the attestation policy management certificates.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r86 r">certificateToAdd</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Attestation Type to retrive.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r87 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">An </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>{<span class="r88 r t">PolicyCertificatesModificationResult</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> with the policy for the specified attestation type.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public virtual async</b> <span class="i">Task</span>&lt;<a href="AttestationResponse.cs.html#fcdef98218d64497" class="t t">AttestationResponse</a>&lt;<a href="P/9afdbef5cc115d52.html#9afdbef5cc115d52" class="t t">PolicyCertificatesModificationResult</a>&gt;&gt; <a id="7c02b6c04fde5782" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">RemovePolicyManagementCertificateAsync</a>(<a href="SecuredAttestationToken.cs.html#38bbaec748e64882" class="t t">SecuredAttestationToken</a> <span id="r86 rd" class="r86 r">certificateToAdd</span>, <span class="i">CancellationToken</span> <span id="r87 rd" class="r87 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>using</b> <a href="Shared/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r89 rd" class="r89 r">scope</span> = <a href="#faab5a77f8b71b43" class="i field">_clientDiagnostics</a>.<a href="Shared/DiagnosticScopeFactory.cs.html#74f1bd8b1f1143c8" class="i method">CreateScope</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="#a99baaa4028ac1c6" class="t t">AttestationAdministrationClient</a>)}<span class="s">.</span>{<b>nameof</b>(<span class="i">RemovePolicyManagementCertificate</span>)}<span class="s">&quot;</span>);
+            <span class="r89 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
+            <b>try</b>
+            {
+                <b>var</b> <span id="r90 rd" class="r90 r">result</span> = <b>await</b> <a href="#64ada79922f7aa1f" class="i field">_policyManagementClient</a>.<a href="Generated/PolicyCertificatesRestClient.cs.html#d6921649b47d5bfd" class="i method">RemoveAsync</a>(<span class="r86 r">certificateToAdd</span>.<a href="AttestationToken.cs.html#60b26ef333128ae4" class="i method">ToString</a>(), <span class="r87 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <a href="AttestationToken.cs.html#fe59844e2c351bcf" class="k">var</a> <span id="r91 rd" class="r91 r">token</span> = <b>new</b> <span class="t">AttestationToken</span>(<span class="r90 r">result</span>.<span class="i">Value</span>.<span class="i">Token</span>);
+                <b>if</b> (<a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#bbfb6a3f45aa6b85" class="i property">ValidateAttestationTokens</a>)
+                {
+                    <span class="r91 r">token</span>.<a href="AttestationToken.cs.html#7e9bbfc484893188" class="i method">ValidateToken</a>(<a href="#c70fc2278a1f62b9" class="i method">GetSigners</a>(), <a href="#02b28a5ff521fa66" class="i field">_options</a>.<a href="AttestationClientOptions.cs.html#682d2880f6c5190d" class="i property">ValidationCallback</a>);
+                }
+                <b>return</b> <b>new</b> <span class="t">AttestationResponse</span>&lt;<a href="P/9afdbef5cc115d52.html#9afdbef5cc115d52" class="t t">PolicyCertificatesModificationResult</a>&gt;(<span class="r90 r">result</span>.<span class="i">GetRawResponse</span>(), <span class="r91 r">token</span>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r92 rd" class="r92 r">ex</span>)
+            {
+                <span class="r89 r">scope</span>.<a href="Shared/DiagnosticScope.cs.html#1fc9b81e757b438c" class="i method">Failed</a>(<span class="r92 r">ex</span>);
+                <b>throw</b>;
+            }
+        }
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span>
+ 
+        <b>private</b> <span class="i">IReadOnlyList</span>&lt;<a href="Models/AttestationSigner.cs.html#f9ef2caf091b7259" class="t t">AttestationSigner</a>&gt; <a id="c70fc2278a1f62b9" href="R/c70fc2278a1f62b9.html" target="n" data-glyph="76,1" class="i method">GetSigners</a>()
+        {
+            <b>lock</b> (<a href="#2c83ea81477d44d5" class="i field">_statelock</a>)
+            {
+                <b>if</b> (<a href="#3433c55686c690eb" class="i field">_signers</a> == <b>null</b>)
+                {
+                    <a href="#3433c55686c690eb" class="i field">_signers</a> = <a href="#28ac14a2f1d08905" class="i field">_attestationClient</a>.<a href="AttestationClient.cs.html#5a7d08f3829e0fa2" class="i method">GetSigningCertificates</a>().<span class="i">Value</span>;
+                }
+ 
+                <b>return</b> <a href="#3433c55686c690eb" class="i field">_signers</a>;
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

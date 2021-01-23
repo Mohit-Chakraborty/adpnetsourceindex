@@ -1,0 +1,575 @@
+﻿<!DOCTYPE html>
+<html><head><title>QueueClient.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(566);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.ServiceBus/QueueClient.cs" target="_top">QueueClient.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.ServiceBus" target="_top">src\Microsoft.Azure.ServiceBus.csproj</a> (Microsoft.Azure.ServiceBus)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft. All rights reserved.</span>
+<span class="c">// Licensed under the MIT license. See LICENSE file in the project root for full license information.</span>
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">ServiceBus</span>
+{
+    <b>using</b> <span class="i">System</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">Amqp</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">ServiceBus</span>.<span class="i n">Core</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">ServiceBus</span>.<span class="i n">Primitives</span>;
+ 
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> QueueClient can be used for all basic interactions with a Service Bus Queue.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">example</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Create a new QueueClient</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">code</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> IQueueClient queueClient = new QueueClient(</span>
+    <span class="c">///</span><span class="c">     namespaceConnectionString,</span>
+    <span class="c">///</span><span class="c">     queueName,</span>
+    <span class="c">///</span><span class="c">     ReceiveMode.PeekLock,</span>
+    <span class="c">///</span><span class="c">     RetryExponential);</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">code</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c"> Send a message to the queue:</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">code</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> byte[] data = GetData();</span>
+    <span class="c">///</span><span class="c"> await queueClient.SendAsync(data);</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">code</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c"> Register a message handler which will be invoked every time a message is received.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">code</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> queueClient.RegisterMessageHandler(</span>
+    <span class="c">///</span><span class="c">        async (message, token) =</span><span class="c">&amp;gt;</span>
+    <span class="c">///</span><span class="c">        {</span>
+    <span class="c">///</span><span class="c">            // Process the message</span>
+    <span class="c">///</span><span class="c">            Console.WriteLine($&quot;Received message: SequenceNumber:{message.SystemProperties.SequenceNumber} Body:{Encoding.UTF8.GetString(message.Body)}&quot;);</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c">            // Complete the message so that it is not received again.</span>
+    <span class="c">///</span><span class="c">            // This can be done only if the queueClient is opened in ReceiveMode.PeekLock mode.</span>
+    <span class="c">///</span><span class="c">            await queueClient.CompleteAsync(message.SystemProperties.LockToken);</span>
+    <span class="c">///</span><span class="c">        },</span>
+    <span class="c">///</span><span class="c">        async (exceptionEvent) =</span><span class="c">&amp;gt;</span>
+    <span class="c">///</span><span class="c">        {</span>
+    <span class="c">///</span><span class="c">            // Process the exception</span>
+    <span class="c">///</span><span class="c">            Console.WriteLine(&quot;Exception = &quot; + exceptionEvent.Exception);</span>
+    <span class="c">///</span><span class="c">            return Task.CompletedTask;</span>
+    <span class="c">///</span><span class="c">        });</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">code</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">example</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">Use </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Core/MessageSender.cs.html#435f723d21eebd94" class="t t">MessageSender</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> or </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Core/MessageReceiver.cs.html#df59eb99899d6167" class="t t">MessageReceiver</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> for advanced set of functionality.</span>
+    <span class="c">///</span><span class="c"> It uses AMQP protocol for communicating with servicebus.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+    <b>public class</b> <a id="600a33086fe1a7c5" href="R/600a33086fe1a7c5.html" target="n" data-glyph="0,0" class="t t">QueueClient</a> : <a href="ClientEntity.cs.html#88eab29996c9f54a" class="t t">ClientEntity</a>, <a href="IQueueClient.cs.html#0f53c36317ac6af9" class="t t">IQueueClient</a>
+    {
+        <b>readonly object</b> <a id="280275efab3688d3" href="R/280275efab3688d3.html" target="n" data-glyph="46,1" class="i field">syncLock</a>;
+ 
+        <b>int</b> <a id="12b2157277651836" href="R/12b2157277651836.html" target="n" data-glyph="46,1" class="i field">prefetchCount</a>;
+        <a href="Core/MessageSender.cs.html#435f723d21eebd94" class="t t">MessageSender</a> <a id="868d25e7068bfef4" href="R/868d25e7068bfef4.html" target="n" data-glyph="46,1" class="i field">innerSender</a>;
+        <a href="Core/MessageReceiver.cs.html#df59eb99899d6167" class="t t">MessageReceiver</a> <a id="a1b5849710e8fb47" href="R/a1b5849710e8fb47.html" target="n" data-glyph="46,1" class="i field">innerReceiver</a>;
+        <a href="SessionClient.cs.html#665e503e2b872f1f" class="t t">SessionClient</a> <a id="ff3acdd3a13bdce5" href="R/ff3acdd3a13bdce5.html" target="n" data-glyph="46,1" class="i field">sessionClient</a>;
+        <a href="SessionPumpHost.cs.html#c8868839ab3f54cb" class="t t">SessionPumpHost</a> <a id="e680b43349479e9f" href="R/e680b43349479e9f.html" target="n" data-glyph="46,1" class="i field">sessionPumpHost</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Instantiates a new </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#600a33086fe1a7c5" class="t t">QueueClient</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to perform operations on a queue.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">connectionStringBuilder</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusConnectionStringBuilder.cs.html#f5792d111dd93f0d" class="t t">ServiceBusConnectionStringBuilder</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> having namespace and queue information.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">receiveMode</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Mode of receive of messages. Defaults to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#e015d00870679cbc" class="i property">ReceiveMode</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.PeekLock.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Retry policy for queue operations. Defaults to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a>.<a href="RetryPolicy.cs.html#d5872bd857fd612e" class="i property">Default</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">Creates a new connection to the queue, which is opened during the first send/receive operation.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public</b> <a id="6289bdcf175dffde" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">QueueClient</a>(<a href="ServiceBusConnectionStringBuilder.cs.html#f5792d111dd93f0d" class="t t">ServiceBusConnectionStringBuilder</a> <span id="r0 rd" class="r0 r">connectionStringBuilder</span>, <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a> <span id="r1 rd" class="r1 r">receiveMode</span> = <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a>.<a href="ReceiveMode.cs.html#d43dbf05f584f89c" class="i field">PeekLock</a>, <a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a> <span id="r2 rd" class="r2 r">retryPolicy</span> = <b>null</b>)
+            : <b>this</b>(<span class="r0 r">connectionStringBuilder</span>?.<a href="ServiceBusConnectionStringBuilder.cs.html#667a4826f798998b" class="i method">GetNamespaceConnectionString</a>(), <span class="r0 r">connectionStringBuilder</span>?.<a href="ServiceBusConnectionStringBuilder.cs.html#07e91b5081d2efe4" class="i property">EntityPath</a>, <span class="r1 r">receiveMode</span>, <span class="r2 r">retryPolicy</span>)
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Instantiates a new </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#600a33086fe1a7c5" class="t t">QueueClient</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to perform operations on a queue.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">connectionString</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Namespace connection string. Must not contain queue information.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">entityPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Name of the queue</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">receiveMode</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Mode of receive of messages. Defaults to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#e015d00870679cbc" class="i property">ReceiveMode</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.PeekLock.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Retry policy for queue operations. Defaults to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a>.<a href="RetryPolicy.cs.html#d5872bd857fd612e" class="i property">Default</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">Creates a new connection to the queue, which is opened during the first send/receive operation.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public</b> <a id="9f8727179f45d47f" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">QueueClient</a>(<b>string</b> <span id="r3 rd" class="r3 r">connectionString</span>, <b>string</b> <span id="r4 rd" class="r4 r">entityPath</span>, <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a> <span id="r5 rd" class="r5 r">receiveMode</span> = <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a>.<a href="ReceiveMode.cs.html#d43dbf05f584f89c" class="i field">PeekLock</a>, <a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a> <span id="r6 rd" class="r6 r">retryPolicy</span> = <b>null</b>)
+            : <a href="#cb442f75093f6572" class="k">this</a>(<b>new</b> <a href="ServiceBusConnection.cs.html#45472230a8f717ae" class="t constructor">ServiceBusConnection</a>(<span class="r3 r">connectionString</span>), <span class="r4 r">entityPath</span>, <span class="r5 r">receiveMode</span>, <span class="r6 r">retryPolicy</span> ?? <a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a>.<a href="RetryPolicy.cs.html#d5872bd857fd612e" class="i property">Default</a>)
+        {
+            <b>if</b> (<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r3 r">connectionString</span>))
+            {
+                <b>throw</b> <a href="Primitives/Fx.cs.html#c01e8844709e19c1" class="t t">Fx</a>.<a href="Primitives/Fx.cs.html#0793cb830fb5b201" class="i property">Exception</a>.<a href="Primitives/ExceptionUtility.cs.html#4ae6cf9072070b0b" class="i method">ArgumentNullOrWhiteSpace</a>(<b>nameof</b>(<span class="r3 r">connectionString</span>));
+            }
+            
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#29456179e6094c9e" class="i property">OwnsConnection</a> = <b>true</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new instance of the Queue client using the specified endpoint, entity path, and token provider.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">endpoint</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Fully qualified domain name for Service Bus. Most likely, {yournamespace}.servicebus.windows.net</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">entityPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Queue path.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">tokenProvider</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Token provider which will generate security tokens for authorization.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r10 r">transportType</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Transport type.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r11 r">receiveMode</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Mode of receive of messages. Defaults to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#e015d00870679cbc" class="i property">ReceiveMode</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.PeekLock.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Retry policy for queue operations. Defaults to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a>.<a href="RetryPolicy.cs.html#d5872bd857fd612e" class="i property">Default</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">Creates a new connection to the queue, which is opened during the first send/receive operation.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public</b> <a id="281ee42d28ed392e" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">QueueClient</a>(
+            <b>string</b> <span id="r7 rd" class="r7 r">endpoint</span>,
+            <b>string</b> <span id="r8 rd" class="r8 r">entityPath</span>,
+            <a href="Primitives/ITokenProvider.cs.html#9e2a4877b63e4b8d" class="t t">ITokenProvider</a> <span id="r9 rd" class="r9 r">tokenProvider</span>,
+            <a href="TransportType.cs.html#0a715f93272561f8" class="t t">TransportType</a> <span id="r10 rd" class="r10 r">transportType</span> = <a href="TransportType.cs.html#0a715f93272561f8" class="t t">TransportType</a>.<a href="TransportType.cs.html#8cda352639a9c461" class="i field">Amqp</a>,
+            <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a> <span id="r11 rd" class="r11 r">receiveMode</span> = <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a>.<a href="ReceiveMode.cs.html#d43dbf05f584f89c" class="i field">PeekLock</a>,
+            <a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a> <span id="r12 rd" class="r12 r">retryPolicy</span> = <b>null</b>)
+            : <a href="#cb442f75093f6572" class="k">this</a>(<b>new</b> <a href="ServiceBusConnection.cs.html#3d86832e26fa991b" class="t constructor">ServiceBusConnection</a>(<span class="r7 r">endpoint</span>, <span class="r10 r">transportType</span>, <span class="r12 r">retryPolicy</span>) {<a href="ServiceBusConnection.cs.html#13221390545f966d" class="i property">TokenProvider</a> = <span class="r9 r">tokenProvider</span>}, <span class="r8 r">entityPath</span>, <span class="r11 r">receiveMode</span>, <span class="r12 r">retryPolicy</span>)
+        {
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#29456179e6094c9e" class="i property">OwnsConnection</a> = <b>true</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new instance of the Queue client on a given </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#d92b8ac99cf69585" class="i property">ServiceBusConnection</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">serviceBusConnection</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Connection object to the service bus namespace.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r14 r">entityPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Queue path.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">receiveMode</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Mode of receive of messages. Default to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#e015d00870679cbc" class="i property">ReceiveMode</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.PeekLock.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r16 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Retry policy for queue operations. Defaults to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a>.<a href="RetryPolicy.cs.html#d5872bd857fd612e" class="i property">Default</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="cb442f75093f6572" href="R/cb442f75093f6572.html" target="n" data-glyph="72,1" class="t constructor">QueueClient</a>(<a href="ServiceBusConnection.cs.html#d4af28baeaa553d8" class="t t">ServiceBusConnection</a> <span id="r13 rd" class="r13 r">serviceBusConnection</span>, <b>string</b> <span id="r14 rd" class="r14 r">entityPath</span>, <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a> <span id="r15 rd" class="r15 r">receiveMode</span>, <a href="RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a> <span id="r16 rd" class="r16 r">retryPolicy</span>)
+            : <a href="ClientEntity.cs.html#912f05124af51638" class="k">base</a>(<b>nameof</b>(<a href="#600a33086fe1a7c5" class="t t">QueueClient</a>), <span class="r14 r">entityPath</span>, <span class="r16 r">retryPolicy</span>)
+        {
+            <a href="MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<span class="i">QueueClientCreateStart</span>(<span class="r13 r">serviceBusConnection</span>?.<a href="ServiceBusConnection.cs.html#aa10f462e6ba95a8" class="i property">Endpoint</a>.<span class="i">Authority</span>, <span class="r14 r">entityPath</span>, <span class="r15 r">receiveMode</span>.<span class="i">ToString</span>());
+ 
+            <b>if</b> (<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r14 r">entityPath</span>))
+            {
+                <b>throw</b> <a href="Primitives/Fx.cs.html#c01e8844709e19c1" class="t t">Fx</a>.<a href="Primitives/Fx.cs.html#0793cb830fb5b201" class="i property">Exception</a>.<a href="Primitives/ExceptionUtility.cs.html#4ae6cf9072070b0b" class="i method">ArgumentNullOrWhiteSpace</a>(<b>nameof</b>(<span class="r14 r">entityPath</span>));
+            }
+ 
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#d92b8ac99cf69585" class="i property">ServiceBusConnection</a> = <span class="r13 r">serviceBusConnection</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r13 r">serviceBusConnection</span>));
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#280275efab3688d3" class="i field">syncLock</a> = <b>new</b> <b>object</b>();
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#ed70bcfca5b9e29a" class="i property">QueueName</a> = <span class="r14 r">entityPath</span>;
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#e015d00870679cbc" class="i property">ReceiveMode</a> = <span class="r15 r">receiveMode</span>;
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#29456179e6094c9e" class="i property">OwnsConnection</a> = <b>false</b>;
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#d92b8ac99cf69585" class="i property">ServiceBusConnection</a>.<a href="ServiceBusConnection.cs.html#ce19b6c3bc0eb42e" class="i method">ThrowIfClosed</a>();
+ 
+            <b>if</b> (<a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#d92b8ac99cf69585" class="i property">ServiceBusConnection</a>.<a href="ServiceBusConnection.cs.html#13221390545f966d" class="i property">TokenProvider</a> != <b>null</b>)
+            {
+                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#dcbd51dcdffc54a4" class="i property">CbsTokenProvider</a> = <b>new</b> <a href="Primitives/TokenProviderAdapter.cs.html#6253ee9453b7f995" class="t constructor">TokenProviderAdapter</a>(<a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#d92b8ac99cf69585" class="i property">ServiceBusConnection</a>.<a href="ServiceBusConnection.cs.html#13221390545f966d" class="i property">TokenProvider</a>, <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#d92b8ac99cf69585" class="i property">ServiceBusConnection</a>.<a href="ServiceBusConnection.cs.html#c7f7ecc4031ee56b" class="i property">OperationTimeout</a>);
+            }
+            <b>else</b>
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="#d92b8ac99cf69585" class="i property">ServiceBusConnection</a>)}<span class="s"> doesn&#39;t have a valid token provider</span><span class="s">&quot;</span>);
+            }
+ 
+            <a href="MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<span class="i">QueueClientCreateStop</span>(<span class="r13 r">serviceBusConnection</span>.<a href="ServiceBusConnection.cs.html#aa10f462e6ba95a8" class="i property">Endpoint</a>.<span class="i">Authority</span>, <span class="r14 r">entityPath</span>, <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the name of the queue.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public string</b> <a id="ed70bcfca5b9e29a" href="R/ed70bcfca5b9e29a.html" target="n" data-glyph="102,1" class="i property">QueueName</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">ServiceBus</span>.<a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> for the QueueClient.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a> <a id="e015d00870679cbc" href="R/e015d00870679cbc.html" target="n" data-glyph="102,1" class="i property">ReceiveMode</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Duration after which individual operations will timeout.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public override</b> <span class="i">TimeSpan</span> <a id="eafd53359cc656f9" href="R/eafd53359cc656f9.html" target="n" data-glyph="102,1" class="i property">OperationTimeout</a>
+        {
+            <b>get</b> =&gt; <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#d92b8ac99cf69585" class="i property">ServiceBusConnection</a>.<a href="ServiceBusConnection.cs.html#c7f7ecc4031ee56b" class="i property">OperationTimeout</a>;
+            <b>set</b> =&gt; <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#d92b8ac99cf69585" class="i property">ServiceBusConnection</a>.<a href="ServiceBusConnection.cs.html#c7f7ecc4031ee56b" class="i property">OperationTimeout</a> = <b>value</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the name of the queue.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public override string</b> <a id="8140ae0e57e2961f" href="R/8140ae0e57e2961f.html" target="n" data-glyph="102,1" class="i property">Path</a> =&gt; <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#ed70bcfca5b9e29a" class="i property">QueueName</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Prefetch speeds up the message flow by aiming to have a message readily available for local retrieval when and before the application asks for one using Receive.</span>
+        <span class="c">///</span><span class="c"> Setting a non-zero value prefetches PrefetchCount number of messages.</span>
+        <span class="c">///</span><span class="c"> Setting the value to zero turns prefetch off.</span>
+        <span class="c">///</span><span class="c"> Defaults to 0.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">para</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> When Prefetch is enabled, the client will quietly acquire more messages, up to the PrefetchCount limit, than what the application</span>
+        <span class="c">///</span><span class="c"> immediately asks for. The message pump will therefore acquire a message for immediate consumption</span>
+        <span class="c">///</span><span class="c"> that will be returned as soon as available, and the client will proceed to acquire further messages to fill the prefetch buffer in the background.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">para</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">para</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> While messages are available in the prefetch buffer, any subsequent ReceiveAsync calls will be immediately satisfied from the buffer, and the buffer is</span>
+        <span class="c">///</span><span class="c"> replenished in the background as space becomes available.If there are no messages available for delivery, the receive operation will drain the</span>
+        <span class="c">///</span><span class="c"> buffer and then wait or block as expected.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">para</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">para</span><span class="c">&gt;</span><span class="c">Updates to this value take effect on the next receive call to the service.</span><span class="c">&lt;/</span><span class="c">para</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public int</b> <a id="3f9d43ec94bcecb1" href="R/3f9d43ec94bcecb1.html" target="n" data-glyph="102,1" class="i property">PrefetchCount</a>
+        {
+            <b>get</b> =&gt; <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#12b2157277651836" class="i field">prefetchCount</a>;
+            <b>set</b>
+            {
+                <b>if</b> (<b>value</b> &lt; 0)
+                {
+                    <b>throw</b> <a href="Primitives/Fx.cs.html#c01e8844709e19c1" class="t t">Fx</a>.<a href="Primitives/Fx.cs.html#0793cb830fb5b201" class="i property">Exception</a>.<a href="Primitives/ExceptionUtility.cs.html#435dab7fe71ed02e" class="i method">ArgumentOutOfRange</a>(<b>nameof</b>(<a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#3f9d43ec94bcecb1" class="i property">PrefetchCount</a>), <b>value</b>, <span class="s">&quot;Value cannot be less than 0.&quot;</span>);
+                }
+                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#12b2157277651836" class="i field">prefetchCount</a> = <b>value</b>;
+                <b>if</b> (<a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#a1b5849710e8fb47" class="i field">innerReceiver</a> != <b>null</b>)
+                {
+                    <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#a1b5849710e8fb47" class="i field">innerReceiver</a>.<a href="Core/MessageReceiver.cs.html#723d5c5572d12b9d" class="i property">PrefetchCount</a> = <b>value</b>;
+                }
+                <b>if</b> (<a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#ff3acdd3a13bdce5" class="i field">sessionClient</a> != <b>null</b>)
+                {
+                    <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#ff3acdd3a13bdce5" class="i field">sessionClient</a>.<a href="SessionClient.cs.html#c03bac5a1da09de8" class="i property">PrefetchCount</a> = <b>value</b>;
+                }
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets a list of currently registered plugins for this QueueClient.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public override</b> <span class="i">IList</span>&lt;<a href="Core/ServiceBusPlugin.cs.html#467b28cbbe8148c5" class="t t">ServiceBusPlugin</a>&gt; <a id="9c55711b1820eaea" href="R/9c55711b1820eaea.html" target="n" data-glyph="102,1" class="i property">RegisteredPlugins</a> =&gt; <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#36199cb4f08b1eb8" class="i property">InnerSender</a>.<a href="Core/MessageSender.cs.html#224857a34d9e40c9" class="i property">RegisteredPlugins</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Connection object to the service bus namespace.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public override</b> <a href="ServiceBusConnection.cs.html#d4af28baeaa553d8" class="t t">ServiceBusConnection</a> <a id="d92b8ac99cf69585" href="R/d92b8ac99cf69585.html" target="n" data-glyph="102,1" class="i property">ServiceBusConnection</a> { <b>get</b>; }
+ 
+        <b>internal</b> <a href="Core/MessageSender.cs.html#435f723d21eebd94" class="t t">MessageSender</a> <a id="36199cb4f08b1eb8" href="R/36199cb4f08b1eb8.html" target="n" data-glyph="104,1" class="i property">InnerSender</a>
+        {
+            <b>get</b>
+            {
+                <b>if</b> (<a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#868d25e7068bfef4" class="i field">innerSender</a> == <b>null</b>)
+                {
+                    <b>lock</b> (<a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#280275efab3688d3" class="i field">syncLock</a>)
+                    {
+                        <b>if</b> (<a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#868d25e7068bfef4" class="i field">innerSender</a> == <b>null</b>)
+                        {
+                            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#868d25e7068bfef4" class="i field">innerSender</a> = <b>new</b> <a href="Core/MessageSender.cs.html#0af44c78ee87a5f3" class="t constructor">MessageSender</a>(
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#ed70bcfca5b9e29a" class="i property">QueueName</a>,
+                                <b>null</b>,
+                                <a href="Primitives/MessagingEntityType.cs.html#03bc9354bc383d14" class="t t">MessagingEntityType</a>.<a href="Primitives/MessagingEntityType.cs.html#20f3e3f2d5f27ae4" class="i field">Queue</a>,
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#d92b8ac99cf69585" class="i property">ServiceBusConnection</a>,
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#dcbd51dcdffc54a4" class="i property">CbsTokenProvider</a>,
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#5735f52e7564bf86" class="i property">RetryPolicy</a>);
+                        }
+                    }
+                }
+ 
+                <b>return</b> <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#868d25e7068bfef4" class="i field">innerSender</a>;
+            }
+        }
+ 
+        <b>internal</b> <a href="Core/MessageReceiver.cs.html#df59eb99899d6167" class="t t">MessageReceiver</a> <a id="b7d211d181b8d9f2" href="R/b7d211d181b8d9f2.html" target="n" data-glyph="104,1" class="i property">InnerReceiver</a>
+        {
+            <b>get</b>
+            {
+                <b>if</b> (<a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#a1b5849710e8fb47" class="i field">innerReceiver</a> == <b>null</b>)
+                {
+                    <b>lock</b> (<a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#280275efab3688d3" class="i field">syncLock</a>)
+                    {
+                        <b>if</b> (<a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#a1b5849710e8fb47" class="i field">innerReceiver</a> == <b>null</b>)
+                        {
+                            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#a1b5849710e8fb47" class="i field">innerReceiver</a> = <b>new</b> <a href="Core/MessageReceiver.cs.html#10a00ad9aa04eb18" class="t constructor">MessageReceiver</a>(
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#ed70bcfca5b9e29a" class="i property">QueueName</a>,
+                                <a href="Primitives/MessagingEntityType.cs.html#03bc9354bc383d14" class="t t">MessagingEntityType</a>.<a href="Primitives/MessagingEntityType.cs.html#20f3e3f2d5f27ae4" class="i field">Queue</a>,
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#e015d00870679cbc" class="i property">ReceiveMode</a>,
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#d92b8ac99cf69585" class="i property">ServiceBusConnection</a>,
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#dcbd51dcdffc54a4" class="i property">CbsTokenProvider</a>,
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#5735f52e7564bf86" class="i property">RetryPolicy</a>,
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#3f9d43ec94bcecb1" class="i property">PrefetchCount</a>);
+                        }
+                    }
+                }
+ 
+                <b>return</b> <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#a1b5849710e8fb47" class="i field">innerReceiver</a>;
+            }
+        }
+ 
+        <b>internal</b> <a href="SessionClient.cs.html#665e503e2b872f1f" class="t t">SessionClient</a> <a id="549a82d000b64ee8" href="R/549a82d000b64ee8.html" target="n" data-glyph="104,1" class="i property">SessionClient</a>
+        {
+            <b>get</b>
+            {
+                <b>if</b> (<a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#ff3acdd3a13bdce5" class="i field">sessionClient</a> == <b>null</b>)
+                {
+                    <b>lock</b> (<a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#280275efab3688d3" class="i field">syncLock</a>)
+                    {
+                        <b>if</b> (<a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#ff3acdd3a13bdce5" class="i field">sessionClient</a> == <b>null</b>)
+                        {
+                            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#ff3acdd3a13bdce5" class="i field">sessionClient</a> = <b>new</b> <a href="SessionClient.cs.html#83624cbe94879369" class="t constructor">SessionClient</a>(
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a>,
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#8140ae0e57e2961f" class="i property">Path</a>,
+                                <a href="Primitives/MessagingEntityType.cs.html#03bc9354bc383d14" class="t t">MessagingEntityType</a>.<a href="Primitives/MessagingEntityType.cs.html#20f3e3f2d5f27ae4" class="i field">Queue</a>,
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#e015d00870679cbc" class="i property">ReceiveMode</a>,
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#3f9d43ec94bcecb1" class="i property">PrefetchCount</a>,
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#d92b8ac99cf69585" class="i property">ServiceBusConnection</a>,
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#dcbd51dcdffc54a4" class="i property">CbsTokenProvider</a>,
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#5735f52e7564bf86" class="i property">RetryPolicy</a>,
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#9c55711b1820eaea" class="i property">RegisteredPlugins</a>);
+ 
+ 
+                        }
+                    }
+                }
+ 
+                <b>return</b> <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#ff3acdd3a13bdce5" class="i field">sessionClient</a>;
+            }
+        }
+ 
+        <b>internal</b> <a href="SessionPumpHost.cs.html#c8868839ab3f54cb" class="t t">SessionPumpHost</a> <a id="9c84119bb7a1fe5e" href="R/9c84119bb7a1fe5e.html" target="n" data-glyph="104,1" class="i property">SessionPumpHost</a>
+        {
+            <b>get</b>
+            {
+                <b>if</b> (<a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#e680b43349479e9f" class="i field">sessionPumpHost</a> == <b>null</b>)
+                {
+                    <b>lock</b> (<a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#280275efab3688d3" class="i field">syncLock</a>)
+                    {
+                        <b>if</b> (<a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#e680b43349479e9f" class="i field">sessionPumpHost</a> == <b>null</b>)
+                        {
+                            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#e680b43349479e9f" class="i field">sessionPumpHost</a> = <b>new</b> <a href="SessionPumpHost.cs.html#e89e1a6915220ed5" class="t constructor">SessionPumpHost</a>(
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a>,
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#e015d00870679cbc" class="i property">ReceiveMode</a>,
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#549a82d000b64ee8" class="i property">SessionClient</a>,
+                                <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#d92b8ac99cf69585" class="i property">ServiceBusConnection</a>.<a href="ServiceBusConnection.cs.html#aa10f462e6ba95a8" class="i property">Endpoint</a>);
+                        }
+                    }
+                }
+ 
+                <b>return</b> <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#e680b43349479e9f" class="i field">sessionPumpHost</a>;
+            }
+        }
+        
+        <span class="i">ICbsTokenProvider</span> <a id="dcbd51dcdffc54a4" href="R/dcbd51dcdffc54a4.html" target="n" data-glyph="106,1" class="i property">CbsTokenProvider</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Sends a message to Service Bus.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <span class="i">Task</span> <a id="9c1e7fb5bd182fb3" href="R/9c1e7fb5bd182fb3.html" target="n" data-glyph="72,1" class="i method">SendAsync</a>(<a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a> <span id="r17 rd" class="r17 r">message</span>)
+        {
+            <b>return</b> <a href="#600a33086fe1a7c5" class="k">this</a>.<span class="i">SendAsync</span>(<b>new</b>[] { <span class="r17 r">message</span> });
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Sends a list of messages to Service Bus.</span>
+        <span class="c">///</span><span class="c"> When called on partitioned entities, messages meant for different partitions cannot be batched together.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <span class="i">Task</span> <a id="e7549b195de397c4" href="R/e7549b195de397c4.html" target="n" data-glyph="72,1" class="i method">SendAsync</a>(<span class="i">IList</span>&lt;<a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>&gt; <span id="r18 rd" class="r18 r">messageList</span>)
+        {
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+ 
+            <b>return</b> <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#36199cb4f08b1eb8" class="i property">InnerSender</a>.<a href="Core/MessageSender.cs.html#fae7579b9adbce4b" class="i method">SendAsync</a>(<span class="r18 r">messageList</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Completes a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> using its lock token. This will delete the message from the queue.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r19 r">lockToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The lock token of the corresponding message to complete.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A lock token can be found in </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>.<a href="Message.cs.html#9fe6ce8ee2f258bb" class="t t">SystemPropertiesCollection</a>.<a href="Message.cs.html#df44fd4ab3d58bb5" class="i property">LockToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">,</span>
+        <span class="c">///</span><span class="c"> only when </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#e015d00870679cbc" class="i property">ReceiveMode</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> is set to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">ServiceBus</span>.<a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a>.<a href="ReceiveMode.cs.html#d43dbf05f584f89c" class="i field">PeekLock</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> This operation can only be performed on messages that were received by this client.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public</b> <span class="i">Task</span> <a id="0746c01a88f496c4" href="R/0746c01a88f496c4.html" target="n" data-glyph="72,1" class="i method">CompleteAsync</a>(<b>string</b> <span id="r19 rd" class="r19 r">lockToken</span>)
+        {
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+            <b>return</b> <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#b7d211d181b8d9f2" class="i property">InnerReceiver</a>.<a href="Core/MessageReceiver.cs.html#76afd0f51de5da52" class="i method">CompleteAsync</a>(<span class="r19 r">lockToken</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Abandons a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> using a lock token. This will make the message available again for processing.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r20 r">lockToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The lock token of the corresponding message to abandon.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r21 r">propertiesToModify</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The properties of the message to modify while abandoning the message.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">A lock token can be found in </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>.<a href="Message.cs.html#9fe6ce8ee2f258bb" class="t t">SystemPropertiesCollection</a>.<a href="Message.cs.html#df44fd4ab3d58bb5" class="i property">LockToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">,</span>
+        <span class="c">///</span><span class="c"> only when </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#e015d00870679cbc" class="i property">ReceiveMode</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> is set to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">ServiceBus</span>.<a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a>.<a href="ReceiveMode.cs.html#d43dbf05f584f89c" class="i field">PeekLock</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> Abandoning a message will increase the delivery count on the message.</span>
+        <span class="c">///</span><span class="c"> This operation can only be performed on messages that were received by this client.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> This operation can only be performed on messages that were received by this client.</span>
+        <b>public</b> <span class="i">Task</span> <a id="7f40d2c893c266ff" href="R/7f40d2c893c266ff.html" target="n" data-glyph="72,1" class="i method">AbandonAsync</a>(<b>string</b> <span id="r20 rd" class="r20 r">lockToken</span>, <span class="i">IDictionary</span>&lt;<b>string</b>, <b>object</b>&gt; <span id="r21 rd" class="r21 r">propertiesToModify</span> = <b>null</b>)
+        {
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+            <b>return</b> <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#b7d211d181b8d9f2" class="i property">InnerReceiver</a>.<a href="Core/MessageReceiver.cs.html#e5e6b77dc789edfa" class="i method">AbandonAsync</a>(<span class="r20 r">lockToken</span>, <span class="r21 r">propertiesToModify</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Moves a message to the deadletter sub-queue.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r22 r">lockToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The lock token of the corresponding message to deadletter.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r23 r">propertiesToModify</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The properties of the message to modify while moving to sub-queue.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A lock token can be found in </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>.<a href="Message.cs.html#9fe6ce8ee2f258bb" class="t t">SystemPropertiesCollection</a>.<a href="Message.cs.html#df44fd4ab3d58bb5" class="i property">LockToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">,</span>
+        <span class="c">///</span><span class="c"> only when </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#e015d00870679cbc" class="i property">ReceiveMode</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> is set to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">ServiceBus</span>.<a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a>.<a href="ReceiveMode.cs.html#d43dbf05f584f89c" class="i field">PeekLock</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> In order to receive a message from the deadletter queue, you will need a new </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Core/IMessageReceiver.cs.html#d29af89efe5d7233" class="t t">IMessageReceiver</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">, with the corresponding path.</span>
+        <span class="c">///</span><span class="c"> You can use </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="EntityNameHelper.cs.html#9ee269f221b531da" class="t t">EntityNameHelper</a>.<a href="EntityNameHelper.cs.html#eeb7674bab71748e" class="i method">FormatDeadLetterPath</a>(<b>string</b>)<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to help with this.</span>
+        <span class="c">///</span><span class="c"> This operation can only be performed on messages that were received by this receiver.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public</b> <span class="i">Task</span> <a id="32fcd15a33a79790" href="R/32fcd15a33a79790.html" target="n" data-glyph="72,1" class="i method">DeadLetterAsync</a>(<b>string</b> <span id="r22 rd" class="r22 r">lockToken</span>, <span class="i">IDictionary</span>&lt;<b>string</b>, <b>object</b>&gt; <span id="r23 rd" class="r23 r">propertiesToModify</span> = <b>null</b>)
+        {
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+            <b>return</b> <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#b7d211d181b8d9f2" class="i property">InnerReceiver</a>.<a href="Core/MessageReceiver.cs.html#13954df117966559" class="i method">DeadLetterAsync</a>(<span class="r22 r">lockToken</span>, <span class="r23 r">propertiesToModify</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Moves a message to the deadletter sub-queue.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r24 r">lockToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The lock token of the corresponding message to deadletter.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r25 r">deadLetterReason</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The reason for deadlettering the message.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r26 r">deadLetterErrorDescription</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The error description for deadlettering the message.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A lock token can be found in </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>.<a href="Message.cs.html#9fe6ce8ee2f258bb" class="t t">SystemPropertiesCollection</a>.<a href="Message.cs.html#df44fd4ab3d58bb5" class="i property">LockToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">,</span>
+        <span class="c">///</span><span class="c"> only when </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#e015d00870679cbc" class="i property">ReceiveMode</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> is set to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">ServiceBus</span>.<a href="ReceiveMode.cs.html#103867a98d0233a8" class="t t">ReceiveMode</a>.<a href="ReceiveMode.cs.html#d43dbf05f584f89c" class="i field">PeekLock</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> In order to receive a message from the deadletter queue, you will need a new </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Core/IMessageReceiver.cs.html#d29af89efe5d7233" class="t t">IMessageReceiver</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">, with the corresponding path.</span>
+        <span class="c">///</span><span class="c"> You can use </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="EntityNameHelper.cs.html#9ee269f221b531da" class="t t">EntityNameHelper</a>.<a href="EntityNameHelper.cs.html#eeb7674bab71748e" class="i method">FormatDeadLetterPath</a>(<b>string</b>)<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to help with this.</span>
+        <span class="c">///</span><span class="c"> This operation can only be performed on messages that were received by this receiver.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public</b> <span class="i">Task</span> <a id="ee9da32b31ff273a" href="R/ee9da32b31ff273a.html" target="n" data-glyph="72,1" class="i method">DeadLetterAsync</a>(<b>string</b> <span id="r24 rd" class="r24 r">lockToken</span>, <b>string</b> <span id="r25 rd" class="r25 r">deadLetterReason</span>, <b>string</b> <span id="r26 rd" class="r26 r">deadLetterErrorDescription</span> = <b>null</b>)
+        {
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+            <b>return</b> <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#b7d211d181b8d9f2" class="i property">InnerReceiver</a>.<a href="Core/MessageReceiver.cs.html#064e0898dab0acaf" class="i method">DeadLetterAsync</a>(<span class="r24 r">lockToken</span>, <span class="r25 r">deadLetterReason</span>, <span class="r26 r">deadLetterErrorDescription</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Receive messages continuously from the entity. Registers a message handler and begins a new thread to receive messages.</span>
+        <span class="c">///</span><span class="c"> This handler(</span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">Func</span>{<span class="r27 r t">Message</span>, <span class="r28 r t">CancellationToken</span>, <span class="r29 r t">Task</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">) is awaited on every time a new message is received by the receiver.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r30 r">handler</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">Func</span>{<span class="r31 r t">Message</span>, <span class="r32 r t">CancellationToken</span>, <span class="r33 r t">Task</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that processes messages.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r34 r">exceptionReceivedHandler</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">Func</span>{<span class="r35 r t">T1</span>, <span class="r36 r t">TResult</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that is invoked during exceptions.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ExceptionReceivedEventArgs.cs.html#01e408e41b2c7c71" class="t t">ExceptionReceivedEventArgs</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> contains contextual information regarding the exception.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">Enable prefetch to speed up the receive rate.</span>
+        <span class="c">///</span><span class="c"> Use </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#7b98ba3b8fea9a9b" class="i method">RegisterMessageHandler</a>(<span class="i">Func</span>{<a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>,<span class="i">CancellationToken</span>,<span class="i">Task</span>}, <a href="MessageHandlerOptions.cs.html#c6900b5fa61c2ffa" class="t t">MessageHandlerOptions</a>)<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to configure the settings of the pump.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public void</b> <a id="fe59e0aa735c7d69" href="R/fe59e0aa735c7d69.html" target="n" data-glyph="72,1" class="i method">RegisterMessageHandler</a>(<span class="i">Func</span>&lt;<a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>, <span class="i">CancellationToken</span>, <span class="i">Task</span>&gt; <span id="r30 rd" class="r30 r">handler</span>, <span class="i">Func</span>&lt;<a href="ExceptionReceivedEventArgs.cs.html#01e408e41b2c7c71" class="t t">ExceptionReceivedEventArgs</a>, <span class="i">Task</span>&gt; <span id="r34 rd" class="r34 r">exceptionReceivedHandler</span>)
+        {
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#7b98ba3b8fea9a9b" class="i method">RegisterMessageHandler</a>(<span class="r30 r">handler</span>, <b>new</b> <a href="MessageHandlerOptions.cs.html#ae102fd3368e2aee" class="t constructor">MessageHandlerOptions</a>(<span class="r34 r">exceptionReceivedHandler</span>));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Receive messages continuously from the entity. Registers a message handler and begins a new thread to receive messages.</span>
+        <span class="c">///</span><span class="c"> This handler(</span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">Func</span>{<span class="r37 r t">Message</span>, <span class="r38 r t">CancellationToken</span>, <span class="r39 r t">Task</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">) is awaited on every time a new message is received by the receiver.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r40 r">handler</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">Func</span>{<span class="r41 r t">Message</span>, <span class="r42 r t">CancellationToken</span>, <span class="r43 r t">Task</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that processes messages.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r44 r">messageHandlerOptions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="MessageHandlerOptions.cs.html#c6900b5fa61c2ffa" class="t t">MessageHandlerOptions</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> options used to configure the settings of the pump.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">Enable prefetch to speed up the receive rate.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public void</b> <a id="7b98ba3b8fea9a9b" href="R/7b98ba3b8fea9a9b.html" target="n" data-glyph="72,1" class="i method">RegisterMessageHandler</a>(<span class="i">Func</span>&lt;<a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>, <span class="i">CancellationToken</span>, <span class="i">Task</span>&gt; <span id="r40 rd" class="r40 r">handler</span>, <a href="MessageHandlerOptions.cs.html#c6900b5fa61c2ffa" class="t t">MessageHandlerOptions</a> <span id="r44 rd" class="r44 r">messageHandlerOptions</span>)
+        {
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#b7d211d181b8d9f2" class="i property">InnerReceiver</a>.<a href="Core/MessageReceiver.cs.html#ab61f9841fc0c589" class="i method">RegisterMessageHandler</a>(<span class="r40 r">handler</span>, <span class="r44 r">messageHandlerOptions</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Unregister message handler from the receiver if there is an active message handler registered. This operation waits for the completion</span>
+        <span class="c">///</span><span class="c"> of inflight receive and message handling operations to finish and unregisters future receives on the message handler which previously </span>
+        <span class="c">///</span><span class="c"> registered. </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r45 r">inflightMessageHandlerTasksWaitTimeout</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c"> is the waitTimeout for inflight message handling tasks.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public async</b> <span class="i">Task</span> <a id="8f9e1ac91e172efe" href="R/8f9e1ac91e172efe.html" target="n" data-glyph="72,1" class="i method">UnregisterMessageHandlerAsync</a>(<span class="i">TimeSpan</span> <span id="r45 rd" class="r45 r">inflightMessageHandlerTasksWaitTimeout</span>)
+        {
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+            <b>await</b> <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#b7d211d181b8d9f2" class="i property">InnerReceiver</a>.<a href="Core/MessageReceiver.cs.html#86a05be253c2f98f" class="i method">UnregisterMessageHandlerAsync</a>(<span class="r45 r">inflightMessageHandlerTasksWaitTimeout</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Receive session messages continuously from the queue. Registers a message handler and begins a new thread to receive session-messages.</span>
+        <span class="c">///</span><span class="c"> This handler(</span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">Func</span>{<span class="r46 r t">IMessageSession</span>, <span class="r47 r t">Message</span>, <span class="r48 r t">CancellationToken</span>, <span class="r49 r t">Task</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">) is awaited on every time a new message is received by the queue client.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r50 r">handler</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">Func</span>{<span class="r51 r t">IMessageSession</span>, <span class="r52 r t">Message</span>, <span class="r53 r t">CancellationToken</span>, <span class="r54 r t">Task</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that processes messages.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> contains the session information, and must be used to perform Complete/Abandon/Deadletter or other such operations on the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r55 r">exceptionReceivedHandler</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">Func</span>{<span class="r56 r t">T1</span>, <span class="r57 r t">TResult</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that is invoked during exceptions.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ExceptionReceivedEventArgs.cs.html#01e408e41b2c7c71" class="t t">ExceptionReceivedEventArgs</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> contains contextual information regarding the exception.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">Enable prefetch to speed up the receive rate.</span>
+        <span class="c">///</span><span class="c"> Use </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#12a136b929177469" class="i method">RegisterSessionHandler</a>(<span class="i">Func</span>{<a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a>,<a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>,<span class="i">CancellationToken</span>,<span class="i">Task</span>}, <a href="SessionHandlerOptions.cs.html#6626e016a3aac115" class="t t">SessionHandlerOptions</a>)<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to configure the settings of the pump.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public void</b> <a id="937ead6dc44ea4f4" href="R/937ead6dc44ea4f4.html" target="n" data-glyph="72,1" class="i method">RegisterSessionHandler</a>(<span class="i">Func</span>&lt;<a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a>, <a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>, <span class="i">CancellationToken</span>, <span class="i">Task</span>&gt; <span id="r50 rd" class="r50 r">handler</span>, <span class="i">Func</span>&lt;<a href="ExceptionReceivedEventArgs.cs.html#01e408e41b2c7c71" class="t t">ExceptionReceivedEventArgs</a>, <span class="i">Task</span>&gt; <span id="r55 rd" class="r55 r">exceptionReceivedHandler</span>)
+        {
+            <a href="SessionHandlerOptions.cs.html#6626e016a3aac115" class="k">var</a> <span id="r58 rd" class="r58 r">sessionHandlerOptions</span> = <b>new</b> <a href="SessionHandlerOptions.cs.html#93f51f9dcb9724ae" class="t constructor">SessionHandlerOptions</a>(<span class="r55 r">exceptionReceivedHandler</span>);
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#12a136b929177469" class="i method">RegisterSessionHandler</a>(<span class="r50 r">handler</span>, <span class="r58 r">sessionHandlerOptions</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Receive session messages continuously from the queue. Registers a message handler and begins a new thread to receive session-messages.</span>
+        <span class="c">///</span><span class="c"> This handler(</span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">Func</span>{<span class="r59 r t">IMessageSession</span>, <span class="r60 r t">Message</span>, <span class="r61 r t">CancellationToken</span>, <span class="r62 r t">Task</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">) is awaited on every time a new message is received by the queue client.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r63 r">handler</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">Func</span>{<span class="r64 r t">IMessageSession</span>, <span class="r65 r t">Message</span>, <span class="r66 r t">CancellationToken</span>, <span class="r67 r t">Task</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that processes messages.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> contains the session information, and must be used to perform Complete/Abandon/Deadletter or other such operations on the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r68 r">sessionHandlerOptions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Options used to configure the settings of the session pump.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">Enable prefetch to speed up the receive rate. </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public void</b> <a id="12a136b929177469" href="R/12a136b929177469.html" target="n" data-glyph="72,1" class="i method">RegisterSessionHandler</a>(<span class="i">Func</span>&lt;<a href="IMessageSession.cs.html#c8efbd26d5c7c9bd" class="t t">IMessageSession</a>, <a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>, <span class="i">CancellationToken</span>, <span class="i">Task</span>&gt; <span id="r63 rd" class="r63 r">handler</span>, <a href="SessionHandlerOptions.cs.html#6626e016a3aac115" class="t t">SessionHandlerOptions</a> <span id="r68 rd" class="r68 r">sessionHandlerOptions</span>)
+        {
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#9c84119bb7a1fe5e" class="i property">SessionPumpHost</a>.<a href="SessionPumpHost.cs.html#9f2cc10a117fef6b" class="i method">OnSessionHandler</a>(<span class="r63 r">handler</span>, <span class="r68 r">sessionHandlerOptions</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Unregister session handler from the receiver if there is an active session handler registered. This operation waits for the completion</span>
+        <span class="c">///</span><span class="c"> of inflight receive and session handling operations to finish and unregisters future receives on the session handler which previously </span>
+        <span class="c">///</span><span class="c"> registered. </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r69 r">inflightSessionHandlerTasksWaitTimeout</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c"> is the waitTimeout for inflight session handling tasks.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public async</b> <span class="i">Task</span> <a id="63744df2fa1e7549" href="R/63744df2fa1e7549.html" target="n" data-glyph="72,1" class="i method">UnregisterSessionHandlerAsync</a>(<span class="i">TimeSpan</span> <span id="r69 rd" class="r69 r">inflightSessionHandlerTasksWaitTimeout</span>)
+        {
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+            <b>await</b> <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#9c84119bb7a1fe5e" class="i property">SessionPumpHost</a>.<a href="SessionPumpHost.cs.html#81a24adc5b0d9a75" class="i method">UnregisterSessionHandlerAsync</a>(<span class="r69 r">inflightSessionHandlerTasksWaitTimeout</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Schedules a message to appear on Service Bus at a later time.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r70 r">scheduleEnqueueTimeUtc</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The UTC time at which the message should be available for processing</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The sequence number of the message that was scheduled.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public</b> <span class="i">Task</span>&lt;<b>long</b>&gt; <a id="13a1a7a5fdf159c5" href="R/13a1a7a5fdf159c5.html" target="n" data-glyph="72,1" class="i method">ScheduleMessageAsync</a>(<a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a> <span id="r71 rd" class="r71 r">message</span>, <span class="i">DateTimeOffset</span> <span id="r70 rd" class="r70 r">scheduleEnqueueTimeUtc</span>)
+        {
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+            <b>return</b> <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#36199cb4f08b1eb8" class="i property">InnerSender</a>.<a href="Core/MessageSender.cs.html#05a8fb3892f6f8c0" class="i method">ScheduleMessageAsync</a>(<span class="r71 r">message</span>, <span class="r70 r">scheduleEnqueueTimeUtc</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Cancels a message that was scheduled.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r72 r">sequenceNumber</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>.<a href="Message.cs.html#9fe6ce8ee2f258bb" class="t t">SystemPropertiesCollection</a>.<a href="Message.cs.html#205df32693f7a775" class="i property">SequenceNumber</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> of the message to be cancelled.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <span class="i">Task</span> <a id="90536aba47e37283" href="R/90536aba47e37283.html" target="n" data-glyph="72,1" class="i method">CancelScheduledMessageAsync</a>(<b>long</b> <span id="r72 rd" class="r72 r">sequenceNumber</span>)
+        {
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+            <b>return</b> <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#36199cb4f08b1eb8" class="i property">InnerSender</a>.<a href="Core/MessageSender.cs.html#58c538d795d1dcbd" class="i method">CancelScheduledMessageAsync</a>(<span class="r72 r">sequenceNumber</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Registers a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Core/ServiceBusPlugin.cs.html#467b28cbbe8148c5" class="t t">ServiceBusPlugin</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to be used with this queue client.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public override void</b> <a id="4c3a443ddd9635a4" href="R/4c3a443ddd9635a4.html" target="n" data-glyph="72,1" class="i method">RegisterPlugin</a>(<a href="Core/ServiceBusPlugin.cs.html#467b28cbbe8148c5" class="t t">ServiceBusPlugin</a> <span id="r73 rd" class="r73 r">serviceBusPlugin</span>)
+        {
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#36199cb4f08b1eb8" class="i property">InnerSender</a>.<a href="Core/MessageSender.cs.html#ff71f12b961b22e6" class="i method">RegisterPlugin</a>(<span class="r73 r">serviceBusPlugin</span>);
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#b7d211d181b8d9f2" class="i property">InnerReceiver</a>.<a href="Core/MessageReceiver.cs.html#9ec8500d00cff6a2" class="i method">RegisterPlugin</a>(<span class="r73 r">serviceBusPlugin</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Unregisters a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Core/ServiceBusPlugin.cs.html#467b28cbbe8148c5" class="t t">ServiceBusPlugin</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r74 r">serviceBusPluginName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Core/ServiceBusPlugin.cs.html#467b28cbbe8148c5" class="t t">ServiceBusPlugin</a>.<a href="Core/ServiceBusPlugin.cs.html#bd6bea073d8b269c" class="i property">Name</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to be unregistered</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public override void</b> <a id="2358cf4c5f1609a0" href="R/2358cf4c5f1609a0.html" target="n" data-glyph="72,1" class="i method">UnregisterPlugin</a>(<b>string</b> <span id="r74 rd" class="r74 r">serviceBusPluginName</span>)
+        {
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#36199cb4f08b1eb8" class="i property">InnerSender</a>.<a href="Core/MessageSender.cs.html#7324cbc642149f53" class="i method">UnregisterPlugin</a>(<span class="r74 r">serviceBusPluginName</span>);
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#b7d211d181b8d9f2" class="i property">InnerReceiver</a>.<a href="Core/MessageReceiver.cs.html#3aaf98dc507a2f6a" class="i method">UnregisterPlugin</a>(<span class="r74 r">serviceBusPluginName</span>);
+        }
+ 
+        <b>protected override async</b> <span class="i">Task</span> <a id="9905a1fc4d117aa0" href="R/9905a1fc4d117aa0.html" target="n" data-glyph="75,1" class="i method">OnClosingAsync</a>()
+        {
+            <b>if</b> (<a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#868d25e7068bfef4" class="i field">innerSender</a> != <b>null</b>)
+            {
+                <b>await</b> <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#868d25e7068bfef4" class="i field">innerSender</a>.<a href="ClientEntity.cs.html#fd1fcdcfdaf194dc" class="i method">CloseAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+ 
+            <b>if</b> (<a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#a1b5849710e8fb47" class="i field">innerReceiver</a> != <b>null</b>)
+            {
+                <b>await</b> <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#a1b5849710e8fb47" class="i field">innerReceiver</a>.<a href="ClientEntity.cs.html#fd1fcdcfdaf194dc" class="i method">CloseAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+ 
+            <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#e680b43349479e9f" class="i field">sessionPumpHost</a>?.<a href="SessionPumpHost.cs.html#a48e14b7de3cefe8" class="i method">Close</a>();
+ 
+            <b>if</b> (<a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#ff3acdd3a13bdce5" class="i field">sessionClient</a> != <b>null</b>)
+            {
+                <b>await</b> <a href="#600a33086fe1a7c5" class="k">this</a>.<a href="#ff3acdd3a13bdce5" class="i field">sessionClient</a>.<a href="ClientEntity.cs.html#fd1fcdcfdaf194dc" class="i method">CloseAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

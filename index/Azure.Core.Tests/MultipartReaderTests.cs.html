@@ -1,0 +1,399 @@
+﻿<!DOCTYPE html>
+<html><head><title>MultipartReaderTests.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(390);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Core.Tests/MultipartReaderTests.cs" target="_top">MultipartReaderTests.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Core.Tests" target="_top">tests\Azure.Core.Tests.csproj</a> (Azure.Core.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<span class="k preprocess">#</span><span class="k preprocess">nullable</span> <span class="k preprocess">disable</span> <span class="k preprocess">warnings</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i">NUnit</span>.<span class="i">Framework</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Tests</span>
+{
+    <b>public class</b> <a id="70a71d857b3b9747" href="R/../../0000000000.html" target="n" data-glyph="0,0" class="t t"><span id="702f79c4903bc539">MultipartReaderTests</span></a>
+    {
+        <b>private const string</b> <a id="e848442150d28428" href="R/e848442150d28428.html" target="n" data-glyph="10,1" class="i field">Boundary</a> = <span class="s">&quot;9051914041544843365972754266&quot;</span>;
+        <span class="c">// Note that CRLF (\r\n) is required. You can&#39;t use multi-line C# strings here because the line breaks on Linux are just LF.</span>
+        <b>private const string</b> <a id="994e5624610cbe6a" href="R/994e5624610cbe6a.html" target="n" data-glyph="10,1" class="i field">OnePartBody</a> =
+<span class="s">&quot;--9051914041544843365972754266\r\n&quot;</span> +
+<span class="s">&quot;Content-Disposition: form-data; name=\&quot;text\&quot;\r\n&quot;</span> +
+<span class="s">&quot;\r\n&quot;</span> +
+<span class="s">&quot;text default\r\n&quot;</span> +
+<span class="s">&quot;--9051914041544843365972754266--\r\n&quot;</span>;
+        <b>private const string</b> <a id="7fcc8056d37c49fd" href="R/7fcc8056d37c49fd.html" target="n" data-glyph="10,1" class="i field">OnePartBodyTwoHeaders</a> =
+<span class="s">&quot;--9051914041544843365972754266\r\n&quot;</span> +
+<span class="s">&quot;Content-Disposition: form-data; name=\&quot;text\&quot;\r\n&quot;</span> +
+<span class="s">&quot;Custom-header: custom-value\r\n&quot;</span> +
+<span class="s">&quot;\r\n&quot;</span> +
+<span class="s">&quot;text default\r\n&quot;</span> +
+<span class="s">&quot;--9051914041544843365972754266--\r\n&quot;</span>;
+        <b>private const string</b> <a id="148f13e7f831091d" href="R/148f13e7f831091d.html" target="n" data-glyph="10,1" class="i field">OnePartBodyWithTrailingWhitespace</a> =
+<span class="s">&quot;--9051914041544843365972754266             \r\n&quot;</span> +
+<span class="s">&quot;Content-Disposition: form-data; name=\&quot;text\&quot;\r\n&quot;</span> +
+<span class="s">&quot;\r\n&quot;</span> +
+<span class="s">&quot;text default\r\n&quot;</span> +
+<span class="s">&quot;--9051914041544843365972754266--\r\n&quot;</span>;
+        <span class="c">// It&#39;s non-compliant but common to leave off the last CRLF.</span>
+        <b>private const string</b> <a id="e9a7f2b048c23af9" href="R/e9a7f2b048c23af9.html" target="n" data-glyph="10,1" class="i field">OnePartBodyWithoutFinalCRLF</a> =
+<span class="s">&quot;--9051914041544843365972754266\r\n&quot;</span> +
+<span class="s">&quot;Content-Disposition: form-data; name=\&quot;text\&quot;\r\n&quot;</span> +
+<span class="s">&quot;\r\n&quot;</span> +
+<span class="s">&quot;text default\r\n&quot;</span> +
+<span class="s">&quot;--9051914041544843365972754266--&quot;</span>;
+        <b>private const string</b> <a id="c2275273b8131c72" href="R/c2275273b8131c72.html" target="n" data-glyph="10,1" class="i field">TwoPartBody</a> =
+<span class="s">&quot;--9051914041544843365972754266\r\n&quot;</span> +
+<span class="s">&quot;Content-Disposition: form-data; name=\&quot;text\&quot;\r\n&quot;</span> +
+<span class="s">&quot;\r\n&quot;</span> +
+<span class="s">&quot;text default\r\n&quot;</span> +
+<span class="s">&quot;--9051914041544843365972754266\r\n&quot;</span> +
+<span class="s">&quot;Content-Disposition: form-data; name=\&quot;file1\&quot;; filename=\&quot;a.txt\&quot;\r\n&quot;</span> +
+<span class="s">&quot;Content-Type: text/plain\r\n&quot;</span> +
+<span class="s">&quot;\r\n&quot;</span> +
+<span class="s">&quot;Content of a.txt.\r\n&quot;</span> +
+<span class="s">&quot;\r\n&quot;</span> +
+<span class="s">&quot;--9051914041544843365972754266--\r\n&quot;</span>;
+        <b>private const string</b> <a id="41eb0e1d1a860f55" href="R/41eb0e1d1a860f55.html" target="n" data-glyph="10,1" class="i field">TwoPartBodyWithUnicodeFileName</a> =
+<span class="s">&quot;--9051914041544843365972754266\r\n&quot;</span> +
+<span class="s">&quot;Content-Disposition: form-data; name=\&quot;text\&quot;\r\n&quot;</span> +
+<span class="s">&quot;\r\n&quot;</span> +
+<span class="s">&quot;text default\r\n&quot;</span> +
+<span class="s">&quot;--9051914041544843365972754266\r\n&quot;</span> +
+<span class="s">&quot;Content-Disposition: form-data; name=\&quot;file1\&quot;; filename=\&quot;a色.txt\&quot;\r\n&quot;</span> +
+<span class="s">&quot;Content-Type: text/plain\r\n&quot;</span> +
+<span class="s">&quot;\r\n&quot;</span> +
+<span class="s">&quot;Content of a.txt.\r\n&quot;</span> +
+<span class="s">&quot;\r\n&quot;</span> +
+<span class="s">&quot;--9051914041544843365972754266--\r\n&quot;</span>;
+        <b>private const string</b> <a id="71a81a672970606e" href="R/71a81a672970606e.html" target="n" data-glyph="10,1" class="i field">ThreePartBody</a> =
+<span class="s">&quot;--9051914041544843365972754266\r\n&quot;</span> +
+<span class="s">&quot;Content-Disposition: form-data; name=\&quot;text\&quot;\r\n&quot;</span> +
+<span class="s">&quot;\r\n&quot;</span> +
+<span class="s">&quot;text default\r\n&quot;</span> +
+<span class="s">&quot;--9051914041544843365972754266\r\n&quot;</span> +
+<span class="s">&quot;Content-Disposition: form-data; name=\&quot;file1\&quot;; filename=\&quot;a.txt\&quot;\r\n&quot;</span> +
+<span class="s">&quot;Content-Type: text/plain\r\n&quot;</span> +
+<span class="s">&quot;\r\n&quot;</span> +
+<span class="s">&quot;Content of a.txt.\r\n&quot;</span> +
+<span class="s">&quot;\r\n&quot;</span> +
+<span class="s">&quot;--9051914041544843365972754266\r\n&quot;</span> +
+<span class="s">&quot;Content-Disposition: form-data; name=\&quot;file2\&quot;; filename=\&quot;a.html\&quot;\r\n&quot;</span> +
+<span class="s">&quot;Content-Type: text/html\r\n&quot;</span> +
+<span class="s">&quot;\r\n&quot;</span> +
+<span class="s">&quot;&lt;!DOCTYPE html&gt;&lt;title&gt;Content of a.html.&lt;/title&gt;\r\n&quot;</span> +
+<span class="s">&quot;\r\n&quot;</span> +
+<span class="s">&quot;--9051914041544843365972754266--\r\n&quot;</span>;
+ 
+        <b>private const string</b> <a id="e216985aafbc6a0d" href="R/e216985aafbc6a0d.html" target="n" data-glyph="10,1" class="i field">TwoPartBodyIncompleteBuffer</a> =
+<span class="s">&quot;--9051914041544843365972754266\r\n&quot;</span> +
+<span class="s">&quot;Content-Disposition: form-data; name=\&quot;text\&quot;\r\n&quot;</span> +
+<span class="s">&quot;\r\n&quot;</span> +
+<span class="s">&quot;text default\r\n&quot;</span> +
+<span class="s">&quot;--9051914041544843365972754266\r\n&quot;</span> +
+<span class="s">&quot;Content-Disposition: form-data; name=\&quot;file1\&quot;; filename=\&quot;a.txt\&quot;\r\n&quot;</span> +
+<span class="s">&quot;Content-Type: text/plain\r\n&quot;</span> +
+<span class="s">&quot;\r\n&quot;</span> +
+<span class="s">&quot;Content of a.txt.\r\n&quot;</span> +
+<span class="s">&quot;\r\n&quot;</span> +
+<span class="s">&quot;--9051914041544843365&quot;</span>;
+ 
+        <b>private static</b> <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="t t">MemoryStream</a> <a id="5f66775679f277a5" href="R/5f66775679f277a5.html" target="n" data-glyph="76,1" class="i method">MakeStream</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r0 rd" class="r0 r">text</span>)
+        {
+            <b>return</b> <b>new</b> <a href="@0@mscorlib/A.html#f92fa270fda9a82b" class="t constructor">MemoryStream</a>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<span class="r0 r">text</span>));
+        }
+ 
+        <b>private static string</b> <a id="37b27ad80fa03f3a" href="R/37b27ad80fa03f3a.html" target="n" data-glyph="76,1" class="i method">GetString</a>(<b>byte</b>[] <span id="r1 rd" class="r1 r">buffer</span>, <b>int</b> <span id="r2 rd" class="r2 r">count</span>)
+        {
+            <b>return</b> <a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#65768102b7ace585" class="i property">ASCII</a>.<a href="@0@mscorlib/A.html#233647d04fbec0c0" class="i method">GetString</a>(<span class="r1 r">buffer</span>, 0, <span class="r2 r">count</span>);
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="de9e3ba44257025c" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">MultipartReader_ReadSinglePartBody_Success</a>()
+        {
+            <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r3 rd" class="r3 r">stream</span> = <a href="#5f66775679f277a5" class="i method">MakeStream</a>(<a href="#994e5624610cbe6a" class="i field">OnePartBody</a>);
+            <a href="MultipartReader.cs.html#5c8c9479a493a9cd" class="k">var</a> <span id="r4 rd" class="r4 r">reader</span> = <b>new</b> <a href="MultipartReader.cs.html#e1460735dfa3677e" class="t constructor">MultipartReader</a>(<a href="#e848442150d28428" class="i field">Boundary</a>, <span class="r3 r">stream</span>);
+ 
+            <a href="MultipartSection.cs.html#1327d72eb23d105c" class="k">var</a> <span id="r5 rd" class="r5 r">section</span> = <b>await</b> <span class="r4 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>();
+            <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r5 r">section</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r5 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a>.<a href="@0@mscorlib/A.html#12b9bba2a1f9c3e2" class="i property">Count</a>, <span class="i">Is</span>.<span class="i">EqualTo</span>(1));
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r5 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="s">&quot;Content-Disposition&quot;</span>][0], <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;form-data; name=\&quot;text\&quot;&quot;</span>));
+            <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r6 rd" class="r6 r">buffer</span> = <b>new</b> <a href="@0@mscorlib/A.html#d308091cc690e78d" class="t constructor">MemoryStream</a>();
+            <b>await</b> <span class="r5 r">section</span>.<a href="MultipartSection.cs.html#08df6b8e14f1d5cc" class="i property">Body</a>.<a href="@0@mscorlib/A.html#1ed7a6d41a19abf9" class="i method">CopyToAsync</a>(<span class="r6 r">buffer</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#65768102b7ace585" class="i property">ASCII</a>.<a href="@0@mscorlib/A.html#7310c9cccfaecd17" class="i method">GetString</a>(<span class="r6 r">buffer</span>.<a href="@0@mscorlib/A.html#5df5fc757781f05e" class="i method">ToArray</a>()), <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;text default&quot;</span>));
+ 
+            <span class="i">Assert</span>.<span class="i">Null</span>(<b>await</b> <span class="r4 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>());
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public void</b> <a id="71ec0991580137e1" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">MultipartReader_HeaderCountExceeded_Throws</a>()
+        {
+            <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r7 rd" class="r7 r">stream</span> = <a href="#5f66775679f277a5" class="i method">MakeStream</a>(<a href="#7fcc8056d37c49fd" class="i field">OnePartBodyTwoHeaders</a>);
+            <a href="MultipartReader.cs.html#5c8c9479a493a9cd" class="k">var</a> <span id="r8 rd" class="r8 r">reader</span> = <b>new</b> <a href="MultipartReader.cs.html#e1460735dfa3677e" class="t constructor">MultipartReader</a>(<a href="#e848442150d28428" class="i field">Boundary</a>, <span class="r7 r">stream</span>)
+            {
+                <a href="MultipartReader.cs.html#6c2fbf8445928748" class="i property">HeadersCountLimit</a> = 1,
+            };
+ 
+            <b>var</b> <span id="r9 rd" class="r9 r">exception</span> = <span class="i">Assert</span>.<span class="i">ThrowsAsync</span>&lt;<a href="@0@System/A.html#2b389f14fb01ad1b" class="t t">InvalidDataException</a>&gt;(<b>async</b> () =&gt; <b>await</b> <span class="r8 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>());
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r9 r">exception</span>.<span class="i">Message</span>, <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;Multipart headers count limit 1 exceeded.&quot;</span>));
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public void</b> <a id="ef82ee0b76a1c591" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">MultipartReader_HeadersLengthExceeded_Throws</a>()
+        {
+            <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r10 rd" class="r10 r">stream</span> = <a href="#5f66775679f277a5" class="i method">MakeStream</a>(<a href="#7fcc8056d37c49fd" class="i field">OnePartBodyTwoHeaders</a>);
+            <a href="MultipartReader.cs.html#5c8c9479a493a9cd" class="k">var</a> <span id="r11 rd" class="r11 r">reader</span> = <b>new</b> <a href="MultipartReader.cs.html#e1460735dfa3677e" class="t constructor">MultipartReader</a>(<a href="#e848442150d28428" class="i field">Boundary</a>, <span class="r10 r">stream</span>)
+            {
+                <a href="MultipartReader.cs.html#457f0243948607db" class="i property">HeadersLengthLimit</a> = 60,
+            };
+ 
+            <b>var</b> <span id="r12 rd" class="r12 r">exception</span> = <span class="i">Assert</span>.<span class="i">ThrowsAsync</span>&lt;<a href="@0@System/A.html#2b389f14fb01ad1b" class="t t">InvalidDataException</a>&gt;(() =&gt; <span class="r11 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>());
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r12 r">exception</span>.<span class="i">Message</span>, <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;Line length limit 17 exceeded.&quot;</span>));
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="56831590b2a41b56" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">MultipartReader_ReadSinglePartBodyWithTrailingWhitespace_Success</a>()
+        {
+            <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r13 rd" class="r13 r">stream</span> = <a href="#5f66775679f277a5" class="i method">MakeStream</a>(<a href="#148f13e7f831091d" class="i field">OnePartBodyWithTrailingWhitespace</a>);
+            <a href="MultipartReader.cs.html#5c8c9479a493a9cd" class="k">var</a> <span id="r14 rd" class="r14 r">reader</span> = <b>new</b> <a href="MultipartReader.cs.html#e1460735dfa3677e" class="t constructor">MultipartReader</a>(<a href="#e848442150d28428" class="i field">Boundary</a>, <span class="r13 r">stream</span>);
+ 
+            <a href="MultipartSection.cs.html#1327d72eb23d105c" class="k">var</a> <span id="r15 rd" class="r15 r">section</span> = <b>await</b> <span class="r14 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>();
+            <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r15 r">section</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r15 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a>.<a href="@0@mscorlib/A.html#12b9bba2a1f9c3e2" class="i property">Count</a>, <span class="i">Is</span>.<span class="i">EqualTo</span>(1));
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r15 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="s">&quot;Content-Disposition&quot;</span>][0], <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;form-data; name=\&quot;text\&quot;&quot;</span>));
+            <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r16 rd" class="r16 r">buffer</span> = <b>new</b> <a href="@0@mscorlib/A.html#d308091cc690e78d" class="t constructor">MemoryStream</a>();
+            <b>await</b> <span class="r15 r">section</span>.<a href="MultipartSection.cs.html#08df6b8e14f1d5cc" class="i property">Body</a>.<a href="@0@mscorlib/A.html#1ed7a6d41a19abf9" class="i method">CopyToAsync</a>(<span class="r16 r">buffer</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#65768102b7ace585" class="i property">ASCII</a>.<a href="@0@mscorlib/A.html#7310c9cccfaecd17" class="i method">GetString</a>(<span class="r16 r">buffer</span>.<a href="@0@mscorlib/A.html#5df5fc757781f05e" class="i method">ToArray</a>()), <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;text default&quot;</span>));
+ 
+            <span class="i">Assert</span>.<span class="i">Null</span>(<b>await</b> <span class="r14 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>());
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="7ba02a362bd508fe" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">MultipartReader_ReadSinglePartBodyWithoutLastCRLF_Success</a>()
+        {
+            <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r17 rd" class="r17 r">stream</span> = <a href="#5f66775679f277a5" class="i method">MakeStream</a>(<a href="#e9a7f2b048c23af9" class="i field">OnePartBodyWithoutFinalCRLF</a>);
+            <a href="MultipartReader.cs.html#5c8c9479a493a9cd" class="k">var</a> <span id="r18 rd" class="r18 r">reader</span> = <b>new</b> <a href="MultipartReader.cs.html#e1460735dfa3677e" class="t constructor">MultipartReader</a>(<a href="#e848442150d28428" class="i field">Boundary</a>, <span class="r17 r">stream</span>);
+ 
+            <a href="MultipartSection.cs.html#1327d72eb23d105c" class="k">var</a> <span id="r19 rd" class="r19 r">section</span> = <b>await</b> <span class="r18 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>();
+            <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r19 r">section</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r19 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a>.<a href="@0@mscorlib/A.html#12b9bba2a1f9c3e2" class="i property">Count</a>, <span class="i">Is</span>.<span class="i">EqualTo</span>(1));
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r19 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="s">&quot;Content-Disposition&quot;</span>][0], <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;form-data; name=\&quot;text\&quot;&quot;</span>));
+            <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r20 rd" class="r20 r">buffer</span> = <b>new</b> <a href="@0@mscorlib/A.html#d308091cc690e78d" class="t constructor">MemoryStream</a>();
+            <b>await</b> <span class="r19 r">section</span>.<a href="MultipartSection.cs.html#08df6b8e14f1d5cc" class="i property">Body</a>.<a href="@0@mscorlib/A.html#1ed7a6d41a19abf9" class="i method">CopyToAsync</a>(<span class="r20 r">buffer</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#65768102b7ace585" class="i property">ASCII</a>.<a href="@0@mscorlib/A.html#7310c9cccfaecd17" class="i method">GetString</a>(<span class="r20 r">buffer</span>.<a href="@0@mscorlib/A.html#5df5fc757781f05e" class="i method">ToArray</a>()), <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;text default&quot;</span>));
+ 
+            <span class="i">Assert</span>.<span class="i">Null</span>(<b>await</b> <span class="r18 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>());
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="1b8889f21dd9d838" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">MultipartReader_ReadTwoPartBody_Success</a>()
+        {
+            <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r21 rd" class="r21 r">stream</span> = <a href="#5f66775679f277a5" class="i method">MakeStream</a>(<a href="#c2275273b8131c72" class="i field">TwoPartBody</a>);
+            <a href="MultipartReader.cs.html#5c8c9479a493a9cd" class="k">var</a> <span id="r22 rd" class="r22 r">reader</span> = <b>new</b> <a href="MultipartReader.cs.html#e1460735dfa3677e" class="t constructor">MultipartReader</a>(<a href="#e848442150d28428" class="i field">Boundary</a>, <span class="r21 r">stream</span>);
+ 
+            <a href="MultipartSection.cs.html#1327d72eb23d105c" class="k">var</a> <span id="r23 rd" class="r23 r">section</span> = <b>await</b> <span class="r22 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>();
+            <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r23 r">section</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r23 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a>.<a href="@0@mscorlib/A.html#12b9bba2a1f9c3e2" class="i property">Count</a>, <span class="i">Is</span>.<span class="i">EqualTo</span>(1));
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r23 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="s">&quot;Content-Disposition&quot;</span>][0], <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;form-data; name=\&quot;text\&quot;&quot;</span>));
+            <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r24 rd" class="r24 r">buffer</span> = <b>new</b> <a href="@0@mscorlib/A.html#d308091cc690e78d" class="t constructor">MemoryStream</a>();
+            <b>await</b> <span class="r23 r">section</span>.<a href="MultipartSection.cs.html#08df6b8e14f1d5cc" class="i property">Body</a>.<a href="@0@mscorlib/A.html#1ed7a6d41a19abf9" class="i method">CopyToAsync</a>(<span class="r24 r">buffer</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#65768102b7ace585" class="i property">ASCII</a>.<a href="@0@mscorlib/A.html#7310c9cccfaecd17" class="i method">GetString</a>(<span class="r24 r">buffer</span>.<a href="@0@mscorlib/A.html#5df5fc757781f05e" class="i method">ToArray</a>()), <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;text default&quot;</span>));
+ 
+            <span class="r23 r">section</span> = <b>await</b> <span class="r22 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>();
+            <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r23 r">section</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r23 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a>.<a href="@0@mscorlib/A.html#12b9bba2a1f9c3e2" class="i property">Count</a>, <span class="i">Is</span>.<span class="i">EqualTo</span>(2));
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r23 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="s">&quot;Content-Disposition&quot;</span>][0], <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;form-data; name=\&quot;file1\&quot;; filename=\&quot;a.txt\&quot;&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r23 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="s">&quot;Content-Type&quot;</span>][0], <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;text/plain&quot;</span>));
+            <span class="r24 r">buffer</span> = <b>new</b> <a href="@0@mscorlib/A.html#d308091cc690e78d" class="t constructor">MemoryStream</a>();
+            <b>await</b> <span class="r23 r">section</span>.<a href="MultipartSection.cs.html#08df6b8e14f1d5cc" class="i property">Body</a>.<a href="@0@mscorlib/A.html#1ed7a6d41a19abf9" class="i method">CopyToAsync</a>(<span class="r24 r">buffer</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#65768102b7ace585" class="i property">ASCII</a>.<a href="@0@mscorlib/A.html#7310c9cccfaecd17" class="i method">GetString</a>(<span class="r24 r">buffer</span>.<a href="@0@mscorlib/A.html#5df5fc757781f05e" class="i method">ToArray</a>()), <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;Content of a.txt.\r\n&quot;</span>));
+ 
+            <span class="i">Assert</span>.<span class="i">Null</span>(<b>await</b> <span class="r22 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>());
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="74e49d6b2030554b" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">MultipartReader_ReadTwoPartBodyWithUnicodeFileName_Success</a>()
+        {
+            <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r25 rd" class="r25 r">stream</span> = <a href="#5f66775679f277a5" class="i method">MakeStream</a>(<a href="#41eb0e1d1a860f55" class="i field">TwoPartBodyWithUnicodeFileName</a>);
+            <a href="MultipartReader.cs.html#5c8c9479a493a9cd" class="k">var</a> <span id="r26 rd" class="r26 r">reader</span> = <b>new</b> <a href="MultipartReader.cs.html#e1460735dfa3677e" class="t constructor">MultipartReader</a>(<a href="#e848442150d28428" class="i field">Boundary</a>, <span class="r25 r">stream</span>);
+ 
+            <a href="MultipartSection.cs.html#1327d72eb23d105c" class="k">var</a> <span id="r27 rd" class="r27 r">section</span> = <b>await</b> <span class="r26 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>();
+            <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r27 r">section</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r27 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a>.<a href="@0@mscorlib/A.html#12b9bba2a1f9c3e2" class="i property">Count</a>, <span class="i">Is</span>.<span class="i">EqualTo</span>(1));
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r27 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="s">&quot;Content-Disposition&quot;</span>][0], <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;form-data; name=\&quot;text\&quot;&quot;</span>));
+            <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r28 rd" class="r28 r">buffer</span> = <b>new</b> <a href="@0@mscorlib/A.html#d308091cc690e78d" class="t constructor">MemoryStream</a>();
+            <b>await</b> <span class="r27 r">section</span>.<a href="MultipartSection.cs.html#08df6b8e14f1d5cc" class="i property">Body</a>.<a href="@0@mscorlib/A.html#1ed7a6d41a19abf9" class="i method">CopyToAsync</a>(<span class="r28 r">buffer</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#65768102b7ace585" class="i property">ASCII</a>.<a href="@0@mscorlib/A.html#7310c9cccfaecd17" class="i method">GetString</a>(<span class="r28 r">buffer</span>.<a href="@0@mscorlib/A.html#5df5fc757781f05e" class="i method">ToArray</a>()), <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;text default&quot;</span>));
+ 
+            <span class="r27 r">section</span> = <b>await</b> <span class="r26 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>();
+            <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r27 r">section</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r27 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a>.<a href="@0@mscorlib/A.html#12b9bba2a1f9c3e2" class="i property">Count</a>, <span class="i">Is</span>.<span class="i">EqualTo</span>(2));
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r27 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="s">&quot;Content-Disposition&quot;</span>][0], <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;form-data; name=\&quot;file1\&quot;; filename=\&quot;a色.txt\&quot;&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r27 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="s">&quot;Content-Type&quot;</span>][0], <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;text/plain&quot;</span>));
+            <span class="r28 r">buffer</span> = <b>new</b> <a href="@0@mscorlib/A.html#d308091cc690e78d" class="t constructor">MemoryStream</a>();
+            <b>await</b> <span class="r27 r">section</span>.<a href="MultipartSection.cs.html#08df6b8e14f1d5cc" class="i property">Body</a>.<a href="@0@mscorlib/A.html#1ed7a6d41a19abf9" class="i method">CopyToAsync</a>(<span class="r28 r">buffer</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#65768102b7ace585" class="i property">ASCII</a>.<a href="@0@mscorlib/A.html#7310c9cccfaecd17" class="i method">GetString</a>(<span class="r28 r">buffer</span>.<a href="@0@mscorlib/A.html#5df5fc757781f05e" class="i method">ToArray</a>()), <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;Content of a.txt.\r\n&quot;</span>));
+ 
+            <span class="i">Assert</span>.<span class="i">Null</span>(<b>await</b> <span class="r26 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>());
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="7957f13da48d8243" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">MultipartReader_ThreePartBody_Success</a>()
+        {
+            <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r29 rd" class="r29 r">stream</span> = <a href="#5f66775679f277a5" class="i method">MakeStream</a>(<a href="#71a81a672970606e" class="i field">ThreePartBody</a>);
+            <a href="MultipartReader.cs.html#5c8c9479a493a9cd" class="k">var</a> <span id="r30 rd" class="r30 r">reader</span> = <b>new</b> <a href="MultipartReader.cs.html#e1460735dfa3677e" class="t constructor">MultipartReader</a>(<a href="#e848442150d28428" class="i field">Boundary</a>, <span class="r29 r">stream</span>);
+ 
+            <a href="MultipartSection.cs.html#1327d72eb23d105c" class="k">var</a> <span id="r31 rd" class="r31 r">section</span> = <b>await</b> <span class="r30 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>();
+            <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r31 r">section</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r31 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a>.<a href="@0@mscorlib/A.html#12b9bba2a1f9c3e2" class="i property">Count</a>, <span class="i">Is</span>.<span class="i">EqualTo</span>(1));
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r31 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="s">&quot;Content-Disposition&quot;</span>][0], <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;form-data; name=\&quot;text\&quot;&quot;</span>));
+            <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r32 rd" class="r32 r">buffer</span> = <b>new</b> <a href="@0@mscorlib/A.html#d308091cc690e78d" class="t constructor">MemoryStream</a>();
+            <b>await</b> <span class="r31 r">section</span>.<a href="MultipartSection.cs.html#08df6b8e14f1d5cc" class="i property">Body</a>.<a href="@0@mscorlib/A.html#1ed7a6d41a19abf9" class="i method">CopyToAsync</a>(<span class="r32 r">buffer</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#65768102b7ace585" class="i property">ASCII</a>.<a href="@0@mscorlib/A.html#7310c9cccfaecd17" class="i method">GetString</a>(<span class="r32 r">buffer</span>.<a href="@0@mscorlib/A.html#5df5fc757781f05e" class="i method">ToArray</a>()), <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;text default&quot;</span>));
+ 
+            <span class="r31 r">section</span> = <b>await</b> <span class="r30 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>();
+            <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r31 r">section</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r31 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a>.<a href="@0@mscorlib/A.html#12b9bba2a1f9c3e2" class="i property">Count</a>, <span class="i">Is</span>.<span class="i">EqualTo</span>(2));
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r31 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="s">&quot;Content-Disposition&quot;</span>][0], <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;form-data; name=\&quot;file1\&quot;; filename=\&quot;a.txt\&quot;&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r31 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="s">&quot;Content-Type&quot;</span>][0], <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;text/plain&quot;</span>));
+            <span class="r32 r">buffer</span> = <b>new</b> <a href="@0@mscorlib/A.html#d308091cc690e78d" class="t constructor">MemoryStream</a>();
+            <b>await</b> <span class="r31 r">section</span>.<a href="MultipartSection.cs.html#08df6b8e14f1d5cc" class="i property">Body</a>.<a href="@0@mscorlib/A.html#1ed7a6d41a19abf9" class="i method">CopyToAsync</a>(<span class="r32 r">buffer</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#65768102b7ace585" class="i property">ASCII</a>.<a href="@0@mscorlib/A.html#7310c9cccfaecd17" class="i method">GetString</a>(<span class="r32 r">buffer</span>.<a href="@0@mscorlib/A.html#5df5fc757781f05e" class="i method">ToArray</a>()), <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;Content of a.txt.\r\n&quot;</span>));
+ 
+            <span class="r31 r">section</span> = <b>await</b> <span class="r30 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>();
+            <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r31 r">section</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r31 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a>.<a href="@0@mscorlib/A.html#12b9bba2a1f9c3e2" class="i property">Count</a>, <span class="i">Is</span>.<span class="i">EqualTo</span>(2));
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r31 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="s">&quot;Content-Disposition&quot;</span>][0], <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;form-data; name=\&quot;file2\&quot;; filename=\&quot;a.html\&quot;&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r31 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="s">&quot;Content-Type&quot;</span>][0], <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;text/html&quot;</span>));
+            <span class="r32 r">buffer</span> = <b>new</b> <a href="@0@mscorlib/A.html#d308091cc690e78d" class="t constructor">MemoryStream</a>();
+            <b>await</b> <span class="r31 r">section</span>.<a href="MultipartSection.cs.html#08df6b8e14f1d5cc" class="i property">Body</a>.<a href="@0@mscorlib/A.html#1ed7a6d41a19abf9" class="i method">CopyToAsync</a>(<span class="r32 r">buffer</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#65768102b7ace585" class="i property">ASCII</a>.<a href="@0@mscorlib/A.html#7310c9cccfaecd17" class="i method">GetString</a>(<span class="r32 r">buffer</span>.<a href="@0@mscorlib/A.html#5df5fc757781f05e" class="i method">ToArray</a>()), <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;&lt;!DOCTYPE html&gt;&lt;title&gt;Content of a.html.&lt;/title&gt;\r\n&quot;</span>));
+ 
+            <span class="i">Assert</span>.<span class="i">Null</span>(<b>await</b> <span class="r30 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>());
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public void</b> <a id="e4c54edbe21399f1" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">MultipartReader_BufferSizeMustBeLargerThanBoundary_Throws</a>()
+        {
+            <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r33 rd" class="r33 r">stream</span> = <a href="#5f66775679f277a5" class="i method">MakeStream</a>(<a href="#71a81a672970606e" class="i field">ThreePartBody</a>);
+            <span class="i">Assert</span>.<span class="i">Throws</span>&lt;<a href="@0@mscorlib/A.html#2975f0aa875d4a32" class="t t">ArgumentOutOfRangeException</a>&gt;(() =&gt;
+            {
+                <a href="MultipartReader.cs.html#5c8c9479a493a9cd" class="k">var</a> <span id="r34 rd" class="r34 r">reader</span> = <b>new</b> <a href="MultipartReader.cs.html#655b5ec767dc322c" class="t constructor">MultipartReader</a>(<a href="#e848442150d28428" class="i field">Boundary</a>, <span class="r33 r">stream</span>, 5);
+            });
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="d39b1dc4ae1481ec" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">MultipartReader_TwoPartBodyIncompleteBuffer_TwoSectionsReadSuccessfullyThirdSectionThrows</a>()
+        {
+            <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r35 rd" class="r35 r">stream</span> = <a href="#5f66775679f277a5" class="i method">MakeStream</a>(<a href="#e216985aafbc6a0d" class="i field">TwoPartBodyIncompleteBuffer</a>);
+            <a href="MultipartReader.cs.html#5c8c9479a493a9cd" class="k">var</a> <span id="r36 rd" class="r36 r">reader</span> = <b>new</b> <a href="MultipartReader.cs.html#e1460735dfa3677e" class="t constructor">MultipartReader</a>(<a href="#e848442150d28428" class="i field">Boundary</a>, <span class="r35 r">stream</span>);
+            <b>var</b> <span id="r37 rd" class="r37 r">buffer</span> = <b>new</b> <b>byte</b>[128];
+ 
+            <span class="c">//first section can be read successfully</span>
+            <a href="MultipartSection.cs.html#1327d72eb23d105c" class="k">var</a> <span id="r38 rd" class="r38 r">section</span> = <b>await</b> <span class="r36 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>();
+            <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r38 r">section</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r38 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a>.<a href="@0@mscorlib/A.html#12b9bba2a1f9c3e2" class="i property">Count</a>, <span class="i">Is</span>.<span class="i">EqualTo</span>(1));
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r38 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="s">&quot;Content-Disposition&quot;</span>][0], <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;form-data; name=\&quot;text\&quot;&quot;</span>));
+            <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r39 rd" class="r39 r">read</span> = <span class="r38 r">section</span>.<a href="MultipartSection.cs.html#08df6b8e14f1d5cc" class="i property">Body</a>.<a href="@0@mscorlib/A.html#6fb9c001d7524ba2" class="i method">Read</a>(<span class="r37 r">buffer</span>, 0, <span class="r37 r">buffer</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<a href="#37b27ad80fa03f3a" class="i method">GetString</a>(<span class="r37 r">buffer</span>, <span class="r39 r">read</span>), <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;text default&quot;</span>));
+ 
+            <span class="c">//second section can be read successfully (even though the bottom boundary is truncated)</span>
+            <span class="r38 r">section</span> = <b>await</b> <span class="r36 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>();
+            <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r38 r">section</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r38 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a>.<a href="@0@mscorlib/A.html#12b9bba2a1f9c3e2" class="i property">Count</a>, <span class="i">Is</span>.<span class="i">EqualTo</span>(2));
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r38 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="s">&quot;Content-Disposition&quot;</span>][0], <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;form-data; name=\&quot;file1\&quot;; filename=\&quot;a.txt\&quot;&quot;</span>));
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r38 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="s">&quot;Content-Type&quot;</span>][0], <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;text/plain&quot;</span>));
+            <span class="r39 r">read</span> = <span class="r38 r">section</span>.<a href="MultipartSection.cs.html#08df6b8e14f1d5cc" class="i property">Body</a>.<a href="@0@mscorlib/A.html#6fb9c001d7524ba2" class="i method">Read</a>(<span class="r37 r">buffer</span>, 0, <span class="r37 r">buffer</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<a href="#37b27ad80fa03f3a" class="i method">GetString</a>(<span class="r37 r">buffer</span>, <span class="r39 r">read</span>), <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;Content of a.txt.\r\n&quot;</span>));
+ 
+            <span class="i">Assert</span>.<span class="i">ThrowsAsync</span>&lt;<a href="@0@mscorlib/A.html#bf546e435199e83c" class="t t">IOException</a>&gt;(<b>async</b> () =&gt;
+            {
+                <span class="c">// we&#39;ll be unable to ensure enough bytes are buffered to even contain a final boundary</span>
+                <span class="r38 r">section</span> = <b>await</b> <span class="r36 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>();
+            });
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="933873d74bf67c58" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">MultipartReader_ReadInvalidUtf8Header_ReplacementCharacters</a>()
+        {
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r40 rd" class="r40 r">body1</span> =
+<span class="s">&quot;--9051914041544843365972754266\r\n&quot;</span> +
+<span class="s">&quot;Content-Disposition: form-data; name=\&quot;text\&quot; filename=\&quot;a&quot;</span>;
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r41 rd" class="r41 r">body2</span> =
+<span class="s">&quot;.txt\&quot;\r\n&quot;</span> +
+<span class="s">&quot;\r\n&quot;</span> +
+<span class="s">&quot;text default\r\n&quot;</span> +
+<span class="s">&quot;--9051914041544843365972754266--\r\n&quot;</span>;
+            <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r42 rd" class="r42 r">stream</span> = <b>new</b> <a href="@0@mscorlib/A.html#d308091cc690e78d" class="t constructor">MemoryStream</a>();
+            <b>var</b> <span id="r43 rd" class="r43 r">bytes</span> = <a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<span class="r40 r">body1</span>);
+            <span class="r42 r">stream</span>.<a href="@0@mscorlib/A.html#a27df287b28d9a2a" class="i method">Write</a>(<span class="r43 r">bytes</span>, 0, <span class="r43 r">bytes</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>);
+ 
+            <span class="c">// Write an invalid utf-8 segment in the middle</span>
+            <span class="r42 r">stream</span>.<a href="@0@mscorlib/A.html#a27df287b28d9a2a" class="i method">Write</a>(<b>new</b> <b>byte</b>[] { 0xC1, 0x21 }, 0, 2);
+ 
+            <span class="r43 r">bytes</span> = <a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<span class="r41 r">body2</span>);
+            <span class="r42 r">stream</span>.<a href="@0@mscorlib/A.html#a27df287b28d9a2a" class="i method">Write</a>(<span class="r43 r">bytes</span>, 0, <span class="r43 r">bytes</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>);
+            <span class="r42 r">stream</span>.<a href="@0@mscorlib/A.html#30f00da49c798fe1" class="i method">Seek</a>(0, <a href="@0@mscorlib/A.html#2cc1cf6635f00a52" class="t t">SeekOrigin</a>.<a href="@0@mscorlib/A.html#c29481af7c617299" class="i field">Begin</a>);
+            <a href="MultipartReader.cs.html#5c8c9479a493a9cd" class="k">var</a> <span id="r44 rd" class="r44 r">reader</span> = <b>new</b> <a href="MultipartReader.cs.html#e1460735dfa3677e" class="t constructor">MultipartReader</a>(<a href="#e848442150d28428" class="i field">Boundary</a>, <span class="r42 r">stream</span>);
+ 
+            <a href="MultipartSection.cs.html#1327d72eb23d105c" class="k">var</a> <span id="r45 rd" class="r45 r">section</span> = <b>await</b> <span class="r44 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>();
+            <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r45 r">section</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r45 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a>.<a href="@0@mscorlib/A.html#12b9bba2a1f9c3e2" class="i property">Count</a>, <span class="i">Is</span>.<span class="i">EqualTo</span>(1));
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r45 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="s">&quot;Content-Disposition&quot;</span>][0], <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;form-data; name=\&quot;text\&quot; filename=\&quot;a\uFFFD!.txt\&quot;&quot;</span>));
+            <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r46 rd" class="r46 r">buffer</span> = <b>new</b> <a href="@0@mscorlib/A.html#d308091cc690e78d" class="t constructor">MemoryStream</a>();
+            <b>await</b> <span class="r45 r">section</span>.<a href="MultipartSection.cs.html#08df6b8e14f1d5cc" class="i property">Body</a>.<a href="@0@mscorlib/A.html#1ed7a6d41a19abf9" class="i method">CopyToAsync</a>(<span class="r46 r">buffer</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#65768102b7ace585" class="i property">ASCII</a>.<a href="@0@mscorlib/A.html#7310c9cccfaecd17" class="i method">GetString</a>(<span class="r46 r">buffer</span>.<a href="@0@mscorlib/A.html#5df5fc757781f05e" class="i method">ToArray</a>()), <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;text default&quot;</span>));
+ 
+            <span class="i">Assert</span>.<span class="i">Null</span>(<b>await</b> <span class="r44 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>());
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="ee034b2d0ea35dba" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">MultipartReader_ReadInvalidUtf8SurrogateHeader_ReplacementCharacters</a>()
+        {
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r47 rd" class="r47 r">body1</span> =
+<span class="s">&quot;--9051914041544843365972754266\r\n&quot;</span> +
+<span class="s">&quot;Content-Disposition: form-data; name=\&quot;text\&quot; filename=\&quot;a&quot;</span>;
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r48 rd" class="r48 r">body2</span> =
+<span class="s">&quot;.txt\&quot;\r\n&quot;</span> +
+<span class="s">&quot;\r\n&quot;</span> +
+<span class="s">&quot;text default\r\n&quot;</span> +
+<span class="s">&quot;--9051914041544843365972754266--\r\n&quot;</span>;
+            <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r49 rd" class="r49 r">stream</span> = <b>new</b> <a href="@0@mscorlib/A.html#d308091cc690e78d" class="t constructor">MemoryStream</a>();
+            <b>var</b> <span id="r50 rd" class="r50 r">bytes</span> = <a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<span class="r47 r">body1</span>);
+            <span class="r49 r">stream</span>.<a href="@0@mscorlib/A.html#a27df287b28d9a2a" class="i method">Write</a>(<span class="r50 r">bytes</span>, 0, <span class="r50 r">bytes</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>);
+ 
+            <span class="c">// Write an invalid utf-8 segment in the middle</span>
+            <span class="r49 r">stream</span>.<a href="@0@mscorlib/A.html#a27df287b28d9a2a" class="i method">Write</a>(<b>new</b> <b>byte</b>[] { 0xED, 0xA0, 85 }, 0, 3);
+ 
+            <span class="r50 r">bytes</span> = <a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<span class="r48 r">body2</span>);
+            <span class="r49 r">stream</span>.<a href="@0@mscorlib/A.html#a27df287b28d9a2a" class="i method">Write</a>(<span class="r50 r">bytes</span>, 0, <span class="r50 r">bytes</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>);
+            <span class="r49 r">stream</span>.<a href="@0@mscorlib/A.html#30f00da49c798fe1" class="i method">Seek</a>(0, <a href="@0@mscorlib/A.html#2cc1cf6635f00a52" class="t t">SeekOrigin</a>.<a href="@0@mscorlib/A.html#c29481af7c617299" class="i field">Begin</a>);
+            <a href="MultipartReader.cs.html#5c8c9479a493a9cd" class="k">var</a> <span id="r51 rd" class="r51 r">reader</span> = <b>new</b> <a href="MultipartReader.cs.html#e1460735dfa3677e" class="t constructor">MultipartReader</a>(<a href="#e848442150d28428" class="i field">Boundary</a>, <span class="r49 r">stream</span>);
+ 
+            <a href="MultipartSection.cs.html#1327d72eb23d105c" class="k">var</a> <span id="r52 rd" class="r52 r">section</span> = <b>await</b> <span class="r51 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>();
+            <span class="i">Assert</span>.<span class="i">NotNull</span>(<span class="r52 r">section</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r52 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a>.<a href="@0@mscorlib/A.html#12b9bba2a1f9c3e2" class="i property">Count</a>, <span class="i">Is</span>.<span class="i">EqualTo</span>(1));
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">NET5_0</span> <span class="c">//https://github.com/dotnet/runtime/issues/29017</span>
+<span class="e">            Assert.That(section.Headers[&quot;Content-Disposition&quot;][0], Is.EqualTo(&quot;form-data; name=\&quot;text\&quot; filename=\&quot;a\uFFFD\uFFFDU.txt\&quot;&quot;));
+</span><span class="k preprocess">#</span><span class="k preprocess">else</span>
+            <span class="i">Assert</span>.<span class="i">That</span>(<span class="r52 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="s">&quot;Content-Disposition&quot;</span>][0], <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;form-data; name=\&quot;text\&quot; filename=\&quot;a\uFFFDU.txt\&quot;&quot;</span>));
+<span class="k preprocess">#</span><span class="k preprocess">endif</span>
+            <a href="@0@mscorlib/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r53 rd" class="r53 r">buffer</span> = <b>new</b> <a href="@0@mscorlib/A.html#d308091cc690e78d" class="t constructor">MemoryStream</a>();
+            <b>await</b> <span class="r52 r">section</span>.<a href="MultipartSection.cs.html#08df6b8e14f1d5cc" class="i property">Body</a>.<a href="@0@mscorlib/A.html#1ed7a6d41a19abf9" class="i method">CopyToAsync</a>(<span class="r53 r">buffer</span>);
+            <span class="i">Assert</span>.<span class="i">That</span>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#65768102b7ace585" class="i property">ASCII</a>.<a href="@0@mscorlib/A.html#7310c9cccfaecd17" class="i method">GetString</a>(<span class="r53 r">buffer</span>.<a href="@0@mscorlib/A.html#5df5fc757781f05e" class="i method">ToArray</a>()), <span class="i">Is</span>.<span class="i">EqualTo</span>(<span class="s">&quot;text default&quot;</span>));
+ 
+            <span class="i">Assert</span>.<span class="i">Null</span>(<b>await</b> <span class="r51 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>());
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

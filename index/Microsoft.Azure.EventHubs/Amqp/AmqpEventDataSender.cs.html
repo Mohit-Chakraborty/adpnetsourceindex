@@ -1,0 +1,199 @@
+﻿<!DOCTYPE html>
+<html><head><title>AmqpEventDataSender.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(190);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.EventHubs/Amqp/AmqpEventDataSender.cs" target="_top">Amqp\AmqpEventDataSender.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.EventHubs" target="_top">Microsoft.Azure.EventHubs\src\Microsoft.Azure.EventHubs.csproj</a> (Microsoft.Azure.EventHubs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft. All rights reserved.</span>
+<span class="c">// Licensed under the MIT license. See LICENSE file in the project root for full license information.</span>
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">EventHubs</span>.<span class="i n">Amqp</span>
+{
+    <b>using</b> <span class="i">System</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">Amqp</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">Amqp</span>.<span class="i">Framing</span>;
+ 
+    <b>class</b> <a id="5b41aaed8bb06ca8" href="../R/5b41aaed8bb06ca8.html" target="n" data-glyph="2,0" class="t t">AmqpEventDataSender</a> : <a href="../EventDataSender.cs.html#e258527873f12d05" class="t t">EventDataSender</a>
+    {
+        <b>int</b> <a id="fdd4aa167cf01e11" href="../R/fdd4aa167cf01e11.html" target="n" data-glyph="46,1" class="i field">deliveryCount</a>;
+        <b>readonly</b> <a href="ActiveClientLinkManager.cs.html#c99969b68e6efcb5" class="t t">ActiveClientLinkManager</a> <a id="1d9bfcbc3b2a3e08" href="../R/1d9bfcbc3b2a3e08.html" target="n" data-glyph="46,1" class="i field">clientLinkManager</a>;
+ 
+        <b>internal</b> <a id="f732a27913aec7d9" href="../R/f732a27913aec7d9.html" target="n" data-glyph="74,1" class="t constructor">AmqpEventDataSender</a>(<a href="AmqpEventHubClient.cs.html#a3d8f2ab12489a19" class="t t">AmqpEventHubClient</a> <span id="r0 rd" class="r0 r">eventHubClient</span>, <b>string</b> <span id="r1 rd" class="r1 r">partitionId</span>)
+            : <a href="../EventDataSender.cs.html#0de5aebe4fcdb93a" class="k">base</a>(<span class="r0 r">eventHubClient</span>, <span class="r1 r">partitionId</span>)
+        {
+            <a href="#5b41aaed8bb06ca8" class="k">this</a>.<a href="#4a64dd38b55161cf" class="i property">Path</a> = !<b>string</b>.<span class="i">IsNullOrEmpty</span>(<span class="r1 r">partitionId</span>)
+                ? <span class="s">$&quot;</span>{<span class="r0 r">eventHubClient</span>.<a href="../EventHubClient.cs.html#cb2687894300e685" class="i property">EventHubName</a>}<span class="s">/Partitions/</span>{<span class="r1 r">partitionId</span>}<span class="s">&quot;</span>
+                : <span class="r0 r">eventHubClient</span>.<a href="../EventHubClient.cs.html#cb2687894300e685" class="i property">EventHubName</a>;
+ 
+            <a href="#5b41aaed8bb06ca8" class="k">this</a>.<a href="#bb4fa54830c17db0" class="i property">SendLinkManager</a> = <b>new</b> <span class="i">FaultTolerantAmqpObject</span>&lt;<span class="i">SendingAmqpLink</span>&gt;(<a href="#5b41aaed8bb06ca8" class="k">this</a>.<span class="i">CreateLinkAsync</span>, <a href="#5b41aaed8bb06ca8" class="k">this</a>.<span class="i">CloseSession</span>);
+            <a href="#5b41aaed8bb06ca8" class="k">this</a>.<a href="#1d9bfcbc3b2a3e08" class="i field">clientLinkManager</a> = <b>new</b> <a href="ActiveClientLinkManager.cs.html#c063258d28921f07" class="t constructor">ActiveClientLinkManager</a>((<a href="AmqpEventHubClient.cs.html#a3d8f2ab12489a19" class="t t">AmqpEventHubClient</a>)<a href="#5b41aaed8bb06ca8" class="k">this</a>.<a href="../EventDataSender.cs.html#ba35870e3f241ac3" class="i property">EventHubClient</a>);
+            <a href="#5b41aaed8bb06ca8" class="k">this</a>.<a href="../EventDataSender.cs.html#07d507543a06f9ed" class="i property">MaxMessageSize</a> = 256 * 1024;   <span class="c">// Default. Updated when link is opened</span>
+        }
+ 
+        <b>string</b> <a id="4a64dd38b55161cf" href="../R/4a64dd38b55161cf.html" target="n" data-glyph="106,1" class="i property">Path</a> { <b>get</b>; }
+ 
+        <span class="i">FaultTolerantAmqpObject</span>&lt;<span class="i">SendingAmqpLink</span>&gt; <a id="bb4fa54830c17db0" href="../R/bb4fa54830c17db0.html" target="n" data-glyph="106,1" class="i property">SendLinkManager</a> { <b>get</b>; }
+ 
+        <b>public override</b> <span class="i">Task</span> <a id="fe826be58292df3a" href="../R/fe826be58292df3a.html" target="n" data-glyph="72,1" class="i method">CloseAsync</a>()
+        {
+            <a href="#5b41aaed8bb06ca8" class="k">this</a>.<a href="#1d9bfcbc3b2a3e08" class="i field">clientLinkManager</a>.<a href="ActiveClientLinkManager.cs.html#6739d81e1328100e" class="i method">Close</a>();
+            <b>return</b> <a href="#5b41aaed8bb06ca8" class="k">this</a>.<a href="#bb4fa54830c17db0" class="i property">SendLinkManager</a>.<span class="i">CloseAsync</span>();
+        }
+ 
+        <b>protected override async</b> <span class="i">Task</span> <a id="91cbf4853113c716" href="../R/91cbf4853113c716.html" target="n" data-glyph="75,1" class="i method">OnSendAsync</a>(<span class="i">IEnumerable</span>&lt;<a href="../EventData.cs.html#f56ed6e805f7061b" class="t t">EventData</a>&gt; <span id="r2 rd" class="r2 r">eventDatas</span>, <b>string</b> <span id="r3 rd" class="r3 r">partitionKey</span>)
+        {
+            <b>bool</b> <span id="r4 rd" class="r4 r">shouldRetry</span>;
+            <b>int</b> <span id="r5 rd" class="r5 r">retryCount</span> = 0;
+ 
+            <a href="../Primitives/TimeoutHelper.cs.html#e772a1e22bafc59c" class="k">var</a> <span id="r6 rd" class="r6 r">timeoutHelper</span> = <b>new</b> <a href="../Primitives/TimeoutHelper.cs.html#d31129aa8e684f15" class="t constructor">TimeoutHelper</a>(<a href="#5b41aaed8bb06ca8" class="k">this</a>.<a href="../EventDataSender.cs.html#ba35870e3f241ac3" class="i property">EventHubClient</a>.<a href="../EventHubClient.cs.html#58a8e47a06e35c53" class="i property">ConnectionStringBuilder</a>.<a href="../Primitives/EventHubsConnectionStringBuilder.cs.html#9bdfa559ce29adc5" class="i property">OperationTimeout</a>, <span class="r7 r">startTimeout</span>: <b>true</b>);
+ 
+            <b>do</b>
+            {
+                <b>using</b> (<span class="i">AmqpMessage</span> <span id="r8 rd" class="r8 r">amqpMessage</span> = <a href="AmqpMessageConverter.cs.html#2175e6b3c265d0d3" class="t t">AmqpMessageConverter</a>.<a href="AmqpMessageConverter.cs.html#b536706316958c0b" class="i method">EventDatasToAmqpMessage</a>(<span class="r2 r">eventDatas</span>, <span class="r3 r">partitionKey</span>))
+                {
+                    <span class="r4 r">shouldRetry</span> = <b>false</b>;
+ 
+                    <b>try</b>
+                    {
+                        <b>try</b>
+                        {
+                            <span class="c">// Always use default timeout for AMQP sesssion.</span>
+                            <b>var</b> <span id="r9 rd" class="r9 r">amqpLink</span> = <b>await</b> <a href="#5b41aaed8bb06ca8" class="k">this</a>.<a href="#bb4fa54830c17db0" class="i property">SendLinkManager</a>.<span class="i">GetOrCreateAsync</span>(
+                                <span class="i">TimeSpan</span>.<span class="i">FromSeconds</span>(<a href="AmqpClientConstants.cs.html#c8bb1175d0499823" class="t t">AmqpClientConstants</a>.<a href="AmqpClientConstants.cs.html#bc95632afdd80c05" class="i field">AmqpSessionTimeoutInSeconds</a>)).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                            <b>if</b> (<span class="r9 r">amqpLink</span>.<span class="i">Settings</span>.<span class="i">MaxMessageSize</span>.<span class="i">HasValue</span>)
+                            {
+                                <b>ulong</b> <span id="r10 rd" class="r10 r">size</span> = (<b>ulong</b>)<span class="r8 r">amqpMessage</span>.<span class="i">SerializedMessageSize</span>;
+                                <b>if</b> (<span class="r10 r">size</span> &gt; <span class="r9 r">amqpLink</span>.<span class="i">Settings</span>.<span class="i">MaxMessageSize</span>.<span class="i">Value</span>)
+                                {
+                                    <b>throw</b> <b>new</b> <span class="t">MessageSizeExceededException</span>(<span class="r8 r">amqpMessage</span>.<span class="i">DeliveryId</span>.<span class="i">Value</span>, <span class="r10 r">size</span>, <span class="r9 r">amqpLink</span>.<span class="i">Settings</span>.<span class="i">MaxMessageSize</span>.<span class="i">Value</span>);
+                                }
+                            }
+ 
+                            <span class="i">Outcome</span> <span id="r11 rd" class="r11 r">outcome</span> = <b>await</b> <span class="r9 r">amqpLink</span>.<span class="i">SendMessageAsync</span>(
+                                <span class="r8 r">amqpMessage</span>,
+                                <a href="#5b41aaed8bb06ca8" class="k">this</a>.<a href="#249acc87a935b1fc" class="i method">GetNextDeliveryTag</a>(),
+                                <span class="i">AmqpConstants</span>.<span class="i">NullBinary</span>,
+                                <span class="r6 r">timeoutHelper</span>.<a href="../Primitives/TimeoutHelper.cs.html#a2f50f7cc33bc27c" class="i method">RemainingTime</a>()).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                            <b>if</b> (<span class="r11 r">outcome</span>.<span class="i">DescriptorCode</span> != <span class="i">Accepted</span>.<span class="i">Code</span>)
+                            {
+                                <span class="i">Rejected</span> <span id="r12 rd" class="r12 r">rejected</span> = (<span class="i">Rejected</span>)<span class="r11 r">outcome</span>;
+                                <b>throw</b> <b>new</b> <span class="i">AmqpException</span>(<span class="r12 r">rejected</span>.<span class="i">Error</span>);
+                            }
+                        }
+                        <b>catch</b> (<span class="i">AmqpException</span> <span id="r13 rd" class="r13 r">amqpException</span>)
+                        {
+                            <b>throw</b> <a href="AmqpExceptionHelper.cs.html#a5cb48409a072b48" class="t t">AmqpExceptionHelper</a>.<span class="i">ToMessagingContract</span>(<span class="r13 r">amqpException</span>.<span class="i">Error</span>);
+                        }
+                        <b>catch</b> (<span class="i">Exception</span> <span id="r14 rd" class="r14 r">ex</span>)
+                        {
+                            <b>if</b> (<a href="AmqpExceptionHelper.cs.html#a5cb48409a072b48" class="t t">AmqpExceptionHelper</a>.<a href="AmqpExceptionHelper.cs.html#fc8b330d3458784b" class="i method">TryTranslateToRetriableException</a>(<span class="r14 r">ex</span>, <b>out</b> <a href="../Primitives/EventHubsException.cs.html#8b9817f4bb66b95f" class="k">var</a> <span id="r15 rd" class="r15 r">retriableEx</span>))
+                            {
+                                <b>throw</b> <span class="r15 r">retriableEx</span>;
+                            }
+ 
+                            <b>throw</b>;
+                        }
+                    }
+                    <b>catch</b> (<span class="i">Exception</span> <span id="r16 rd" class="r16 r">ex</span>)
+                    {
+                        <span class="c">// Evaluate retry condition?</span>
+                        <span class="i">TimeSpan</span>? <span id="r17 rd" class="r17 r">retryInterval</span> = <a href="#5b41aaed8bb06ca8" class="k">this</a>.<a href="../Primitives/ClientEntity.cs.html#133e57fb5d300f42" class="i property">RetryPolicy</a>.<span class="i">GetNextRetryInterval</span>(<span class="r16 r">ex</span>, <span class="r6 r">timeoutHelper</span>.<a href="../Primitives/TimeoutHelper.cs.html#a2f50f7cc33bc27c" class="i method">RemainingTime</a>(), ++<span class="r5 r">retryCount</span>);
+                        <b>if</b> (<span class="r17 r">retryInterval</span> != <b>null</b> &amp;&amp; !<a href="#5b41aaed8bb06ca8" class="k">this</a>.<a href="../Primitives/ClientEntity.cs.html#136db9d3ec1ba014" class="i property">IsClosed</a> &amp;&amp; !<a href="#5b41aaed8bb06ca8" class="k">this</a>.<a href="../EventDataSender.cs.html#ba35870e3f241ac3" class="i property">EventHubClient</a>.<a href="../Primitives/ClientEntity.cs.html#136db9d3ec1ba014" class="i property">IsClosed</a>)
+                        {
+                            <b>await</b> <span class="i">Task</span>.<span class="i">Delay</span>(<span class="r17 r">retryInterval</span>.<span class="i">Value</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                            <span class="r4 r">shouldRetry</span> = <b>true</b>;
+                        }
+                        <b>else</b>
+                        {
+                            <b>throw</b>;
+                        }
+                    }
+                }
+            } <b>while</b> (<span class="r4 r">shouldRetry</span>);
+        }
+ 
+        <span class="i">ArraySegment</span>&lt;<b>byte</b>&gt; <a id="249acc87a935b1fc" href="../R/249acc87a935b1fc.html" target="n" data-glyph="76,1" class="i method">GetNextDeliveryTag</a>()
+        {
+            <b>int</b> <span id="r18 rd" class="r18 r">deliveryId</span> = <span class="i">Interlocked</span>.<span class="i">Increment</span>(<b>ref</b> <a href="#5b41aaed8bb06ca8" class="k">this</a>.<a href="#fdd4aa167cf01e11" class="i field">deliveryCount</a>);
+            <b>return</b> <b>new</b> <span class="i">ArraySegment</span>&lt;<b>byte</b>&gt;(<span class="i">BitConverter</span>.<span class="i">GetBytes</span>(<span class="r18 r">deliveryId</span>));
+        }
+ 
+        <b>async</b> <span class="i">Task</span>&lt;<span class="i">SendingAmqpLink</span>&gt; <a id="e442ec54842a8030" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">CreateLinkAsync</a>(<span class="i">TimeSpan</span> <span id="r19 rd" class="r19 r">timeout</span>)
+        {
+            <a href="AmqpEventHubClient.cs.html#a3d8f2ab12489a19" class="k">var</a> <span id="r20 rd" class="r20 r">amqpEventHubClient</span> = ((<a href="AmqpEventHubClient.cs.html#a3d8f2ab12489a19" class="t t">AmqpEventHubClient</a>)<a href="#5b41aaed8bb06ca8" class="k">this</a>.<a href="../EventDataSender.cs.html#ba35870e3f241ac3" class="i property">EventHubClient</a>);
+ 
+            <a href="../Primitives/TimeoutHelper.cs.html#e772a1e22bafc59c" class="k">var</a> <span id="r21 rd" class="r21 r">timeoutHelper</span> = <b>new</b> <a href="../Primitives/TimeoutHelper.cs.html#590ff83c14fb7e1d" class="t constructor">TimeoutHelper</a>(<span class="r19 r">timeout</span>);
+            <span class="i">AmqpConnection</span> <span id="r22 rd" class="r22 r">connection</span> = <b>await</b> <span class="r20 r">amqpEventHubClient</span>.<a href="AmqpEventHubClient.cs.html#bedb28b5969278fa" class="i property">ConnectionManager</a>.<span class="i">GetOrCreateAsync</span>(<span class="r21 r">timeoutHelper</span>.<a href="../Primitives/TimeoutHelper.cs.html#a2f50f7cc33bc27c" class="i method">RemainingTime</a>()).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+            <span class="c">// Authenticate over CBS</span>
+            <b>var</b> <span id="r23 rd" class="r23 r">cbsLink</span> = <span class="r22 r">connection</span>.<span class="i">Extensions</span>.<span class="i">Find</span>&lt;<span class="i">AmqpCbsLink</span>&gt;();
+ 
+            <span class="i">ICbsTokenProvider</span> <span id="r24 rd" class="r24 r">cbsTokenProvider</span> = <span class="r20 r">amqpEventHubClient</span>.<a href="AmqpEventHubClient.cs.html#c17427d4e6e1b6db" class="i property">CbsTokenProvider</a>;
+            <span class="i">Uri</span> <span id="r25 rd" class="r25 r">address</span> = <b>new</b> <span class="i">Uri</span>(<span class="r20 r">amqpEventHubClient</span>.<a href="../EventHubClient.cs.html#58a8e47a06e35c53" class="i property">ConnectionStringBuilder</a>.<a href="../Primitives/EventHubsConnectionStringBuilder.cs.html#6d119b1fb797464e" class="i property">Endpoint</a>, <a href="#5b41aaed8bb06ca8" class="k">this</a>.<a href="#4a64dd38b55161cf" class="i property">Path</a>);
+            <b>string</b> <span id="r26 rd" class="r26 r">audience</span> = <span class="r25 r">address</span>.<span class="i">AbsoluteUri</span>;
+            <b>string</b> <span id="r27 rd" class="r27 r">resource</span> = <span class="r25 r">address</span>.<span class="i">AbsoluteUri</span>;
+            <b>var</b> <span id="r28 rd" class="r28 r">expiresAt</span> = <b>await</b> <span class="r23 r">cbsLink</span>.<span class="i">SendTokenAsync</span>(
+                <span class="r24 r">cbsTokenProvider</span>,
+                <span class="r25 r">address</span>,
+                <span class="r26 r">audience</span>,
+                <span class="r27 r">resource</span>,
+                <b>new</b>[] { <a href="../Primitives/ClaimConstants.cs.html#748ab48e857a3e43" class="t t">ClaimConstants</a>.<a href="../Primitives/ClaimConstants.cs.html#8dc0b2fc84d9c285" class="i field">Send</a> },
+                <span class="r21 r">timeoutHelper</span>.<a href="../Primitives/TimeoutHelper.cs.html#a2f50f7cc33bc27c" class="i method">RemainingTime</a>()).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+            <span class="i">AmqpSession</span> <span id="r29 rd" class="r29 r">session</span> = <b>null</b>;
+            <b>try</b>
+            {
+                <span class="c">// Create our Session</span>
+                <b>var</b> <span id="r30 rd" class="r30 r">sessionSettings</span> = <b>new</b> <span class="i">AmqpSessionSettings</span> { <span class="i">Properties</span> = <b>new</b> <span class="i">Fields</span>() };
+                <span class="r29 r">session</span> = <span class="r22 r">connection</span>.<span class="i">CreateSession</span>(<span class="r30 r">sessionSettings</span>);
+                <b>await</b> <span class="r29 r">session</span>.<span class="i">OpenAsync</span>(<span class="r21 r">timeoutHelper</span>.<a href="../Primitives/TimeoutHelper.cs.html#a2f50f7cc33bc27c" class="i method">RemainingTime</a>()).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <span class="c">// Create our Link</span>
+                <b>var</b> <span id="r31 rd" class="r31 r">linkSettings</span> = <b>new</b> <span class="i">AmqpLinkSettings</span>();
+                <span class="r31 r">linkSettings</span>.<span class="i">AddProperty</span>(<a href="AmqpClientConstants.cs.html#c8bb1175d0499823" class="t t">AmqpClientConstants</a>.<a href="AmqpClientConstants.cs.html#dca913f95644f9ab" class="i field">TimeoutName</a>, (<b>uint</b>)<span class="r21 r">timeoutHelper</span>.<a href="../Primitives/TimeoutHelper.cs.html#a2f50f7cc33bc27c" class="i method">RemainingTime</a>().<span class="i">TotalMilliseconds</span>);
+                <span class="r31 r">linkSettings</span>.<span class="i">AddProperty</span>(<a href="AmqpClientConstants.cs.html#c8bb1175d0499823" class="t t">AmqpClientConstants</a>.<a href="AmqpClientConstants.cs.html#bff60ab913b0c180" class="i field">EntityTypeName</a>, (<b>int</b>)<a href="../Primitives/MessagingEntityType.cs.html#1e322cb393957686" class="t t">MessagingEntityType</a>.<a href="../Primitives/MessagingEntityType.cs.html#ced5b600dc76d911" class="i field">EventHub</a>);
+                <span class="r31 r">linkSettings</span>.<span class="i">Role</span> = <b>false</b>;
+                <span class="r31 r">linkSettings</span>.<span class="i">InitialDeliveryCount</span> = 0;
+                <span class="r31 r">linkSettings</span>.<span class="i">Target</span> = <b>new</b> <span class="i">Target</span> { <span class="i">Address</span> = <span class="r25 r">address</span>.<span class="i">AbsolutePath</span> };
+                <span class="r31 r">linkSettings</span>.<span class="i">Source</span> = <b>new</b> <span class="i">Source</span> { <span class="i">Address</span> = <a href="#5b41aaed8bb06ca8" class="k">this</a>.<a href="../Primitives/ClientEntity.cs.html#5b2ded861d3b6cd6" class="i property">ClientId</a> };
+ 
+                <b>var</b> <span id="r32 rd" class="r32 r">link</span> = <b>new</b> <span class="i">SendingAmqpLink</span>(<span class="r31 r">linkSettings</span>);
+                <span class="r31 r">linkSettings</span>.<span class="i">LinkName</span> = <span class="s">$&quot;</span>{<span class="r20 r">amqpEventHubClient</span>.<a href="AmqpEventHubClient.cs.html#490a7f9ec845c866" class="i property">ContainerId</a>}<span class="s">;</span>{<span class="r22 r">connection</span>.<span class="i">Identifier</span>}<span class="s">:</span>{<span class="r29 r">session</span>.<span class="i">Identifier</span>}<span class="s">:</span>{<span class="r32 r">link</span>.<span class="i">Identifier</span>}<span class="s">&quot;</span>;
+                <span class="r32 r">link</span>.<span class="i">AttachTo</span>(<span class="r29 r">session</span>);
+ 
+                <b>await</b> <span class="r32 r">link</span>.<span class="i">OpenAsync</span>(<span class="r21 r">timeoutHelper</span>.<a href="../Primitives/TimeoutHelper.cs.html#a2f50f7cc33bc27c" class="i method">RemainingTime</a>()).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <a href="ActiveClientLink.cs.html#1bdec0b0815b0b1d" class="k">var</a> <span id="r33 rd" class="r33 r">activeClientLink</span> = <b>new</b> <span class="t">ActiveClientLink</span>(
+                    <span class="r32 r">link</span>,
+                    <span class="r26 r">audience</span>, <span class="c">// audience</span>
+                    <a href="#5b41aaed8bb06ca8" class="k">this</a>.<a href="../EventDataSender.cs.html#ba35870e3f241ac3" class="i property">EventHubClient</a>.<a href="../EventHubClient.cs.html#58a8e47a06e35c53" class="i property">ConnectionStringBuilder</a>.<a href="../Primitives/EventHubsConnectionStringBuilder.cs.html#6d119b1fb797464e" class="i property">Endpoint</a>.<span class="i">AbsoluteUri</span>, <span class="c">// endpointUri</span>
+                    <b>new</b>[] { <a href="../Primitives/ClaimConstants.cs.html#748ab48e857a3e43" class="t t">ClaimConstants</a>.<a href="../Primitives/ClaimConstants.cs.html#8dc0b2fc84d9c285" class="i field">Send</a> },
+                    <b>true</b>,
+                    <span class="r28 r">expiresAt</span>);
+ 
+                <a href="#5b41aaed8bb06ca8" class="k">this</a>.<a href="../EventDataSender.cs.html#07d507543a06f9ed" class="i property">MaxMessageSize</a> = (<b>long</b>)<span class="r33 r">activeClientLink</span>.<a href="ActiveClientLink.cs.html#ebd2fa31c7e6e2b0" class="i property">Link</a>.<span class="i">Settings</span>.<span class="i">MaxMessageSize</span>();
+                <a href="#5b41aaed8bb06ca8" class="k">this</a>.<a href="#1d9bfcbc3b2a3e08" class="i field">clientLinkManager</a>.<a href="ActiveClientLinkManager.cs.html#08137352696729da" class="i method">SetActiveLink</a>(<span class="r33 r">activeClientLink</span>);
+                <b>return</b> <span class="r32 r">link</span>;
+            }
+            <b>catch</b>
+            {
+                <span class="c">// Cleanup any session (and thus link) in case of exception.</span>
+                <span class="r29 r">session</span>?.<span class="i">SafeClose</span>();
+                <b>throw</b>;
+            }
+        }
+ 
+        <b>void</b> <a id="77a18267aac3c8b3" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">CloseSession</a>(<span class="i">SendingAmqpLink</span> <span id="r34 rd" class="r34 r">link</span>)
+        {
+            <span class="c">// Note we close the session (which includes the link).</span>
+            <span class="r34 r">link</span>.<span class="i">Session</span>.<span class="i">SafeClose</span>();
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

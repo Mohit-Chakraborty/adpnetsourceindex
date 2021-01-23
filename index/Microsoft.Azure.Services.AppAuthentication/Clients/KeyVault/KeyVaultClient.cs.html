@@ -1,0 +1,218 @@
+﻿<!DOCTYPE html>
+<html><head><title>KeyVaultClient.cs</title><link rel="stylesheet" href="../../../styles.css"><script src="../../../scripts.js"></script></head>
+<body class="cB" onload="i(209);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.Services.AppAuthentication/Clients/KeyVault/KeyVaultClient.cs" target="_top">Clients\KeyVault\KeyVaultClient.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.Services.AppAuthentication" target="_top">Azure.Services.AppAuthentication\Microsoft.Azure.Services.AppAuthentication.csproj</a> (Microsoft.Azure.Services.AppAuthentication)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>.<span class="i n">Http</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Security</span>.<span class="i n">Cryptography</span>.<span class="i n">X509Certificates</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Services</span>.<span class="i n">AppAuthentication</span>
+{
+    <b>internal class</b> <a id="5e7f9dc8b5300af2" href="../../R/5e7f9dc8b5300af2.html" target="n" data-glyph="2,0" class="t t">KeyVaultClient</a>
+    {
+        <span class="c">// Configurable MSI retry timeout for internal MsiAccessTokenProvider</span>
+        <b>private readonly int</b> <a id="8333ce98b56f25d1" href="../../R/8333ce98b56f25d1.html" target="n" data-glyph="46,1" class="i field">_msiRetryTimeoutInSeconds</a>;
+ 
+        <span class="c">// These members allow for unit testing</span>
+        <b>private readonly</b> <span class="t t">HttpClient</span> <a id="5c3e8a544a68b025" href="../../R/5c3e8a544a68b025.html" target="n" data-glyph="46,1" class="i field">_httpClient</a>;
+        <b>private</b> <a href="../../TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="t t">NonInteractiveAzureServiceTokenProviderBase</a> <a id="73171c1b4186643a" href="../../R/73171c1b4186643a.html" target="n" data-glyph="46,1" class="i field">_tokenProvider</a>;
+ 
+        <span class="c">// In case of User assigned MSI, this needs to be provided</span>
+        <b>private string</b> <a id="ec4736979f58ca30" href="../../R/ec4736979f58ca30.html" target="n" data-glyph="46,1" class="i field">_managedIdentityClientId</a>;
+ 
+        <b>private const string</b> <a id="a28f3346ebde5818" href="../../R/a28f3346ebde5818.html" target="n" data-glyph="10,1" class="i field">KeyVaultRestApiVersion</a> = <span class="s">&quot;2016-10-01&quot;</span>;
+ 
+        <span class="c">// Error messages</span>
+        <b>internal const string</b> <a id="7085ea00ac3326a9" href="../../R/7085ea00ac3326a9.html" target="n" data-glyph="8,1" class="i field">BearerChallengeMissingOrInvalidError</a> = <span class="s">&quot;A bearer challenge was not returned or is invalid.&quot;</span>;
+        <b>internal const string</b> <a id="23f881be858a2582" href="../../R/23f881be858a2582.html" target="n" data-glyph="8,1" class="i field">EndpointNotAvailableError</a> = <span class="s">&quot;Unable to connect to the Key Vault endpoint. Please check that the secret identifier is correct.&quot;</span>;
+        <b>internal const string</b> <a id="62a37150f7b46770" href="../../R/62a37150f7b46770.html" target="n" data-glyph="8,1" class="i field">KeyVaultAccessTokenRetrievalError</a> = <span class="s">&quot;Unable to get a Key Vault access token to acquire certificate.&quot;</span>;
+        <b>internal const string</b> <a id="7bba1c003bfd5e95" href="../../R/7bba1c003bfd5e95.html" target="n" data-glyph="8,1" class="i field">KeyVaultResponseError</a> = <span class="s">&quot;Key Vault returned an error.&quot;</span>;
+        <b>internal const string</b> <a id="104448784bc3258d" href="../../R/104448784bc3258d.html" target="n" data-glyph="8,1" class="i field">SecretBundleInvalidContentTypeError</a> = <span class="s">&quot;Specified secret identifier does not contain private key data. Please check you are providing the secret identifier for the Key Vault client certificate.&quot;</span>;
+        <b>internal const string</b> <a id="9c263439e4cf4d6a" href="../../R/9c263439e4cf4d6a.html" target="n" data-glyph="8,1" class="i field">SecretIdentifierInvalidSchemeError</a> = <span class="s">&quot;Specified identifier must use HTTPS.&quot;</span>;
+        <b>internal const string</b> <a id="0a55860965a68402" href="../../R/0a55860965a68402.html" target="n" data-glyph="8,1" class="i field">SecretIdentifierInvalidTypeError</a> = <span class="s">&quot;Specified identifier is not a secret identifier.&quot;</span>;
+        <b>internal const string</b> <a id="f60807f2fe877a40" href="../../R/f60807f2fe877a40.html" target="n" data-glyph="8,1" class="i field">SecretIdentifierInvalidUriError</a> = <span class="s">&quot;Specified secret identifier is not a valid URI.&quot;</span>;
+        <b>internal const string</b> <a id="f9eb7ae8ea2316ff" href="../../R/f9eb7ae8ea2316ff.html" target="n" data-glyph="8,1" class="i field">TokenProviderErrorsFormat</a> = <span class="s">&quot;Tried the following {0} methods to get a Key Vault access token, but none of them worked.&quot;</span>;
+ 
+        <b>internal</b> <a href="../../Principal.cs.html#ee98ea95591837a0" class="t t">Principal</a> <a id="9c1f22f83fb0ebf5" href="../../R/9c1f22f83fb0ebf5.html" target="n" data-glyph="104,1" class="i property">PrincipalUsed</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <b>internal</b> <a id="d52f5b12d0568f2f" href="../../R/d52f5b12d0568f2f.html" target="n" data-glyph="74,1" class="t constructor">KeyVaultClient</a>(<b>int</b> <span id="r0 rd" class="r0 r">msiRetryTimeoutInSeconds</span> = 0, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r1 rd" class="r1 r">managedIdentityClientId</span> = <b>null</b>, <span class="t t">HttpClient</span> <span id="r2 rd" class="r2 r">httpClient</span> = <b>null</b>, <a href="../../TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="t t">NonInteractiveAzureServiceTokenProviderBase</a> <span id="r3 rd" class="r3 r">tokenProvider</span> = <b>null</b>)
+        {
+            <a href="#8333ce98b56f25d1" class="i field">_msiRetryTimeoutInSeconds</a> = <span class="r0 r">msiRetryTimeoutInSeconds</span>;
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">NETSTANDARD1_4</span> || <span class="i">net452</span> || <span class="i">net461</span>
+<span class="e">            _httpClient = httpClient ?? new HttpClient();
+</span><span class="k preprocess">#</span><span class="k preprocess">else</span>
+            <a href="#5c3e8a544a68b025" class="i field">_httpClient</a> = <span class="r2 r">httpClient</span> ?? <b>new</b> <span class="t constructor">HttpClient</span>(<b>new</b> <span class="t constructor">HttpClientHandler</span>() { <span class="i property">CheckCertificateRevocationList</span> = <b>true</b> });
+<span class="k preprocess">#</span><span class="k preprocess">endif</span>
+            <a href="#73171c1b4186643a" class="i field">_tokenProvider</a> = <span class="r3 r">tokenProvider</span>;
+            <a href="#ec4736979f58ca30" class="i field">_managedIdentityClientId</a> = <span class="r1 r">managedIdentityClientId</span>;
+        }
+ 
+        <b>internal</b> <a id="94d994ce7faa4344" href="../../R/94d994ce7faa4344.html" target="n" data-glyph="74,1" class="t constructor">KeyVaultClient</a>(<span class="t t">HttpClient</span> <span id="r4 rd" class="r4 r">httpClient</span>, <a href="../../TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="t t">NonInteractiveAzureServiceTokenProviderBase</a> <span id="r5 rd" class="r5 r">tokenProvider</span> = <b>null</b>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r6 rd" class="r6 r">managedIdentityClientId</span> = <b>null</b>) : <a href="#d52f5b12d0568f2f" class="k">this</a>(0, <span class="r6 r">managedIdentityClientId</span>, <span class="r4 r">httpClient</span>, <span class="r5 r">tokenProvider</span>)
+        {
+        }
+ 
+        <b>internal async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@0@System/A.html#2e8ad9e6007798e5" class="t t">X509Certificate2</a>&gt; <a id="5f36e4f1a22b0dec" href="../../R/5f36e4f1a22b0dec.html" target="n" data-glyph="74,1" class="i method">GetCertificateAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r7 rd" class="r7 r">secretIdentifier</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r8 rd" class="r8 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>try</b>
+            {
+                <a href="#3582696cf27dbe7b" class="i method">ValidateSecretIdentifier</a>(<span class="r7 r">secretIdentifier</span>);
+ 
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r9 rd" class="r9 r">accessToken</span> = <b>await</b> <a href="#f590cdb779748dea" class="i method">GetKeyVaultAccessTokenAsync</a>(<span class="r7 r">secretIdentifier</span>, <span class="r8 r">cancellationToken</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r10 rd" class="r10 r">requestUrl</span> = <span class="s">$&quot;</span>{<span class="r7 r">secretIdentifier</span>}<span class="s">?api-version=</span>{<a href="#a28f3346ebde5818" class="i field">KeyVaultRestApiVersion</a>}<span class="s">&quot;</span>;
+ 
+                <span class="t t">HttpRequestMessage</span> <span id="r11 rd" class="r11 r">request</span> = <b>new</b> <span class="t constructor">HttpRequestMessage</span>(<span class="t t">HttpMethod</span>.<span class="i property">Get</span>, <span class="r10 r">requestUrl</span>);
+                <span class="r11 r">request</span>.<span class="i property">Headers</span>.<span class="i method">Add</span>(<span class="s">&quot;Accept&quot;</span>, <span class="s">&quot;application/json&quot;</span>);
+                <span class="r11 r">request</span>.<span class="i property">Headers</span>.<span class="i method">Add</span>(<span class="s">&quot;Authorization&quot;</span>, <span class="s">$&quot;</span><span class="s">Bearer </span>{<span class="r9 r">accessToken</span>}<span class="s">&quot;</span>);
+ 
+                <span class="t t">HttpResponseMessage</span> <span id="r12 rd" class="r12 r">response</span> = <b>await</b> <a href="#5c3e8a544a68b025" class="i field">_httpClient</a>.<span class="i method">SendAsync</span>(<span class="r11 r">request</span>, <span class="r8 r">cancellationToken</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                <b>if</b> (!<span class="r12 r">response</span>.<span class="i property">IsSuccessStatusCode</span>)
+                {
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r13 rd" class="r13 r">exceptionText</span> = <b>await</b> <span class="r12 r">response</span>.<span class="i property">Content</span>.<span class="i method">ReadAsStringAsync</span>().<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                    <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#df2d82d91ca29e40" class="t constructor">Exception</a>(<span class="s">$&quot;</span>{<a href="#7bba1c003bfd5e95" class="i field">KeyVaultResponseError</a>}<span class="s"> KeyVault ResponseCode: </span>{<span class="r12 r">response</span>.<span class="i property">StatusCode</span>}<span class="s">, Message: </span>{<span class="r13 r">exceptionText</span>}<span class="s">&quot;</span>);
+                }
+ 
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r14 rd" class="r14 r">jsonResponse</span> = <b>await</b> <span class="r12 r">response</span>.<span class="i property">Content</span>.<span class="i method">ReadAsStringAsync</span>().<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                <span class="c">// Validate that the JSON secret bundle returned contains private key data</span>
+                <a href="SecretBundle.cs.html#8885ea209560650f" class="t t">SecretBundle</a> <span id="r15 rd" class="r15 r">secretBundle</span> = <a href="SecretBundle.cs.html#8885ea209560650f" class="t t">SecretBundle</a>.<a href="SecretBundle.cs.html#2e61ebfb74be89d5" class="i method">Parse</a>(<span class="r14 r">jsonResponse</span>);
+                <b>if</b> (<span class="r15 r">secretBundle</span>.<a href="SecretBundle.cs.html#04e0278299546b45" class="i property">ContentType</a> != <span class="s">&quot;application/x-pkcs12&quot;</span>)
+                {
+                    <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#df2d82d91ca29e40" class="t constructor">Exception</a>(<a href="#104448784bc3258d" class="i field">SecretBundleInvalidContentTypeError</a>);
+                }
+ 
+                <b>byte</b>[] <span id="r16 rd" class="r16 r">rawCertBytes</span> = <a href="@0@mscorlib/A.html#fc990bd1275d43d6" class="t t">Convert</a>.<a href="@0@mscorlib/A.html#08c34f52087ba624" class="i method">FromBase64String</a>(<span class="r15 r">secretBundle</span>.<a href="SecretBundle.cs.html#14f010d8e193753e" class="i property">Value</a>);
+ 
+                <a href="@0@System/A.html#2e8ad9e6007798e5" class="t t">X509Certificate2</a> <span id="r17 rd" class="r17 r">certificate</span> = <b>null</b>;
+ 
+                <span class="c">// access to key store dependent on environment, try to import to both user and machine key stores</span>
+                <b>try</b>
+                {
+                    <span class="r17 r">certificate</span> = <b>new</b> <a href="@0@System/A.html#d1fabe236fa55c47" class="t constructor">X509Certificate2</a>(<span class="r16 r">rawCertBytes</span>, <b>default</b>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>), <a href="@0@mscorlib/A.html#db2c6ad625b2625d" class="t t">X509KeyStorageFlags</a>.<a href="@0@mscorlib/A.html#92cd6f8a9edc84a8" class="i field">UserKeySet</a>);
+                }
+                <b>catch</b>
+                {
+                    <span class="r17 r">certificate</span> = <b>new</b> <a href="@0@System/A.html#d1fabe236fa55c47" class="t constructor">X509Certificate2</a>(<span class="r16 r">rawCertBytes</span>, <b>default</b>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>), <a href="@0@mscorlib/A.html#db2c6ad625b2625d" class="t t">X509KeyStorageFlags</a>.<a href="@0@mscorlib/A.html#dc1475f0f43d3c58" class="i field">MachineKeySet</a>);
+                }
+ 
+                <b>return</b> <span class="r17 r">certificate</span>;
+            }
+            <b>catch</b> (<a href="#8657088ae419f2ed" class="t t">KeyVaultAccessTokenRetrievalException</a> <span id="r18 rd" class="r18 r">exp</span>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#df2d82d91ca29e40" class="t constructor">Exception</a>(<span class="s">$&quot;</span>{<a href="#62a37150f7b46770" class="i field">KeyVaultAccessTokenRetrievalError</a>}<span class="s"> </span>{<span class="r18 r">exp</span>.<a href="@0@mscorlib/A.html#5fba0e16215b42a3" class="i property">Message</a>}<span class="s">&quot;</span>);
+            }
+            <b>catch</b> (<span class="t t">HttpRequestException</span>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#df2d82d91ca29e40" class="t constructor">Exception</a>(<a href="#23f881be858a2582" class="i field">EndpointNotAvailableError</a>);
+            }
+        }
+ 
+        <b>private void</b> <a id="3582696cf27dbe7b" href="../../R/3582696cf27dbe7b.html" target="n" data-glyph="76,1" class="i method">ValidateSecretIdentifier</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r19 rd" class="r19 r">secretIdentifier</span>)
+        {
+            <span class="c">// Ensure secret identifier is a valid URI</span>
+            <a href="@0@System/A.html#991565dd25f47c90" class="t t">Uri</a> <span id="r20 rd" class="r20 r">secretUri</span>;
+            <b>if</b> (!<a href="@0@System/A.html#991565dd25f47c90" class="t t">Uri</a>.<a href="@0@System/A.html#49754736d6982eb6" class="i method">TryCreate</a>(<span class="r19 r">secretIdentifier</span>, <a href="@0@System/A.html#ac43655101ad74be" class="t t">UriKind</a>.<a href="@0@System/A.html#d734108197254429" class="i field">Absolute</a>, <b>out</b> <span class="r20 r">secretUri</span>))
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#df2d82d91ca29e40" class="t constructor">Exception</a>(<a href="#f60807f2fe877a40" class="i field">SecretIdentifierInvalidUriError</a>);
+ 
+            <span class="c">// Ensure secret URI is using HTTPS scheme</span>
+            <b>if</b> (!<span class="r20 r">secretUri</span>.<a href="@0@System/A.html#e73925be401b9bcb" class="i property">Scheme</a>.<a href="@0@mscorlib/A.html#b98069ccbe2d3960" class="i method">Equals</a>(<span class="s">&quot;https&quot;</span>, <a href="@0@mscorlib/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@0@mscorlib/A.html#6c3139b940557bf9" class="i field">OrdinalIgnoreCase</a>))
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#df2d82d91ca29e40" class="t constructor">Exception</a>(<a href="#9c263439e4cf4d6a" class="i field">SecretIdentifierInvalidSchemeError</a>);
+ 
+            <span class="c">// Ensure secret URI is actually a secret identifier (and not key or certificate identifier)</span>
+            <b>if</b> (!<span class="r20 r">secretUri</span>.<a href="@0@System/A.html#6da7cb1d49922d85" class="i property">LocalPath</a>.<a href="@0@mscorlib/A.html#1c787ba07a7b11ab" class="i method">StartsWith</a>(<span class="s">&quot;/secrets/&quot;</span>, <a href="@0@mscorlib/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@0@mscorlib/A.html#6c3139b940557bf9" class="i field">OrdinalIgnoreCase</a>))
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#df2d82d91ca29e40" class="t constructor">Exception</a>(<a href="#0a55860965a68402" class="i field">SecretIdentifierInvalidTypeError</a>);
+        }
+ 
+        <b>private class</b> <a id="8657088ae419f2ed" href="../../R/8657088ae419f2ed.html" target="n" data-glyph="4,1" class="t t">KeyVaultAccessTokenRetrievalException</a> : <a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>
+        {
+            <b>internal</b> <a id="ebd57a20606b41f2" href="../../R/ebd57a20606b41f2.html" target="n" data-glyph="74,2" class="t constructor">KeyVaultAccessTokenRetrievalException</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r21 rd" class="r21 r">message</span>) :
+                <a href="@0@mscorlib/A.html#df2d82d91ca29e40" class="k">base</a>(<span class="r21 r">message</span>)
+            {
+            }
+        }
+ 
+        <b>private async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="f590cdb779748dea" href="../../R/f590cdb779748dea.html" target="n" data-glyph="76,1" class="i method">GetKeyVaultAccessTokenAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r22 rd" class="r22 r">secretUrl</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r23 rd" class="r23 r">cancellationToken</span>)
+        {
+            <span class="c">// Send an anonymous request to Key Vault endpoint to get an OAuth2 HTTP Bearer challenge</span>
+            <span class="t t">HttpRequestMessage</span> <span id="r24 rd" class="r24 r">request</span> = <b>new</b> <span class="t constructor">HttpRequestMessage</span>(<span class="t t">HttpMethod</span>.<span class="i property">Get</span>, <span class="r22 r">secretUrl</span>);
+            <span class="t t">HttpResponseMessage</span> <span id="r25 rd" class="r25 r">response</span> = <b>await</b> <a href="#5c3e8a544a68b025" class="i field">_httpClient</a>.<span class="i method">SendAsync</span>(<span class="r24 r">request</span>, <span class="r23 r">cancellationToken</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <span class="c">// Parse challenge to get authorization server and resource identifier for Key Vault</span>
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r26 rd" class="r26 r">authenticateHeader</span> = <span class="r25 r">response</span>.<span class="i property">Headers</span>.<span class="i property">WwwAuthenticate</span>.<a href="@0@System.Core/A.html#8087366974af11d2" class="i method">FirstOrDefault</a>()?.<span class="i method">ToString</span>();
+            <a href="HttpBearerChallenge.cs.html#1fde78aee610961a" class="k">var</a> <span id="r27 rd" class="r27 r">challenge</span> = <a href="HttpBearerChallenge.cs.html#1fde78aee610961a" class="t t">HttpBearerChallenge</a>.<a href="HttpBearerChallenge.cs.html#395daffb7a4f7b3f" class="i method">Parse</a>(<span class="r26 r">authenticateHeader</span>); 
+            <b>if</b> (<span class="r27 r">challenge</span> == <b>null</b>)
+            {
+                 <b>throw</b> <b>new</b> <a href="#ebd57a20606b41f2" class="t constructor">KeyVaultAccessTokenRetrievalException</a>(<a href="#7085ea00ac3326a9" class="i field">BearerChallengeMissingOrInvalidError</a>);
+            }
+ 
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r28 rd" class="r28 r">tokenProviders</span> = <a href="#03126bcd573f4f73" class="i method">GetTokenProviders</a>(<span class="r27 r">challenge</span>.<a href="HttpBearerChallenge.cs.html#e408e2ce7264df02" class="i property">AuthorizationServer</a>);
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt; <span id="r29 rd" class="r29 r">exceptions</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt;();
+ 
+            <span class="c">// Use values parsed from the bearer challenge to request an access token for Key Vault</span>
+            <b>foreach</b> (<a href="../../TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="k">var</a> <span id="r30 rd" class="r30 r">tokenProvider</span> <b>in</b> <span class="r28 r">tokenProviders</span>)
+            {
+                <b>try</b>
+                {
+                    <a href="../../AppAuthenticationResult.cs.html#f4c4ab1f6d870222" class="k">var</a> <span id="r31 rd" class="r31 r">authResult</span> = <b>await</b> <span class="r30 r">tokenProvider</span>.<a href="../../TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#13253d3aadebc42c" class="i method">GetAuthResultAsync</a>(<span class="r27 r">challenge</span>.<a href="HttpBearerChallenge.cs.html#48e8c008a0898f2f" class="i property">Resource</a>,
+                        <span class="r27 r">challenge</span>.<a href="HttpBearerChallenge.cs.html#e408e2ce7264df02" class="i property">AuthorizationServer</a>, <span class="r23 r">cancellationToken</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                    <a href="#9c1f22f83fb0ebf5" class="i property">PrincipalUsed</a> = <span class="r30 r">tokenProvider</span>.<a href="../../TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#675f5f5e0e11c4d7" class="i field">PrincipalUsed</a>;
+ 
+                    <b>return</b> <span class="r31 r">authResult</span>.<a href="../../AppAuthenticationResult.cs.html#bac23240ee26a0c7" class="i property">AccessToken</a>;
+                }
+                <b>catch</b> (<a href="../../AzureServiceTokenProviderException.cs.html#9d8ad69856076643" class="t t">AzureServiceTokenProviderException</a> <span id="r32 rd" class="r32 r">exp</span>)
+                {
+                    <span class="r29 r">exceptions</span>.<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r32 r">exp</span>);
+                }
+            }
+ 
+            <span class="c">// Compile token provider exceptions and rethrow if token request was not successful</span>
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r33 rd" class="r33 r">message</span> = <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<a href="#f9eb7ae8ea2316ff" class="i field">TokenProviderErrorsFormat</a>, <span class="r29 r">exceptions</span>.<a href="@0@mscorlib/A.html#78a69d857716bc68" class="i property">Count</a>) + <a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>;
+            <b>foreach</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="k">var</a> <span id="r34 rd" class="r34 r">exception</span> <b>in</b> <span class="r29 r">exceptions</span>)
+            {
+                <span class="r33 r">message</span> += <span class="s">$&quot;</span>{<span class="r34 r">exception</span>.<a href="@0@mscorlib/A.html#5fba0e16215b42a3" class="i property">Message</a>}{<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>}<span class="s">&quot;</span>;
+            }
+ 
+            <b>throw</b> <b>new</b> <a href="#ebd57a20606b41f2" class="t constructor">KeyVaultAccessTokenRetrievalException</a>(<span class="r33 r">message</span>);
+        }
+ 
+        <b>private</b> <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="../../TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="t t">NonInteractiveAzureServiceTokenProviderBase</a>&gt; <a id="03126bcd573f4f73" href="../../R/03126bcd573f4f73.html" target="n" data-glyph="76,1" class="i method">GetTokenProviders</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r35 rd" class="r35 r">authority</span>)
+        {
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="../../TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="t t">NonInteractiveAzureServiceTokenProviderBase</a>&gt; <span id="r36 rd" class="r36 r">tokenProviders</span> = <b>null</b>;
+ 
+            <span class="c">// use default user token providers if token provider not specified (e.g. by unit test)</span>
+            <b>if</b> (<a href="#73171c1b4186643a" class="i field">_tokenProvider</a> == <b>null</b>)
+            {
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r37 rd" class="r37 r">azureAdInstance</span> = <a href="../../Helpers/UriHelper.cs.html#27b8882e673a9c1b" class="t t">UriHelper</a>.<a href="../../Helpers/UriHelper.cs.html#0295f228048343f9" class="i method">GetAzureAdInstanceByAuthority</a>(<span class="r35 r">authority</span>);
+                <span class="r36 r">tokenProviders</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="../../TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="t t">NonInteractiveAzureServiceTokenProviderBase</a>&gt;
+                {
+                    <b>new</b> <a href="../../TokenProviders/MsiAccessTokenProvider.cs.html#1a7c5b6067de8a61" class="t constructor">MsiAccessTokenProvider</a>(<a href="#8333ce98b56f25d1" class="i field">_msiRetryTimeoutInSeconds</a>, <a href="#ec4736979f58ca30" class="i field">_managedIdentityClientId</a>),
+                    <b>new</b> <a href="../../TokenProviders/VisualStudioAccessTokenProvider.cs.html#5a2bb68d9d598234" class="t constructor">VisualStudioAccessTokenProvider</a>(<b>new</b> <a href="../ProcessManager.cs.html#17152cca322db3b5" class="t constructor">ProcessManager</a>()),
+                    <b>new</b> <a href="../../TokenProviders/AzureCliAccessTokenProvider.cs.html#0815045b687aff66" class="t constructor">AzureCliAccessTokenProvider</a>(<b>new</b> <a href="../ProcessManager.cs.html#17152cca322db3b5" class="t constructor">ProcessManager</a>()),
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">FullNetFx</span>
+                    <b>new</b> <a href="../../TokenProviders/WindowsAuthenticationAccessTokenProvider.cs.html#1d1dd23ab031967a" class="t constructor">WindowsAuthenticationAzureServiceTokenProvider</a>(<b>new</b> <a href="../AdalAuthenticationContext.cs.html#97b31cdaff68109f" class="t constructor">AdalAuthenticationContext</a>(), <span class="r37 r">azureAdInstance</span>)
+<span class="k preprocess">#</span><span class="k preprocess">endif</span>
+                };
+            }
+            <b>else</b>
+            {
+                <span class="r36 r">tokenProviders</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="../../TokenProviders/NonInteractiveAccessTokenProviderBase.cs.html#49fd7e94c4cb40c3" class="t t">NonInteractiveAzureServiceTokenProviderBase</a>&gt;() { <a href="#73171c1b4186643a" class="i field">_tokenProvider</a> };
+            }
+ 
+            <b>return</b> <span class="r36 r">tokenProviders</span>;
+        }
+    }
+}</pre></td></tr></table></div></body></html>

@@ -1,0 +1,792 @@
+﻿<!DOCTYPE html>
+<html><head><title>MessageSender.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(783);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.ServiceBus/Core/MessageSender.cs" target="_top">Core\MessageSender.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.ServiceBus" target="_top">src\Microsoft.Azure.ServiceBus.csproj</a> (Microsoft.Azure.ServiceBus)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft. All rights reserved.</span>
+<span class="c">// Licensed under the MIT license. See LICENSE file in the project root for full license information.</span>
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">ServiceBus</span>.<span class="i n">Core</span>
+{
+    <b>using</b> <span class="i">System</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Linq</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Transactions</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">Amqp</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">Amqp</span>.<span class="i">Encoding</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">Amqp</span>.<span class="i">Framing</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">ServiceBus</span>.<span class="i n">Amqp</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">ServiceBus</span>.<span class="i n">Primitives</span>;
+ 
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> The MessageSender can be used to send messages to Queues or Topics.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">example</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Create a new MessageSender to send to a Queue</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">code</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> IMessageSender messageSender = new MessageSender(</span>
+    <span class="c">///</span><span class="c">     namespaceConnectionString,</span>
+    <span class="c">///</span><span class="c">     queueName)</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">code</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c"> Send message</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">code</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> byte[] data = GetData();</span>
+    <span class="c">///</span><span class="c"> await messageSender.SendAsync(data);</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">code</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">example</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">This uses AMQP protocol to communicate with service.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+    <b>public class</b> <a id="435f723d21eebd94" href="../R/435f723d21eebd94.html" target="n" data-glyph="0,0" class="t t">MessageSender</a> : <a href="../ClientEntity.cs.html#88eab29996c9f54a" class="t t">ClientEntity</a>, <a href="IMessageSender.cs.html#233b41083166efc5" class="t t">IMessageSender</a>
+    {
+        <b>int</b> <a id="68a9aafbb0d7f20c" href="../R/68a9aafbb0d7f20c.html" target="n" data-glyph="46,1" class="i field">deliveryCount</a>;
+        <b>readonly</b> <a href="../Amqp/ActiveClientLinkManager.cs.html#fb4a3cc4a792a877" class="t t">ActiveClientLinkManager</a> <a id="4e57010672d06045" href="../R/4e57010672d06045.html" target="n" data-glyph="46,1" class="i field">clientLinkManager</a>;
+        <b>readonly</b> <a href="../ServiceBusDiagnosticsSource.cs.html#8b0a5b6d28151a22" class="t t">ServiceBusDiagnosticSource</a> <a id="8a3ef3eb54c82779" href="../R/8a3ef3eb54c82779.html" target="n" data-glyph="46,1" class="i field">diagnosticSource</a>;
+        <b>readonly bool</b> <a id="f2818efa6e68cd88" href="../R/f2818efa6e68cd88.html" target="n" data-glyph="46,1" class="i field">isViaSender</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new AMQP MessageSender.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">connectionStringBuilder</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../ServiceBusConnectionStringBuilder.cs.html#f5792d111dd93f0d" class="t t">ServiceBusConnectionStringBuilder</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> having entity level connection details.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that will be used when communicating with Service Bus. Defaults to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a>.<a href="../RetryPolicy.cs.html#d5872bd857fd612e" class="i property">Default</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">Creates a new connection to the entity, which is opened during the first operation.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public</b> <a id="80384f56190404b1" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">MessageSender</a>(
+            <a href="../ServiceBusConnectionStringBuilder.cs.html#f5792d111dd93f0d" class="t t">ServiceBusConnectionStringBuilder</a> <span id="r0 rd" class="r0 r">connectionStringBuilder</span>,
+            <a href="../RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a> <span id="r1 rd" class="r1 r">retryPolicy</span> = <b>null</b>)
+            : <b>this</b>(<span class="r0 r">connectionStringBuilder</span>?.<a href="../ServiceBusConnectionStringBuilder.cs.html#667a4826f798998b" class="i method">GetNamespaceConnectionString</a>(), <span class="r0 r">connectionStringBuilder</span>?.<a href="../ServiceBusConnectionStringBuilder.cs.html#07e91b5081d2efe4" class="i property">EntityPath</a>, <span class="r1 r">retryPolicy</span>)
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new AMQP MessageSender.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">connectionString</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Namespace connection string used to communicate with Service Bus. Must not contain Entity details.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">entityPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The path of the entity this sender should connect to.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that will be used when communicating with Service Bus. Defaults to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a>.<a href="../RetryPolicy.cs.html#d5872bd857fd612e" class="i property">Default</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">Creates a new connection to the entity, which is opened during the first operation.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public</b> <a id="6e8041574ce0438b" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">MessageSender</a>(
+            <b>string</b> <span id="r2 rd" class="r2 r">connectionString</span>,
+            <b>string</b> <span id="r3 rd" class="r3 r">entityPath</span>,
+            <a href="../RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a> <span id="r4 rd" class="r4 r">retryPolicy</span> = <b>null</b>)
+            : <a href="#0af44c78ee87a5f3" class="k">this</a>(<span class="r3 r">entityPath</span>, <b>null</b>, <b>null</b>, <b>new</b> <a href="../ServiceBusConnection.cs.html#45472230a8f717ae" class="t constructor">ServiceBusConnection</a>(<span class="r2 r">connectionString</span>), <b>null</b>, <span class="r4 r">retryPolicy</span>)
+        {
+            <b>if</b> (<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r2 r">connectionString</span>))
+            {
+                <b>throw</b> <a href="../Primitives/Fx.cs.html#c01e8844709e19c1" class="t t">Fx</a>.<a href="../Primitives/Fx.cs.html#0793cb830fb5b201" class="i property">Exception</a>.<a href="../Primitives/ExceptionUtility.cs.html#4ae6cf9072070b0b" class="i method">ArgumentNullOrWhiteSpace</a>(<span class="r2 r">connectionString</span>);
+            }
+ 
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#29456179e6094c9e" class="i property">OwnsConnection</a> = <b>true</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new MessageSender</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">endpoint</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Fully qualified domain name for Service Bus. Most likely, {yournamespace}.servicebus.windows.net</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">entityPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Queue path.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">tokenProvider</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Token provider which will generate security tokens for authorization.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">transportType</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Transport type.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Retry policy for queue operations. Defaults to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a>.<a href="../RetryPolicy.cs.html#d5872bd857fd612e" class="i property">Default</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">Creates a new connection to the entity, which is opened during the first operation.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public</b> <a id="6faff40afff20343" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">MessageSender</a>(
+            <b>string</b> <span id="r5 rd" class="r5 r">endpoint</span>,
+            <b>string</b> <span id="r6 rd" class="r6 r">entityPath</span>,
+            <a href="../Primitives/ITokenProvider.cs.html#9e2a4877b63e4b8d" class="t t">ITokenProvider</a> <span id="r7 rd" class="r7 r">tokenProvider</span>,
+            <a href="../TransportType.cs.html#0a715f93272561f8" class="t t">TransportType</a> <span id="r8 rd" class="r8 r">transportType</span> = <a href="../TransportType.cs.html#0a715f93272561f8" class="t t">TransportType</a>.<a href="../TransportType.cs.html#8cda352639a9c461" class="i field">Amqp</a>,
+            <a href="../RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a> <span id="r9 rd" class="r9 r">retryPolicy</span> = <b>null</b>)
+            : <a href="#0af44c78ee87a5f3" class="k">this</a>(<span class="r6 r">entityPath</span>, <b>null</b>, <b>null</b>, <b>new</b> <a href="../ServiceBusConnection.cs.html#3d86832e26fa991b" class="t constructor">ServiceBusConnection</a>(<span class="r5 r">endpoint</span>, <span class="r8 r">transportType</span>, <span class="r9 r">retryPolicy</span>) {<a href="../ServiceBusConnection.cs.html#13221390545f966d" class="i property">TokenProvider</a> = <span class="r7 r">tokenProvider</span>}, <b>null</b>, <span class="r9 r">retryPolicy</span>)
+        {
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#29456179e6094c9e" class="i property">OwnsConnection</a> = <b>true</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new AMQP MessageSender on a given </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#a3335e7d13539d3a" class="i property">ServiceBusConnection</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r10 r">serviceBusConnection</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Connection object to the service bus namespace.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r11 r">entityPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The path of the entity this sender should connect to.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that will be used when communicating with Service Bus. Defaults to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a>.<a href="../RetryPolicy.cs.html#d5872bd857fd612e" class="i property">Default</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="c610f8da97fd0161" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">MessageSender</a>(
+            <a href="../ServiceBusConnection.cs.html#d4af28baeaa553d8" class="t t">ServiceBusConnection</a> <span id="r10 rd" class="r10 r">serviceBusConnection</span>,
+            <b>string</b> <span id="r11 rd" class="r11 r">entityPath</span>,
+            <a href="../RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a> <span id="r12 rd" class="r12 r">retryPolicy</span> = <b>null</b>)
+            : <a href="#0af44c78ee87a5f3" class="k">this</a>(<span class="r11 r">entityPath</span>, <b>null</b>, <b>null</b>, <span class="r10 r">serviceBusConnection</span>, <b>null</b>, <span class="r12 r">retryPolicy</span>)
+        {
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#29456179e6094c9e" class="i property">OwnsConnection</a> = <b>false</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a ViaMessageSender. This can be used to send messages to a destination entity via another another entity.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">serviceBusConnection</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Connection object to the service bus namespace.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r14 r">entityPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The final destination of the message.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">viaEntityPath</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The first destination of the message.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r16 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that will be used when communicating with Service Bus. Defaults to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a>.<a href="../RetryPolicy.cs.html#d5872bd857fd612e" class="i property">Default</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> This is mainly to be used when sending messages in a transaction.</span>
+        <span class="c">///</span><span class="c"> When messages need to be sent across entities in a single transaction, this can be used to ensure</span>
+        <span class="c">///</span><span class="c"> all the messages land initially in the same entity/partition for local transactions, and then</span>
+        <span class="c">///</span><span class="c"> let service bus handle transferring the message to the actual destination.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public</b> <a id="a89504bca9acc5b2" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">MessageSender</a>(
+            <a href="../ServiceBusConnection.cs.html#d4af28baeaa553d8" class="t t">ServiceBusConnection</a> <span id="r13 rd" class="r13 r">serviceBusConnection</span>,
+            <b>string</b> <span id="r14 rd" class="r14 r">entityPath</span>,
+            <b>string</b> <span id="r15 rd" class="r15 r">viaEntityPath</span>,
+            <a href="../RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a> <span id="r16 rd" class="r16 r">retryPolicy</span> = <b>null</b>)
+            :<a href="#0af44c78ee87a5f3" class="k">this</a>(<span class="r15 r">viaEntityPath</span>, <span class="r14 r">entityPath</span>, <b>null</b>, <span class="r13 r">serviceBusConnection</span>, <b>null</b>, <span class="r16 r">retryPolicy</span>)
+        {
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#29456179e6094c9e" class="i property">OwnsConnection</a> = <b>false</b>;
+        }
+ 
+        <b>internal</b> <a id="0af44c78ee87a5f3" href="../R/0af44c78ee87a5f3.html" target="n" data-glyph="74,1" class="t constructor">MessageSender</a>(
+            <b>string</b> <span id="r17 rd" class="r17 r">entityPath</span>,
+            <b>string</b> <span id="r18 rd" class="r18 r">transferDestinationPath</span>,
+            <a href="../Primitives/MessagingEntityType.cs.html#03bc9354bc383d14" class="t t">MessagingEntityType</a>? <span id="r19 rd" class="r19 r">entityType</span>,
+            <a href="../ServiceBusConnection.cs.html#d4af28baeaa553d8" class="t t">ServiceBusConnection</a> <span id="r20 rd" class="r20 r">serviceBusConnection</span>,
+            <span class="i">ICbsTokenProvider</span> <span id="r21 rd" class="r21 r">cbsTokenProvider</span>,
+            <a href="../RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a> <span id="r22 rd" class="r22 r">retryPolicy</span>)
+            : <a href="../ClientEntity.cs.html#912f05124af51638" class="k">base</a>(<b>nameof</b>(<a href="#435f723d21eebd94" class="t t">MessageSender</a>), <span class="r17 r">entityPath</span>, <span class="r22 r">retryPolicy</span> ?? <a href="../RetryPolicy.cs.html#f4d3d17482dc49e5" class="t t">RetryPolicy</a>.<a href="../RetryPolicy.cs.html#d5872bd857fd612e" class="i property">Default</a>)
+        {
+            <a href="../MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="../MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<span class="i">MessageSenderCreateStart</span>(<span class="r20 r">serviceBusConnection</span>?.<a href="../ServiceBusConnection.cs.html#aa10f462e6ba95a8" class="i property">Endpoint</a>.<span class="i">Authority</span>, <span class="r17 r">entityPath</span>);
+ 
+            <b>if</b> (<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r17 r">entityPath</span>))
+            {
+                <b>throw</b> <a href="../Primitives/Fx.cs.html#c01e8844709e19c1" class="t t">Fx</a>.<a href="../Primitives/Fx.cs.html#0793cb830fb5b201" class="i property">Exception</a>.<a href="../Primitives/ExceptionUtility.cs.html#4ae6cf9072070b0b" class="i method">ArgumentNullOrWhiteSpace</a>(<span class="r17 r">entityPath</span>);
+            }
+ 
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="#a3335e7d13539d3a" class="i property">ServiceBusConnection</a> = <span class="r20 r">serviceBusConnection</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r20 r">serviceBusConnection</span>));
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="#e6f9bb8a374b6bc0" class="i property">Path</a> = <span class="r17 r">entityPath</span>;
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="#b37c082fa0693983" class="i property">SendingLinkDestination</a> = <span class="r17 r">entityPath</span>;
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="#f051a6046a7cea98" class="i property">EntityType</a> = <span class="r19 r">entityType</span>;
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="#a3335e7d13539d3a" class="i property">ServiceBusConnection</a>.<a href="../ServiceBusConnection.cs.html#ce19b6c3bc0eb42e" class="i method">ThrowIfClosed</a>();
+ 
+            <b>if</b> (<span class="r21 r">cbsTokenProvider</span> != <b>null</b>)
+            {
+                <a href="#435f723d21eebd94" class="k">this</a>.<a href="#084f8afda062c7d9" class="i property">CbsTokenProvider</a> = <span class="r21 r">cbsTokenProvider</span>;
+            }
+            <b>else</b> <b>if</b> (<a href="#435f723d21eebd94" class="k">this</a>.<a href="#a3335e7d13539d3a" class="i property">ServiceBusConnection</a>.<a href="../ServiceBusConnection.cs.html#13221390545f966d" class="i property">TokenProvider</a> != <b>null</b>)
+            {
+                <a href="#435f723d21eebd94" class="k">this</a>.<a href="#084f8afda062c7d9" class="i property">CbsTokenProvider</a> = <b>new</b> <a href="../Primitives/TokenProviderAdapter.cs.html#6253ee9453b7f995" class="t constructor">TokenProviderAdapter</a>(<a href="#435f723d21eebd94" class="k">this</a>.<a href="#a3335e7d13539d3a" class="i property">ServiceBusConnection</a>.<a href="../ServiceBusConnection.cs.html#13221390545f966d" class="i property">TokenProvider</a>, <a href="#435f723d21eebd94" class="k">this</a>.<a href="#a3335e7d13539d3a" class="i property">ServiceBusConnection</a>.<a href="../ServiceBusConnection.cs.html#c7f7ecc4031ee56b" class="i property">OperationTimeout</a>);
+            }
+            <b>else</b>
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="#a3335e7d13539d3a" class="i property">ServiceBusConnection</a>)}<span class="s"> doesn&#39;t have a valid token provider</span><span class="s">&quot;</span>);
+            }
+ 
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="#113ebafa9227e3d8" class="i property">SendLinkManager</a> = <b>new</b> <span class="i">FaultTolerantAmqpObject</span>&lt;<span class="i">SendingAmqpLink</span>&gt;(<a href="#435f723d21eebd94" class="k">this</a>.<span class="i">CreateLinkAsync</span>, <span class="i">CloseSession</span>);
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="#4f1300f0a438d9ad" class="i property">RequestResponseLinkManager</a> = <b>new</b> <span class="i">FaultTolerantAmqpObject</span>&lt;<span class="i">RequestResponseAmqpLink</span>&gt;(<a href="#435f723d21eebd94" class="k">this</a>.<span class="i">CreateRequestResponseLinkAsync</span>, <span class="i">CloseRequestResponseSession</span>);
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="#4e57010672d06045" class="i field">clientLinkManager</a> = <b>new</b> <a href="../Amqp/ActiveClientLinkManager.cs.html#c32cee42713fd5a6" class="t constructor">ActiveClientLinkManager</a>(<a href="#435f723d21eebd94" class="k">this</a>, <a href="#435f723d21eebd94" class="k">this</a>.<a href="#084f8afda062c7d9" class="i property">CbsTokenProvider</a>);
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="#8a3ef3eb54c82779" class="i field">diagnosticSource</a> = <b>new</b> <a href="../ServiceBusDiagnosticsSource.cs.html#5e2002e923a0f339" class="t constructor">ServiceBusDiagnosticSource</a>(<span class="r17 r">entityPath</span>, <span class="r20 r">serviceBusConnection</span>.<a href="../ServiceBusConnection.cs.html#aa10f462e6ba95a8" class="i property">Endpoint</a>);
+ 
+            <b>if</b> (!<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r18 r">transferDestinationPath</span>))
+            {
+                <a href="#435f723d21eebd94" class="k">this</a>.<a href="#f2818efa6e68cd88" class="i field">isViaSender</a> = <b>true</b>;
+                <a href="#435f723d21eebd94" class="k">this</a>.<a href="#988179b2ba5f756b" class="i property">TransferDestinationPath</a> = <span class="r18 r">transferDestinationPath</span>;
+                <a href="#435f723d21eebd94" class="k">this</a>.<a href="#46cebf7b47963822" class="i property">ViaEntityPath</a> = <span class="r17 r">entityPath</span>;
+            }
+ 
+            <a href="../MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="../MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<span class="i">MessageSenderCreateStop</span>(<span class="r20 r">serviceBusConnection</span>.<a href="../ServiceBusConnection.cs.html#aa10f462e6ba95a8" class="i property">Endpoint</a>.<span class="i">Authority</span>, <span class="r17 r">entityPath</span>, <a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets a list of currently registered plugins for this sender.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#ff71f12b961b22e6" class="i method">RegisterPlugin</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <b>public override</b> <span class="i">IList</span>&lt;<a href="ServiceBusPlugin.cs.html#467b28cbbe8148c5" class="t t">ServiceBusPlugin</a>&gt; <a id="224857a34d9e40c9" href="../R/224857a34d9e40c9.html" target="n" data-glyph="102,1" class="i property">RegisteredPlugins</a> { <b>get</b>; } = <b>new</b> <span class="i">List</span>&lt;<a href="ServiceBusPlugin.cs.html#467b28cbbe8148c5" class="t t">ServiceBusPlugin</a>&gt;();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the entity path of the MessageSender. </span>
+        <span class="c">///</span><span class="c"> In the case of a via-sender, this returns the path of the via entity.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public override string</b> <a id="e6f9bb8a374b6bc0" href="../R/e6f9bb8a374b6bc0.html" target="n" data-glyph="102,1" class="i property">Path</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> In the case of a via-sender, gets the final destination path of the messages; null otherwise.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public string</b> <a id="988179b2ba5f756b" href="../R/988179b2ba5f756b.html" target="n" data-glyph="102,1" class="i property">TransferDestinationPath</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> In the case of a via-sender, the message is sent to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#988179b2ba5f756b" class="i property">TransferDestinationPath</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> via </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#46cebf7b47963822" class="i property">ViaEntityPath</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">; null otherwise.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public string</b> <a id="46cebf7b47963822" href="../R/46cebf7b47963822.html" target="n" data-glyph="102,1" class="i property">ViaEntityPath</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Duration after which individual operations will timeout.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public override</b> <span class="i">TimeSpan</span> <a id="220cb27e883f363d" href="../R/220cb27e883f363d.html" target="n" data-glyph="102,1" class="i property">OperationTimeout</a>
+        {
+            <b>get</b> =&gt; <a href="#435f723d21eebd94" class="k">this</a>.<a href="#a3335e7d13539d3a" class="i property">ServiceBusConnection</a>.<a href="../ServiceBusConnection.cs.html#c7f7ecc4031ee56b" class="i property">OperationTimeout</a>;
+            <b>set</b> =&gt; <a href="#435f723d21eebd94" class="k">this</a>.<a href="#a3335e7d13539d3a" class="i property">ServiceBusConnection</a>.<a href="../ServiceBusConnection.cs.html#c7f7ecc4031ee56b" class="i property">OperationTimeout</a> = <b>value</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Connection object to the service bus namespace.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public override</b> <a href="../ServiceBusConnection.cs.html#d4af28baeaa553d8" class="t t">ServiceBusConnection</a> <a id="a3335e7d13539d3a" href="../R/a3335e7d13539d3a.html" target="n" data-glyph="102,1" class="i property">ServiceBusConnection</a> { <b>get</b>; }
+ 
+        <b>internal</b> <a href="../Primitives/MessagingEntityType.cs.html#03bc9354bc383d14" class="t t">MessagingEntityType</a>? <a id="f051a6046a7cea98" href="../R/f051a6046a7cea98.html" target="n" data-glyph="104,1" class="i property">EntityType</a> { <b>get</b>; }
+ 
+        <b>internal string</b> <a id="b37c082fa0693983" href="../R/b37c082fa0693983.html" target="n" data-glyph="104,1" class="i property">SendingLinkDestination</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="i">ICbsTokenProvider</span> <a id="084f8afda062c7d9" href="../R/084f8afda062c7d9.html" target="n" data-glyph="106,1" class="i property">CbsTokenProvider</a> { <b>get</b>; }
+ 
+        <span class="i">FaultTolerantAmqpObject</span>&lt;<span class="i">SendingAmqpLink</span>&gt; <a id="113ebafa9227e3d8" href="../R/113ebafa9227e3d8.html" target="n" data-glyph="106,1" class="i property">SendLinkManager</a> { <b>get</b>; }
+ 
+        <span class="i">FaultTolerantAmqpObject</span>&lt;<span class="i">RequestResponseAmqpLink</span>&gt; <a id="4f1300f0a438d9ad" href="../R/4f1300f0a438d9ad.html" target="n" data-glyph="106,1" class="i property">RequestResponseLinkManager</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Sends a message to the entity as described by </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#e6f9bb8a374b6bc0" class="i property">Path</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <span class="i">Task</span> <a id="04175fed8034e281" href="../R/04175fed8034e281.html" target="n" data-glyph="72,1" class="i method">SendAsync</a>(<a href="../Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a> <span id="r23 rd" class="r23 r">message</span>)
+        {
+            <b>return</b> <a href="#435f723d21eebd94" class="k">this</a>.<span class="i">SendAsync</span>(<b>new</b>[] { <span class="r23 r">message</span> });
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Sends a list of messages to the entity as described by </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#e6f9bb8a374b6bc0" class="i property">Path</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> When called on partitioned entities, messages meant for different partitions cannot be batched together.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public async</b> <span class="i">Task</span> <a id="fae7579b9adbce4b" href="../R/fae7579b9adbce4b.html" target="n" data-glyph="72,1" class="i method">SendAsync</a>(<span class="i">IList</span>&lt;<a href="../Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>&gt; <span id="r24 rd" class="r24 r">messageList</span>)
+        {
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+ 
+            <b>var</b> <span id="r25 rd" class="r25 r">count</span> = <a href="#435f723d21eebd94" class="t t">MessageSender</a>.<a href="#65c81de1c7595639" class="i method">ValidateMessages</a>(<span class="r24 r">messageList</span>);
+            <b>if</b> (<span class="r25 r">count</span> &lt;= 0)
+            {
+                <b>return</b>;
+            }
+ 
+            <a href="../MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="../MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="../MessagingEventSource.cs.html#ae84f7aa6761c67a" class="i method">MessageSendStart</a>(<a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a>, <span class="r25 r">count</span>);
+ 
+            <b>bool</b> <span id="r26 rd" class="r26 r">isDiagnosticSourceEnabled</span> = <a href="../ServiceBusDiagnosticsSource.cs.html#8b0a5b6d28151a22" class="t t">ServiceBusDiagnosticSource</a>.<a href="../ServiceBusDiagnosticsSource.cs.html#1ef66eeeefb94a5f" class="i method">IsEnabled</a>();
+            <span class="i">Activity</span> <span id="r27 rd" class="r27 r">activity</span> = <span class="r26 r">isDiagnosticSourceEnabled</span> ? <a href="#435f723d21eebd94" class="k">this</a>.<a href="#8a3ef3eb54c82779" class="i field">diagnosticSource</a>.<a href="../ServiceBusDiagnosticsSource.cs.html#4cf015536b83bc1b" class="i method">SendStart</a>(<span class="r24 r">messageList</span>) : <b>null</b>;
+            <span class="i">Task</span> <span id="r28 rd" class="r28 r">sendTask</span> = <b>null</b>;
+ 
+            <b>try</b>
+            {
+                <b>var</b> <span id="r29 rd" class="r29 r">processedMessages</span> = <b>await</b> <a href="#435f723d21eebd94" class="k">this</a>.<a href="#47a0cfe068125c74" class="i method">ProcessMessages</a>(<span class="r24 r">messageList</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <span class="r28 r">sendTask</span> = <a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#5735f52e7564bf86" class="i property">RetryPolicy</a>.<span class="i">RunOperation</span>(() =&gt; <a href="#435f723d21eebd94" class="k">this</a>.<span class="i">OnSendAsync</span>(<span class="r29 r">processedMessages</span>), <a href="#435f723d21eebd94" class="k">this</a>.<a href="#220cb27e883f363d" class="i property">OperationTimeout</a>);
+                <b>await</b> <span class="r28 r">sendTask</span>.<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r30 rd" class="r30 r">exception</span>)
+            {
+                <b>if</b> (<span class="r26 r">isDiagnosticSourceEnabled</span>)
+                {
+                    <a href="#435f723d21eebd94" class="k">this</a>.<a href="#8a3ef3eb54c82779" class="i field">diagnosticSource</a>.<a href="../ServiceBusDiagnosticsSource.cs.html#1106e116e1c0feb0" class="i method">ReportException</a>(<span class="r30 r">exception</span>);
+                }
+ 
+                <a href="../MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="../MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="../MessagingEventSource.cs.html#1b5ecfa169a4eb26" class="i method">MessageSendException</a>(<a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a>, <span class="r30 r">exception</span>);
+                <b>throw</b>;
+            }
+            <b>finally</b>
+            {
+                <a href="#435f723d21eebd94" class="k">this</a>.<a href="#8a3ef3eb54c82779" class="i field">diagnosticSource</a>.<span class="i">SendStop</span>(<span class="r27 r">activity</span>, <span class="r24 r">messageList</span>, <span class="r28 r">sendTask</span>?.<span class="i">Status</span>);
+            }
+ 
+            <a href="../MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="../MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="../MessagingEventSource.cs.html#da785a96601c87d8" class="i method">MessageSendStop</a>(<a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Schedules a message to appear on Service Bus at a later time.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r31 r">message</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> that needs to be scheduled.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r32 r">scheduleEnqueueTimeUtc</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The UTC time at which the message should be available for processing</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The sequence number of the message that was scheduled.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public async</b> <span class="i">Task</span>&lt;<b>long</b>&gt; <a id="05a8fb3892f6f8c0" href="../R/05a8fb3892f6f8c0.html" target="n" data-glyph="72,1" class="i method">ScheduleMessageAsync</a>(<a href="../Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a> <span id="r31 rd" class="r31 r">message</span>, <span class="i">DateTimeOffset</span> <span id="r32 rd" class="r32 r">scheduleEnqueueTimeUtc</span>)
+        {
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+            <b>if</b> (<span class="r31 r">message</span> == <b>null</b>)
+            {
+                <b>throw</b> <a href="../Primitives/Fx.cs.html#c01e8844709e19c1" class="t t">Fx</a>.<a href="../Primitives/Fx.cs.html#0793cb830fb5b201" class="i property">Exception</a>.<a href="../Primitives/ExceptionUtility.cs.html#ca1f689c31b7d5d8" class="i method">ArgumentNull</a>(<b>nameof</b>(<span class="r31 r">message</span>));
+            }
+ 
+            <b>if</b> (<span class="r32 r">scheduleEnqueueTimeUtc</span>.<span class="i">CompareTo</span>(<span class="i">DateTimeOffset</span>.<span class="i">UtcNow</span>) &lt; 0)
+            {
+                <b>throw</b> <a href="../Primitives/Fx.cs.html#c01e8844709e19c1" class="t t">Fx</a>.<a href="../Primitives/Fx.cs.html#0793cb830fb5b201" class="i property">Exception</a>.<span class="i">ArgumentOutOfRange</span>(
+                    <b>nameof</b>(<span class="r32 r">scheduleEnqueueTimeUtc</span>),
+                    <span class="r32 r">scheduleEnqueueTimeUtc</span>.<span class="i">ToString</span>(),
+                    <span class="s">&quot;Cannot schedule messages in the past&quot;</span>);
+            }
+ 
+            <b>if</b> (<a href="#435f723d21eebd94" class="k">this</a>.<a href="#f2818efa6e68cd88" class="i field">isViaSender</a> &amp;&amp; <span class="i">Transaction</span>.<span class="i">Current</span> != <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="../ServiceBusException.cs.html#4654907a08cc5c48" class="t constructor">ServiceBusException</a>(<b>false</b>, <span class="s">$&quot;</span>{<b>nameof</b>(<span class="i">ScheduleMessageAsync</span>)}<span class="s"> method is not supported in a Via-Sender with transactions.</span><span class="s">&quot;</span>);
+            }
+ 
+            <span class="r31 r">message</span>.<a href="../Message.cs.html#aacdc857896898c5" class="i property">ScheduledEnqueueTimeUtc</a> = <span class="r32 r">scheduleEnqueueTimeUtc</span>.<span class="i">UtcDateTime</span>;
+            <a href="#435f723d21eebd94" class="t t">MessageSender</a>.<a href="#d8b460813a56f789" class="i method">ValidateMessage</a>(<span class="r31 r">message</span>);
+            <a href="../MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="../MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="../MessagingEventSource.cs.html#a6712e3760e13a7a" class="i method">ScheduleMessageStart</a>(<a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a>, <span class="r32 r">scheduleEnqueueTimeUtc</span>);
+            <b>long</b> <span id="r33 rd" class="r33 r">result</span> = 0;
+ 
+            <b>bool</b> <span id="r34 rd" class="r34 r">isDiagnosticSourceEnabled</span> = <a href="../ServiceBusDiagnosticsSource.cs.html#8b0a5b6d28151a22" class="t t">ServiceBusDiagnosticSource</a>.<a href="../ServiceBusDiagnosticsSource.cs.html#1ef66eeeefb94a5f" class="i method">IsEnabled</a>();
+            <span class="i">Activity</span> <span id="r35 rd" class="r35 r">activity</span> = <span class="r34 r">isDiagnosticSourceEnabled</span> ? <a href="#435f723d21eebd94" class="k">this</a>.<a href="#8a3ef3eb54c82779" class="i field">diagnosticSource</a>.<a href="../ServiceBusDiagnosticsSource.cs.html#6641ffc7617c62ff" class="i method">ScheduleStart</a>(<span class="r31 r">message</span>, <span class="r32 r">scheduleEnqueueTimeUtc</span>) : <b>null</b>;
+            <span class="i">Task</span> <span id="r36 rd" class="r36 r">scheduleTask</span> = <b>null</b>;
+ 
+            <b>try</b>
+            {
+                <b>var</b> <span id="r37 rd" class="r37 r">processedMessage</span> = <b>await</b> <a href="#435f723d21eebd94" class="k">this</a>.<a href="#02047e0ddf81ef46" class="i method">ProcessMessage</a>(<span class="r31 r">message</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <span class="r36 r">scheduleTask</span> = <a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#5735f52e7564bf86" class="i property">RetryPolicy</a>.<span class="i">RunOperation</span>(
+                    <b>async</b> () =&gt;
+                    {
+                        <span class="r33 r">result</span> = <b>await</b> <a href="#435f723d21eebd94" class="k">this</a>.<span class="i">OnScheduleMessageAsync</span>(<span class="r37 r">processedMessage</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    }, <a href="#435f723d21eebd94" class="k">this</a>.<a href="#220cb27e883f363d" class="i property">OperationTimeout</a>);
+                <b>await</b> <span class="r36 r">scheduleTask</span>.<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r38 rd" class="r38 r">exception</span>)
+            {
+                <b>if</b> (<span class="r34 r">isDiagnosticSourceEnabled</span>)
+                {
+                    <a href="#435f723d21eebd94" class="k">this</a>.<a href="#8a3ef3eb54c82779" class="i field">diagnosticSource</a>.<a href="../ServiceBusDiagnosticsSource.cs.html#1106e116e1c0feb0" class="i method">ReportException</a>(<span class="r38 r">exception</span>);
+                }
+ 
+                <a href="../MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="../MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="../MessagingEventSource.cs.html#df692f4d0a9714da" class="i method">ScheduleMessageException</a>(<a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a>, <span class="r38 r">exception</span>);
+                <b>throw</b>;
+            }
+            <b>finally</b>
+            {
+                <a href="#435f723d21eebd94" class="k">this</a>.<a href="#8a3ef3eb54c82779" class="i field">diagnosticSource</a>.<span class="i">ScheduleStop</span>(<span class="r35 r">activity</span>, <span class="r31 r">message</span>, <span class="r32 r">scheduleEnqueueTimeUtc</span>, <span class="r36 r">scheduleTask</span>?.<span class="i">Status</span>, <span class="r33 r">result</span>);
+            }
+ 
+            <a href="../MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="../MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="../MessagingEventSource.cs.html#9efc00e2ca70ef1c" class="i method">ScheduleMessageStop</a>(<a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a>);
+            <b>return</b> <span class="r33 r">result</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Cancels a message that was scheduled.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r39 r">sequenceNumber</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>.<a href="../Message.cs.html#9fe6ce8ee2f258bb" class="t t">SystemPropertiesCollection</a>.<a href="../Message.cs.html#205df32693f7a775" class="i property">SequenceNumber</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> of the message to be cancelled.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public async</b> <span class="i">Task</span> <a id="58c538d795d1dcbd" href="../R/58c538d795d1dcbd.html" target="n" data-glyph="72,1" class="i method">CancelScheduledMessageAsync</a>(<b>long</b> <span id="r39 rd" class="r39 r">sequenceNumber</span>)
+        {
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+            <b>if</b> (<span class="i">Transaction</span>.<span class="i">Current</span> != <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="../ServiceBusException.cs.html#4654907a08cc5c48" class="t constructor">ServiceBusException</a>(<b>false</b>, <span class="s">$&quot;</span>{<b>nameof</b>(<span class="i">CancelScheduledMessageAsync</span>)}<span class="s"> method is not supported within a transaction.</span><span class="s">&quot;</span>);
+            }
+ 
+            <a href="../MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="../MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="../MessagingEventSource.cs.html#0b4026b031c28ff1" class="i method">CancelScheduledMessageStart</a>(<a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a>, <span class="r39 r">sequenceNumber</span>);
+ 
+            <b>bool</b> <span id="r40 rd" class="r40 r">isDiagnosticSourceEnabled</span> = <a href="../ServiceBusDiagnosticsSource.cs.html#8b0a5b6d28151a22" class="t t">ServiceBusDiagnosticSource</a>.<a href="../ServiceBusDiagnosticsSource.cs.html#1ef66eeeefb94a5f" class="i method">IsEnabled</a>();
+            <span class="i">Activity</span> <span id="r41 rd" class="r41 r">activity</span> = <span class="r40 r">isDiagnosticSourceEnabled</span> ? <a href="#435f723d21eebd94" class="k">this</a>.<a href="#8a3ef3eb54c82779" class="i field">diagnosticSource</a>.<a href="../ServiceBusDiagnosticsSource.cs.html#04439481117cd539" class="i method">CancelStart</a>(<span class="r39 r">sequenceNumber</span>) : <b>null</b>;
+            <span class="i">Task</span> <span id="r42 rd" class="r42 r">cancelTask</span> = <b>null</b>;
+ 
+            <b>try</b>
+            {
+                <span class="r42 r">cancelTask</span> = <a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#5735f52e7564bf86" class="i property">RetryPolicy</a>.<span class="i">RunOperation</span>(() =&gt; <a href="#435f723d21eebd94" class="k">this</a>.<a href="#5a7c9bc1d22a2a07" class="i method">OnCancelScheduledMessageAsync</a>(<span class="r39 r">sequenceNumber</span>),
+                    <a href="#435f723d21eebd94" class="k">this</a>.<a href="#220cb27e883f363d" class="i property">OperationTimeout</a>);
+                <b>await</b> <span class="r42 r">cancelTask</span>.<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r43 rd" class="r43 r">exception</span>)
+            {
+                <b>if</b> (<span class="r40 r">isDiagnosticSourceEnabled</span>)
+                {
+                    <a href="#435f723d21eebd94" class="k">this</a>.<a href="#8a3ef3eb54c82779" class="i field">diagnosticSource</a>.<a href="../ServiceBusDiagnosticsSource.cs.html#1106e116e1c0feb0" class="i method">ReportException</a>(<span class="r43 r">exception</span>);
+                }
+ 
+                <a href="../MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="../MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="../MessagingEventSource.cs.html#2089f88b3a7702d4" class="i method">CancelScheduledMessageException</a>(<a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a>, <span class="r43 r">exception</span>);
+                <b>throw</b>;
+            }
+            <b>finally</b>
+            {
+                <a href="#435f723d21eebd94" class="k">this</a>.<a href="#8a3ef3eb54c82779" class="i field">diagnosticSource</a>.<span class="i">CancelStop</span>(<span class="r41 r">activity</span>, <span class="r39 r">sequenceNumber</span>, <span class="r42 r">cancelTask</span>?.<span class="i">Status</span>);
+            }
+            <a href="../MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="../MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="../MessagingEventSource.cs.html#221da28070951308" class="i method">CancelScheduledMessageStop</a>(<a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Registers a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusPlugin.cs.html#467b28cbbe8148c5" class="t t">ServiceBusPlugin</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to be used with this sender.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r44 r">serviceBusPlugin</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusPlugin.cs.html#467b28cbbe8148c5" class="t t">ServiceBusPlugin</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to register.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public override void</b> <a id="ff71f12b961b22e6" href="../R/ff71f12b961b22e6.html" target="n" data-glyph="72,1" class="i method">RegisterPlugin</a>(<a href="ServiceBusPlugin.cs.html#467b28cbbe8148c5" class="t t">ServiceBusPlugin</a> <span id="r44 rd" class="r44 r">serviceBusPlugin</span>)
+        {
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+            <b>if</b> (<span class="r44 r">serviceBusPlugin</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r44 r">serviceBusPlugin</span>), <a href="../Resources.Designer.cs.html#8e0563579d43c165" class="t t">Resources</a>.<a href="../Resources.Designer.cs.html#74ff1445adbade5e" class="i property">ArgumentNullOrWhiteSpace</a>.<a href="../Primitives/StringUtility.cs.html#3a252e19ad9654c1" class="i method">FormatForUser</a>(<b>nameof</b>(<span class="r44 r">serviceBusPlugin</span>)));
+            }
+ 
+            <b>if</b> (<a href="#435f723d21eebd94" class="k">this</a>.<a href="#224857a34d9e40c9" class="i property">RegisteredPlugins</a>.<span class="i">Any</span>(<span id="r45 rd" class="r45 r">p</span> =&gt; <span class="r45 r">p</span>.<span class="i">GetType</span>() == <span class="r44 r">serviceBusPlugin</span>.<span class="i">GetType</span>()))
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentException</span>(<b>nameof</b>(<span class="r44 r">serviceBusPlugin</span>), <a href="../Resources.Designer.cs.html#8e0563579d43c165" class="t t">Resources</a>.<a href="../Resources.Designer.cs.html#bd15a8f93b31859b" class="i property">PluginAlreadyRegistered</a>.<a href="../Primitives/StringUtility.cs.html#3a252e19ad9654c1" class="i method">FormatForUser</a>(<span class="r44 r">serviceBusPlugin</span>.<a href="ServiceBusPlugin.cs.html#bd6bea073d8b269c" class="i property">Name</a>));
+            }
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="#224857a34d9e40c9" class="i property">RegisteredPlugins</a>.<span class="i">Add</span>(<span class="r44 r">serviceBusPlugin</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Unregisters a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusPlugin.cs.html#467b28cbbe8148c5" class="t t">ServiceBusPlugin</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r46 r">serviceBusPluginName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="ServiceBusPlugin.cs.html#467b28cbbe8148c5" class="t t">ServiceBusPlugin</a>.<a href="ServiceBusPlugin.cs.html#bd6bea073d8b269c" class="i property">Name</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to be unregistered</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public override void</b> <a id="7324cbc642149f53" href="../R/7324cbc642149f53.html" target="n" data-glyph="72,1" class="i method">UnregisterPlugin</a>(<b>string</b> <span id="r46 rd" class="r46 r">serviceBusPluginName</span>)
+        {
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#4e4f2b9737babe9a" class="i method">ThrowIfClosed</a>();
+            <b>if</b> (<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r46 r">serviceBusPluginName</span>))
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r46 r">serviceBusPluginName</span>), <a href="../Resources.Designer.cs.html#8e0563579d43c165" class="t t">Resources</a>.<a href="../Resources.Designer.cs.html#74ff1445adbade5e" class="i property">ArgumentNullOrWhiteSpace</a>.<a href="../Primitives/StringUtility.cs.html#3a252e19ad9654c1" class="i method">FormatForUser</a>(<b>nameof</b>(<span class="r46 r">serviceBusPluginName</span>)));
+            }
+            <b>if</b> (<a href="#435f723d21eebd94" class="k">this</a>.<a href="#224857a34d9e40c9" class="i property">RegisteredPlugins</a>.<span class="i">Any</span>(<span id="r47 rd" class="r47 r">p</span> =&gt; <span class="r47 r">p</span>.<span class="i">Name</span> == <span class="r46 r">serviceBusPluginName</span>))
+            {
+                <b>var</b> <span id="r48 rd" class="r48 r">plugin</span> = <a href="#435f723d21eebd94" class="k">this</a>.<a href="#224857a34d9e40c9" class="i property">RegisteredPlugins</a>.<span class="i">First</span>(<span id="r49 rd" class="r49 r">p</span> =&gt; <span class="r49 r">p</span>.<span class="i">Name</span> == <span class="r46 r">serviceBusPluginName</span>);
+                <a href="#435f723d21eebd94" class="k">this</a>.<a href="#224857a34d9e40c9" class="i property">RegisteredPlugins</a>.<span class="i">Remove</span>(<span class="r48 r">plugin</span>);
+            }
+        }
+ 
+        <b>internal async</b> <span class="i">Task</span>&lt;<a href="../Amqp/AmqpResponseMessage.cs.html#9e99baf0a4484957" class="t t">AmqpResponseMessage</a>&gt; <a id="301669ebe87cc7ec" href="../R/301669ebe87cc7ec.html" target="n" data-glyph="74,1" class="i method">ExecuteRequestResponseAsync</a>(<a href="../Amqp/AmqpRequestMessage.cs.html#b85785d75a26dd84" class="t t">AmqpRequestMessage</a> <span id="r50 rd" class="r50 r">amqpRequestMessage</span>)
+        {
+            <b>var</b> <span id="r51 rd" class="r51 r">amqpMessage</span> = <span class="r50 r">amqpRequestMessage</span>.<a href="../Amqp/AmqpRequestMessage.cs.html#dd23d18578a317a0" class="i property">AmqpMessage</a>;
+            <a href="../Primitives/TimeoutHelper.cs.html#a61b449000b5ed05" class="k">var</a> <span id="r52 rd" class="r52 r">timeoutHelper</span> = <b>new</b> <a href="../Primitives/TimeoutHelper.cs.html#a86b412187d436fa" class="t constructor">TimeoutHelper</a>(<a href="#435f723d21eebd94" class="k">this</a>.<a href="#220cb27e883f363d" class="i property">OperationTimeout</a>, <b>true</b>);
+ 
+            <span class="i">ArraySegment</span>&lt;<b>byte</b>&gt; <span id="r53 rd" class="r53 r">transactionId</span> = <span class="i">AmqpConstants</span>.<span class="i">NullBinary</span>;
+            <b>var</b> <span id="r54 rd" class="r54 r">ambientTransaction</span> = <span class="i">Transaction</span>.<span class="i">Current</span>;
+            <b>if</b> (<span class="r54 r">ambientTransaction</span> != <b>null</b>)
+            {
+                <span class="r53 r">transactionId</span> = <b>await</b> <a href="../Amqp/AmqpTransactionManager.cs.html#fbc6c75f425fe758" class="t t">AmqpTransactionManager</a>.<a href="../Amqp/AmqpTransactionManager.cs.html#a3fc0f5b9cfabb07" class="i property">Instance</a>.<span class="i">EnlistAsync</span>(<span class="r54 r">ambientTransaction</span>, <a href="#435f723d21eebd94" class="k">this</a>.<a href="#a3335e7d13539d3a" class="i property">ServiceBusConnection</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+ 
+            <b>if</b> (!<a href="#435f723d21eebd94" class="k">this</a>.<a href="#4f1300f0a438d9ad" class="i property">RequestResponseLinkManager</a>.<span class="i">TryGetOpenedObject</span>(<b>out</b> <b>var</b> <span id="r55 rd" class="r55 r">requestResponseAmqpLink</span>))
+            {
+                <span class="r55 r">requestResponseAmqpLink</span> = <b>await</b> <a href="#435f723d21eebd94" class="k">this</a>.<a href="#4f1300f0a438d9ad" class="i property">RequestResponseLinkManager</a>.<span class="i">GetOrCreateAsync</span>(<span class="r52 r">timeoutHelper</span>.<a href="../Primitives/TimeoutHelper.cs.html#2926e364b94617ad" class="i method">RemainingTime</a>()).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+ 
+            <b>var</b> <span id="r56 rd" class="r56 r">responseAmqpMessage</span> = <b>await</b> <span class="i">Task</span>.<span class="i">Factory</span>.<span class="i">FromAsync</span>(
+                (<span id="r57 rd" class="r57 r">c</span>, <span id="r58 rd" class="r58 r">s</span>) =&gt; <span class="r55 r">requestResponseAmqpLink</span>.<span class="i">BeginRequest</span>(<span class="r51 r">amqpMessage</span>, <span class="r53 r">transactionId</span>, <span class="r52 r">timeoutHelper</span>.<a href="../Primitives/TimeoutHelper.cs.html#2926e364b94617ad" class="i method">RemainingTime</a>(), <span class="r57 r">c</span>, <span class="r58 r">s</span>),
+                <span id="r59 rd" class="r59 r">a</span> =&gt; <span class="r55 r">requestResponseAmqpLink</span>.<span class="i">EndRequest</span>(<span class="r59 r">a</span>),
+                <a href="#435f723d21eebd94" class="k">this</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+            <b>return</b> <a href="../Amqp/AmqpResponseMessage.cs.html#9e99baf0a4484957" class="t t">AmqpResponseMessage</a>.<span class="i">CreateResponse</span>(<span class="r56 r">responseAmqpMessage</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">Closes the connection.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>protected override async</b> <span class="i">Task</span> <a id="6b0d4ef93d1cce95" href="../R/6b0d4ef93d1cce95.html" target="n" data-glyph="75,1" class="i method">OnClosingAsync</a>()
+        {
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="#4e57010672d06045" class="i field">clientLinkManager</a>.<a href="../Amqp/ActiveClientLinkManager.cs.html#23709674995008ad" class="i method">Close</a>();
+            <b>await</b> <a href="#435f723d21eebd94" class="k">this</a>.<a href="#113ebafa9227e3d8" class="i property">SendLinkManager</a>.<span class="i">CloseAsync</span>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+            <b>await</b> <a href="#435f723d21eebd94" class="k">this</a>.<a href="#4f1300f0a438d9ad" class="i property">RequestResponseLinkManager</a>.<span class="i">CloseAsync</span>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+        }
+ 
+        <b>static int</b> <a id="65c81de1c7595639" href="../R/65c81de1c7595639.html" target="n" data-glyph="76,1" class="i method">ValidateMessages</a>(<span class="i">IList</span>&lt;<a href="../Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>&gt; <span id="r60 rd" class="r60 r">messageList</span>)
+        {
+            <b>var</b> <span id="r61 rd" class="r61 r">count</span> = 0;
+            <b>if</b> (<span class="r60 r">messageList</span> == <b>null</b>)
+            {
+                <b>throw</b> <a href="../Primitives/Fx.cs.html#c01e8844709e19c1" class="t t">Fx</a>.<a href="../Primitives/Fx.cs.html#0793cb830fb5b201" class="i property">Exception</a>.<a href="../Primitives/ExceptionUtility.cs.html#ca1f689c31b7d5d8" class="i method">ArgumentNull</a>(<b>nameof</b>(<span class="r60 r">messageList</span>));
+            }
+ 
+            <b>foreach</b> (<b>var</b> <span id="r62 rd" class="r62 r">message</span> <b>in</b> <span class="r60 r">messageList</span>)
+            {
+                <span class="r61 r">count</span>++;
+                <span class="i">ValidateMessage</span>(<span class="r62 r">message</span>);
+            }
+ 
+            <b>return</b> <span class="r61 r">count</span>;
+        }
+ 
+        <b>static void</b> <a id="d8b460813a56f789" href="../R/d8b460813a56f789.html" target="n" data-glyph="76,1" class="i method">ValidateMessage</a>(<a href="../Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a> <span id="r63 rd" class="r63 r">message</span>)
+        {
+            <b>if</b> (<span class="r63 r">message</span>.<a href="../Message.cs.html#5b973fca03337aea" class="i property">SystemProperties</a>.<a href="../Message.cs.html#b123973da7ab0969" class="i property">IsLockTokenSet</a>)
+            {
+                <b>throw</b> <a href="../Primitives/Fx.cs.html#c01e8844709e19c1" class="t t">Fx</a>.<a href="../Primitives/Fx.cs.html#0793cb830fb5b201" class="i property">Exception</a>.<a href="../Primitives/ExceptionUtility.cs.html#e75e149f89dada84" class="i method">Argument</a>(<b>nameof</b>(<span class="r63 r">message</span>), <span class="s">&quot;Cannot send a message that was already received.&quot;</span>);
+            }
+        }
+ 
+        <b>static void</b> <a id="f0b4e172a3880fc4" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">CloseSession</a>(<span class="i">SendingAmqpLink</span> <span id="r64 rd" class="r64 r">link</span>)
+        {
+            <span class="c">// Note we close the session (which includes the link).</span>
+            <span class="r64 r">link</span>.<span class="i">Session</span>.<span class="i">SafeClose</span>();
+        }
+ 
+        <b>static void</b> <a id="854eb0ae3f400fdb" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">CloseRequestResponseSession</a>(<span class="i">RequestResponseAmqpLink</span> <span id="r65 rd" class="r65 r">requestResponseAmqpLink</span>)
+        {
+            <span class="r65 r">requestResponseAmqpLink</span>.<span class="i">Session</span>.<span class="i">SafeClose</span>();
+        }
+ 
+        <b>async</b> <span class="i">Task</span>&lt;<a href="../Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>&gt; <a id="02047e0ddf81ef46" href="../R/02047e0ddf81ef46.html" target="n" data-glyph="76,1" class="i method">ProcessMessage</a>(<a href="../Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a> <span id="r66 rd" class="r66 r">message</span>)
+        {
+            <a href="../Message.cs.html#74fc1aa4fea2b013" class="k">var</a> <span id="r67 rd" class="r67 r">processedMessage</span> = <span class="r66 r">message</span>;
+            <b>foreach</b> (<b>var</b> <span id="r68 rd" class="r68 r">plugin</span> <b>in</b> <a href="#435f723d21eebd94" class="k">this</a>.<a href="#224857a34d9e40c9" class="i property">RegisteredPlugins</a>)
+            {
+                <b>try</b>
+                {
+                    <a href="../MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="../MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<span class="i">PluginCallStarted</span>(<span class="r68 r">plugin</span>.<span class="i">Name</span>, <span class="r66 r">message</span>.<a href="../Message.cs.html#6b02c9ff5b03ba9c" class="i property">MessageId</a>);
+                    <span class="r67 r">processedMessage</span> = <b>await</b> <span class="r68 r">plugin</span>.<span class="i">BeforeMessageSend</span>(<span class="r66 r">message</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    <a href="../MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="../MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<span class="i">PluginCallCompleted</span>(<span class="r68 r">plugin</span>.<span class="i">Name</span>, <span class="r66 r">message</span>.<a href="../Message.cs.html#6b02c9ff5b03ba9c" class="i property">MessageId</a>);
+                }
+                <b>catch</b> (<span class="i">Exception</span> <span id="r69 rd" class="r69 r">ex</span>)
+                {
+                    <a href="../MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="../MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<span class="i">PluginCallFailed</span>(<span class="r68 r">plugin</span>.<span class="i">Name</span>, <span class="r66 r">message</span>.<a href="../Message.cs.html#6b02c9ff5b03ba9c" class="i property">MessageId</a>, <span class="r69 r">ex</span>);
+                    <b>if</b> (!<span class="r68 r">plugin</span>.<span class="i">ShouldContinueOnException</span>)
+                    {
+                        <b>throw</b>;
+                    }
+                }
+            }
+            <b>return</b> <span class="r67 r">processedMessage</span>;
+        }
+ 
+        <b>async</b> <span class="i">Task</span>&lt;<span class="i">IList</span>&lt;<a href="../Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>&gt;&gt; <a id="47a0cfe068125c74" href="../R/47a0cfe068125c74.html" target="n" data-glyph="76,1" class="i method">ProcessMessages</a>(<span class="i">IList</span>&lt;<a href="../Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>&gt; <span id="r70 rd" class="r70 r">messageList</span>)
+        {
+            <b>if</b> (<a href="#435f723d21eebd94" class="k">this</a>.<a href="#224857a34d9e40c9" class="i property">RegisteredPlugins</a>.<span class="i">Count</span> &lt; 1)
+            {
+                <b>return</b> <span class="r70 r">messageList</span>;
+            }
+ 
+            <b>var</b> <span id="r71 rd" class="r71 r">processedMessageList</span> = <b>new</b> <span class="i">List</span>&lt;<a href="../Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>&gt;();
+            <b>foreach</b> (<b>var</b> <span id="r72 rd" class="r72 r">message</span> <b>in</b> <span class="r70 r">messageList</span>)
+            {
+                <b>var</b> <span id="r73 rd" class="r73 r">processedMessage</span> = <b>await</b> <a href="#435f723d21eebd94" class="k">this</a>.<span class="i">ProcessMessage</span>(<span class="r72 r">message</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <span class="r71 r">processedMessageList</span>.<span class="i">Add</span>(<span class="r73 r">processedMessage</span>);
+            }
+ 
+            <b>return</b> <span class="r71 r">processedMessageList</span>;
+        }
+ 
+        <b>async</b> <span class="i">Task</span> <a id="54dbabe5bfc65076" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">OnSendAsync</a>(<span class="i">IList</span>&lt;<a href="../Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a>&gt; <span id="r74 rd" class="r74 r">messageList</span>)
+        {
+            <a href="../Primitives/TimeoutHelper.cs.html#a61b449000b5ed05" class="k">var</a> <span id="r75 rd" class="r75 r">timeoutHelper</span> = <b>new</b> <a href="../Primitives/TimeoutHelper.cs.html#a86b412187d436fa" class="t constructor">TimeoutHelper</a>(<a href="#435f723d21eebd94" class="k">this</a>.<a href="#220cb27e883f363d" class="i property">OperationTimeout</a>, <b>true</b>);
+            <b>using</b> (<b>var</b> <span id="r76 rd" class="r76 r">amqpMessage</span> = <a href="../Amqp/AmqpMessageConverter.cs.html#062369f8adb48536" class="t t">AmqpMessageConverter</a>.<span class="i">BatchSBMessagesAsAmqpMessage</span>(<span class="r74 r">messageList</span>))
+            {
+                <span class="i">SendingAmqpLink</span> <span id="r77 rd" class="r77 r">amqpLink</span> = <b>null</b>;
+                <b>try</b>
+                {
+                    <span class="i">ArraySegment</span>&lt;<b>byte</b>&gt; <span id="r78 rd" class="r78 r">transactionId</span> = <span class="i">AmqpConstants</span>.<span class="i">NullBinary</span>;
+                    <b>var</b> <span id="r79 rd" class="r79 r">ambientTransaction</span> = <span class="i">Transaction</span>.<span class="i">Current</span>;
+                    <b>if</b> (<span class="r79 r">ambientTransaction</span> != <b>null</b>)
+                    {
+                        <span class="r78 r">transactionId</span> = <b>await</b> <a href="../Amqp/AmqpTransactionManager.cs.html#fbc6c75f425fe758" class="t t">AmqpTransactionManager</a>.<a href="../Amqp/AmqpTransactionManager.cs.html#a3fc0f5b9cfabb07" class="i property">Instance</a>.<span class="i">EnlistAsync</span>(<span class="r79 r">ambientTransaction</span>, <a href="#435f723d21eebd94" class="k">this</a>.<a href="#a3335e7d13539d3a" class="i property">ServiceBusConnection</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    }
+ 
+                    <b>if</b> (!<a href="#435f723d21eebd94" class="k">this</a>.<a href="#113ebafa9227e3d8" class="i property">SendLinkManager</a>.<span class="i">TryGetOpenedObject</span>(<b>out</b> <span class="r77 r">amqpLink</span>))
+                    {
+                        <span class="r77 r">amqpLink</span> = <b>await</b> <a href="#435f723d21eebd94" class="k">this</a>.<a href="#113ebafa9227e3d8" class="i property">SendLinkManager</a>.<span class="i">GetOrCreateAsync</span>(<span class="r75 r">timeoutHelper</span>.<a href="../Primitives/TimeoutHelper.cs.html#2926e364b94617ad" class="i method">RemainingTime</a>()).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    }
+                    <b>if</b> (<span class="r77 r">amqpLink</span>.<span class="i">Settings</span>.<span class="i">MaxMessageSize</span>.<span class="i">HasValue</span>)
+                    {
+                        <b>var</b> <span id="r80 rd" class="r80 r">size</span> = (<b>ulong</b>)<span class="r76 r">amqpMessage</span>.<span class="i">SerializedMessageSize</span>;
+                        <b>if</b> (<span class="r80 r">size</span> &gt; <span class="r77 r">amqpLink</span>.<span class="i">Settings</span>.<span class="i">MaxMessageSize</span>.<span class="i">Value</span>)
+                        {
+                            <b>throw</b> <b>new</b> <a href="../MessageSizeExceededException.cs.html#2490ca324e61a8ce" class="t constructor">MessageSizeExceededException</a>(<a href="../Resources.Designer.cs.html#8e0563579d43c165" class="t t">Resources</a>.<a href="../Resources.Designer.cs.html#02ad89863177e1d7" class="i property">AmqpMessageSizeExceeded</a>.<span class="i">FormatForUser</span>(<span class="r76 r">amqpMessage</span>.<span class="i">DeliveryId</span>.<span class="i">Value</span>, <span class="r80 r">size</span>, <span class="r77 r">amqpLink</span>.<span class="i">Settings</span>.<span class="i">MaxMessageSize</span>.<span class="i">Value</span>));
+                        }
+                    }
+ 
+                    <b>var</b> <span id="r81 rd" class="r81 r">outcome</span> = <b>await</b> <span class="r77 r">amqpLink</span>.<span class="i">SendMessageAsync</span>(<span class="r76 r">amqpMessage</span>, <a href="#435f723d21eebd94" class="k">this</a>.<a href="#ad7455feee9d34dd" class="i method">GetNextDeliveryTag</a>(), <span class="r78 r">transactionId</span>, <span class="r75 r">timeoutHelper</span>.<a href="../Primitives/TimeoutHelper.cs.html#2926e364b94617ad" class="i method">RemainingTime</a>()).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                    <b>if</b> (<span class="r81 r">outcome</span>.<span class="i">DescriptorCode</span> != <span class="i">Accepted</span>.<span class="i">Code</span>)
+                    {
+                        <b>var</b> <span id="r82 rd" class="r82 r">rejected</span> = (<span class="i">Rejected</span>)<span class="r81 r">outcome</span>;
+                        <b>throw</b> <a href="../Primitives/Fx.cs.html#c01e8844709e19c1" class="t t">Fx</a>.<a href="../Primitives/Fx.cs.html#0793cb830fb5b201" class="i property">Exception</a>.<a href="../Primitives/ExceptionUtility.cs.html#d80aca75d05d8c01" class="i method">AsError</a>(<span class="r82 r">rejected</span>.<span class="i">Error</span>.<span class="i">ToMessagingContractException</span>());
+                    }
+                }
+                <b>catch</b> (<span class="i">Exception</span> <span id="r83 rd" class="r83 r">exception</span>)
+                {
+                    <b>throw</b> <a href="../Amqp/AmqpExceptionHelper.cs.html#2d67e789261d8e30" class="t t">AmqpExceptionHelper</a>.<span class="i">GetClientException</span>(<span class="r83 r">exception</span>, <span class="r77 r">amqpLink</span>?.<span class="i">GetTrackingId</span>(), <b>null</b>, <span class="r77 r">amqpLink</span>?.<span class="i">Session</span>.<span class="i">IsClosing</span>() ?? <b>false</b>);
+                }
+            }
+        }
+ 
+        <b>async</b> <span class="i">Task</span>&lt;<b>long</b>&gt; <a id="7674035958f610c1" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">OnScheduleMessageAsync</a>(<a href="../Message.cs.html#74fc1aa4fea2b013" class="t t">Message</a> <span id="r84 rd" class="r84 r">message</span>)
+        {
+            <b>using</b> (<b>var</b> <span id="r85 rd" class="r85 r">amqpMessage</span> = <a href="../Amqp/AmqpMessageConverter.cs.html#062369f8adb48536" class="t t">AmqpMessageConverter</a>.<a href="../Amqp/AmqpMessageConverter.cs.html#673d584a4ecff536" class="i method">SBMessageToAmqpMessage</a>(<span class="r84 r">message</span>))
+            {
+                <a href="../Amqp/AmqpRequestMessage.cs.html#b85785d75a26dd84" class="k">var</a> <span id="r86 rd" class="r86 r">request</span> = <a href="../Amqp/AmqpRequestMessage.cs.html#b85785d75a26dd84" class="t t">AmqpRequestMessage</a>.<a href="../Amqp/AmqpRequestMessage.cs.html#66600f5127c562a1" class="i method">CreateRequest</a>(
+                        <a href="../Amqp/ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="../Amqp/ManagementConstants.cs.html#3ed02eaf36e2be41" class="t t">Operations</a>.<a href="../Amqp/ManagementConstants.cs.html#d73919337c353179" class="i field">ScheduleMessageOperation</a>,
+                        <a href="#435f723d21eebd94" class="k">this</a>.<a href="#220cb27e883f363d" class="i property">OperationTimeout</a>,
+                        <b>null</b>);
+ 
+                <span class="i">SendingAmqpLink</span> <span id="r87 rd" class="r87 r">sendLink</span> = <b>null</b>;
+ 
+                <b>try</b>
+                {
+                    <b>if</b> (<a href="#435f723d21eebd94" class="k">this</a>.<a href="#113ebafa9227e3d8" class="i property">SendLinkManager</a>.<span class="i">TryGetOpenedObject</span>(<b>out</b> <span class="r87 r">sendLink</span>))
+                    {
+                        <span class="r86 r">request</span>.<a href="../Amqp/AmqpRequestMessage.cs.html#dd23d18578a317a0" class="i property">AmqpMessage</a>.<span class="i">ApplicationProperties</span>.<span class="i">Map</span>[<a href="../Amqp/ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="../Amqp/ManagementConstants.cs.html#08a4aa88819cc239" class="t t">Request</a>.<a href="../Amqp/ManagementConstants.cs.html#ab6572fda668d116" class="i field">AssociatedLinkName</a>] = <span class="r87 r">sendLink</span>.<span class="i">Name</span>;
+                    }
+ 
+                    <span class="i">ArraySegment</span>&lt;<b>byte</b>&gt;[] <span id="r88 rd" class="r88 r">payload</span> = <span class="r85 r">amqpMessage</span>.<span class="i">GetPayload</span>();
+                    <b>var</b> <span id="r89 rd" class="r89 r">buffer</span> = <b>new</b> <span class="i">BufferListStream</span>(<span class="r88 r">payload</span>);
+                    <span class="i">ArraySegment</span>&lt;<b>byte</b>&gt; <span id="r90 rd" class="r90 r">value</span> = <span class="r89 r">buffer</span>.<span class="i">ReadBytes</span>((<b>int</b>)<span class="r89 r">buffer</span>.<span class="i">Length</span>);
+ 
+                    <b>var</b> <span id="r91 rd" class="r91 r">entry</span> = <b>new</b> <span class="i">AmqpMap</span>();
+                    {
+                        <span class="r91 r">entry</span>[<a href="../Amqp/ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="../Amqp/ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="../Amqp/ManagementConstants.cs.html#14001af87af6d3e0" class="i field">Message</a>] = <span class="r90 r">value</span>;
+                        <span class="r91 r">entry</span>[<a href="../Amqp/ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="../Amqp/ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="../Amqp/ManagementConstants.cs.html#a1dc6a9572b59ee3" class="i field">MessageId</a>] = <span class="r84 r">message</span>.<a href="../Message.cs.html#6b02c9ff5b03ba9c" class="i property">MessageId</a>;
+ 
+                        <b>if</b> (!<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r84 r">message</span>.<a href="../Message.cs.html#688c80d5d9a7e2b3" class="i property">SessionId</a>))
+                        {
+                            <span class="r91 r">entry</span>[<a href="../Amqp/ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="../Amqp/ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="../Amqp/ManagementConstants.cs.html#5bcf274376236182" class="i field">SessionId</a>] = <span class="r84 r">message</span>.<a href="../Message.cs.html#688c80d5d9a7e2b3" class="i property">SessionId</a>;
+                        }
+ 
+                        <b>if</b> (!<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r84 r">message</span>.<a href="../Message.cs.html#99fb27efd92a94d4" class="i property">PartitionKey</a>))
+                        {
+                            <span class="r91 r">entry</span>[<a href="../Amqp/ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="../Amqp/ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="../Amqp/ManagementConstants.cs.html#74c68cc92ccb302f" class="i field">PartitionKey</a>] = <span class="r84 r">message</span>.<a href="../Message.cs.html#99fb27efd92a94d4" class="i property">PartitionKey</a>;
+                        }
+ 
+                        <b>if</b> (!<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r84 r">message</span>.<a href="../Message.cs.html#187ce45c7e8dca5c" class="i property">ViaPartitionKey</a>))
+                        {
+                            <span class="r91 r">entry</span>[<a href="../Amqp/ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="../Amqp/ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="../Amqp/ManagementConstants.cs.html#444aa8ee9c335728" class="i field">ViaPartitionKey</a>] = <span class="r84 r">message</span>.<a href="../Message.cs.html#187ce45c7e8dca5c" class="i property">ViaPartitionKey</a>;
+                        }
+                    }
+ 
+                    <span class="r86 r">request</span>.<a href="../Amqp/AmqpRequestMessage.cs.html#786a66521cef3172" class="i property">Map</a>[<a href="../Amqp/ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="../Amqp/ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="../Amqp/ManagementConstants.cs.html#0755003119922551" class="i field">Messages</a>] = <b>new</b> <span class="i">List</span>&lt;<span class="i">AmqpMap</span>&gt; { <span class="r91 r">entry</span> };
+ 
+                    <b>var</b> <span id="r92 rd" class="r92 r">response</span> = <b>await</b> <a href="#435f723d21eebd94" class="k">this</a>.<a href="#301669ebe87cc7ec" class="i method">ExecuteRequestResponseAsync</a>(<span class="r86 r">request</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    <b>if</b> (<span class="r92 r">response</span>.<span class="i">StatusCode</span> == <span class="i">AmqpResponseStatusCode</span>.<span class="i">OK</span>)
+                    {
+                        <b>var</b> <span id="r93 rd" class="r93 r">sequenceNumbers</span> = <span class="r92 r">response</span>.<span class="i">GetValue</span>&lt;<b>long</b>[]&gt;(<a href="../Amqp/ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="../Amqp/ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="../Amqp/ManagementConstants.cs.html#e559f2bcd51ae199" class="i field">SequenceNumbers</a>);
+                        <b>if</b> (<span class="r93 r">sequenceNumbers</span> == <b>null</b> || <span class="r93 r">sequenceNumbers</span>.<span class="i">Length</span> &lt; 1)
+                        {
+                            <b>throw</b> <b>new</b> <a href="../ServiceBusException.cs.html#4654907a08cc5c48" class="t constructor">ServiceBusException</a>(<b>true</b>, <span class="s">&quot;Could not schedule message successfully.&quot;</span>);
+                        }
+ 
+                        <b>return</b> <span class="r93 r">sequenceNumbers</span>[0];
+ 
+                    }
+                    <b>else</b>
+                    {
+                        <b>throw</b> <span class="r92 r">response</span>.<span class="i">ToMessagingContractException</span>();
+                    }
+                }
+                <b>catch</b> (<span class="i">Exception</span> <span id="r94 rd" class="r94 r">exception</span>)
+                {
+                    <b>throw</b> <a href="../Amqp/AmqpExceptionHelper.cs.html#2d67e789261d8e30" class="t t">AmqpExceptionHelper</a>.<span class="i">GetClientException</span>(<span class="r94 r">exception</span>, <span class="r87 r">sendLink</span>?.<span class="i">GetTrackingId</span>(), <b>null</b>, <span class="r87 r">sendLink</span>?.<span class="i">Session</span>.<span class="i">IsClosing</span>() ?? <b>false</b>);
+                }
+            }
+        }
+ 
+        <b>async</b> <span class="i">Task</span> <a id="5a7c9bc1d22a2a07" href="../R/5a7c9bc1d22a2a07.html" target="n" data-glyph="76,1" class="i method">OnCancelScheduledMessageAsync</a>(<b>long</b> <span id="r95 rd" class="r95 r">sequenceNumber</span>)
+        {
+            <a href="../Amqp/AmqpRequestMessage.cs.html#b85785d75a26dd84" class="k">var</a> <span id="r96 rd" class="r96 r">request</span> =
+                <a href="../Amqp/AmqpRequestMessage.cs.html#b85785d75a26dd84" class="t t">AmqpRequestMessage</a>.<a href="../Amqp/AmqpRequestMessage.cs.html#66600f5127c562a1" class="i method">CreateRequest</a>(
+                    <a href="../Amqp/ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="../Amqp/ManagementConstants.cs.html#3ed02eaf36e2be41" class="t t">Operations</a>.<a href="../Amqp/ManagementConstants.cs.html#5dbc8d42788642c8" class="i field">CancelScheduledMessageOperation</a>,
+                    <a href="#435f723d21eebd94" class="k">this</a>.<a href="#220cb27e883f363d" class="i property">OperationTimeout</a>,
+                    <b>null</b>);
+ 
+            <span class="i">SendingAmqpLink</span> <span id="r97 rd" class="r97 r">sendLink</span> = <b>null</b>;
+ 
+            <b>try</b>
+            {
+                <b>if</b> (<a href="#435f723d21eebd94" class="k">this</a>.<a href="#113ebafa9227e3d8" class="i property">SendLinkManager</a>.<span class="i">TryGetOpenedObject</span>(<b>out</b> <span class="r97 r">sendLink</span>))
+                {
+                    <span class="r96 r">request</span>.<a href="../Amqp/AmqpRequestMessage.cs.html#dd23d18578a317a0" class="i property">AmqpMessage</a>.<span class="i">ApplicationProperties</span>.<span class="i">Map</span>[<a href="../Amqp/ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="../Amqp/ManagementConstants.cs.html#08a4aa88819cc239" class="t t">Request</a>.<a href="../Amqp/ManagementConstants.cs.html#ab6572fda668d116" class="i field">AssociatedLinkName</a>] = <span class="r97 r">sendLink</span>.<span class="i">Name</span>;
+                }
+ 
+                <span class="r96 r">request</span>.<a href="../Amqp/AmqpRequestMessage.cs.html#786a66521cef3172" class="i property">Map</a>[<a href="../Amqp/ManagementConstants.cs.html#faef0da0ebc46a02" class="t t">ManagementConstants</a>.<a href="../Amqp/ManagementConstants.cs.html#4f0ed0afaf7d3f09" class="t t">Properties</a>.<a href="../Amqp/ManagementConstants.cs.html#e559f2bcd51ae199" class="i field">SequenceNumbers</a>] = <b>new</b>[] { <span class="r95 r">sequenceNumber</span> };
+ 
+                <b>var</b> <span id="r98 rd" class="r98 r">response</span> = <b>await</b> <a href="#435f723d21eebd94" class="k">this</a>.<a href="#301669ebe87cc7ec" class="i method">ExecuteRequestResponseAsync</a>(<span class="r96 r">request</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <b>if</b> (<span class="r98 r">response</span>.<span class="i">StatusCode</span> != <span class="i">AmqpResponseStatusCode</span>.<span class="i">OK</span>)
+                {
+                    <b>throw</b> <span class="r98 r">response</span>.<span class="i">ToMessagingContractException</span>();
+                }
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r99 rd" class="r99 r">exception</span>)
+            {
+                <b>throw</b> <a href="../Amqp/AmqpExceptionHelper.cs.html#2d67e789261d8e30" class="t t">AmqpExceptionHelper</a>.<span class="i">GetClientException</span>(<span class="r99 r">exception</span>, <span class="r97 r">sendLink</span>?.<span class="i">GetTrackingId</span>(), <b>null</b>, <span class="r97 r">sendLink</span>?.<span class="i">Session</span>.<span class="i">IsClosing</span>() ?? <b>false</b>);
+            }
+        }
+ 
+        <b>async</b> <span class="i">Task</span>&lt;<span class="i">SendingAmqpLink</span>&gt; <a id="fbcb9feb0874aa90" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">CreateLinkAsync</a>(<span class="i">TimeSpan</span> <span id="r100 rd" class="r100 r">timeout</span>)
+        {
+            <a href="../MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="../MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="../MessagingEventSource.cs.html#273c985ca73c4670" class="i method">AmqpSendLinkCreateStart</a>(<a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a>, <a href="#435f723d21eebd94" class="k">this</a>.<a href="#f051a6046a7cea98" class="i property">EntityType</a>, <a href="#435f723d21eebd94" class="k">this</a>.<a href="#b37c082fa0693983" class="i property">SendingLinkDestination</a>);
+ 
+            <b>var</b> <span id="r101 rd" class="r101 r">amqpLinkSettings</span> = <b>new</b> <span class="i">AmqpLinkSettings</span>
+            {
+                <span class="i">Role</span> = <b>false</b>,
+                <span class="i">InitialDeliveryCount</span> = 0,
+                <span class="i">Target</span> = <b>new</b> <span class="i">Target</span> { <span class="i">Address</span> = <a href="#435f723d21eebd94" class="k">this</a>.<a href="#b37c082fa0693983" class="i property">SendingLinkDestination</a> },
+                <span class="i">Source</span> = <b>new</b> <span class="i">Source</span> { <span class="i">Address</span> = <a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a> },
+            };
+            <b>if</b> (<a href="#435f723d21eebd94" class="k">this</a>.<a href="#f051a6046a7cea98" class="i property">EntityType</a> != <b>null</b>)
+            {
+                <span class="r101 r">amqpLinkSettings</span>.<span class="i">AddProperty</span>(<a href="../Amqp/AmqpClientConstants.cs.html#3dc61df9413cd7ab" class="t t">AmqpClientConstants</a>.<a href="../Amqp/AmqpClientConstants.cs.html#35e117e7313e504a" class="i field">EntityTypeName</a>, (<b>int</b>)<a href="#435f723d21eebd94" class="k">this</a>.<a href="#f051a6046a7cea98" class="i property">EntityType</a>);
+            }
+ 
+            <b>var</b> <span id="r102 rd" class="r102 r">endpointUri</span> = <b>new</b> <span class="i">Uri</span>(<a href="#435f723d21eebd94" class="k">this</a>.<a href="#a3335e7d13539d3a" class="i property">ServiceBusConnection</a>.<a href="../ServiceBusConnection.cs.html#aa10f462e6ba95a8" class="i property">Endpoint</a>, <a href="#435f723d21eebd94" class="k">this</a>.<a href="#b37c082fa0693983" class="i property">SendingLinkDestination</a>);
+ 
+            <b>string</b>[] <span id="r103 rd" class="r103 r">audience</span>;
+            <b>if</b> (<a href="#435f723d21eebd94" class="k">this</a>.<a href="#f2818efa6e68cd88" class="i field">isViaSender</a>)
+            {
+                <b>var</b> <span id="r104 rd" class="r104 r">transferDestinationEndpointUri</span> = <b>new</b> <span class="i">Uri</span>(<a href="#435f723d21eebd94" class="k">this</a>.<a href="#a3335e7d13539d3a" class="i property">ServiceBusConnection</a>.<a href="../ServiceBusConnection.cs.html#aa10f462e6ba95a8" class="i property">Endpoint</a>, <a href="#435f723d21eebd94" class="k">this</a>.<a href="#988179b2ba5f756b" class="i property">TransferDestinationPath</a>);
+                <span class="r103 r">audience</span> = <b>new</b> <b>string</b>[] { <span class="r102 r">endpointUri</span>.<span class="i">AbsoluteUri</span>, <span class="r104 r">transferDestinationEndpointUri</span>.<span class="i">AbsoluteUri</span> };
+                <span class="r101 r">amqpLinkSettings</span>.<span class="i">AddProperty</span>(<a href="../Amqp/AmqpClientConstants.cs.html#3dc61df9413cd7ab" class="t t">AmqpClientConstants</a>.<a href="../Amqp/AmqpClientConstants.cs.html#affd0a5d85133b35" class="i field">TransferDestinationAddress</a>, <a href="#435f723d21eebd94" class="k">this</a>.<a href="#988179b2ba5f756b" class="i property">TransferDestinationPath</a>);
+            }
+            <b>else</b>
+            {
+                <span class="r103 r">audience</span> = <b>new</b> <b>string</b>[] { <span class="r102 r">endpointUri</span>.<span class="i">AbsoluteUri</span> };
+            }
+ 
+            <b>string</b>[] <span id="r105 rd" class="r105 r">claims</span> = {<a href="../Primitives/ClaimConstants.cs.html#d2402c439e7c4a57" class="t t">ClaimConstants</a>.<a href="../Primitives/ClaimConstants.cs.html#3b5682da44c58a34" class="i field">Send</a>};
+            <a href="../Amqp/AmqpSendReceiveLinkCreator.cs.html#440ba372fc852f18" class="k">var</a> <span id="r106 rd" class="r106 r">amqpSendReceiveLinkCreator</span> = <b>new</b> <a href="../Amqp/AmqpSendReceiveLinkCreator.cs.html#2cc3b18b558648fe" class="t constructor">AmqpSendReceiveLinkCreator</a>(<a href="#435f723d21eebd94" class="k">this</a>.<a href="#b37c082fa0693983" class="i property">SendingLinkDestination</a>, <a href="#435f723d21eebd94" class="k">this</a>.<a href="#a3335e7d13539d3a" class="i property">ServiceBusConnection</a>, <span class="r102 r">endpointUri</span>, <span class="r103 r">audience</span>, <span class="r105 r">claims</span>, <a href="#435f723d21eebd94" class="k">this</a>.<a href="#084f8afda062c7d9" class="i property">CbsTokenProvider</a>, <span class="r101 r">amqpLinkSettings</span>, <a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a>);
+            <span class="i">Tuple</span>&lt;<span class="i">AmqpObject</span>, <span class="i">DateTime</span>&gt; <span id="r107 rd" class="r107 r">linkDetails</span> = <b>await</b> <span class="r106 r">amqpSendReceiveLinkCreator</span>.<a href="../Amqp/AmqpLinkCreator.cs.html#2b5f3c2904678580" class="i method">CreateAndOpenAmqpLinkAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+            <b>var</b> <span id="r108 rd" class="r108 r">sendingAmqpLink</span> = (<span class="i">SendingAmqpLink</span>) <span class="r107 r">linkDetails</span>.<span class="i">Item1</span>;
+            <a href="../Amqp/ActiveSendReceiveClientLink.cs.html#fe8c2d92107298d3" class="k">var</a> <span id="r109 rd" class="r109 r">activeSendReceiveClientLink</span> = <b>new</b> <span class="t">ActiveSendReceiveClientLink</span>(
+                <span class="r108 r">sendingAmqpLink</span>,
+                <span class="r102 r">endpointUri</span>,
+                <span class="r103 r">audience</span>,
+                <span class="r105 r">claims</span>,
+                <span class="r107 r">linkDetails</span>.<span class="i">Item2</span>);
+ 
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="#4e57010672d06045" class="i field">clientLinkManager</a>.<a href="../Amqp/ActiveClientLinkManager.cs.html#684bab65ef4234b4" class="i method">SetActiveSendReceiveLink</a>(<span class="r109 r">activeSendReceiveClientLink</span>);
+ 
+            <a href="../MessagingEventSource.cs.html#6cd77e4d6bd16e43" class="t t">MessagingEventSource</a>.<a href="../MessagingEventSource.cs.html#d7da38f75d26ea59" class="i property">Log</a>.<a href="../MessagingEventSource.cs.html#7fc263a7e84cef31" class="i method">AmqpSendLinkCreateStop</a>(<a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a>);
+            <b>return</b> <span class="r108 r">sendingAmqpLink</span>;
+        }
+ 
+        <b>async</b> <span class="i">Task</span>&lt;<span class="i">RequestResponseAmqpLink</span>&gt; <a id="7f35d6d91e814fa8" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">CreateRequestResponseLinkAsync</a>(<span class="i">TimeSpan</span> <span id="r110 rd" class="r110 r">timeout</span>)
+        {
+            <b>var</b> <span id="r111 rd" class="r111 r">entityPath</span> = <a href="#435f723d21eebd94" class="k">this</a>.<a href="#b37c082fa0693983" class="i property">SendingLinkDestination</a> + <span class="s">&#39;/&#39;</span> + <a href="../Amqp/AmqpClientConstants.cs.html#3dc61df9413cd7ab" class="t t">AmqpClientConstants</a>.<a href="../Amqp/AmqpClientConstants.cs.html#8af0b3eca78f3ea4" class="i field">ManagementAddress</a>;
+            <b>var</b> <span id="r112 rd" class="r112 r">amqpLinkSettings</span> = <b>new</b> <span class="i">AmqpLinkSettings</span>();
+            <span class="r112 r">amqpLinkSettings</span>.<span class="i">AddProperty</span>(<a href="../Amqp/AmqpClientConstants.cs.html#3dc61df9413cd7ab" class="t t">AmqpClientConstants</a>.<a href="../Amqp/AmqpClientConstants.cs.html#35e117e7313e504a" class="i field">EntityTypeName</a>, <a href="../Amqp/AmqpClientConstants.cs.html#3dc61df9413cd7ab" class="t t">AmqpClientConstants</a>.<a href="../Amqp/AmqpClientConstants.cs.html#6664d79954a4f86d" class="i field">EntityTypeManagement</a>);
+ 
+            <b>var</b> <span id="r113 rd" class="r113 r">endpointUri</span> = <b>new</b> <span class="i">Uri</span>(<a href="#435f723d21eebd94" class="k">this</a>.<a href="#a3335e7d13539d3a" class="i property">ServiceBusConnection</a>.<a href="../ServiceBusConnection.cs.html#aa10f462e6ba95a8" class="i property">Endpoint</a>, <span class="r111 r">entityPath</span>);
+ 
+            <b>string</b>[] <span id="r114 rd" class="r114 r">audience</span>;
+            <b>if</b> (<a href="#435f723d21eebd94" class="k">this</a>.<a href="#f2818efa6e68cd88" class="i field">isViaSender</a>)
+            {
+                <b>var</b> <span id="r115 rd" class="r115 r">transferDestinationEndpointUri</span> = <b>new</b> <span class="i">Uri</span>(<a href="#435f723d21eebd94" class="k">this</a>.<a href="#a3335e7d13539d3a" class="i property">ServiceBusConnection</a>.<a href="../ServiceBusConnection.cs.html#aa10f462e6ba95a8" class="i property">Endpoint</a>, <a href="#435f723d21eebd94" class="k">this</a>.<a href="#988179b2ba5f756b" class="i property">TransferDestinationPath</a>);
+                <span class="r114 r">audience</span> = <b>new</b> <b>string</b>[] { <span class="r113 r">endpointUri</span>.<span class="i">AbsoluteUri</span>, <span class="r115 r">transferDestinationEndpointUri</span>.<span class="i">AbsoluteUri</span> };
+                <span class="r112 r">amqpLinkSettings</span>.<span class="i">AddProperty</span>(<a href="../Amqp/AmqpClientConstants.cs.html#3dc61df9413cd7ab" class="t t">AmqpClientConstants</a>.<a href="../Amqp/AmqpClientConstants.cs.html#affd0a5d85133b35" class="i field">TransferDestinationAddress</a>, <a href="#435f723d21eebd94" class="k">this</a>.<a href="#988179b2ba5f756b" class="i property">TransferDestinationPath</a>);
+            }
+            <b>else</b>
+            {
+                <span class="r114 r">audience</span> = <b>new</b> <b>string</b>[] { <span class="r113 r">endpointUri</span>.<span class="i">AbsoluteUri</span> };
+            }
+ 
+            <b>string</b>[] <span id="r116 rd" class="r116 r">claims</span> = { <a href="../Primitives/ClaimConstants.cs.html#d2402c439e7c4a57" class="t t">ClaimConstants</a>.<a href="../Primitives/ClaimConstants.cs.html#cf5c83571fdcc3fa" class="i field">Manage</a>, <a href="../Primitives/ClaimConstants.cs.html#d2402c439e7c4a57" class="t t">ClaimConstants</a>.<a href="../Primitives/ClaimConstants.cs.html#3b5682da44c58a34" class="i field">Send</a> };
+            <a href="../Amqp/AmqpRequestResponseLinkCreator.cs.html#4452407dcd46a598" class="k">var</a> <span id="r117 rd" class="r117 r">amqpRequestResponseLinkCreator</span> = <b>new</b> <span class="t">AmqpRequestResponseLinkCreator</span>(
+                <span class="r111 r">entityPath</span>,
+                <a href="#435f723d21eebd94" class="k">this</a>.<a href="#a3335e7d13539d3a" class="i property">ServiceBusConnection</a>,
+                <span class="r113 r">endpointUri</span>,
+                <span class="r114 r">audience</span>,
+                <span class="r116 r">claims</span>,
+                <a href="#435f723d21eebd94" class="k">this</a>.<a href="#084f8afda062c7d9" class="i property">CbsTokenProvider</a>,
+                <span class="r112 r">amqpLinkSettings</span>,
+                <a href="#435f723d21eebd94" class="k">this</a>.<a href="../ClientEntity.cs.html#a85ecf5bbde8da61" class="i property">ClientId</a>);
+ 
+            <span class="i">Tuple</span>&lt;<span class="i">AmqpObject</span>, <span class="i">DateTime</span>&gt; <span id="r118 rd" class="r118 r">linkDetails</span> =
+                <b>await</b> <span class="r117 r">amqpRequestResponseLinkCreator</span>.<a href="../Amqp/AmqpLinkCreator.cs.html#2b5f3c2904678580" class="i method">CreateAndOpenAmqpLinkAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+            <b>var</b> <span id="r119 rd" class="r119 r">requestResponseAmqpLink</span> = (<span class="i">RequestResponseAmqpLink</span>) <span class="r118 r">linkDetails</span>.<span class="i">Item1</span>;
+            <a href="../Amqp/ActiveRequestResponseLink.cs.html#14cf1cc070b4e613" class="k">var</a> <span id="r120 rd" class="r120 r">activeRequestResponseClientLink</span> = <b>new</b> <span class="t">ActiveRequestResponseLink</span>(
+                <span class="r119 r">requestResponseAmqpLink</span>,
+                <span class="r113 r">endpointUri</span>,
+                <span class="r114 r">audience</span>,
+                <span class="r116 r">claims</span>,
+                <span class="r118 r">linkDetails</span>.<span class="i">Item2</span>);
+            <a href="#435f723d21eebd94" class="k">this</a>.<a href="#4e57010672d06045" class="i field">clientLinkManager</a>.<a href="../Amqp/ActiveClientLinkManager.cs.html#d2b8033c902990d4" class="i method">SetActiveRequestResponseLink</a>(<span class="r120 r">activeRequestResponseClientLink</span>);
+ 
+            <b>return</b> <span class="r119 r">requestResponseAmqpLink</span>;
+        }
+ 
+        <span class="i">ArraySegment</span>&lt;<b>byte</b>&gt; <a id="ad7455feee9d34dd" href="../R/ad7455feee9d34dd.html" target="n" data-glyph="76,1" class="i method">GetNextDeliveryTag</a>()
+        {
+            <b>var</b> <span id="r121 rd" class="r121 r">deliveryId</span> = <span class="i">Interlocked</span>.<span class="i">Increment</span>(<b>ref</b> <a href="#435f723d21eebd94" class="k">this</a>.<a href="#68a9aafbb0d7f20c" class="i field">deliveryCount</a>);
+            <b>return</b> <b>new</b> <span class="i">ArraySegment</span>&lt;<b>byte</b>&gt;(<span class="i">BitConverter</span>.<span class="i">GetBytes</span>(<span class="r121 r">deliveryId</span>));
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

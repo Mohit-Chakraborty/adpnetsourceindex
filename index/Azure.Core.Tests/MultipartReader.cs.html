@@ -1,0 +1,138 @@
+﻿<!DOCTYPE html>
+<html><head><title>MultipartReader.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(129);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Core.Tests/MultipartReader.cs" target="_top">MultipartReader.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Core.Tests" target="_top">tests\Azure.Core.Tests.csproj</a> (Azure.Core.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<span class="c">// Copied from https://github.com/aspnet/AspNetCore/tree/master/src/Http/WebUtilities/src</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA1001</span>  <span class="c">// disposable fields</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">IDE0008</span> <span class="c">// Use explicit type</span>
+<span class="k preprocess">#</span><span class="k preprocess">nullable</span> <span class="k preprocess">disable</span>
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Core</span>
+{
+    <span class="c">// https://www.ietf.org/rfc/rfc2046.txt</span>
+    <b>internal class</b> <a id="5c8c9479a493a9cd" href="R/5c8c9479a493a9cd.html" target="n" data-glyph="2,0" class="t t">MultipartReader</a>
+    {
+        <b>public const int</b> <a id="dc42709e0fb87d57" href="R/dc42709e0fb87d57.html" target="n" data-glyph="6,1" class="i field">DefaultHeadersCountLimit</a> = 16;
+        <b>public const int</b> <a id="f0b925cfde9d66d4" href="R/f0b925cfde9d66d4.html" target="n" data-glyph="6,1" class="i field">DefaultHeadersLengthLimit</a> = 1024 * 16;
+        <b>private const int</b> <a id="e0c6c52bcab03e38" href="R/e0c6c52bcab03e38.html" target="n" data-glyph="10,1" class="i field">DefaultBufferSize</a> = 1024 * 4;
+ 
+        <b>private readonly</b> <a href="BufferedReadStream.cs.html#2bf7462855da2a0e" class="t t">BufferedReadStream</a> <a id="ff8f9ad607e6eef2" href="R/ff8f9ad607e6eef2.html" target="n" data-glyph="46,1" class="i field">_stream</a>;
+        <b>private readonly</b> <a href="MultipartBoundary.cs.html#4b81ea40256760c0" class="t t">MultipartBoundary</a> <a id="fa5c194794c76383" href="R/fa5c194794c76383.html" target="n" data-glyph="46,1" class="i field">_boundary</a>;
+        <b>private</b> <a href="MultipartReaderStream.cs.html#2139c284a97aa672" class="t t">MultipartReaderStream</a> <a id="9ce43633a6bd8ff8" href="R/9ce43633a6bd8ff8.html" target="n" data-glyph="46,1" class="i field">_currentStream</a>;
+ 
+        <b>public</b> <a id="e1460735dfa3677e" href="R/e1460735dfa3677e.html" target="n" data-glyph="72,1" class="t constructor">MultipartReader</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r0 rd" class="r0 r">boundary</span>, <a href="@0@mscorlib/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r1 rd" class="r1 r">stream</span>)
+            : <a href="#655b5ec767dc322c" class="k">this</a>(<span class="r0 r">boundary</span>, <span class="r1 r">stream</span>, <a href="#e0c6c52bcab03e38" class="i field">DefaultBufferSize</a>)
+        {
+        }
+ 
+        <b>public</b> <a id="655b5ec767dc322c" href="R/655b5ec767dc322c.html" target="n" data-glyph="72,1" class="t constructor">MultipartReader</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r2 rd" class="r2 r">boundary</span>, <a href="@0@mscorlib/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r3 rd" class="r3 r">stream</span>, <b>int</b> <span id="r4 rd" class="r4 r">bufferSize</span>)
+        {
+            <b>if</b> (<span class="r2 r">boundary</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>(<b>nameof</b>(<span class="r2 r">boundary</span>));
+            }
+ 
+            <b>if</b> (<span class="r3 r">stream</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>(<b>nameof</b>(<span class="r3 r">stream</span>));
+            }
+ 
+            <b>if</b> (<span class="r4 r">bufferSize</span> &lt; <span class="r2 r">boundary</span>.<a href="@0@mscorlib/A.html#e13f5829ef28aa07" class="i property">Length</a> + 8) <span class="c">// Size of the boundary + leading and trailing CRLF + leading and trailing &#39;--&#39; markers.</span>
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#c524af42f1a5665e" class="t constructor">ArgumentOutOfRangeException</a>(<b>nameof</b>(<span class="r4 r">bufferSize</span>), <span class="r4 r">bufferSize</span>, <span class="s">&quot;Insufficient buffer space, the buffer must be larger than the boundary: &quot;</span> + <span class="r2 r">boundary</span>);
+            }
+            <a href="#ff8f9ad607e6eef2" class="i field">_stream</a> = <b>new</b> <a href="BufferedReadStream.cs.html#c7c5c414c86cc311" class="t constructor">BufferedReadStream</a>(<span class="r3 r">stream</span>, <span class="r4 r">bufferSize</span>);
+            <a href="#fa5c194794c76383" class="i field">_boundary</a> = <b>new</b> <a href="MultipartBoundary.cs.html#6ab61435f05c92c3" class="t constructor">MultipartBoundary</a>(<span class="r2 r">boundary</span>, <b>false</b>);
+            <span class="c">// This stream will drain any preamble data and remove the first boundary marker.</span>
+            <span class="c">// TODO: HeadersLengthLimit can&#39;t be modified until after the constructor.</span>
+            <a href="#9ce43633a6bd8ff8" class="i field">_currentStream</a> = <b>new</b> <a href="MultipartReaderStream.cs.html#e13ea155acdb8ecb" class="t constructor">MultipartReaderStream</a>(<a href="#ff8f9ad607e6eef2" class="i field">_stream</a>, <a href="#fa5c194794c76383" class="i field">_boundary</a>) { <a href="MultipartReaderStream.cs.html#972b2b43e04b82fa" class="i property">LengthLimit</a> = <a href="#457f0243948607db" class="i property">HeadersLengthLimit</a> };
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The limit for the number of headers to read.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public int</b> <a id="6c2fbf8445928748" href="R/6c2fbf8445928748.html" target="n" data-glyph="102,1" class="i property">HeadersCountLimit</a> { <b>get</b>; <b>set</b>; } = <a href="#dc42709e0fb87d57" class="i field">DefaultHeadersCountLimit</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The combined size limit for headers per multipart section.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public int</b> <a id="457f0243948607db" href="R/457f0243948607db.html" target="n" data-glyph="102,1" class="i property">HeadersLengthLimit</a> { <b>get</b>; <b>set</b>; } = <a href="#f0b925cfde9d66d4" class="i field">DefaultHeadersLengthLimit</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The optional limit for the total response body length.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public long</b>? <a id="c640ac7e6ffff768" href="R/c640ac7e6ffff768.html" target="n" data-glyph="102,1" class="i property">BodyLengthLimit</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Sets whether the reader will always expect CRLF around boundaries.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        <b>public bool</b> <a id="106bcfbec948d113" href="R/106bcfbec948d113.html" target="n" data-glyph="102,1" class="i property">ExpectBoundariesWithCRLF</a> { <b>get</b>; <b>set</b>; } = <b>true</b>;
+ 
+        <b>public async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="MultipartSection.cs.html#1327d72eb23d105c" class="t t">MultipartSection</a>&gt; <a id="d55c1573fa49708a" href="R/d55c1573fa49708a.html" target="n" data-glyph="72,1" class="i method">ReadNextSectionAsync</a>(<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r5 rd" class="r5 r">cancellationToken</span> = <b>new</b> <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t constructor">CancellationToken</a>())
+        {
+            <span class="c">// Drain the prior section.</span>
+            <b>await</b> <a href="#9ce43633a6bd8ff8" class="i field">_currentStream</a>.<a href="StreamHelperExtensions.cs.html#dc38934b5b95464d" class="i method">DrainAsync</a>(<span class="r5 r">cancellationToken</span>).<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+            <span class="c">// If we&#39;re at the end return null</span>
+            <b>if</b> (<a href="#9ce43633a6bd8ff8" class="i field">_currentStream</a>.<a href="MultipartReaderStream.cs.html#285a19eb5e08a8af" class="i property">FinalBoundaryFound</a>)
+            {
+                <span class="c">// There may be trailer data after the last boundary.</span>
+                <b>await</b> <a href="#ff8f9ad607e6eef2" class="i field">_stream</a>.<a href="StreamHelperExtensions.cs.html#19cd470de22b8a52" class="i method">DrainAsync</a>(<a href="#457f0243948607db" class="i property">HeadersLengthLimit</a>, <span class="r5 r">cancellationToken</span>).<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+                <b>return</b> <b>null</b>;
+            }
+            <a href="@0@mscorlib/A.html#d3599058f8d79be0" class="k">var</a> <span id="r6 rd" class="r6 r">headers</span> = <b>await</b> <a href="#021e727c1c27f90b" class="i method">ReadHeadersAsync</a>(<span class="r5 r">cancellationToken</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+            <a href="#fa5c194794c76383" class="i field">_boundary</a>.<a href="MultipartBoundary.cs.html#9e481a3a2e94d510" class="i property">ExpectLeadingCrlf</a> = <a href="#106bcfbec948d113" class="i property">ExpectBoundariesWithCRLF</a>;
+            <a href="#9ce43633a6bd8ff8" class="i field">_currentStream</a> = <b>new</b> <a href="MultipartReaderStream.cs.html#e13ea155acdb8ecb" class="t constructor">MultipartReaderStream</a>(<a href="#ff8f9ad607e6eef2" class="i field">_stream</a>, <a href="#fa5c194794c76383" class="i field">_boundary</a>) { <a href="MultipartReaderStream.cs.html#972b2b43e04b82fa" class="i property">LengthLimit</a> = <a href="#c640ac7e6ffff768" class="i property">BodyLengthLimit</a> };
+            <b>long</b>? <span id="r7 rd" class="r7 r">baseStreamOffset</span> = <a href="#ff8f9ad607e6eef2" class="i field">_stream</a>.<a href="BufferedReadStream.cs.html#a601b7b5896707df" class="i property">CanSeek</a> ? (<b>long</b>?)<a href="#ff8f9ad607e6eef2" class="i field">_stream</a>.<a href="BufferedReadStream.cs.html#4f4f918614c16eb2" class="i property">Position</a> : <b>null</b>;
+            <b>return</b> <b>new</b> <a href="MultipartSection.cs.html#1327d72eb23d105c" class="t constructor">MultipartSection</a>() { <a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a> = <span class="r6 r">headers</span>, <a href="MultipartSection.cs.html#08df6b8e14f1d5cc" class="i property">Body</a> = <a href="#9ce43633a6bd8ff8" class="i field">_currentStream</a>, <a href="MultipartSection.cs.html#e1c1eb5ce5de586e" class="i property">BaseStreamOffset</a> = <span class="r7 r">baseStreamOffset</span> };
+        }
+ 
+        <b>private async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@0@mscorlib/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>[]&gt;&gt; <a id="021e727c1c27f90b" href="R/021e727c1c27f90b.html" target="n" data-glyph="76,1" class="i method">ReadHeadersAsync</a>(<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r8 rd" class="r8 r">cancellationToken</span>)
+        {
+            <b>int</b> <span id="r9 rd" class="r9 r">totalSize</span> = 0;
+            <a href="KeyValueAccumulator.cs.html#7479d5e7dad86152" class="k">var</a> <span id="r10 rd" class="r10 r">accumulator</span> = <b>new</b> <a href="KeyValueAccumulator.cs.html#7479d5e7dad86152" class="t constructor">KeyValueAccumulator</a>();
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r11 rd" class="r11 r">line</span> = <b>await</b> <a href="#ff8f9ad607e6eef2" class="i field">_stream</a>.<a href="BufferedReadStream.cs.html#821c039371da4a36" class="i method">ReadLineAsync</a>(<a href="#457f0243948607db" class="i property">HeadersLengthLimit</a> - <span class="r9 r">totalSize</span>, <span class="r8 r">cancellationToken</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+            <b>while</b> (!<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r11 r">line</span>))
+            {
+                <b>if</b> (<a href="#457f0243948607db" class="i property">HeadersLengthLimit</a> - <span class="r9 r">totalSize</span> &lt; <span class="r11 r">line</span>.<a href="@0@mscorlib/A.html#e13f5829ef28aa07" class="i property">Length</a>)
+                {
+                    <b>throw</b> <b>new</b> <a href="@0@System/A.html#3be0a1f685d20864" class="t constructor">InvalidDataException</a>(<span class="s">$&quot;</span><span class="s">Multipart headers length limit </span>{<a href="#457f0243948607db" class="i property">HeadersLengthLimit</a>}<span class="s"> exceeded.</span><span class="s">&quot;</span>);
+                }
+                <span class="r9 r">totalSize</span> += <span class="r11 r">line</span>.<a href="@0@mscorlib/A.html#e13f5829ef28aa07" class="i property">Length</a>;
+                <b>int</b> <span id="r12 rd" class="r12 r">splitIndex</span> = <span class="r11 r">line</span>.<a href="@0@mscorlib/A.html#eb06d6d166f6a3d9" class="i method">IndexOf</a>(<span class="s">&#39;:&#39;</span>);
+                <b>if</b> (<span class="r12 r">splitIndex</span> &lt;= 0)
+                {
+                    <b>throw</b> <b>new</b> <a href="@0@System/A.html#3be0a1f685d20864" class="t constructor">InvalidDataException</a>(<span class="s">$&quot;</span><span class="s">Invalid header line: </span>{<span class="r11 r">line</span>}<span class="s">&quot;</span>);
+                }
+ 
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r13 rd" class="r13 r">name</span> = <span class="r11 r">line</span>.<a href="@0@mscorlib/A.html#8124961f027d9ac9" class="i method">Substring</a>(0, <span class="r12 r">splitIndex</span>);
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r14 rd" class="r14 r">value</span> = <span class="r11 r">line</span>.<a href="@0@mscorlib/A.html#8124961f027d9ac9" class="i method">Substring</a>(<span class="r12 r">splitIndex</span> + 1, <span class="r11 r">line</span>.<a href="@0@mscorlib/A.html#e13f5829ef28aa07" class="i property">Length</a> - <span class="r12 r">splitIndex</span> - 1).<a href="@0@mscorlib/A.html#06a5f7c688e69307" class="i method">Trim</a>();
+                <span class="r10 r">accumulator</span>.<a href="KeyValueAccumulator.cs.html#27a194c6460bed84" class="i method">Append</a>(<span class="r13 r">name</span>, <span class="r14 r">value</span>);
+                <b>if</b> (<span class="r10 r">accumulator</span>.<a href="KeyValueAccumulator.cs.html#c7efaf0904c77fe7" class="i property">KeyCount</a> &gt; <a href="#6c2fbf8445928748" class="i property">HeadersCountLimit</a>)
+                {
+                    <b>throw</b> <b>new</b> <a href="@0@System/A.html#3be0a1f685d20864" class="t constructor">InvalidDataException</a>(<span class="s">$&quot;</span><span class="s">Multipart headers count limit </span>{<a href="#6c2fbf8445928748" class="i property">HeadersCountLimit</a>}<span class="s"> exceeded.</span><span class="s">&quot;</span>);
+                }
+ 
+                <span class="r11 r">line</span> = <b>await</b> <a href="#ff8f9ad607e6eef2" class="i field">_stream</a>.<a href="BufferedReadStream.cs.html#821c039371da4a36" class="i method">ReadLineAsync</a>(<a href="#457f0243948607db" class="i property">HeadersLengthLimit</a> - <span class="r9 r">totalSize</span>, <span class="r8 r">cancellationToken</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+            }
+ 
+            <b>return</b> <span class="r10 r">accumulator</span>.<a href="KeyValueAccumulator.cs.html#54d9f1b620bafde8" class="i method">GetResults</a>();
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

@@ -1,0 +1,332 @@
+﻿<!DOCTYPE html>
+<html><head><title>ScanBlobScanLogHybridPollingStrategy.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(323);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs/Listeners/ScanBlobScanLogHybridPollingStrategy.cs" target="_top">Listeners\ScanBlobScanLogHybridPollingStrategy.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs" target="_top">Microsoft.Azure.WebJobs.Extensions.Storage.Blobs\src\Microsoft.Azure.WebJobs.Extensions.Storage.Blobs.csproj</a> (Microsoft.Azure.WebJobs.Extensions.Storage.Blobs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Concurrent</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Linq</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>.<span class="i n">Models</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>.<span class="i n">Specialized</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Common</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Common</span>.<span class="i n">Listeners</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Common</span>.<span class="i n">Timers</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Executors</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Timers</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Logging</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>.<span class="i n">Listeners</span>
+{
+    <b>internal sealed</b> <a href="../P/7ddd8cc1ad49bc4d.html" target="s" class="k">partial</a> <b>class</b> <a id="7ddd8cc1ad49bc4d" href="../R/7ddd8cc1ad49bc4d.html" target="n" data-glyph="2,0" class="t t">ScanBlobScanLogHybridPollingStrategy</a> : <a href="IBlobListenerStrategy.cs.html#528416e145265466" class="t t">IBlobListenerStrategy</a>
+    {
+        <b>private static readonly</b> <span class="i">TimeSpan</span> <a id="dd2cc82fca84ea89" href="../R/dd2cc82fca84ea89.html" target="n" data-glyph="46,1" class="i field">PollingInterval</a> = <span class="i">TimeSpan</span>.<span class="i">FromSeconds</span>(10);
+        <b>private readonly</b> <span class="i">IDictionary</span>&lt;<a href="/Azure.Storage.Blobs/A.html#6bb2c165ee95c7d4" class="t t">BlobContainerClient</a>, <a href="ContainerScanInfo.cs.html#b474883f7313294d" class="t t">ContainerScanInfo</a>&gt; <a id="0b046d873ac9ad4d" href="../R/0b046d873ac9ad4d.html" target="n" data-glyph="46,1" class="i field">_scanInfo</a>;
+        <b>private readonly</b> <span class="i">ConcurrentQueue</span>&lt;<a href="BlobNotification.cs.html#ad593194c333e2bb" class="t t">BlobNotification</a>&gt; <a id="257a3c8e6de6f20f" href="../R/257a3c8e6de6f20f.html" target="n" data-glyph="46,1" class="i field">_blobsFoundFromScanOrNotification</a>;
+        <b>private readonly</b> <span class="i">IWebJobsExceptionHandler</span> <a id="4262fb2cebb60444" href="../R/4262fb2cebb60444.html" target="n" data-glyph="46,1" class="i field">_exceptionHandler</a>;
+        <b>private readonly</b> <span class="i">ILogger</span>&lt;<a href="BlobListener.cs.html#f6072afdd237218d" class="t t">BlobListener</a>&gt; <a id="95f1d95f97ec6fc0" href="../R/95f1d95f97ec6fc0.html" target="n" data-glyph="46,1" class="i field">_logger</a>;
+        <b>private readonly</b> <span class="i">CancellationTokenSource</span> <a id="110b9a74557e51e1" href="../R/110b9a74557e51e1.html" target="n" data-glyph="46,1" class="i field">_cancellationTokenSource</a>;
+        <b>private</b> <a href="IBlobScanInfoManager.cs.html#3c68988d428afdc1" class="t t">IBlobScanInfoManager</a> <a id="274b0f158dfd2bbc" href="../R/274b0f158dfd2bbc.html" target="n" data-glyph="46,1" class="i field">_blobScanInfoManager</a>;
+        <span class="c">// A budget is allocated representing the number of blobs to be listed in a polling</span>
+        <span class="c">// interval, each container will get its share of _scanBlobLimitPerPoll/number of containers.</span>
+        <span class="c">// this share will be listed for each container each polling interval</span>
+        <b>private int</b> <a id="fc1b4dc3026b67ec" href="../R/fc1b4dc3026b67ec.html" target="n" data-glyph="46,1" class="i field">_scanBlobLimitPerPoll</a> = 10000;
+        <b>private</b> <a href="../P/c5b68fb2bddd0de8.html#c5b68fb2bddd0de8" class="t t">PollLogsStrategy</a> <a id="2d339f3e14abae4b" href="../R/2d339f3e14abae4b.html" target="n" data-glyph="46,1" class="i field">_pollLogStrategy</a>;
+        <b>private bool</b> <a id="b37e320b80c8bab5" href="../R/b37e320b80c8bab5.html" target="n" data-glyph="46,1" class="i field">_disposed</a>;
+ 
+        <b>public</b> <a id="777fadff4e303135" href="../R/777fadff4e303135.html" target="n" data-glyph="72,1" class="t constructor">ScanBlobScanLogHybridPollingStrategy</a>(<a href="IBlobScanInfoManager.cs.html#3c68988d428afdc1" class="t t">IBlobScanInfoManager</a> <span id="r0 rd" class="r0 r">blobScanInfoManager</span>, <span class="i">IWebJobsExceptionHandler</span> <span id="r1 rd" class="r1 r">exceptionHandler</span>, <span class="i">ILogger</span>&lt;<a href="BlobListener.cs.html#f6072afdd237218d" class="t t">BlobListener</a>&gt; <span id="r2 rd" class="r2 r">logger</span>) : <b>base</b>()
+        {
+            <a href="#274b0f158dfd2bbc" class="i field">_blobScanInfoManager</a> = <span class="r0 r">blobScanInfoManager</span>;
+            <a href="#0b046d873ac9ad4d" class="i field">_scanInfo</a> = <b>new</b> <span class="i">Dictionary</span>&lt;<a href="/Azure.Storage.Blobs/A.html#6bb2c165ee95c7d4" class="t t">BlobContainerClient</a>, <a href="ContainerScanInfo.cs.html#b474883f7313294d" class="t t">ContainerScanInfo</a>&gt;(<b>new</b> <span class="t">CloudBlobContainerComparer</span>());
+            <a href="#2d339f3e14abae4b" class="i field">_pollLogStrategy</a> = <b>new</b> <a href="PollLogsStrategy.cs.html#36e85c4828f7454b" class="t constructor">PollLogsStrategy</a>(<span class="r1 r">exceptionHandler</span>, <span class="r2 r">logger</span>, <span class="r3 r">performInitialScan</span>: <b>false</b>);
+            <a href="#110b9a74557e51e1" class="i field">_cancellationTokenSource</a> = <b>new</b> <span class="i">CancellationTokenSource</span>();
+            <a href="#257a3c8e6de6f20f" class="i field">_blobsFoundFromScanOrNotification</a> = <b>new</b> <span class="i">ConcurrentQueue</span>&lt;<a href="BlobNotification.cs.html#ad593194c333e2bb" class="t t">BlobNotification</a>&gt;();
+            <a href="#4262fb2cebb60444" class="i field">_exceptionHandler</a> = <span class="r1 r">exceptionHandler</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r1 r">exceptionHandler</span>));
+            <a href="#95f1d95f97ec6fc0" class="i field">_logger</a> = <span class="r2 r">logger</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r2 r">logger</span>));
+        }
+ 
+        <b>public void</b> <a id="b9fc3b43d3c39769" href="../R/b9fc3b43d3c39769.html" target="n" data-glyph="72,1" class="i method">Start</a>()
+        {
+            <a href="#582cc8efe8df5d9e" class="i method">ThrowIfDisposed</a>();
+            <a href="#2d339f3e14abae4b" class="i field">_pollLogStrategy</a>.<a href="PollLogsStrategy.cs.html#1efec28a8bded9c7" class="i method">Start</a>();
+        }
+ 
+        <b>public void</b> <a id="98ba576a911d4bfa" href="../R/98ba576a911d4bfa.html" target="n" data-glyph="72,1" class="i method">Cancel</a>()
+        {
+            <a href="#582cc8efe8df5d9e" class="i method">ThrowIfDisposed</a>();
+            <a href="#2d339f3e14abae4b" class="i field">_pollLogStrategy</a>.<a href="PollLogsStrategy.cs.html#dc6f9cc8287e7560" class="i method">Cancel</a>();
+            <a href="#110b9a74557e51e1" class="i field">_cancellationTokenSource</a>.<span class="i">Cancel</span>();
+        }
+ 
+        <b>public async</b> <span class="i">Task</span> <a id="fcfef9730032fedd" href="../R/fcfef9730032fedd.html" target="n" data-glyph="72,1" class="i method">RegisterAsync</a>(<a href="/Azure.Storage.Blobs/A.html#5c3c4fe54cdb5868" class="t t">BlobServiceClient</a> <span id="r4 rd" class="r4 r">blobServiceClient</span>, <a href="/Azure.Storage.Blobs/A.html#6bb2c165ee95c7d4" class="t t">BlobContainerClient</a> <span id="r5 rd" class="r5 r">container</span>, <a href="../Shared/Listeners/ITriggerExecutor.cs.html#7371353e2f184692" class="t t">ITriggerExecutor</a>&lt;<a href="BlobTriggerExecutorContext.cs.html#082c94806db01159" class="t t">BlobTriggerExecutorContext</a>&gt; <span id="r6 rd" class="r6 r">triggerExecutor</span>, <span class="i">CancellationToken</span> <span id="r7 rd" class="r7 r">cancellationToken</span>)
+        {
+            <span class="c">// Register and Execute are not concurrency-safe.</span>
+            <span class="c">// Avoiding calling Register while Execute is running is the caller&#39;s responsibility.</span>
+            <a href="#582cc8efe8df5d9e" class="i method">ThrowIfDisposed</a>();
+ 
+            <span class="c">// Register all in logPolling, there is no problem if we get 2 notifications of the new blob</span>
+            <b>await</b> <a href="#2d339f3e14abae4b" class="i field">_pollLogStrategy</a>.<a href="PollLogsStrategy.cs.html#3a399ae732f34b37" class="i method">RegisterAsync</a>(<span class="r4 r">blobServiceClient</span>, <span class="r5 r">container</span>, <span class="r6 r">triggerExecutor</span>, <span class="r7 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+            <b>if</b> (!<a href="#0b046d873ac9ad4d" class="i field">_scanInfo</a>.<span class="i">TryGetValue</span>(<span class="r5 r">container</span>, <b>out</b> <a href="ContainerScanInfo.cs.html#b474883f7313294d" class="t t">ContainerScanInfo</a> <span id="r8 rd" class="r8 r">containerScanInfo</span>))
+            {
+                <span class="c">// First, try to load serialized scanInfo for this container.</span>
+                <span class="i">DateTime</span>? <span id="r9 rd" class="r9 r">latestStoredScan</span> = <b>await</b> <a href="#274b0f158dfd2bbc" class="i field">_blobScanInfoManager</a>.<a href="IBlobScanInfoManager.cs.html#ecc8fe144fd951a4" class="i method">LoadLatestScanAsync</a>(<span class="r4 r">blobServiceClient</span>.<a href="/Azure.Storage.Blobs/A.html#c986470f7b7901c4" class="i property">AccountName</a>, <span class="r5 r">container</span>.<a href="/Azure.Storage.Blobs/A.html#a2b6be6038e393b3" class="i property">Name</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <span class="r8 r">containerScanInfo</span> = <b>new</b> <span class="t">ContainerScanInfo</span>()
+                {
+                    <a href="ContainerScanInfo.cs.html#cd42987eba9a2a01" class="i property">Registrations</a> = <b>new</b> <span class="i">List</span>&lt;<a href="../Shared/Listeners/ITriggerExecutor.cs.html#7371353e2f184692" class="t t">ITriggerExecutor</a>&lt;<a href="BlobTriggerExecutorContext.cs.html#082c94806db01159" class="t t">BlobTriggerExecutorContext</a>&gt;&gt;(),
+                    <a href="ContainerScanInfo.cs.html#92e938058dd81d74" class="i property">LastSweepCycleLatestModified</a> = <span class="r9 r">latestStoredScan</span> ?? <span class="i">DateTime</span>.<span class="i">MinValue</span>,
+                    <a href="ContainerScanInfo.cs.html#46dd836ca45ec50e" class="i property">CurrentSweepCycleLatestModified</a> = <span class="i">DateTime</span>.<span class="i">MinValue</span>,
+                    <a href="ContainerScanInfo.cs.html#f065b3d534d2c781" class="i property">ContinuationToken</a> = <b>null</b>
+                };
+ 
+                <a href="ScanBlobScanLogHybridPollingStrategy.Logger.cs.html#8daf57b4d23ded74" class="t t">Logger</a>.<a href="ScanBlobScanLogHybridPollingStrategy.Logger.cs.html#1290fd48b02fafe6" class="i method">InitializedScanInfo</a>(<a href="#95f1d95f97ec6fc0" class="i field">_logger</a>, <span class="r5 r">container</span>.<a href="/Azure.Storage.Blobs/A.html#a2b6be6038e393b3" class="i property">Name</a>, <span class="r8 r">containerScanInfo</span>.<a href="ContainerScanInfo.cs.html#92e938058dd81d74" class="i property">LastSweepCycleLatestModified</a>);
+ 
+                <a href="#0b046d873ac9ad4d" class="i field">_scanInfo</a>.<span class="i">Add</span>(<span class="r5 r">container</span>, <span class="r8 r">containerScanInfo</span>);
+            }
+ 
+            <span class="r8 r">containerScanInfo</span>.<a href="ContainerScanInfo.cs.html#cd42987eba9a2a01" class="i property">Registrations</a>.<span class="i">Add</span>(<span class="r6 r">triggerExecutor</span>);
+        }
+ 
+        <b>public async</b> <span class="i">Task</span>&lt;<a href="../Shared/Timers/TaskSeriesCommandResult.cs.html#82bfc030f4f50a55" class="t t">TaskSeriesCommandResult</a>&gt; <a id="a1ecd196d29e23cf" href="../R/a1ecd196d29e23cf.html" target="n" data-glyph="72,1" class="i method">ExecuteAsync</a>(<span class="i">CancellationToken</span> <span id="r10 rd" class="r10 r">cancellationToken</span>)
+        {
+            <a href="#582cc8efe8df5d9e" class="i method">ThrowIfDisposed</a>();
+ 
+            <span class="i">Task</span> <span id="r11 rd" class="r11 r">logPollingTask</span> = <a href="#2d339f3e14abae4b" class="i field">_pollLogStrategy</a>.<a href="PollLogsStrategy.cs.html#fc2f0d09ed328b5f" class="i method">ExecuteAsync</a>(<span class="r10 r">cancellationToken</span>);
+            <span class="i">List</span>&lt;<a href="BlobNotification.cs.html#ad593194c333e2bb" class="t t">BlobNotification</a>&gt; <span id="r12 rd" class="r12 r">failedNotifications</span> = <b>new</b> <span class="i">List</span>&lt;<a href="BlobNotification.cs.html#ad593194c333e2bb" class="t t">BlobNotification</a>&gt;();
+            <span class="i">List</span>&lt;<span class="i">Task</span>&gt; <span id="r13 rd" class="r13 r">notifications</span> = <b>new</b> <span class="i">List</span>&lt;<span class="i">Task</span>&gt;();
+ 
+            <span class="c">// Drain the background queue of blob written notifications.</span>
+            <b>while</b> (<b>true</b>)
+            {
+                <span class="r10 r">cancellationToken</span>.<span class="i">ThrowIfCancellationRequested</span>();
+ 
+                <b>if</b> (!<a href="#257a3c8e6de6f20f" class="i field">_blobsFoundFromScanOrNotification</a>.<span class="i">TryDequeue</span>(<b>out</b> <a href="BlobNotification.cs.html#ad593194c333e2bb" class="t t">BlobNotification</a> <span id="r14 rd" class="r14 r">failedNotification</span>))
+                {
+                    <b>break</b>;
+                }
+ 
+                <span class="r13 r">notifications</span>.<span class="i">Add</span>(<span class="i">NotifyRegistrationsAsync</span>(<span class="r14 r">failedNotification</span>.<a href="BlobNotification.cs.html#8e0ee1aa6812b0e5" class="i property">Blob</a>, <span class="r12 r">failedNotifications</span>, <span class="r14 r">failedNotification</span>.<a href="BlobNotification.cs.html#65be29d3fa9fed3f" class="i property">PollId</a>, <span class="r10 r">cancellationToken</span>));
+            }
+ 
+            <b>await</b> <span class="i">Task</span>.<span class="i">WhenAll</span>(<span class="r13 r">notifications</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+            <span class="i">List</span>&lt;<span class="i">Task</span>&gt; <span id="r15 rd" class="r15 r">pollingTasks</span> = <b>new</b> <span class="i">List</span>&lt;<span class="i">Task</span>&gt;();
+            <span class="r15 r">pollingTasks</span>.<span class="i">Add</span>(<span class="r11 r">logPollingTask</span>);
+ 
+            <b>foreach</b> (<span class="i">KeyValuePair</span>&lt;<a href="/Azure.Storage.Blobs/A.html#6bb2c165ee95c7d4" class="t t">BlobContainerClient</a>, <a href="ContainerScanInfo.cs.html#b474883f7313294d" class="t t">ContainerScanInfo</a>&gt; <span id="r16 rd" class="r16 r">containerScanInfoPair</span> <b>in</b> <a href="#0b046d873ac9ad4d" class="i field">_scanInfo</a>)
+            {
+                <span class="r15 r">pollingTasks</span>.<span class="i">Add</span>(<span class="i">PollAndNotify</span>(<span class="r16 r">containerScanInfoPair</span>.<span class="i">Key</span>, <span class="r16 r">containerScanInfoPair</span>.<span class="i">Value</span>, <span class="r12 r">failedNotifications</span>, <span class="r10 r">cancellationToken</span>));
+            }
+ 
+            <span class="c">// Re-add any failed notifications for the next iteration.</span>
+            <b>foreach</b> (<b>var</b> <span id="r17 rd" class="r17 r">failedNotification</span> <b>in</b> <span class="r12 r">failedNotifications</span>)
+            {
+                <a href="#257a3c8e6de6f20f" class="i field">_blobsFoundFromScanOrNotification</a>.<span class="i">Enqueue</span>(<span class="r17 r">failedNotification</span>);
+            }
+ 
+            <b>await</b> <span class="i">Task</span>.<span class="i">WhenAll</span>(<span class="r15 r">pollingTasks</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+            <span class="c">// Run subsequent iterations at &quot;_pollingInterval&quot; second intervals.</span>
+            <b>return</b> <b>new</b> <span class="t">TaskSeriesCommandResult</span>(<span class="i">wait</span>: <span class="i">Task</span>.<span class="i">Delay</span>(<a href="#dd2cc82fca84ea89" class="i field">PollingInterval</a>, <span class="i">CancellationToken</span>.<span class="i">None</span>));
+        }
+ 
+        <b>private async</b> <span class="i">Task</span> <a id="f45b6fd4bea3f035" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">PollAndNotify</a>(<a href="/Azure.Storage.Blobs/A.html#6bb2c165ee95c7d4" class="t t">BlobContainerClient</a> <span id="r18 rd" class="r18 r">container</span>, <a href="ContainerScanInfo.cs.html#b474883f7313294d" class="t t">ContainerScanInfo</a> <span id="r19 rd" class="r19 r">containerScanInfo</span>,
+            <span class="i">List</span>&lt;<a href="BlobNotification.cs.html#ad593194c333e2bb" class="t t">BlobNotification</a>&gt; <span id="r20 rd" class="r20 r">failedNotifications</span>, <span class="i">CancellationToken</span> <span id="r21 rd" class="r21 r">cancellationToken</span>)
+        {
+            <span class="r21 r">cancellationToken</span>.<span class="i">ThrowIfCancellationRequested</span>();
+            <span class="i">DateTime</span> <span id="r22 rd" class="r22 r">lastScan</span> = <span class="r19 r">containerScanInfo</span>.<a href="ContainerScanInfo.cs.html#92e938058dd81d74" class="i property">LastSweepCycleLatestModified</a>;
+ 
+            <span class="c">// For tracking</span>
+            <b>string</b> <span id="r23 rd" class="r23 r">clientRequestId</span> = <span class="i">Guid</span>.<span class="i">NewGuid</span>().<span class="i">ToString</span>();
+ 
+            <span class="i">IEnumerable</span>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt; <span id="r24 rd" class="r24 r">newBlobs</span> = <b>await</b> <a href="#2662f473fb1e24e2" class="i method">PollNewBlobsAsync</a>(<span class="r18 r">container</span>, <span class="r19 r">containerScanInfo</span>, <span class="r23 r">clientRequestId</span>, <span class="r21 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+            <b>foreach</b> (<b>var</b> <span id="r25 rd" class="r25 r">newBlob</span> <b>in</b> <span class="r24 r">newBlobs</span>)
+            {
+                <span class="r21 r">cancellationToken</span>.<span class="i">ThrowIfCancellationRequested</span>();
+                <b>await</b> <span class="i">NotifyRegistrationsAsync</span>(<b>new</b> <span class="t">BlobWithContainer</span>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt;(<span class="r18 r">container</span>, <span class="r25 r">newBlob</span>), <span class="r20 r">failedNotifications</span>, <span class="r23 r">clientRequestId</span>, <span class="r21 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+ 
+            <span class="c">// if the &#39;LatestModified&#39; has changed, update it in the manager</span>
+            <b>if</b> (<span class="r19 r">containerScanInfo</span>.<a href="ContainerScanInfo.cs.html#92e938058dd81d74" class="i property">LastSweepCycleLatestModified</a> &gt; <span class="r22 r">lastScan</span>)
+            {
+                <span class="i">DateTime</span> <span id="r26 rd" class="r26 r">latestScan</span> = <span class="r19 r">containerScanInfo</span>.<a href="ContainerScanInfo.cs.html#92e938058dd81d74" class="i property">LastSweepCycleLatestModified</a>;
+ 
+                <span class="c">// It&#39;s possible that we had some blobs that we failed to move to the queue. We want to make sure</span>
+                <span class="c">// we continue to find these if the host needs to restart.</span>
+                <b>if</b> (<span class="r20 r">failedNotifications</span>.<span class="i">Any</span>())
+                {
+                    <span class="c">// TODO (kasobol-msft) this call to GetProperties is suboptimal figure out how to propagate data from listing here.</span>
+                    <span class="r26 r">latestScan</span> = <span class="r20 r">failedNotifications</span>.<span class="i">Select</span>(<span id="r27 rd" class="r27 r">p</span> =&gt; <span class="r27 r">p</span>.<span class="i">Blob</span>).<span class="i">Min</span>(<span id="r28 rd" class="r28 r">n</span> =&gt; <span class="r28 r">n</span>.<span class="i">BlobClient</span>.<span class="i">GetProperties</span>().<span class="i">Value</span>.<span class="i">LastModified</span>.<span class="i">UtcDateTime</span>);
+                }
+ 
+                <span class="c">// Store our timestamp slightly earlier than the last timestamp. This is a failsafe for any blobs that created</span>
+                <span class="c">// milliseconds after our last scan (blob timestamps round to the second). This way we make sure to pick those</span>
+                <span class="c">// up on a host restart.</span>
+                <b>await</b> <a href="#274b0f158dfd2bbc" class="i field">_blobScanInfoManager</a>.<span class="i">UpdateLatestScanAsync</span>(<span class="r18 r">container</span>.<a href="/Azure.Storage.Blobs/A.html#52f2ab122a2623c4" class="i property">AccountName</a>,
+                    <span class="r18 r">container</span>.<a href="/Azure.Storage.Blobs/A.html#a2b6be6038e393b3" class="i property">Name</a>, <span class="r26 r">latestScan</span>.<span class="i">AddMilliseconds</span>(-1)).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+        }
+ 
+        <b>public void</b> <a id="0c61a18665c7395a" href="../R/0c61a18665c7395a.html" target="n" data-glyph="72,1" class="i method">Notify</a>(<a href="../BlobWithContainer.cs.html#062f07c49edbf857" class="t t">BlobWithContainer</a>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt; <span id="r29 rd" class="r29 r">blobWritten</span>)
+        {
+            <a href="#582cc8efe8df5d9e" class="i method">ThrowIfDisposed</a>();
+            <a href="#257a3c8e6de6f20f" class="i field">_blobsFoundFromScanOrNotification</a>.<span class="i">Enqueue</span>(<b>new</b> <a href="BlobNotification.cs.html#c54557161c28f2c7" class="t constructor">BlobNotification</a>(<span class="r29 r">blobWritten</span>, <b>null</b>));
+        }
+ 
+        <b>public void</b> <a id="680fe43bba5f3d9a" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Dispose</a>()
+        {
+            <b>if</b> (!<a href="#b37e320b80c8bab5" class="i field">_disposed</a>)
+            {
+                <a href="#2d339f3e14abae4b" class="i field">_pollLogStrategy</a>.<a href="PollLogsStrategy.cs.html#1ca0aa645fbddb4c" class="i method">Dispose</a>();
+                <a href="#110b9a74557e51e1" class="i field">_cancellationTokenSource</a>.<span class="i">Dispose</span>();
+                <a href="#b37e320b80c8bab5" class="i field">_disposed</a> = <b>true</b>;
+            }
+        }
+ 
+        <b>private void</b> <a id="582cc8efe8df5d9e" href="../R/582cc8efe8df5d9e.html" target="n" data-glyph="76,1" class="i method">ThrowIfDisposed</a>()
+        {
+            <b>if</b> (<a href="#b37e320b80c8bab5" class="i field">_disposed</a>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ObjectDisposedException</span>(<b>null</b>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> This method is called each polling interval for all containers. The method divides the</span>
+        <span class="c">///</span><span class="c"> budget of allocated number of blobs to query, for each container we query a page of</span>
+        <span class="c">///</span><span class="c"> that size and we keep the continuation token for the next time. AS a curser, we use</span>
+        <span class="c">///</span><span class="c"> the time stamp when the current cycle on the container started. blobs newer than that</span>
+        <span class="c">///</span><span class="c"> time will be considered new and registrations will be notified</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r30 r">container</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r31 r">containerScanInfo</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c"> Information that includes the last cycle start</span>
+        <span class="c">///</span><span class="c"> the continuation token and the current cycle start for a container</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r32 r">clientRequestId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r33 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public async</b> <span class="i">Task</span>&lt;<span class="i">IEnumerable</span>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt;&gt; <a id="2662f473fb1e24e2" href="../R/2662f473fb1e24e2.html" target="n" data-glyph="72,1" class="i method">PollNewBlobsAsync</a>(
+            <a href="/Azure.Storage.Blobs/A.html#6bb2c165ee95c7d4" class="t t">BlobContainerClient</a> <span id="r30 rd" class="r30 r">container</span>, <a href="ContainerScanInfo.cs.html#b474883f7313294d" class="t t">ContainerScanInfo</a> <span id="r31 rd" class="r31 r">containerScanInfo</span>, <b>string</b> <span id="r32 rd" class="r32 r">clientRequestId</span>, <span class="i">CancellationToken</span> <span id="r33 rd" class="r33 r">cancellationToken</span>)
+        {
+            <span class="i">IEnumerable</span>&lt;<a href="/Azure.Storage.Blobs/A.html#8029f8268c3df23c" class="t t">BlobItem</a>&gt; <span id="r34 rd" class="r34 r">currentBlobs</span>;
+            <b>int</b> <span id="r35 rd" class="r35 r">blobPollLimitPerContainer</span> = <a href="#fc1b4dc3026b67ec" class="i field">_scanBlobLimitPerPoll</a> / <a href="#0b046d873ac9ad4d" class="i field">_scanInfo</a>.<span class="i">Count</span>;
+            <b>string</b> <span id="r36 rd" class="r36 r">continuationToken</span> = <span class="r31 r">containerScanInfo</span>.<a href="ContainerScanInfo.cs.html#f065b3d534d2c781" class="i property">ContinuationToken</a>;
+            <span class="i">Page</span>&lt;<a href="/Azure.Storage.Blobs/A.html#8029f8268c3df23c" class="t t">BlobItem</a>&gt; <span id="r37 rd" class="r37 r">page</span>;
+ 
+            <span class="c">// if starting the cycle, reset the sweep time</span>
+            <b>if</b> (<span class="r36 r">continuationToken</span> == <b>null</b>)
+            {
+                <span class="r31 r">containerScanInfo</span>.<a href="ContainerScanInfo.cs.html#46dd836ca45ec50e" class="i property">CurrentSweepCycleLatestModified</a> = <span class="i">DateTime</span>.<span class="i">MinValue</span>;
+            }
+ 
+            <span class="i">Stopwatch</span> <span id="r38 rd" class="r38 r">sw</span> = <span class="i">Stopwatch</span>.<span class="i">StartNew</span>();
+            <b>try</b>
+            {
+                <span class="i">AsyncPageable</span>&lt;<a href="/Azure.Storage.Blobs/A.html#8029f8268c3df23c" class="t t">BlobItem</a>&gt; <span id="r39 rd" class="r39 r">blobsAsyncPageable</span> = <span class="r30 r">container</span>.<span class="i">GetBlobsAsync</span>(<span class="i">cancellationToken</span>: <span class="r33 r">cancellationToken</span>);
+                <span class="i">IAsyncEnumerable</span>&lt;<span class="i">Page</span>&lt;<a href="/Azure.Storage.Blobs/A.html#8029f8268c3df23c" class="t t">BlobItem</a>&gt;&gt; <span id="r40 rd" class="r40 r">pages</span> = <span class="r39 r">blobsAsyncPageable</span>.<span class="i">AsPages</span>(<span class="i">continuationToken</span>: <span class="r36 r">continuationToken</span>, <span class="i">pageSizeHint</span>: <span class="r35 r">blobPollLimitPerContainer</span>);
+                <span class="i">IAsyncEnumerator</span>&lt;<span class="i">Page</span>&lt;<a href="/Azure.Storage.Blobs/A.html#8029f8268c3df23c" class="t t">BlobItem</a>&gt;&gt; <span id="r41 rd" class="r41 r">pagesEnumerator</span> = <span class="r40 r">pages</span>.<span class="i">GetAsyncEnumerator</span>(<span class="r33 r">cancellationToken</span>);
+                <b>if</b> (<b>await</b> <span class="r41 r">pagesEnumerator</span>.<span class="i">MoveNextAsync</span>().<span class="i">ConfigureAwait</span>(<b>false</b>))
+                {
+                    <span class="r37 r">page</span> = <span class="r41 r">pagesEnumerator</span>.<span class="i">Current</span>;
+                    <span class="r34 r">currentBlobs</span> = <span class="r37 r">page</span>.<span class="i">Values</span>;
+                }
+                <b>else</b>
+                {
+                    <b>return</b> <span class="i">Enumerable</span>.<span class="i">Empty</span>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt;();
+                }
+            }
+            <b>catch</b> (<span class="i">RequestFailedException</span> <span id="r42 rd" class="r42 r">exception</span>)
+            {
+                <b>if</b> (<span class="r42 r">exception</span>.<a href="../Shared/RequestFailedExceptionExtensions.cs.html#4e36af4b2555233e" class="i method">IsNotFound</a>())
+                {
+                    <a href="ScanBlobScanLogHybridPollingStrategy.Logger.cs.html#8daf57b4d23ded74" class="t t">Logger</a>.<a href="ScanBlobScanLogHybridPollingStrategy.Logger.cs.html#cf23051de4317327" class="i method">ContainerDoesNotExist</a>(<a href="#95f1d95f97ec6fc0" class="i field">_logger</a>, <span class="r30 r">container</span>.<a href="/Azure.Storage.Blobs/A.html#a2b6be6038e393b3" class="i property">Name</a>);
+                    <b>return</b> <span class="i">Enumerable</span>.<span class="i">Empty</span>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt;();
+                }
+                <b>else</b>
+                {
+                    <b>throw</b>;
+                }
+            }
+ 
+            <span class="i">List</span>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt; <span id="r43 rd" class="r43 r">newBlobs</span> = <b>new</b> <span class="i">List</span>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt;();
+ 
+            <span class="c">// Type cast to IStorageBlob is safe due to useFlatBlobListing: true above.</span>
+            <b>foreach</b> (<a href="/Azure.Storage.Blobs/A.html#8029f8268c3df23c" class="t t">BlobItem</a> <span id="r44 rd" class="r44 r">currentBlob</span> <b>in</b> <span class="r34 r">currentBlobs</span>)
+            {
+                <span class="r33 r">cancellationToken</span>.<span class="i">ThrowIfCancellationRequested</span>();
+ 
+                <a href="/Azure.Storage.Blobs/A.html#941af435ad7e1c11" class="k">var</a> <span id="r45 rd" class="r45 r">properties</span> = <span class="r44 r">currentBlob</span>.<a href="/Azure.Storage.Blobs/A.html#6988ec92b10f0e2d" class="i property">Properties</a>;
+                <span class="i">DateTime</span> <span id="r46 rd" class="r46 r">lastModifiedTimestamp</span> = <span class="r45 r">properties</span>.<a href="/Azure.Storage.Blobs/A.html#435dde97a5a28281" class="i property">LastModified</a>.<span class="i">Value</span>.<span class="i">UtcDateTime</span>;
+ 
+                <b>if</b> (<span class="r46 r">lastModifiedTimestamp</span> &gt; <span class="r31 r">containerScanInfo</span>.<a href="ContainerScanInfo.cs.html#46dd836ca45ec50e" class="i property">CurrentSweepCycleLatestModified</a>)
+                {
+                    <span class="r31 r">containerScanInfo</span>.<a href="ContainerScanInfo.cs.html#46dd836ca45ec50e" class="i property">CurrentSweepCycleLatestModified</a> = <span class="r46 r">lastModifiedTimestamp</span>;
+                }
+ 
+                <span class="c">// Blob timestamps are rounded to the nearest second, so make sure we continue to check</span>
+                <span class="c">// the previous timestamp to catch any blobs that came in slightly after our previous poll.</span>
+                <b>if</b> (<span class="r46 r">lastModifiedTimestamp</span> &gt;= <span class="r31 r">containerScanInfo</span>.<a href="ContainerScanInfo.cs.html#92e938058dd81d74" class="i property">LastSweepCycleLatestModified</a>)
+                {
+                    <span class="r43 r">newBlobs</span>.<span class="i">Add</span>(<span class="r30 r">container</span>.<span class="i">GetBlobClient</span>(<span class="r44 r">currentBlob</span>.<a href="/Azure.Storage.Blobs/A.html#1c486ee7e34147b4" class="i property">Name</a>));
+                }
+            }
+ 
+            <a href="ScanBlobScanLogHybridPollingStrategy.Logger.cs.html#8daf57b4d23ded74" class="t t">Logger</a>.<span class="i">PollBlobContainer</span>(<a href="#95f1d95f97ec6fc0" class="i field">_logger</a>, <span class="r30 r">container</span>.<a href="/Azure.Storage.Blobs/A.html#a2b6be6038e393b3" class="i property">Name</a>, <span class="r31 r">containerScanInfo</span>.<a href="ContainerScanInfo.cs.html#92e938058dd81d74" class="i property">LastSweepCycleLatestModified</a>, <span class="r32 r">clientRequestId</span>,
+                <span class="r43 r">newBlobs</span>.<span class="i">Count</span>, <span class="r38 r">sw</span>.<span class="i">ElapsedMilliseconds</span>, !<b>string</b>.<span class="i">IsNullOrWhiteSpace</span>(<span class="r37 r">page</span>.<span class="i">ContinuationToken</span>));
+ 
+            <span class="c">// record continuation token for next chunk retrieval</span>
+            <span class="r31 r">containerScanInfo</span>.<a href="ContainerScanInfo.cs.html#f065b3d534d2c781" class="i property">ContinuationToken</a> = <span class="r37 r">page</span>.<span class="i">ContinuationToken</span>;
+ 
+            <span class="c">// if ending a cycle then copy currentSweepCycleStartTime to lastSweepCycleStartTime, if changed</span>
+            <b>if</b> (<span class="r37 r">page</span>.<span class="i">ContinuationToken</span> == <b>null</b> &amp;&amp;
+                <span class="r31 r">containerScanInfo</span>.<a href="ContainerScanInfo.cs.html#46dd836ca45ec50e" class="i property">CurrentSweepCycleLatestModified</a> &gt; <span class="r31 r">containerScanInfo</span>.<a href="ContainerScanInfo.cs.html#92e938058dd81d74" class="i property">LastSweepCycleLatestModified</a>)
+            {
+                <span class="r31 r">containerScanInfo</span>.<a href="ContainerScanInfo.cs.html#92e938058dd81d74" class="i property">LastSweepCycleLatestModified</a> = <span class="r31 r">containerScanInfo</span>.<a href="ContainerScanInfo.cs.html#46dd836ca45ec50e" class="i property">CurrentSweepCycleLatestModified</a>;
+            }
+ 
+            <b>return</b> <span class="r43 r">newBlobs</span>;
+        }
+ 
+        <b>private async</b> <span class="i">Task</span> <a id="1dca67739f387bad" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">NotifyRegistrationsAsync</a>(<a href="../BlobWithContainer.cs.html#062f07c49edbf857" class="t t">BlobWithContainer</a>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt; <span id="r47 rd" class="r47 r">blob</span>, <span class="i">ICollection</span>&lt;<a href="BlobNotification.cs.html#ad593194c333e2bb" class="t t">BlobNotification</a>&gt; <span id="r48 rd" class="r48 r">failedNotifications</span>, <b>string</b> <span id="r49 rd" class="r49 r">clientRequestId</span>, <span class="i">CancellationToken</span> <span id="r50 rd" class="r50 r">cancellationToken</span>)
+        {
+            <span class="c">// Blob written notifications are host-wide, so filter out things that aren&#39;t in the container list.</span>
+            <b>if</b> (!<a href="#0b046d873ac9ad4d" class="i field">_scanInfo</a>.<span class="i">TryGetValue</span>(<span class="r47 r">blob</span>.<a href="../BlobWithContainer.cs.html#d4310a0855722634" class="i property">BlobContainerClient</a>, <b>out</b> <a href="ContainerScanInfo.cs.html#b474883f7313294d" class="t t">ContainerScanInfo</a> <span id="r51 rd" class="r51 r">containerScanInfo</span>))
+            {
+                <b>return</b>;
+            }
+ 
+            <b>foreach</b> (<a href="../Shared/Listeners/ITriggerExecutor.cs.html#7371353e2f184692" class="t t">ITriggerExecutor</a>&lt;<a href="BlobTriggerExecutorContext.cs.html#082c94806db01159" class="t t">BlobTriggerExecutorContext</a>&gt; <span id="r52 rd" class="r52 r">registration</span> <b>in</b> <span class="r51 r">containerScanInfo</span>.<a href="ContainerScanInfo.cs.html#cd42987eba9a2a01" class="i property">Registrations</a>)
+            {
+                <span class="r50 r">cancellationToken</span>.<span class="i">ThrowIfCancellationRequested</span>();
+ 
+                <a href="BlobTriggerExecutorContext.cs.html#082c94806db01159" class="t t">BlobTriggerExecutorContext</a> <span id="r53 rd" class="r53 r">context</span> = <b>new</b> <span class="t">BlobTriggerExecutorContext</span>
+                {
+                    <a href="BlobTriggerExecutorContext.cs.html#77ab4d235fdc4693" class="i property">Blob</a> = <span class="r47 r">blob</span>,
+                    <a href="BlobTriggerExecutorContext.cs.html#900f32443c7a41c2" class="i property">PollId</a> = <span class="r49 r">clientRequestId</span>,
+                    <a href="BlobTriggerExecutorContext.cs.html#09678fddb71cf595" class="i property">TriggerSource</a> = <a href="BlobTriggerScanSource.cs.html#b885eb1843a6758f" class="t t">BlobTriggerScanSource</a>.<a href="BlobTriggerScanSource.cs.html#8273f3045f6d806e" class="i field">ContainerScan</a>
+                };
+ 
+                <span class="i">FunctionResult</span> <span id="r54 rd" class="r54 r">result</span> = <b>await</b> <span class="r52 r">registration</span>.<a href="../Shared/Listeners/ITriggerExecutor.cs.html#7022f6d9e9487c01" class="i method">ExecuteAsync</a>(<span class="r53 r">context</span>, <span class="r50 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <b>if</b> (!<span class="r54 r">result</span>.<span class="i">Succeeded</span>)
+                {
+                    <span class="c">// If notification failed, try again on the next iteration.</span>
+                    <span class="r48 r">failedNotifications</span>.<span class="i">Add</span>(<b>new</b> <a href="BlobNotification.cs.html#c54557161c28f2c7" class="t constructor">BlobNotification</a>(<span class="r47 r">blob</span>, <span class="r49 r">clientRequestId</span>));
+                }
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

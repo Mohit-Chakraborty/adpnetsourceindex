@@ -1,0 +1,195 @@
+﻿<!DOCTYPE html>
+<html><head><title>BasicRetryPolicy.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(186);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Messaging.ServiceBus/Core/BasicRetryPolicy.cs" target="_top">Core\BasicRetryPolicy.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Messaging.ServiceBus" target="_top">src\Azure.Messaging.ServiceBus.csproj</a> (Azure.Messaging.ServiceBus)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Globalization</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Net</span>.<span class="i">Sockets</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Transactions</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>.<span class="i n">Core</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">   The default retry policy for the Service Bus client library, respecting the</span>
+    <span class="c">///</span><span class="c">   configuration specified as a set of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Primitives/ServiceBusRetryOptions.cs.html#f405da36db2d38b0" class="t t">ServiceBusRetryOptions</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Primitives/ServiceBusRetryOptions.cs.html#f405da36db2d38b0" class="t t">ServiceBusRetryOptions</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+    <span class="c">///</span>
+    <b>internal class</b> <a id="a8f770f2a264ea46" href="../R/a8f770f2a264ea46.html" target="n" data-glyph="2,0" class="t t">BasicRetryPolicy</a> : <a href="../Primitives/ServiceBusRetryPolicy.cs.html#d0d6be7ac57eb9c9" class="t t">ServiceBusRetryPolicy</a>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The seed to use for initializing random number generated for a given thread-specific instance.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static int</b> <a id="3161b94c80e82b40" href="../R/3161b94c80e82b40.html" target="n" data-glyph="46,1" class="i field">s_randomSeed</a> = <span class="i">Environment</span>.<span class="i">TickCount</span>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The random number generator to use for a specific thread.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static readonly</b> <span class="i">ThreadLocal</span>&lt;<span class="i">Random</span>&gt; <a id="862d6b6dd899fd02" href="../R/862d6b6dd899fd02.html" target="n" data-glyph="46,1" class="i field">RandomNumberGenerator</a> = <b>new</b> <span class="i">ThreadLocal</span>&lt;<span class="i">Random</span>&gt;(() =&gt; <b>new</b> <span class="i">Random</span>(<span class="i">Interlocked</span>.<span class="i">Increment</span>(<b>ref</b> <a href="#3161b94c80e82b40" class="i field">s_randomSeed</a>)), <b>false</b>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The set of options responsible for configuring the retry</span>
+        <span class="c">///</span><span class="c">   behavior.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a href="../Primitives/ServiceBusRetryOptions.cs.html#f405da36db2d38b0" class="t t">ServiceBusRetryOptions</a> <a id="8b1b8f6ad90180d0" href="../R/8b1b8f6ad90180d0.html" target="n" data-glyph="102,1" class="i property">Options</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The factor to apply to the base delay for use as a base jitter value.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span><span class="c">This factor is used as the basis for random jitter to apply to the calculated retry duration.</span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public double</b> <a id="4e97504afd079aea" href="../R/4e97504afd079aea.html" target="n" data-glyph="102,1" class="i property">JitterFactor</a> { <b>get</b>; } = 0.08;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#a8f770f2a264ea46" class="t t">BasicRetryPolicy</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">retryOptions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The options which control the retry approach.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="fd7bf6a4a0b138a1" href="../R/fd7bf6a4a0b138a1.html" target="n" data-glyph="72,1" class="t constructor">BasicRetryPolicy</a>(<a href="../Primitives/ServiceBusRetryOptions.cs.html#f405da36db2d38b0" class="t t">ServiceBusRetryOptions</a> <span id="r0 rd" class="r0 r">retryOptions</span>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r0 r">retryOptions</span>, <b>nameof</b>(<span class="r0 r">retryOptions</span>));
+            <a href="#8b1b8f6ad90180d0" class="i property">Options</a> = <span class="r0 r">retryOptions</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Calculates the amount of time to allow the current attempt for an operation to</span>
+        <span class="c">///</span><span class="c">   complete before considering it to be timed out.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">attemptCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The number of total attempts that have been made, including the initial attempt before any retries.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The amount of time to allow for an operation to complete.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override</b> <span class="i">TimeSpan</span> <a id="357a0e58978f4ba6" href="../R/357a0e58978f4ba6.html" target="n" data-glyph="72,1" class="i method">CalculateTryTimeout</a>(<b>int</b> <span id="r1 rd" class="r1 r">attemptCount</span>) =&gt; <a href="#8b1b8f6ad90180d0" class="i property">Options</a>.<a href="../Primitives/ServiceBusRetryOptions.cs.html#cdf1b0ed863b1af5" class="i property">TryTimeout</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Calculates the amount of time to wait before another attempt should be made.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">lastException</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The last exception that was observed for the operation to be retried.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">attemptCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The number of total attempts that have been made, including the initial attempt before any retries.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The amount of time to delay before retrying the associated operation; if </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">, then the operation is no longer eligible to be retried.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override</b> <span class="i">TimeSpan</span>? <a id="019f062a80717c2e" href="../R/019f062a80717c2e.html" target="n" data-glyph="72,1" class="i method">CalculateRetryDelay</a>(
+            <span class="i">Exception</span> <span id="r2 rd" class="r2 r">lastException</span>,
+            <b>int</b> <span id="r3 rd" class="r3 r">attemptCount</span>)
+        {
+            <b>if</b> ((<a href="#8b1b8f6ad90180d0" class="i property">Options</a>.<a href="../Primitives/ServiceBusRetryOptions.cs.html#903729caa62a94c3" class="i property">MaxRetries</a> &lt;= 0)
+                || (<a href="#8b1b8f6ad90180d0" class="i property">Options</a>.<a href="../Primitives/ServiceBusRetryOptions.cs.html#a807a2c339100a71" class="i property">Delay</a> == <span class="i">TimeSpan</span>.<span class="i">Zero</span>)
+                || (<a href="#8b1b8f6ad90180d0" class="i property">Options</a>.<a href="../Primitives/ServiceBusRetryOptions.cs.html#5d74adab07b6f215" class="i property">MaxDelay</a> == <span class="i">TimeSpan</span>.<span class="i">Zero</span>)
+                || (<span class="r3 r">attemptCount</span> &gt; <a href="#8b1b8f6ad90180d0" class="i property">Options</a>.<a href="../Primitives/ServiceBusRetryOptions.cs.html#903729caa62a94c3" class="i property">MaxRetries</a>)
+                || (!<a href="#de1f5f3bd0d123a2" class="i method">ShouldRetryException</a>(<span class="r2 r">lastException</span>)))
+            {
+                <b>return</b> <b>null</b>;
+            }
+ 
+            <b>var</b> <span id="r4 rd" class="r4 r">baseJitterSeconds</span> = (<a href="#8b1b8f6ad90180d0" class="i property">Options</a>.<a href="../Primitives/ServiceBusRetryOptions.cs.html#a807a2c339100a71" class="i property">Delay</a>.<span class="i">TotalSeconds</span> * <a href="#4e97504afd079aea" class="i property">JitterFactor</a>);
+ 
+            <span class="i">TimeSpan</span> <span id="r5 rd" class="r5 r">retryDelay</span> = <a href="#8b1b8f6ad90180d0" class="i property">Options</a>.<a href="../Primitives/ServiceBusRetryOptions.cs.html#00f7139f0d242e8b" class="i property">Mode</a> <b>switch</b>
+            {
+                <a href="../Primitives/ServiceBusRetryMode.cs.html#27a44d4e573916f9" class="t t">ServiceBusRetryMode</a>.<a href="../Primitives/ServiceBusRetryMode.cs.html#1c4d9ea947a678a3" class="i field">Fixed</a> =&gt; <span class="i">CalculateFixedDelay</span>(<a href="#8b1b8f6ad90180d0" class="i property">Options</a>.<a href="../Primitives/ServiceBusRetryOptions.cs.html#a807a2c339100a71" class="i property">Delay</a>.<span class="i">TotalSeconds</span>, <span class="r4 r">baseJitterSeconds</span>, <a href="#862d6b6dd899fd02" class="i field">RandomNumberGenerator</a>.<span class="i">Value</span>),
+                <a href="../Primitives/ServiceBusRetryMode.cs.html#27a44d4e573916f9" class="t t">ServiceBusRetryMode</a>.<a href="../Primitives/ServiceBusRetryMode.cs.html#6b092805dbeeb5da" class="i field">Exponential</a> =&gt; <span class="i">CalculateExponentialDelay</span>(<span class="r3 r">attemptCount</span>, <a href="#8b1b8f6ad90180d0" class="i property">Options</a>.<a href="../Primitives/ServiceBusRetryOptions.cs.html#a807a2c339100a71" class="i property">Delay</a>.<span class="i">TotalSeconds</span>, <span class="r4 r">baseJitterSeconds</span>, <a href="#862d6b6dd899fd02" class="i field">RandomNumberGenerator</a>.<span class="i">Value</span>),
+                <b>_</b> =&gt; <b>throw</b> <b>new</b> <span class="i">NotSupportedException</span>(<b>string</b>.<span class="i">Format</span>(<span class="i">CultureInfo</span>.<span class="i">CurrentCulture</span>, <a href="../Resources.Designer.cs.html#7e6b2ac45384f6a8" class="t t">Resources</a>.<a href="../Resources.Designer.cs.html#4af86c32765a1762" class="i property">UnknownRetryMode</a>, <a href="#8b1b8f6ad90180d0" class="i property">Options</a>.<a href="../Primitives/ServiceBusRetryOptions.cs.html#00f7139f0d242e8b" class="i property">Mode</a>.<span class="i">ToString</span>())),
+            };
+ 
+            <span class="c">// Adjust the delay, if needed, to keep within the maximum</span>
+            <span class="c">// duration.</span>
+ 
+            <b>if</b> (<a href="#8b1b8f6ad90180d0" class="i property">Options</a>.<a href="../Primitives/ServiceBusRetryOptions.cs.html#5d74adab07b6f215" class="i property">MaxDelay</a> &lt; <span class="r5 r">retryDelay</span>)
+            {
+                <b>return</b> <a href="#8b1b8f6ad90180d0" class="i property">Options</a>.<a href="../Primitives/ServiceBusRetryOptions.cs.html#5d74adab07b6f215" class="i property">MaxDelay</a>;
+            }
+ 
+            <b>return</b> <span class="r5 r">retryDelay</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Determines if an exception should be retried.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">exception</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The exception to consider.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> to retry the exception; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static bool</b> <a id="de1f5f3bd0d123a2" href="../R/de1f5f3bd0d123a2.html" target="n" data-glyph="76,1" class="i method">ShouldRetryException</a>(<span class="i">Exception</span> <span id="r6 rd" class="r6 r">exception</span>)
+        {
+            <span class="c">// There&#39;s there&#39;s an ambient transaction - should not retry</span>
+            <b>if</b> (<span class="i">Transaction</span>.<span class="i">Current</span> != <b>null</b>)
+            {
+                <b>return</b> <b>false</b>;
+            }
+ 
+            <b>if</b> ((<span class="r6 r">exception</span> <b>is</b> <span class="i">TaskCanceledException</span>) || (<span class="r6 r">exception</span> <b>is</b> <span class="i">OperationCanceledException</span>))
+            {
+                <span class="r6 r">exception</span> = <span class="r6 r">exception</span>?.<span class="i">InnerException</span>;
+            }
+            <b>else</b> <b>if</b> (<span class="r6 r">exception</span> <b>is</b> <span class="i">AggregateException</span> <span id="r7 rd" class="r7 r">aggregateEx</span>)
+            {
+                <span class="r6 r">exception</span> = <span class="r7 r">aggregateEx</span>?.<span class="i">Flatten</span>().<span class="i">InnerException</span>;
+            }
+ 
+            <b>switch</b> (<span class="r6 r">exception</span>)
+            {
+                <b>case</b> <b>null</b>:
+                    <b>return</b> <b>false</b>;
+ 
+                <b>case</b> <a href="../Primitives/ServiceBusException.cs.html#a5716ddcbc4510f2" class="t t">ServiceBusException</a> <span id="r8 rd" class="r8 r">ex</span>:
+                    <b>return</b> <span class="r8 r">ex</span>.<a href="../Primitives/ServiceBusException.cs.html#67d00fe10885d8e7" class="i property">IsTransient</a>;
+ 
+                <b>case</b> <span class="i">TimeoutException</span> <b>_</b>:
+                <b>case</b> <span class="i">SocketException</span> <b>_</b>:
+                    <b>return</b> <b>true</b>;
+ 
+                <b>default</b>:
+                    <b>return</b> <b>false</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Calculates the delay for an exponential backoff.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">attemptCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The number of total attempts that have been made, including the initial attempt before any retries.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r10 r">baseDelaySeconds</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The delay to use as a basis for the exponential backoff, in seconds.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r11 r">baseJitterSeconds</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The delay to use as the basis for a random jitter value, in seconds.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">random</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The random number generator to use for the calculation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The recommended duration to delay before retrying; this value does not take the maximum delay or eligibility for retry into account.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static</b> <span class="i">TimeSpan</span> <a id="67f8ed7d7659040a" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">CalculateExponentialDelay</a>(
+            <b>int</b> <span id="r9 rd" class="r9 r">attemptCount</span>,
+            <b>double</b> <span id="r10 rd" class="r10 r">baseDelaySeconds</span>,
+            <b>double</b> <span id="r11 rd" class="r11 r">baseJitterSeconds</span>,
+            <span class="i">Random</span> <span id="r12 rd" class="r12 r">random</span>) =&gt;
+            <span class="i">TimeSpan</span>.<span class="i">FromSeconds</span>((<span class="i">Math</span>.<span class="i">Pow</span>(2, <span class="r9 r">attemptCount</span>) * <span class="r10 r">baseDelaySeconds</span>) + (<span class="r12 r">random</span>.<span class="i">NextDouble</span>() * <span class="r11 r">baseJitterSeconds</span>));
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Calculates the delay for a fixed backoff.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">baseDelaySeconds</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The delay to use as a basis for the fixed backoff, in seconds.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r14 r">baseJitterSeconds</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The delay to use as the basis for a random jitter value, in seconds.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">random</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The random number generator to use for the calculation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The recommended duration to delay before retrying; this value does not take the maximum delay or eligibility for retry into account.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static</b> <span class="i">TimeSpan</span> <a id="63a2473230c4395a" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">CalculateFixedDelay</a>(
+            <b>double</b> <span id="r13 rd" class="r13 r">baseDelaySeconds</span>,
+            <b>double</b> <span id="r14 rd" class="r14 r">baseJitterSeconds</span>,
+            <span class="i">Random</span> <span id="r15 rd" class="r15 r">random</span>) =&gt;
+            <span class="i">TimeSpan</span>.<span class="i">FromSeconds</span>(<span class="r13 r">baseDelaySeconds</span> + (<span class="r15 r">random</span>.<span class="i">NextDouble</span>() * <span class="r14 r">baseJitterSeconds</span>));
+    }
+}
+</pre></td></tr></table></div></body></html>

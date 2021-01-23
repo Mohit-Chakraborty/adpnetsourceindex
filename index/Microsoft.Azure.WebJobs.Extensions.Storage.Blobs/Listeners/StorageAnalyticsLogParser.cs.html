@@ -1,0 +1,188 @@
+﻿<!DOCTYPE html>
+<html><head><title>StorageAnalyticsLogParser.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(179);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs/Listeners/StorageAnalyticsLogParser.cs" target="_top">Listeners\StorageAnalyticsLogParser.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs" target="_top">Microsoft.Azure.WebJobs.Extensions.Storage.Blobs\src\Microsoft.Azure.WebJobs.Extensions.Storage.Blobs.csproj</a> (Microsoft.Azure.WebJobs.Extensions.Storage.Blobs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Globalization</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">IO</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Linq</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Net</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Text</span>.<span class="i">RegularExpressions</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>.<span class="i n">Specialized</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Logging</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>.<span class="i n">Listeners</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Implements parsing of Storage Analytics Log file.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Storage Analytics Log Format defined at </span><span class="c">&lt;</span><span class="c">a</span> <span class="c">href</span><span class="c">=</span><span class="c">&quot;</span><span class="c">http://msdn.microsoft.com/en-us/library/windowsazure/hh343259.aspx</span><span class="c">&quot;</span><span class="c">/&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="bcc233e3887e9b87" href="../R/bcc233e3887e9b87.html" target="n" data-glyph="2,0" class="t t">StorageAnalyticsLogParser</a>
+    {
+        <b>private const string</b> <a id="4d39516e691946b6" href="../R/4d39516e691946b6.html" target="n" data-glyph="10,1" class="i field">FieldPattern</a> =
+            <span class="c">// x - ignore whitespace and comments.</span>
+            <span class="c">// n - do not capture unnamed groups.</span>
+            <span class="s">@&quot;(?xn)&quot;</span> +
+            <span class="c">// Non-capturing group</span>
+            <span class="c">// asserts position at start of the string, or</span>
+            <span class="c">// matches the character ; literally</span>
+            <span class="s">@&quot;(^|;)&quot;</span> +
+            <span class="c">// Non-capturing group</span>
+            <span class="s">&quot;(&quot;</span> +
+            <span class="c">// 1st Alternative of named capturing group field:</span>
+            <span class="c">// greedy match of &quot; embraced sequence of 0 to unlimited number of characters</span>
+            <span class="s">@&quot;&quot;&quot;(?&lt;field&gt;[^&quot;&quot;]*)&quot;&quot; | &quot;</span> +
+            <span class="c">// 2nd Alternative of named capturing group field:</span>
+            <span class="c">// greedy match of zero to unlimited number of characters not present in the list below</span>
+            <span class="s">@&quot;(?&lt;field&gt;[^;&quot;&quot;]*)&quot;</span> +
+            <span class="s">@&quot;)&quot;</span> +
+            <span class="c">// Positive Lookahead - Assert that the regex below can be matched</span>
+            <span class="c">// matches the character ; literally, or</span>
+            <span class="c">// asserts position at end of the string</span>
+            <span class="s">@&quot;(?=;|$)&quot;</span>;
+ 
+        <b>private const int</b> <a id="08266bce7fa469c2" href="../R/08266bce7fa469c2.html" target="n" data-glyph="10,1" class="i field">ColumnCount</a> = (<b>int</b>)<a href="StorageAnalyticsLogColumnId.cs.html#0604ae05f5d7b3d0" class="t t">StorageAnalyticsLogColumnId</a>.<a href="StorageAnalyticsLogColumnId.cs.html#6e3b2a6c77b5dc02" class="i field">LastColumn</a> + 1;
+ 
+        <b>private readonly</b> <span class="i">Version</span> <a id="82e76554969b6507" href="../R/82e76554969b6507.html" target="n" data-glyph="46,1" class="i field">supportedVersion</a> = <b>new</b> <span class="i">Version</span>(1, 0);
+ 
+        <b>private readonly</b> <span class="i">Regex</span> <a id="e1dde0842be707ce" href="../R/e1dde0842be707ce.html" target="n" data-glyph="46,1" class="i field">_compiledRegex</a>;
+        <b>private readonly</b> <span class="i">ILogger</span>&lt;<a href="BlobListener.cs.html#f6072afdd237218d" class="t t">BlobListener</a>&gt; <a id="e63239426df0c063" href="../R/e63239426df0c063.html" target="n" data-glyph="46,1" class="i field">_logger</a>;
+ 
+        <b>public</b> <a id="02a39a60550be557" href="../R/02a39a60550be557.html" target="n" data-glyph="72,1" class="t constructor">StorageAnalyticsLogParser</a>(<span class="i">ILogger</span>&lt;<a href="BlobListener.cs.html#f6072afdd237218d" class="t t">BlobListener</a>&gt; <span id="r0 rd" class="r0 r">logger</span>)
+        {
+            <a href="#e1dde0842be707ce" class="i field">_compiledRegex</a> = <b>new</b> <span class="i">Regex</span>(<a href="#4d39516e691946b6" class="i field">FieldPattern</a>, <span class="i">RegexOptions</span>.<span class="i">Compiled</span>);
+            <a href="#e63239426df0c063" class="i field">_logger</a> = <span class="r0 r">logger</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r0 r">logger</span>));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Given a log file (as a blob), parses it and return a collection of log entries matching version 1.0</span>
+        <span class="c">///</span><span class="c"> of the Storage Analytics Log Format.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">blob</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Object representing a cloud blob with Storage Analytics log content.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A token to monitor for cancellation request.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Collection of successfully parsed log entries.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">FormatException</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">If unable to parse a line in given log.</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="StorageAnalyticsLogEntry.cs.html#d4c021e95eda3c8f" class="t t">StorageAnalyticsLogEntry</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The method scans log file lines one at a time.</span>
+        <span class="c">///</span><span class="c"> First it attempts to detect a line format version and throws an exception if failed to do so.</span>
+        <span class="c">///</span><span class="c"> It skips all lines with version different than supported one, i.e. 1.0.</span>
+        <span class="c">///</span><span class="c"> Then it calls TryParseLogEntry to create a log entry out of every line of supported version and throws</span>
+        <span class="c">///</span><span class="c"> an exception if the parse method returns null.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public async</b> <span class="i">Task</span>&lt;<span class="i">IEnumerable</span>&lt;<a href="StorageAnalyticsLogEntry.cs.html#d4c021e95eda3c8f" class="t t">StorageAnalyticsLogEntry</a>&gt;&gt; <a id="bd3e06c386a2e37e" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ParseLogAsync</a>(<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a> <span id="r1 rd" class="r1 r">blob</span>,
+            <span class="i">CancellationToken</span> <span id="r2 rd" class="r2 r">cancellationToken</span>)
+        {
+            <span class="i">List</span>&lt;<a href="StorageAnalyticsLogEntry.cs.html#d4c021e95eda3c8f" class="t t">StorageAnalyticsLogEntry</a>&gt; <span id="r3 rd" class="r3 r">entries</span> = <b>new</b> <span class="i">List</span>&lt;<a href="StorageAnalyticsLogEntry.cs.html#d4c021e95eda3c8f" class="t t">StorageAnalyticsLogEntry</a>&gt;();
+ 
+            <b>using</b> (<span class="i">Stream</span> <span id="r4 rd" class="r4 r">content</span> = (<b>await</b> <span class="r1 r">blob</span>.<span class="i">DownloadAsync</span>(<span class="r2 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>)).<span class="i">Value</span>.<span class="i">Content</span>)
+            {
+                <b>using</b> (<span class="i">TextReader</span> <span id="r5 rd" class="r5 r">tr</span> = <b>new</b> <span class="i">StreamReader</span>(<span class="r4 r">content</span>))
+                {
+                    <b>for</b> (<b>int</b> <span id="r6 rd" class="r6 r">lineNumber</span> = 1; ; <span class="r6 r">lineNumber</span>++)
+                    {
+                        <span class="r2 r">cancellationToken</span>.<span class="i">ThrowIfCancellationRequested</span>();
+                        <b>string</b> <span id="r7 rd" class="r7 r">line</span> = <b>await</b> <span class="r5 r">tr</span>.<span class="i">ReadLineAsync</span>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        <b>if</b> (<span class="r7 r">line</span> == <b>null</b>)
+                        {
+                            <b>break</b>;
+                        }
+ 
+                        <span class="i">Version</span> <span id="r8 rd" class="r8 r">version</span> = <a href="#8d8dcf5b7cbd5b06" class="i method">TryParseVersion</a>(<span class="r7 r">line</span>);
+                        <b>if</b> (<span class="r8 r">version</span> == <b>null</b>)
+                        {
+                            <b>string</b> <span id="r9 rd" class="r9 r">message</span> = <span class="i">String</span>.<span class="i">Format</span>(<span class="i">CultureInfo</span>.<span class="i">CurrentCulture</span>,
+                                <span class="s">&quot;Unable to detect a version of log entry on line {1} of Storage Analytics log file &#39;{0}&#39;.&quot;</span>,
+                                <span class="r1 r">blob</span>.<a href="/Azure.Storage.Blobs/A.html#157bb830a0c2db34" class="i property">Name</a>, <span class="r6 r">lineNumber</span>);
+ 
+                            <a href="#e63239426df0c063" class="i field">_logger</a>.<span class="i">LogWarning</span>(<span class="r9 r">message</span>);
+                        }
+ 
+                        <b>if</b> (<span class="r8 r">version</span> == <a href="#82e76554969b6507" class="i field">supportedVersion</a>)
+                        {
+                            <a href="StorageAnalyticsLogEntry.cs.html#d4c021e95eda3c8f" class="t t">StorageAnalyticsLogEntry</a> <span id="r10 rd" class="r10 r">entry</span> = <a href="#e827c636b4638b3d" class="i method">TryParseLogEntry</a>(<span class="r7 r">line</span>);
+                            <b>if</b> (<span class="r10 r">entry</span> == <b>null</b>)
+                            {
+                                <b>string</b> <span id="r11 rd" class="r11 r">message</span> = <span class="i">String</span>.<span class="i">Format</span>(<span class="i">CultureInfo</span>.<span class="i">CurrentCulture</span>,
+                                    <span class="s">&quot;Unable to parse the log entry on line {1} of Storage Analytics log file &#39;{0}&#39;.&quot;</span>,
+                                    <span class="r1 r">blob</span>.<a href="/Azure.Storage.Blobs/A.html#157bb830a0c2db34" class="i property">Name</a>, <span class="r6 r">lineNumber</span>);
+ 
+                                <a href="#e63239426df0c063" class="i field">_logger</a>.<span class="i">LogWarning</span>(<span class="r11 r">message</span>);
+                            }
+ 
+                            <span class="r3 r">entries</span>.<span class="i">Add</span>(<span class="r10 r">entry</span>);
+                        }
+                    }
+                }
+            }
+ 
+            <b>return</b> <span class="r3 r">entries</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Attempts to parse first field of a log line assuming it&#39;s in &#39;Major.Minor&#39; version format</span>
+        <span class="c">///</span><span class="c"> followed by &#39;;&#39;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">line</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A line as extracted from a Storage Analytics Log file.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Parsed instance of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">Version</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> or null if parsing has failed.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public static</b> <span class="i">Version</span> <a id="8d8dcf5b7cbd5b06" href="../R/8d8dcf5b7cbd5b06.html" target="n" data-glyph="72,1" class="i method">TryParseVersion</a>(<b>string</b> <span id="r12 rd" class="r12 r">line</span>)
+        {
+            <b>if</b> (<span class="i">String</span>.<span class="i">IsNullOrEmpty</span>(<span class="r12 r">line</span>))
+            {
+                <b>return</b> <b>null</b>;
+            }
+ 
+            <b>int</b> <span id="r13 rd" class="r13 r">versionEndPos</span> = <span class="r12 r">line</span>.<span class="i">IndexOf</span>(<span class="s">&#39;;&#39;</span>);
+            <b>if</b> (<span class="r13 r">versionEndPos</span> == -1)
+            {
+                <b>return</b> <b>null</b>;
+            }
+ 
+            <span class="i">Version</span> <span id="r14 rd" class="r14 r">ver</span>;
+            <b>if</b> (!<span class="i">Version</span>.<span class="i">TryParse</span>(<span class="r12 r">line</span>.<span class="i">Substring</span>(0, <span class="r13 r">versionEndPos</span>), <b>out</b> <span class="r14 r">ver</span>))
+            {
+                <b>return</b> <b>null</b>;
+            }
+ 
+            <b>return</b> <span class="r14 r">ver</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Attempts to parse a single line of Storage Analytics Log file using Regex matches.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">line</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A line as extracted from a Storage Analytics Log file. Must not be null or empty.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">Parsed instance of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="StorageAnalyticsLogEntry.cs.html#d4c021e95eda3c8f" class="t t">StorageAnalyticsLogEntry</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> if the given line matches expected format</span>
+        <span class="c">///</span><span class="c"> of the Storage Analytics Log v1.0, or null otherwise.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public</b> <a href="StorageAnalyticsLogEntry.cs.html#d4c021e95eda3c8f" class="t t">StorageAnalyticsLogEntry</a> <a id="e827c636b4638b3d" href="../R/e827c636b4638b3d.html" target="n" data-glyph="72,1" class="i method">TryParseLogEntry</a>(<b>string</b> <span id="r15 rd" class="r15 r">line</span>)
+        {
+            <span class="i">Debug</span>.<span class="i">Assert</span>(<span class="r15 r">line</span> != <b>null</b>);
+ 
+            <b>var</b> <span id="r16 rd" class="r16 r">capturedFields</span> =
+                <b>from</b> <span class="i">Match</span> <span class="i">m</span> <b>in</b> <a href="#e1dde0842be707ce" class="i field">_compiledRegex</a>.<span class="i">Matches</span>(<span class="r15 r">line</span>)
+                <b>select</b> <span class="i">WebUtility</span>.<span class="i">HtmlDecode</span>(<span class="i">m</span>.<span class="i">Groups</span>[1].<span class="i">Value</span>);
+            <b>string</b>[] <span id="r17 rd" class="r17 r">fieldsArray</span> = <span class="r16 r">capturedFields</span>.<span class="i">ToArray</span>();
+ 
+            <b>if</b> (<span class="r17 r">fieldsArray</span>.<span class="i">Length</span> != <a href="#08266bce7fa469c2" class="i field">ColumnCount</a>)
+            {
+                <b>return</b> <b>null</b>;
+            }
+ 
+            <b>return</b> <a href="StorageAnalyticsLogEntry.cs.html#d4c021e95eda3c8f" class="t t">StorageAnalyticsLogEntry</a>.<a href="StorageAnalyticsLogEntry.cs.html#fb3ae7b5312fe5e1" class="i method">TryParse</a>(<span class="r17 r">fieldsArray</span>);
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

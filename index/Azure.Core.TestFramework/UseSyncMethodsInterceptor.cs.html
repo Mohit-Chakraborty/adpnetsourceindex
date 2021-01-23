@@ -1,0 +1,280 @@
+﻿<!DOCTYPE html>
+<html><head><title>UseSyncMethodsInterceptor.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(271);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Core.TestFramework/UseSyncMethodsInterceptor.cs" target="_top">UseSyncMethodsInterceptor.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Core.TestFramework" target="_top">..\..\..\sdk\core\Azure.Core.TestFramework\src\Azure.Core.TestFramework.csproj</a> (Azure.Core.TestFramework)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Reflection</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Runtime</span>.<span class="i n">ExceptionServices</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Castle</span>.<span class="i n">DynamicProxy</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">TestFramework</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> This interceptor forwards the async call to a sync method call with the same arguments</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>public class</b> <a id="8453856ccc6e079a" href="R/8453856ccc6e079a.html" target="n" data-glyph="0,0" class="t t">UseSyncMethodsInterceptor</a> : <span class="t t">IInterceptor</span>
+    {
+        <b>private readonly bool</b> <a id="4057ba34bdf5b973" href="R/4057ba34bdf5b973.html" target="n" data-glyph="46,1" class="i field">_forceSync</a>;
+ 
+        <b>public</b> <a id="a530de9a99def598" href="R/a530de9a99def598.html" target="n" data-glyph="72,1" class="t constructor">UseSyncMethodsInterceptor</a>(<b>bool</b> <span id="r0 rd" class="r0 r">forceSync</span>)
+        {
+            <a href="#4057ba34bdf5b973" class="i field">_forceSync</a> = <span class="r0 r">forceSync</span>;
+        }
+ 
+        <b>private const string</b> <a id="44e8b890bb8008e8" href="R/44e8b890bb8008e8.html" target="n" data-glyph="10,1" class="i field">AsyncSuffix</a> = <span class="s">&quot;Async&quot;</span>;
+ 
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#382d90b1fa682bac" class="t t">MethodInfo</a> <a id="f105fc0457bf3ba3" href="R/f105fc0457bf3ba3.html" target="n" data-glyph="46,1" class="i field">_taskFromResultMethod</a> = <b>typeof</b>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>)
+            .<a href="@0@mscorlib/A.html#f24e0c9fd5441fd5" class="i method">GetMethod</a>(<span class="s">&quot;FromResult&quot;</span>, <a href="@0@mscorlib/A.html#4795caf3b483702d" class="t t">BindingFlags</a>.<a href="@0@mscorlib/A.html#d1fa47f9abe3c16a" class="i field">Static</a> | <a href="@0@mscorlib/A.html#4795caf3b483702d" class="t t">BindingFlags</a>.<a href="@0@mscorlib/A.html#ef2ef39bdfa059df" class="i field">Public</a>);
+ 
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#382d90b1fa682bac" class="t t">MethodInfo</a> <a id="b17c9cbb05c2d166" href="R/b17c9cbb05c2d166.html" target="n" data-glyph="46,1" class="i field">_taskFromExceptionMethod</a> = <b>typeof</b>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>)
+            .<a href="@0@mscorlib/A.html#40399c847276225e" class="i method">GetMethods</a>(<a href="@0@mscorlib/A.html#4795caf3b483702d" class="t t">BindingFlags</a>.<a href="@0@mscorlib/A.html#d1fa47f9abe3c16a" class="i field">Static</a> | <a href="@0@mscorlib/A.html#4795caf3b483702d" class="t t">BindingFlags</a>.<a href="@0@mscorlib/A.html#ef2ef39bdfa059df" class="i field">Public</a>)
+            .<a href="@0@System.Core/A.html#226beadd4e521229" class="i method">Single</a>(<span id="r1 rd" class="r1 r">m</span> =&gt; <span class="r1 r">m</span>.<a href="@0@mscorlib/A.html#aa4f112f79364b6e" class="i property">Name</a> == <span class="s">&quot;FromException&quot;</span> &amp;&amp; <span class="r1 r">m</span>.<a href="@0@mscorlib/A.html#a9816d3f127d8c28" class="i property">IsGenericMethod</a>);
+ 
+        [<a href="@0@mscorlib/A.html#15085db4bf5c94f0" class="t constructor">DebuggerStepThrough</a>]
+        <b>public void</b> <a id="c0f44f4b223b45a1" href="R/c0f44f4b223b45a1.html" target="n" data-glyph="72,1" class="i method">Intercept</a>(<span class="t t">IInvocation</span> <span id="r2 rd" class="r2 r">invocation</span>)
+        {
+            <a href="@0@mscorlib/A.html#3d00eeab9feb80f3" class="t t">Type</a>[] <span id="r3 rd" class="r3 r">parameterTypes</span> = <span class="r2 r">invocation</span>.<span class="i property">Method</span>.<a href="@0@mscorlib/A.html#91801fac9c14db1f" class="i method">GetParameters</a>().<a href="@0@System.Core/A.html#5c652c53e80df013" class="i method">Select</a>(<span id="r4 rd" class="r4 r">p</span> =&gt; <span class="r4 r">p</span>.<a href="@0@mscorlib/A.html#caa6206e7a50fd83" class="i property">ParameterType</a>).<a href="@0@System.Core/A.html#783a052330e7d48d" class="i method">ToArray</a>();
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r5 rd" class="r5 r">methodName</span> = <span class="r2 r">invocation</span>.<span class="i property">Method</span>.<a href="@0@mscorlib/A.html#aa4f112f79364b6e" class="i property">Name</a>;
+            <b>if</b> (!<span class="r5 r">methodName</span>.<a href="@0@mscorlib/A.html#cb74053b3f2d03f4" class="i method">EndsWith</a>(<a href="#44e8b890bb8008e8" class="i field">AsyncSuffix</a>))
+            {
+                <a href="@0@mscorlib/A.html#382d90b1fa682bac" class="t t">MethodInfo</a> <span id="r6 rd" class="r6 r">asyncAlternative</span> = <a href="#4d122ef54fa95868" class="i method">GetMethod</a>(<span class="r2 r">invocation</span>, <span class="r5 r">methodName</span> + <a href="#44e8b890bb8008e8" class="i field">AsyncSuffix</a>, <span class="r3 r">parameterTypes</span>);
+ 
+                <span class="c">// Check if there is an async alternative to sync call</span>
+                <b>if</b> (<span class="r6 r">asyncAlternative</span> != <b>null</b>)
+                {
+                    <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span><span class="s">Async method call expected for </span>{<span class="r5 r">methodName</span>}<span class="s">&quot;</span>);
+                }
+                <b>else</b>
+                {
+                    <span class="r2 r">invocation</span>.<span class="i method">Proceed</span>();
+                    <b>return</b>;
+                }
+            }
+ 
+            <b>if</b> (!<a href="#4057ba34bdf5b973" class="i field">_forceSync</a>)
+            {
+                <span class="r2 r">invocation</span>.<span class="i method">Proceed</span>();
+                <b>return</b>;
+            }
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r7 rd" class="r7 r">nonAsyncMethodName</span> = <span class="r5 r">methodName</span>.<a href="@0@mscorlib/A.html#8124961f027d9ac9" class="i method">Substring</a>(0, <span class="r5 r">methodName</span>.<a href="@0@mscorlib/A.html#e13f5829ef28aa07" class="i property">Length</a> - <a href="#44e8b890bb8008e8" class="i field">AsyncSuffix</a>.<a href="@0@mscorlib/A.html#e13f5829ef28aa07" class="i property">Length</a>);
+ 
+            <a href="@0@mscorlib/A.html#382d90b1fa682bac" class="t t">MethodInfo</a> <span id="r8 rd" class="r8 r">methodInfo</span> = <a href="#4d122ef54fa95868" class="i method">GetMethod</a>(<span class="r2 r">invocation</span>, <span class="r7 r">nonAsyncMethodName</span>, <span class="r3 r">parameterTypes</span>);
+            <b>if</b> (<span class="r8 r">methodInfo</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span><span class="s">Unable to find a method with name </span>{<span class="r7 r">nonAsyncMethodName</span>}<span class="s"> and </span>{<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#da0d95b54df01dcf" class="i method">Join</a>&lt;<a href="@0@mscorlib/A.html#3d00eeab9feb80f3" class="t t">Type</a>&gt;(<span class="s">&quot;,&quot;</span>, <span class="r3 r">parameterTypes</span>)}<span class="s"> parameters. </span><span class="s">&quot;</span>
+                                                    + <span class="s">&quot;Make sure both methods have the same signature including the cancellationToken parameter&quot;</span>);
+            }
+ 
+            <a href="@0@mscorlib/A.html#3d00eeab9feb80f3" class="t t">Type</a> <span id="r9 rd" class="r9 r">returnType</span> = <span class="r8 r">methodInfo</span>.<a href="@0@mscorlib/A.html#5be6c92e98bc4044" class="i property">ReturnType</a>;
+            <b>bool</b> <span id="r10 rd" class="r10 r">returnsSyncCollection</span> = <span class="r9 r">returnType</span>.<a href="@0@mscorlib/A.html#b81fd50dfeabd50c" class="i property">IsGenericType</a> &amp;&amp; <span class="r9 r">returnType</span>.<a href="@0@mscorlib/A.html#7179022318447358" class="i method">GetGenericTypeDefinition</a>() == <b>typeof</b>(<a href="/Azure.Core/A.html#14dd227dfe3d4fe9" class="t t">Pageable</a>&lt;&gt;);
+ 
+            <b>try</b>
+            {
+                <span class="c">// If we&#39;ve got GetAsync&lt;Model&gt;() and just found Get&lt;T&gt;(), we</span>
+                <span class="c">// need to change the method to Get&lt;Model&gt;().</span>
+                <b>if</b> (<span class="r8 r">methodInfo</span>.<a href="@0@mscorlib/A.html#af35f54f1266e459" class="i property">ContainsGenericParameters</a>)
+                {
+                    <span class="r8 r">methodInfo</span> = <span class="r8 r">methodInfo</span>.<a href="@0@mscorlib/A.html#6f9c3eb767cf3cc7" class="i method">MakeGenericMethod</a>(<span class="r2 r">invocation</span>.<span class="i property">Method</span>.<a href="@0@mscorlib/A.html#be13e704ec670e4f" class="i method">GetGenericArguments</a>());
+                    <span class="r9 r">returnType</span> = <span class="r8 r">methodInfo</span>.<a href="@0@mscorlib/A.html#5be6c92e98bc4044" class="i property">ReturnType</a>;
+                }
+                <b>object</b> <span id="r11 rd" class="r11 r">result</span> = <span class="r8 r">methodInfo</span>.<a href="@0@mscorlib/A.html#c8277ed81262a367" class="i method">Invoke</a>(<span class="r2 r">invocation</span>.<span class="i property">InvocationTarget</span>, <span class="r2 r">invocation</span>.<span class="i property">Arguments</span>);
+ 
+                <span class="c">// Map IEnumerable to IAsyncEnumerable</span>
+                <b>if</b> (<span class="r10 r">returnsSyncCollection</span>)
+                {
+                    <a href="@0@mscorlib/A.html#3d00eeab9feb80f3" class="t t">Type</a>[] <span id="r12 rd" class="r12 r">modelType</span> = <span class="r9 r">returnType</span>.<a href="@0@mscorlib/A.html#0aa31a7de47b9dc7" class="i property">GenericTypeArguments</a>;
+                    <a href="@0@mscorlib/A.html#3d00eeab9feb80f3" class="t t">Type</a> <span id="r13 rd" class="r13 r">wrapperType</span> = <b>typeof</b>(<a href="#852c7e8bc72bbbc3" class="t t">SyncPageableWrapper</a>&lt;&gt;).<a href="@0@mscorlib/A.html#3e82dbae123f91fc" class="i method">MakeGenericType</a>(<span class="r12 r">modelType</span>);
+ 
+                    <span class="r2 r">invocation</span>.<span class="i property">ReturnValue</span> = <a href="@0@mscorlib/A.html#955a7437554c8efc" class="t t">Activator</a>.<a href="@0@mscorlib/A.html#f6b936ab5a27846a" class="i method">CreateInstance</a>(<span class="r13 r">wrapperType</span>, <b>new</b>[] { <span class="r11 r">result</span> });
+                }
+                <b>else</b>
+                {
+                    <a href="#3bd00ba31e84aa97" class="i method">SetAsyncResult</a>(<span class="r2 r">invocation</span>, <span class="r9 r">returnType</span>, <span class="r11 r">result</span>);
+                }
+            }
+            <b>catch</b> (<a href="@0@mscorlib/A.html#ff482968ccfe251f" class="t t">TargetInvocationException</a> <span id="r14 rd" class="r14 r">exception</span>)
+            {
+                <b>if</b> (<span class="r10 r">returnsSyncCollection</span>)
+                {
+                    <a href="@0@mscorlib/A.html#1443447025759846" class="t t">ExceptionDispatchInfo</a>.<a href="@0@mscorlib/A.html#139923899a417d5a" class="i method">Capture</a>(<span class="r14 r">exception</span>.<a href="@0@mscorlib/A.html#89c20b39fb04108b" class="i property">InnerException</a>).<a href="@0@mscorlib/A.html#fc3b312e2d0ab87a" class="i method">Throw</a>();
+                }
+                <b>else</b>
+                {
+                    <a href="#bdec772cd068ef3f" class="i method">SetAsyncException</a>(<span class="r2 r">invocation</span>, <span class="r9 r">returnType</span>, <span class="r14 r">exception</span>.<a href="@0@mscorlib/A.html#89c20b39fb04108b" class="i property">InnerException</a>);
+                }
+            }
+        }
+ 
+        <b>private void</b> <a id="3bd00ba31e84aa97" href="R/3bd00ba31e84aa97.html" target="n" data-glyph="76,1" class="i method">SetAsyncResult</a>(<span class="t t">IInvocation</span> <span id="r15 rd" class="r15 r">invocation</span>, <a href="@0@mscorlib/A.html#3d00eeab9feb80f3" class="t t">Type</a> <span id="r16 rd" class="r16 r">returnType</span>, <b>object</b> <span id="r17 rd" class="r17 r">result</span>)
+        {
+            <a href="@0@mscorlib/A.html#3d00eeab9feb80f3" class="t t">Type</a> <span id="r18 rd" class="r18 r">methodReturnType</span> = <span class="r15 r">invocation</span>.<span class="i property">Method</span>.<a href="@0@mscorlib/A.html#5be6c92e98bc4044" class="i property">ReturnType</a>;
+            <b>if</b> (<span class="r18 r">methodReturnType</span>.<a href="@0@mscorlib/A.html#b81fd50dfeabd50c" class="i property">IsGenericType</a>)
+            {
+                <span class="r16 r">returnType</span> = <a href="#76cef21cb607040c" class="i method">CloseResponseType</a>(<span class="r16 r">returnType</span>, <span class="r18 r">methodReturnType</span>);
+                <b>if</b> (<span class="r18 r">methodReturnType</span>.<a href="@0@mscorlib/A.html#7179022318447358" class="i method">GetGenericTypeDefinition</a>() == <b>typeof</b>(<a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;&gt;))
+                {
+                    <span class="r15 r">invocation</span>.<span class="i property">ReturnValue</span> = <a href="#f105fc0457bf3ba3" class="i field">_taskFromResultMethod</a>.<a href="@0@mscorlib/A.html#6f9c3eb767cf3cc7" class="i method">MakeGenericMethod</a>(<span class="r16 r">returnType</span>).<a href="@0@mscorlib/A.html#c8277ed81262a367" class="i method">Invoke</a>(<b>null</b>, <b>new</b>[] { <span class="r17 r">result</span> });
+                    <b>return</b>;
+                }
+                <b>if</b> (<span class="r18 r">methodReturnType</span>.<a href="@0@mscorlib/A.html#7179022318447358" class="i method">GetGenericTypeDefinition</a>() == <b>typeof</b>(<span class="t t">ValueTask</span>&lt;&gt;))
+                {
+                    <span class="r15 r">invocation</span>.<span class="i property">ReturnValue</span> = <a href="@0@mscorlib/A.html#955a7437554c8efc" class="t t">Activator</a>.<a href="@0@mscorlib/A.html#f6b936ab5a27846a" class="i method">CreateInstance</a>(<b>typeof</b>(<span class="t t">ValueTask</span>&lt;&gt;).<a href="@0@mscorlib/A.html#3e82dbae123f91fc" class="i method">MakeGenericType</a>(<span class="r16 r">returnType</span>), <span class="r17 r">result</span>);
+                    <b>return</b>;
+                }
+            }
+ 
+            <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#ab0acd5f99886747" class="t constructor">NotSupportedException</a>();
+        }
+ 
+        <b>private void</b> <a id="bdec772cd068ef3f" href="R/bdec772cd068ef3f.html" target="n" data-glyph="76,1" class="i method">SetAsyncException</a>(<span class="t t">IInvocation</span> <span id="r19 rd" class="r19 r">invocation</span>, <a href="@0@mscorlib/A.html#3d00eeab9feb80f3" class="t t">Type</a> <span id="r20 rd" class="r20 r">returnType</span>, <a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r21 rd" class="r21 r">result</span>)
+        {
+            <a href="@0@mscorlib/A.html#3d00eeab9feb80f3" class="t t">Type</a> <span id="r22 rd" class="r22 r">methodReturnType</span> = <span class="r19 r">invocation</span>.<span class="i property">Method</span>.<a href="@0@mscorlib/A.html#5be6c92e98bc4044" class="i property">ReturnType</a>;
+            <b>if</b> (<span class="r22 r">methodReturnType</span>.<a href="@0@mscorlib/A.html#b81fd50dfeabd50c" class="i property">IsGenericType</a>)
+            {
+                <span class="r20 r">returnType</span> = <a href="#76cef21cb607040c" class="i method">CloseResponseType</a>(<span class="r20 r">returnType</span>, <span class="r22 r">methodReturnType</span>);
+                <b>if</b> (<span class="r22 r">methodReturnType</span>.<a href="@0@mscorlib/A.html#7179022318447358" class="i method">GetGenericTypeDefinition</a>() == <b>typeof</b>(<a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;&gt;))
+                {
+                    <span class="r19 r">invocation</span>.<span class="i property">ReturnValue</span> = <a href="#b17c9cbb05c2d166" class="i field">_taskFromExceptionMethod</a>.<a href="@0@mscorlib/A.html#6f9c3eb767cf3cc7" class="i method">MakeGenericMethod</a>(<span class="r20 r">returnType</span>).<a href="@0@mscorlib/A.html#c8277ed81262a367" class="i method">Invoke</a>(<b>null</b>, <b>new</b>[] { <span class="r21 r">result</span> });
+                    <b>return</b>;
+                }
+ 
+                <b>if</b> (<span class="r22 r">methodReturnType</span>.<a href="@0@mscorlib/A.html#7179022318447358" class="i method">GetGenericTypeDefinition</a>() == <b>typeof</b>(<span class="t t">ValueTask</span>&lt;&gt;))
+                {
+                    <a href="@0@mscorlib/A.html#d9262ceecc1719ab" class="k">var</a> <span id="r23 rd" class="r23 r">task</span> = <a href="#b17c9cbb05c2d166" class="i field">_taskFromExceptionMethod</a>.<a href="@0@mscorlib/A.html#6f9c3eb767cf3cc7" class="i method">MakeGenericMethod</a>(<span class="r20 r">returnType</span>).<a href="@0@mscorlib/A.html#c8277ed81262a367" class="i method">Invoke</a>(<b>null</b>, <b>new</b>[] { <span class="r21 r">result</span> });
+                    <span class="r19 r">invocation</span>.<span class="i property">ReturnValue</span> = <a href="@0@mscorlib/A.html#955a7437554c8efc" class="t t">Activator</a>.<a href="@0@mscorlib/A.html#f6b936ab5a27846a" class="i method">CreateInstance</a>(<b>typeof</b>(<span class="t t">ValueTask</span>&lt;&gt;).<a href="@0@mscorlib/A.html#3e82dbae123f91fc" class="i method">MakeGenericType</a>(<span class="r20 r">returnType</span>), <span class="r23 r">task</span>);
+                    <b>return</b>;
+                }
+            }
+ 
+            <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#ab0acd5f99886747" class="t constructor">NotSupportedException</a>();
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> If the sync method returned Response{Model} and the async method&#39;s</span>
+        <span class="c">///</span><span class="c"> return type is still an open Response{U}, we need to close it to</span>
+        <span class="c">///</span><span class="c"> Response{Model} as well.  We don&#39;t care about this if Response{}</span>
+        <span class="c">///</span><span class="c"> has already been closed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r24 r">returnType</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The sync method&#39;s return type.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r25 r">methodReturnType</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The async method&#39;s return type.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A return type with Response{U} closed.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private static</b> <a href="@0@mscorlib/A.html#3d00eeab9feb80f3" class="t t">Type</a> <a id="76cef21cb607040c" href="R/76cef21cb607040c.html" target="n" data-glyph="76,1" class="i method">CloseResponseType</a>(<a href="@0@mscorlib/A.html#3d00eeab9feb80f3" class="t t">Type</a> <span id="r24 rd" class="r24 r">returnType</span>, <a href="@0@mscorlib/A.html#3d00eeab9feb80f3" class="t t">Type</a> <span id="r25 rd" class="r25 r">methodReturnType</span>)
+        {
+            <b>if</b> (<span class="r24 r">returnType</span>.<a href="@0@mscorlib/A.html#b81fd50dfeabd50c" class="i property">IsGenericType</a> &amp;&amp;
+                <span class="r24 r">returnType</span>.<a href="@0@mscorlib/A.html#7179022318447358" class="i method">GetGenericTypeDefinition</a>() == <b>typeof</b>(<a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;&gt;) &amp;&amp;
+                <span class="r24 r">returnType</span>.<a href="@0@mscorlib/A.html#0e9f6b9fabdec830" class="i property">ContainsGenericParameters</a>)
+            {
+                <a href="@0@mscorlib/A.html#3d00eeab9feb80f3" class="t t">Type</a> <span id="r26 rd" class="r26 r">modelType</span> = <span class="r25 r">methodReturnType</span>.<a href="@0@mscorlib/A.html#e0094047204f40ea" class="i method">GetGenericArguments</a>()[0].<a href="@0@mscorlib/A.html#e0094047204f40ea" class="i method">GetGenericArguments</a>()[0];
+                <span class="r24 r">returnType</span> = <span class="r24 r">returnType</span>.<a href="@0@mscorlib/A.html#7179022318447358" class="i method">GetGenericTypeDefinition</a>().<a href="@0@mscorlib/A.html#3e82dbae123f91fc" class="i method">MakeGenericType</a>(<span class="r26 r">modelType</span>);
+            }
+            <b>return</b> <span class="r24 r">returnType</span>;
+        }
+ 
+        <b>private static</b> <a href="@0@mscorlib/A.html#382d90b1fa682bac" class="t t">MethodInfo</a> <a id="4d122ef54fa95868" href="R/4d122ef54fa95868.html" target="n" data-glyph="76,1" class="i method">GetMethod</a>(<span class="t t">IInvocation</span> <span id="r27 rd" class="r27 r">invocation</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r28 rd" class="r28 r">nonAsyncMethodName</span>, <a href="@0@mscorlib/A.html#3d00eeab9feb80f3" class="t t">Type</a>[] <span id="r29 rd" class="r29 r">types</span>)
+        {
+            <a href="@0@mscorlib/A.html#4795caf3b483702d" class="t t">BindingFlags</a> <span id="r30 rd" class="r30 r">flags</span> = <a href="#ea3256298c245edd" class="i method">IsInternal</a>(<span class="r27 r">invocation</span>.<span class="i property">Method</span>) ?
+                <a href="@0@mscorlib/A.html#4795caf3b483702d" class="t t">BindingFlags</a>.<a href="@0@mscorlib/A.html#54a14f747b06c614" class="i field">Instance</a> | <a href="@0@mscorlib/A.html#4795caf3b483702d" class="t t">BindingFlags</a>.<a href="@0@mscorlib/A.html#5144189c11f6b668" class="i field">NonPublic</a> :
+                <a href="@0@mscorlib/A.html#4795caf3b483702d" class="t t">BindingFlags</a>.<a href="@0@mscorlib/A.html#54a14f747b06c614" class="i field">Instance</a> | <a href="@0@mscorlib/A.html#4795caf3b483702d" class="t t">BindingFlags</a>.<a href="@0@mscorlib/A.html#ef2ef39bdfa059df" class="i field">Public</a>;
+ 
+            <span class="c">// Do our own slow &quot;lightweight binding&quot; in situations where we</span>
+            <span class="c">// have generic arguments that aren&#39;t factored into the binder for</span>
+            <span class="c">// the regular GetMethod call.  We&#39;re taking lots of shortcuts like</span>
+            <span class="c">// only comparing the generic type or count and it&#39;s only enough</span>
+            <span class="c">// for the cases we have today.</span>
+            <b>static</b> <a href="@0@mscorlib/A.html#3d00eeab9feb80f3" class="t t">Type</a> <a id="0ba95829802fd044" href="R/0ba95829802fd044.html" target="n" data-glyph="76,2" class="i method">GenericDef</a>(<a href="@0@mscorlib/A.html#3d00eeab9feb80f3" class="t t">Type</a> <span id="r31 rd" class="r31 r">t</span>) =&gt; <span class="r31 r">t</span>.<a href="@0@mscorlib/A.html#b81fd50dfeabd50c" class="i property">IsGenericType</a> ? <span class="r31 r">t</span>.<a href="@0@mscorlib/A.html#7179022318447358" class="i method">GetGenericTypeDefinition</a>() : <span class="r31 r">t</span>;
+            <a href="@0@mscorlib/A.html#382d90b1fa682bac" class="t t">MethodInfo</a> <a id="71211fb6474cf96a" href="R/71211fb6474cf96a.html" target="n" data-glyph="76,2" class="i method">GetMethodSlow</a>()
+            {
+                <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="k">var</a> <span id="r32 rd" class="r32 r">methods</span> = <span class="r27 r">invocation</span>.<span class="i property">TargetType</span>
+                <span class="c">// Start with all methods that have the right name</span>
+                .<a href="@0@mscorlib/A.html#40399c847276225e" class="i method">GetMethods</a>(<span class="r30 r">flags</span>).<a href="@0@System.Core/A.html#e73922753675387a" class="i method">Where</a>(<span id="r33 rd" class="r33 r">m</span> =&gt; <span class="r33 r">m</span>.<a href="@0@mscorlib/A.html#aa4f112f79364b6e" class="i property">Name</a> == <span class="r28 r">nonAsyncMethodName</span>);
+ 
+                <span class="c">// Check if their type parameters have the same generic</span>
+                <span class="c">// type definitions (i.e., if I invoked</span>
+                <span class="c">// GetAsync&lt;Model&gt;(Wrapper&lt;Model&gt;) we want that to match</span>
+                <span class="c">// with Get&lt;T&gt;(Wrapper&lt;T&gt;)</span>
+                <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="k">var</a> <span id="r34 rd" class="r34 r">genericDefs</span> = <span class="r32 r">methods</span>.<a href="@0@System.Core/A.html#e73922753675387a" class="i method">Where</a>(<span id="r35 rd" class="r35 r">m</span> =&gt;
+                    <span class="r35 r">m</span>.<a href="@0@mscorlib/A.html#91801fac9c14db1f" class="i method">GetParameters</a>().<a href="@0@System.Core/A.html#5c652c53e80df013" class="i method">Select</a>(<span id="r36 rd" class="r36 r">p</span> =&gt; <a href="#0ba95829802fd044" class="i method">GenericDef</a>(<span class="r36 r">p</span>.<a href="@0@mscorlib/A.html#caa6206e7a50fd83" class="i property">ParameterType</a>))
+                    .<a href="@0@System.Core/A.html#9bdd6ef7ba6a5615" class="i method">SequenceEqual</a>(<span class="r29 r">types</span>.<a href="@0@System.Core/A.html#5c652c53e80df013" class="i method">Select</a>(<a href="#0ba95829802fd044" class="i method">GenericDef</a>)));
+ 
+                <span class="c">// If the previous check has any results, check if they have the same number of type arguments</span>
+                <span class="c">// (all of our cases today either specialize on 0 or 1 type</span>
+                <span class="c">// argument for the static or dynamic user schema approach)</span>
+                <span class="c">// Else, close each GenericMethodDefinition and compare its parameter types.</span>
+                <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="k">var</a> <span id="r37 rd" class="r37 r">withSimilarGenericArguments</span> = <span class="r34 r">genericDefs</span>.<a href="@0@System.Core/A.html#8788153112b7ffd0" class="i method">Any</a>() ?
+                    <span class="r34 r">genericDefs</span>.<a href="@0@System.Core/A.html#e73922753675387a" class="i method">Where</a>(<span id="r38 rd" class="r38 r">m</span> =&gt;
+                        <span class="r38 r">m</span>.<a href="@0@mscorlib/A.html#be13e704ec670e4f" class="i method">GetGenericArguments</a>().<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a> ==
+                        <span class="r27 r">invocation</span>.<span class="i property">Method</span>.<a href="@0@mscorlib/A.html#be13e704ec670e4f" class="i method">GetGenericArguments</a>().<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>) :
+                    <span class="r32 r">methods</span>
+                        .<a href="@0@System.Core/A.html#e73922753675387a" class="i method">Where</a>(<span id="r39 rd" class="r39 r">m</span> =&gt; <span class="r39 r">m</span>.<a href="@0@mscorlib/A.html#df5b7ce373bece76" class="i property">IsGenericMethodDefinition</a>)
+                        .<a href="@0@System.Core/A.html#5c652c53e80df013" class="i method">Select</a>(<span id="r40 rd" class="r40 r">m</span> =&gt; <span class="r40 r">m</span>.<a href="@0@mscorlib/A.html#6f9c3eb767cf3cc7" class="i method">MakeGenericMethod</a>(<span class="r27 r">invocation</span>.<span class="i property">GenericArguments</span>))
+                        .<a href="@0@System.Core/A.html#e73922753675387a" class="i method">Where</a>(<span id="r41 rd" class="r41 r">gm</span> =&gt; <span class="r41 r">gm</span>.<a href="@0@mscorlib/A.html#91801fac9c14db1f" class="i method">GetParameters</a>().<a href="@0@System.Core/A.html#5c652c53e80df013" class="i method">Select</a>(<span id="r42 rd" class="r42 r">p</span> =&gt; <span class="r42 r">p</span>.<a href="@0@mscorlib/A.html#caa6206e7a50fd83" class="i property">ParameterType</a>)
+                            .<a href="@0@System.Core/A.html#9bdd6ef7ba6a5615" class="i method">SequenceEqual</a>(<span class="r27 r">invocation</span>.<span class="i property">Method</span>.<a href="@0@mscorlib/A.html#91801fac9c14db1f" class="i method">GetParameters</a>().<a href="@0@System.Core/A.html#5c652c53e80df013" class="i method">Select</a>(<span id="r43 rd" class="r43 r">p</span> =&gt; <span class="r43 r">p</span>.<a href="@0@mscorlib/A.html#caa6206e7a50fd83" class="i property">ParameterType</a>)));
+ 
+                <span class="c">// Hopefully we&#39;re down to 1.  If you arrive here in the</span>
+                <span class="c">// future because SingleOrDefault threw, we need to make</span>
+                <span class="c">// the comparison logic more specific.  If you arrive here</span>
+                <span class="c">// because we&#39;re returning null, then we need to search</span>
+                <span class="c">// a little more broadly.  Either way, congratulations on</span>
+                <span class="c">// blazing new API patterns and taking us boldly into the</span>
+                <span class="c">// future.</span>
+                <b>return</b> <span class="r37 r">withSimilarGenericArguments</span>.<a href="@0@System.Core/A.html#9cd0418fc9042fbe" class="i method">SingleOrDefault</a>();
+            }
+ 
+            <b>try</b>
+            {
+                <b>return</b> <span class="r27 r">invocation</span>.<span class="i property">TargetType</span>.<a href="@0@mscorlib/A.html#6cd11a2e3211bf71" class="i method">GetMethod</a>(
+                    <span class="r28 r">nonAsyncMethodName</span>,
+                    <span class="r30 r">flags</span>,
+                    <b>null</b>,
+                    <span class="r29 r">types</span>,
+                    <b>null</b>) ??
+                    <span class="c">// Search a little more broadly if the regular binder</span>
+                    <span class="c">// couldn&#39;t find a match</span>
+                    <a href="#71211fb6474cf96a" class="i method">GetMethodSlow</a>();
+            }
+            <b>catch</b> (<a href="@0@mscorlib/A.html#22610eb903c01043" class="t t">AmbiguousMatchException</a>)
+            {
+                <span class="c">// Use our own binder to pick the best method if the regular</span>
+                <span class="c">// binder couldn&#39;t decide between multiple choices</span>
+                <b>return</b> <a href="#71211fb6474cf96a" class="i method">GetMethodSlow</a>();
+            }
+        }
+ 
+        <b>private static bool</b> <a id="ea3256298c245edd" href="R/ea3256298c245edd.html" target="n" data-glyph="76,1" class="i method">IsInternal</a>(<a href="@0@mscorlib/A.html#1383b72169c6b2ae" class="t t">MethodBase</a> <span id="r44 rd" class="r44 r">method</span>) =&gt; <span class="r44 r">method</span>.<a href="@0@mscorlib/A.html#cf7e726fc11a5590" class="i property">IsAssembly</a> || <span class="r44 r">method</span>.<a href="@0@mscorlib/A.html#c72d22cb904e1113" class="i property">IsFamilyAndAssembly</a> &amp;&amp; !<span class="r44 r">method</span>.<a href="@0@mscorlib/A.html#e9b4dcf1bdc7d9d3" class="i property">IsFamilyOrAssembly</a>;
+ 
+        <b>private class</b> <a id="852c7e8bc72bbbc3" href="R/852c7e8bc72bbbc3.html" target="n" data-glyph="4,1" class="t t">SyncPageableWrapper</a>&lt;<span id="r45 rd t" class="r45 r t">T</span>&gt; : <a href="/Azure.Core/A.html#ce6e47443d11533b" class="t t">AsyncPageable</a>&lt;<span class="r45 r t">T</span>&gt;
+        {
+            <b>private readonly</b> <a href="/Azure.Core/A.html#14dd227dfe3d4fe9" class="t t">Pageable</a>&lt;<span class="r45 r t">T</span>&gt; <a id="27c0e62e417a10e2" href="R/27c0e62e417a10e2.html" target="n" data-glyph="46,2" class="i field">_enumerable</a>;
+ 
+            <b>public</b> <a id="eca708b0698a23b3" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="t constructor">SyncPageableWrapper</a>(<a href="/Azure.Core/A.html#14dd227dfe3d4fe9" class="t t">Pageable</a>&lt;<span class="r45 r t">T</span>&gt; <span id="r46 rd" class="r46 r">enumerable</span>)
+            {
+                <a href="#27c0e62e417a10e2" class="i field">_enumerable</a> = <span class="r46 r">enumerable</span>;
+            }
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> 1998
+            <b>public override async</b> <span class="t t">IAsyncEnumerable</span>&lt;<a href="/Azure.Core/A.html#b864610eef8c9004" class="t t">Page</a>&lt;<span class="r45 r t">T</span>&gt;&gt; <a id="8d79d62b3ef1fc1a" href="R/8d79d62b3ef1fc1a.html" target="n" data-glyph="72,2" class="i method">AsPages</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r47 rd" class="r47 r">continuationToken</span> = <b>default</b>, <b>int</b>? <span id="r48 rd" class="r48 r">pageSizeHint</span> = <b>default</b>)
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> 1998
+            {
+                <b>foreach</b> (<a href="/Azure.Core/A.html#b864610eef8c9004" class="t t">Page</a>&lt;<span class="r45 r t">T</span>&gt; <span id="r49 rd" class="r49 r">page</span> <b>in</b> <a href="#27c0e62e417a10e2" class="i field">_enumerable</a>.<a href="/Azure.Core/A.html#52c4c0f5011a253b" class="i method">AsPages</a>(<span class="r47 r">continuationToken</span>, <span class="r48 r">pageSizeHint</span>))
+                {
+                    <b>yield</b> <b>return</b> <span class="r49 r">page</span>;
+                }
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

@@ -1,0 +1,553 @@
+﻿<!DOCTYPE html>
+<html><head><title>PartitionLoadBalancer.cs</title><link rel="stylesheet" href="../../../styles.css"><script src="../../../scripts.js"></script></head>
+<body class="cB" onload="i(544);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Messaging.EventHubs.Shared.Tests/SharedSource/Processor/PartitionLoadBalancer.cs" target="_top">SharedSource\Processor\PartitionLoadBalancer.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Messaging.EventHubs.Shared.Tests" target="_top">tests\Azure.Messaging.EventHubs.Shared.Tests.csproj</a> (Azure.Messaging.EventHubs.Shared.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Diagnostics</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Primitives</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">   Handles all load balancing concerns for an event processor including claiming, stealing, and relinquishing ownership.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <b>internal class</b> <a id="a5baeac704f7e234" href="../../R/a5baeac704f7e234.html" target="n" data-glyph="2,0" class="t t">PartitionLoadBalancer</a>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The random number generator to use for a specific thread.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static readonly</b> <a href="@0@mscorlib/A.html#42021806b924c5cd" class="t t">ThreadLocal</a>&lt;<a href="@0@mscorlib/A.html#bb77e610694e64ca" class="t t">Random</a>&gt; <a id="7c937db4483ee19b" href="../../R/7c937db4483ee19b.html" target="n" data-glyph="46,1" class="i field">RandomNumberGenerator</a> = <b>new</b> <a href="@0@mscorlib/A.html#28dd4e60dd02f687" class="t constructor">ThreadLocal</a>&lt;<a href="@0@mscorlib/A.html#bb77e610694e64ca" class="t t">Random</a>&gt;(() =&gt; <b>new</b> <a href="@0@mscorlib/A.html#92e3cf6e56571d5a" class="t constructor">Random</a>(<a href="@0@mscorlib/A.html#8792520ddc6dadcb" class="t t">Interlocked</a>.<a href="@0@mscorlib/A.html#09bb1e21afd76cf2" class="i method">Increment</a>(<b>ref</b> <a href="#ba7cd2504c9a2ed0" class="i field">s_randomSeed</a>)), <b>false</b>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The seed to use for initializing random number generated for a given thread-specific instance.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static int</b> <a id="ba7cd2504c9a2ed0" href="../../R/ba7cd2504c9a2ed0.html" target="n" data-glyph="46,1" class="i field">s_randomSeed</a> = <a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#39a839e5e9ca1f3f" class="i property">TickCount</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Responsible for creation of checkpoints and for ownership claim.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private readonly</b> <a href="StorageManager.cs.html#4c3279872ba9c8f6" class="t t">StorageManager</a> <a id="8ea421a5da0000ec" href="../../R/8ea421a5da0000ec.html" target="n" data-glyph="46,1" class="i field">StorageManager</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   A partition distribution dictionary, mapping an owner&#39;s identifier to the amount of partitions it owns and its list of partitions.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt;&gt; <a id="2132590cb985e3fd" href="../../R/2132590cb985e3fd.html" target="n" data-glyph="46,1" class="i field">ActiveOwnershipWithDistribution</a> = <b>new</b> <a href="@0@mscorlib/A.html#05d4a216235a779c" class="t constructor">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt;&gt;(<a href="@0@mscorlib/A.html#a1c3d85bbf4ae20e" class="t t">StringComparer</a>.<a href="@0@mscorlib/A.html#59b9c33842417944" class="i property">OrdinalIgnoreCase</a>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The fully qualified Event Hubs namespace that the processor is associated with.  This is likely</span>
+        <span class="c">///</span><span class="c">   to be similar to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">{yournamespace}.servicebus.windows.net</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public string</b> <a id="e76cf56a5668d2da" href="../../R/e76cf56a5668d2da.html" target="n" data-glyph="102,1" class="i property">FullyQualifiedNamespace</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The name of the Event Hub that the processor is connected to, specific to the</span>
+        <span class="c">///</span><span class="c">   Event Hubs namespace that contains it.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public string</b> <a id="ae1501fb0730d7b8" href="../../R/ae1501fb0730d7b8.html" target="n" data-glyph="102,1" class="i property">EventHubName</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The name of the consumer group this load balancer is associated with.  Events will be</span>
+        <span class="c">///</span><span class="c">   read only in the context of this group.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public string</b> <a id="9573bc29d78d1e3c" href="../../R/9573bc29d78d1e3c.html" target="n" data-glyph="102,1" class="i property">ConsumerGroup</a> { <b>get</b>;  }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The identifier of the EventProcessorClient that owns this load balancer.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public string</b> <a id="bf8e285bbd9c37c5" href="../../R/bf8e285bbd9c37c5.html" target="n" data-glyph="102,1" class="i property">OwnerIdentifier</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The minimum amount of time for an ownership to be considered expired without further updates.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="084107ce99b6a2b8" href="../../R/084107ce99b6a2b8.html" target="n" data-glyph="102,1" class="i property">OwnershipExpirationInterval</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The minimum amount of time to be elapsed between two load balancing verifications.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="c9ab269ed5e71e29" href="../../R/c9ab269ed5e71e29.html" target="n" data-glyph="102,1" class="i property">LoadBalanceInterval</a> { <b>get</b>; <b>internal set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Indicates whether the load balancer believes itself to be in a balanced state</span>
+        <span class="c">///</span><span class="c">   when considering its fair share of partitions and whether any partitions</span>
+        <span class="c">///</span><span class="c">   remain unclaimed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public virtual bool</b> <a id="02151f8e45c3570e" href="../../R/02151f8e45c3570e.html" target="n" data-glyph="102,1" class="i property">IsBalanced</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The partitionIds currently owned by the associated event processor.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public virtual</b> <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="3831241686220f3c" href="../../R/3831241686220f3c.html" target="n" data-glyph="102,1" class="i property">OwnedPartitionIds</a> =&gt; <a href="#2b06ecc7849a19bc" class="i property">InstanceOwnership</a>.<a href="@0@mscorlib/A.html#9a3c0cb5c149c9f7" class="i property">Keys</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The instance of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Diagnostics/PartitionLoadBalancerEventSource.cs.html#c6710342c5a3d0ca" class="t t">PartitionLoadBalancerEventSource</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> which can be mocked for testing.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal</b> <a href="../Diagnostics/PartitionLoadBalancerEventSource.cs.html#c6710342c5a3d0ca" class="t t">PartitionLoadBalancerEventSource</a> <a id="260edd6eaae99247" href="../../R/260edd6eaae99247.html" target="n" data-glyph="104,1" class="i property">Logger</a> { <b>get</b>; <b>set</b>; } = <a href="../Diagnostics/PartitionLoadBalancerEventSource.cs.html#c6710342c5a3d0ca" class="t t">PartitionLoadBalancerEventSource</a>.<a href="../Diagnostics/PartitionLoadBalancerEventSource.cs.html#7fdaa52175154b26" class="i property">Log</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The set of partition ownership the associated event processor owns.  Partition ids are used as keys.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <a href="@0@mscorlib/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt; <a id="2b06ecc7849a19bc" href="../../R/2b06ecc7849a19bc.html" target="n" data-glyph="106,1" class="i property">InstanceOwnership</a> { <b>get</b>; <b>set</b>; } = <b>new</b> <a href="@0@mscorlib/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt;();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#a5baeac704f7e234" class="t t">PartitionLoadBalancer</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">storageManager</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Responsible for creation of checkpoints and for ownership claim.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">identifier</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The identifier of the EventProcessorClient that owns this load balancer.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">consumerGroup</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the consumer group this load balancer is associated with.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">fullyQualifiedNamespace</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The fully qualified Event Hubs namespace that the processor is associated with.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">eventHubName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the Event Hub that the processor is associated with.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">ownershipExpirationInterval</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The minimum amount of time for an ownership to be considered expired without further updates.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">loadBalancingInterval</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The minimum amount of time to be elapsed between two load balancing verifications.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="49b58f683d1c5ed4" href="../../R/49b58f683d1c5ed4.html" target="n" data-glyph="72,1" class="t constructor">PartitionLoadBalancer</a>(<a href="StorageManager.cs.html#4c3279872ba9c8f6" class="t t">StorageManager</a> <span id="r0 rd" class="r0 r">storageManager</span>,
+                                     <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r1 rd" class="r1 r">identifier</span>,
+                                     <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r2 rd" class="r2 r">consumerGroup</span>,
+                                     <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r3 rd" class="r3 r">fullyQualifiedNamespace</span>,
+                                     <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r4 rd" class="r4 r">eventHubName</span>,
+                                     <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r5 rd" class="r5 r">ownershipExpirationInterval</span>,
+                                     <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r6 rd" class="r6 r">loadBalancingInterval</span>)
+        {
+            <a href="../../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r0 r">storageManager</span>, <b>nameof</b>(<span class="r0 r">storageManager</span>));
+            <a href="../../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r1 r">identifier</span>, <b>nameof</b>(<span class="r1 r">identifier</span>));
+            <a href="../../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r2 r">consumerGroup</span>, <b>nameof</b>(<span class="r2 r">consumerGroup</span>));
+            <a href="../../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r3 r">fullyQualifiedNamespace</span>, <b>nameof</b>(<span class="r3 r">fullyQualifiedNamespace</span>));
+            <a href="../../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r4 r">eventHubName</span>, <b>nameof</b>(<span class="r4 r">eventHubName</span>));
+ 
+            <a href="#8ea421a5da0000ec" class="i field">StorageManager</a> = <span class="r0 r">storageManager</span>;
+            <a href="#bf8e285bbd9c37c5" class="i property">OwnerIdentifier</a> = <span class="r1 r">identifier</span>;
+            <a href="#e76cf56a5668d2da" class="i property">FullyQualifiedNamespace</a> = <span class="r3 r">fullyQualifiedNamespace</span>;
+            <a href="#ae1501fb0730d7b8" class="i property">EventHubName</a> = <span class="r4 r">eventHubName</span>;
+            <a href="#9573bc29d78d1e3c" class="i property">ConsumerGroup</a> = <span class="r2 r">consumerGroup</span>;
+            <a href="#084107ce99b6a2b8" class="i property">OwnershipExpirationInterval</a> = <span class="r5 r">ownershipExpirationInterval</span>;
+            <a href="#c9ab269ed5e71e29" class="i property">LoadBalanceInterval</a> = <span class="r6 r">loadBalancingInterval</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#a5baeac704f7e234" class="t t">PartitionLoadBalancer</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>protected</b> <a id="198fc0373cc1c870" href="../../R/../../0000000000.html" target="n" data-glyph="75,1" class="t constructor">PartitionLoadBalancer</a>()
+        {
+            <span class="c">// Because this constructor is used heavily in testing, initialize the</span>
+            <span class="c">// critical timing properties to their default option values.</span>
+ 
+            <a href="/Azure.Messaging.EventHubs/A.html#ff5042f1902a1c50" class="k">var</a> <span id="r7 rd" class="r7 r">options</span> = <b>new</b> <span class="t">EventProcessorOptions</span>();
+ 
+            <a href="#c9ab269ed5e71e29" class="i property">LoadBalanceInterval</a> = <span class="r7 r">options</span>.<a href="/Azure.Messaging.EventHubs/A.html#683a6b0c2592ec66" class="i property">LoadBalancingUpdateInterval</a>;
+            <a href="#084107ce99b6a2b8" class="i property">OwnershipExpirationInterval</a> = <span class="r7 r">options</span>.<a href="/Azure.Messaging.EventHubs/A.html#f9c560e2baa1fef3" class="i property">PartitionOwnershipExpirationInterval</a>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Performs load balancing between multiple EventProcessorClient instances, claiming others&#39; partitions to enforce</span>
+        <span class="c">///</span><span class="c">   a more equal distribution when necessary.  It also manages its own partition processing tasks and ownership.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">partitionIds</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The set of partitionIds available for ownership balancing.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The claimed ownership. </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if this instance is not eligible, if no claimable ownership was found or if the claim attempt failed.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public virtual async</b> <span class="i">ValueTask</span>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt; <a id="e9f18fd7562b5298" href="../../R/e9f18fd7562b5298.html" target="n" data-glyph="72,1" class="i method">RunLoadBalancingAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>[] <span id="r8 rd" class="r8 r">partitionIds</span>,
+                                                                                               <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r9 rd" class="r9 r">cancellationToken</span>)
+        {
+            <span class="c">// Renew this instance&#39;s ownership so they don&#39;t expire.</span>
+ 
+            <b>await</b> <a href="#ac8b9ff9d0dd8b4f" class="i method">RenewOwnershipAsync</a>(<span class="r9 r">cancellationToken</span>).<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <span class="c">// From the storage service, obtain a complete list of ownership, including expired ones.  We may still need</span>
+            <span class="c">// their eTags to claim orphan partitions.</span>
+ 
+            <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt; <span id="r10 rd" class="r10 r">completeOwnershipList</span>;
+ 
+            <b>try</b>
+            {
+                <span class="r10 r">completeOwnershipList</span> = (<b>await</b> <a href="#8ea421a5da0000ec" class="i field">StorageManager</a>.<a href="StorageManager.cs.html#7ecf92f689e27571" class="i method">ListOwnershipAsync</a>(<a href="#e76cf56a5668d2da" class="i property">FullyQualifiedNamespace</a>, <a href="#ae1501fb0730d7b8" class="i property">EventHubName</a>, <a href="#9573bc29d78d1e3c" class="i property">ConsumerGroup</a>, <span class="r9 r">cancellationToken</span>)
+                    .<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>))
+                    .<a href="@0@System.Core/A.html#e276d6892241255b" class="i method">ToList</a>();
+            }
+            <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r11 rd" class="r11 r">ex</span>)
+            {
+                <span class="r9 r">cancellationToken</span>.<a href="../Core/CancellationTokenExtensions.cs.html#48bae066cbca26c9" class="i method">ThrowIfCancellationRequested</a>&lt;<a href="@0@mscorlib/A.html#30edb7a318d221fa" class="t t">TaskCanceledException</a>&gt;();
+ 
+                <span class="c">// If ownership list retrieval fails, give up on the current cycle.  There&#39;s nothing more we can do</span>
+                <span class="c">// without an updated ownership list.  Set the EventHubName to null so it doesn&#39;t modify the exception</span>
+                <span class="c">// message.  This exception message is used so the processor can retrieve the raw Operation string, and</span>
+                <span class="c">// adding the EventHubName would append unwanted info to it.</span>
+ 
+                <b>throw</b> <b>new</b> <span class="t">EventHubsException</span>(<b>true</b>, <b>null</b>, <a href="../../Resources.Designer.cs.html#0f60eafa1a3b4f36" class="t t">Resources</a>.<a href="../../Resources.Designer.cs.html#5925c4e5552e1e7d" class="i property">OperationListOwnership</a>, <span class="r11 r">ex</span>);
+            }
+ 
+            <span class="c">// There&#39;s no point in continuing the current cycle if we failed to fetch the completeOwnershipList.</span>
+ 
+            <b>if</b> (<span class="r10 r">completeOwnershipList</span> == <b>default</b>)
+            {
+                <b>return</b> <b>default</b>;
+            }
+ 
+            <a href="@0@System.Core/A.html#2d265edc718b158b" class="k">var</a> <span id="r12 rd" class="r12 r">unclaimedPartitions</span> = <b>new</b> <a href="@0@System.Core/A.html#e068afbcd77375f8" class="t constructor">HashSet</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="r8 r">partitionIds</span>);
+ 
+            <span class="c">// Create a partition distribution dictionary from the complete ownership list we have, mapping an owner&#39;s identifier to the list of</span>
+            <span class="c">// partitions it owns.  When an event processor goes down and it has only expired ownership, it will not be taken into consideration</span>
+            <span class="c">// by others.  The expiration time defaults to 30 seconds, but it may be overridden by a derived class.</span>
+ 
+            <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="k">var</a> <span id="r13 rd" class="r13 r">utcNow</span> = <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@0@mscorlib/A.html#04abe0cac293ebd0" class="i property">UtcNow</a>;
+            <a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="k">var</a> <span id="r14 rd" class="r14 r">activeOwnership</span> = <b>default</b>(<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>);
+ 
+            <a href="#2132590cb985e3fd" class="i field">ActiveOwnershipWithDistribution</a>.<a href="@0@mscorlib/A.html#36b30e4c0708a88c" class="i method">Clear</a>();
+            <a href="#2132590cb985e3fd" class="i field">ActiveOwnershipWithDistribution</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><a href="#bf8e285bbd9c37c5" class="i property">OwnerIdentifier</a>] = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt;();
+ 
+            <b>foreach</b> (<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a> <span id="r15 rd" class="r15 r">ownership</span> <b>in</b> <span class="r10 r">completeOwnershipList</span>)
+            {
+                <b>if</b> (<span class="r13 r">utcNow</span>.<span class="i">Subtract</span>(<span class="r15 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#316dcf4e9c1cf9ae" class="i property">LastModifiedTime</a>) &lt; <a href="#084107ce99b6a2b8" class="i property">OwnershipExpirationInterval</a> &amp;&amp; !<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r15 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#0a2651fca459d132" class="i property">OwnerIdentifier</a>))
+                {
+                    <span class="r14 r">activeOwnership</span> = <span class="r15 r">ownership</span>;
+ 
+                    <span class="c">// If a processor crashes and restarts, then it is possible for it to own partitions that it is not currently</span>
+                    <span class="c">// tracking as owned.  Test for this case and ensure that ownership is tracked and extended.</span>
+ 
+                    <b>if</b> ((<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#d47c1f57ad1e1e6e" class="i method">Equals</a>(<span class="r15 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#0a2651fca459d132" class="i property">OwnerIdentifier</a>, <a href="#bf8e285bbd9c37c5" class="i property">OwnerIdentifier</a>, <a href="@0@mscorlib/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@0@mscorlib/A.html#6c3139b940557bf9" class="i field">OrdinalIgnoreCase</a>)) &amp;&amp; (!<a href="#2b06ecc7849a19bc" class="i property">InstanceOwnership</a>.<a href="@0@mscorlib/A.html#22fd7cd7408aed6e" class="i method">ContainsKey</a>(<span class="r15 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a>)))
+                    {
+                        (<b>_</b>, <span class="r14 r">activeOwnership</span>) = <b>await</b> <a href="#0fad32194090a401" class="i method">ClaimOwnershipAsync</a>(<span class="r15 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a>, <b>new</b>[] { <span class="r15 r">ownership</span> }, <span class="r9 r">cancellationToken</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                        <span class="c">// If the claim failed, then the ownership period was not extended.  Since the original ownership had not</span>
+                        <span class="c">// yet expired prior to the claim attempt, consider the original to be the active ownership for this cycle.</span>
+ 
+                        <b>if</b> (<span class="r14 r">activeOwnership</span> == <b>default</b>)
+                        {
+                            <span class="r14 r">activeOwnership</span> = <span class="r15 r">ownership</span>;
+                        }
+ 
+                        <a href="#2b06ecc7849a19bc" class="i property">InstanceOwnership</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="r14 r">activeOwnership</span>.<a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a>] = <span class="r14 r">activeOwnership</span>;
+                    }
+ 
+                    <span class="c">// Update active ownership and trim the unclaimed partitions.</span>
+ 
+                    <b>if</b> (<a href="#2132590cb985e3fd" class="i field">ActiveOwnershipWithDistribution</a>.<a href="@0@mscorlib/A.html#22fd7cd7408aed6e" class="i method">ContainsKey</a>(<span class="r14 r">activeOwnership</span>.<a href="/Azure.Messaging.EventHubs/A.html#0a2651fca459d132" class="i property">OwnerIdentifier</a>))
+                    {
+                        <a href="#2132590cb985e3fd" class="i field">ActiveOwnershipWithDistribution</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="r14 r">activeOwnership</span>.<a href="/Azure.Messaging.EventHubs/A.html#0a2651fca459d132" class="i property">OwnerIdentifier</a>].<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r14 r">activeOwnership</span>);
+                    }
+                    <b>else</b>
+                    {
+                        <a href="#2132590cb985e3fd" class="i field">ActiveOwnershipWithDistribution</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="r14 r">activeOwnership</span>.<a href="/Azure.Messaging.EventHubs/A.html#0a2651fca459d132" class="i property">OwnerIdentifier</a>] = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt; { <span class="r14 r">activeOwnership</span> };
+                    }
+ 
+                    <span class="r12 r">unclaimedPartitions</span>.<a href="@0@System.Core/A.html#4e77ae9204a00be6" class="i method">Remove</a>(<span class="r14 r">activeOwnership</span>.<a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a>);
+                }
+            }
+ 
+            <span class="c">// Find an ownership to claim and try to claim it.  The method will return null if this instance was not eligible to</span>
+            <span class="c">// increase its ownership list, if no claimable ownership could be found or if a claim attempt has failed.</span>
+ 
+            <b>var</b> (<span id="r16 rd" class="r16 r">claimAttempted</span>, <span id="r17 rd" class="r17 r">claimedOwnership</span>) = <b>await</b> <a href="#3a51d0ba80952353" class="i method">FindAndClaimOwnershipAsync</a>(<span class="r10 r">completeOwnershipList</span>, <span class="r12 r">unclaimedPartitions</span>, <span class="r8 r">partitionIds</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>, <span class="r9 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+            <b>if</b> (<span class="r17 r">claimedOwnership</span> != <b>null</b>)
+            {
+                <a href="#2b06ecc7849a19bc" class="i property">InstanceOwnership</a>[<span class="r17 r">claimedOwnership</span>.<span class="i">PartitionId</span>] = <span class="r17 r">claimedOwnership</span>;
+            }
+ 
+            <span class="c">// Update the balanced state.  Consider the load balanced if this processor has its minimum share of partitions and did not</span>
+            <span class="c">// attempt to claim a partition.</span>
+ 
+            <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r18 rd" class="r18 r">minimumDesiredPartitions</span> = <span class="r8 r">partitionIds</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a> / <a href="#2132590cb985e3fd" class="i field">ActiveOwnershipWithDistribution</a>.<a href="@0@mscorlib/A.html#9a3c0cb5c149c9f7" class="i property">Keys</a>.<a href="@0@mscorlib/A.html#4d2ca7d243bf0022" class="i property">Count</a>;
+            <a href="#02151f8e45c3570e" class="i property">IsBalanced</a> = ((<a href="#2b06ecc7849a19bc" class="i property">InstanceOwnership</a>.<a href="@0@mscorlib/A.html#12b9bba2a1f9c3e2" class="i property">Count</a> &gt;= <span class="r18 r">minimumDesiredPartitions</span>) &amp;&amp; (!<span class="r16 r">claimAttempted</span>));
+ 
+            <b>return</b> <span class="r17 r">claimedOwnership</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Relinquishes this instance&#39;s ownership so they can be claimed by other processors and clears the OwnedPartitionIds.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r19 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public virtual async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="e7a7b9e36a9629fd" href="../../R/e7a7b9e36a9629fd.html" target="n" data-glyph="72,1" class="i method">RelinquishOwnershipAsync</a>(<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r19 rd" class="r19 r">cancellationToken</span>)
+        {
+            <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt; <span id="r20 rd" class="r20 r">ownershipToRelinquish</span> = <a href="#2b06ecc7849a19bc" class="i property">InstanceOwnership</a>.<a href="@0@mscorlib/A.html#4367dd1e300ae797" class="i property">Values</a>
+                .<span class="i">Select</span>(<span id="r21 rd" class="r21 r">ownership</span> =&gt; <b>new</b> <span class="t">EventProcessorPartitionOwnership</span>
+                {
+                    <a href="/Azure.Messaging.EventHubs/A.html#32a10c50b50b991b" class="i property">FullyQualifiedNamespace</a> = <span class="r21 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#32a10c50b50b991b" class="i property">FullyQualifiedNamespace</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#c918efefac954f70" class="i property">EventHubName</a> = <span class="r21 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#c918efefac954f70" class="i property">EventHubName</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#f020f76a29d0ee5e" class="i property">ConsumerGroup</a> = <span class="r21 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#f020f76a29d0ee5e" class="i property">ConsumerGroup</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#0a2651fca459d132" class="i property">OwnerIdentifier</a> = <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#c9f70a27facb27cf" class="i field">Empty</a>, <span class="c">//set ownership to Empty so that it is treated as available to claim</span>
+                    <a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a> = <span class="r21 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#316dcf4e9c1cf9ae" class="i property">LastModifiedTime</a> = <span class="r21 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#316dcf4e9c1cf9ae" class="i property">LastModifiedTime</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#9b3a949192b7c6eb" class="i property">Version</a> = <span class="r21 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#9b3a949192b7c6eb" class="i property">Version</a>
+                });
+ 
+            <b>await</b> <a href="#8ea421a5da0000ec" class="i field">StorageManager</a>.<a href="StorageManager.cs.html#2518dddbde161122" class="i method">ClaimOwnershipAsync</a>(<span class="r20 r">ownershipToRelinquish</span>, <span class="r19 r">cancellationToken</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <a href="#2b06ecc7849a19bc" class="i property">InstanceOwnership</a>.<a href="@0@mscorlib/A.html#36b30e4c0708a88c" class="i method">Clear</a>();
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Finds and tries to claim an ownership if this processor instance is eligible to increase its ownership list.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r22 r">completeOwnershipEnumerable</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A complete enumerable of ownership obtained from the storage service.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r23 r">unclaimedPartitions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The set of partitionIds that are currently unclaimed.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r24 r">partitionCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The count of partitions.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r25 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A tuple indicating whether a claim was attempted and any ownership that was claimed.  The claimed ownership will be </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if no claim was attempted or if the claim attempt failed.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <span class="i">ValueTask</span>&lt;(<b>bool</b> <a id="7aaeb882ebec82fe" href="../../R/../../0000000000.html" target="n" data-glyph="42,1" class="i field">wasClaimAttempted</a>, <a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a> <a id="67bad18e4e960c94" href="../../R/../../0000000000.html" target="n" data-glyph="42,1" class="i field">claimedPartition</a>)&gt; <a id="3a51d0ba80952353" href="../../R/3a51d0ba80952353.html" target="n" data-glyph="76,1" class="i method">FindAndClaimOwnershipAsync</a>(<a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt; <span id="r22 rd" class="r22 r">completeOwnershipEnumerable</span>,
+                                                                                                                                  <a href="@0@System.Core/A.html#2d265edc718b158b" class="t t">HashSet</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <span id="r23 rd" class="r23 r">unclaimedPartitions</span>,
+                                                                                                                                  <b>int</b> <span id="r24 rd" class="r24 r">partitionCount</span>,
+                                                                                                                                  <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r25 rd" class="r25 r">cancellationToken</span>)
+        {
+            <span class="r25 r">cancellationToken</span>.<a href="../Core/CancellationTokenExtensions.cs.html#48bae066cbca26c9" class="i method">ThrowIfCancellationRequested</a>&lt;<a href="@0@mscorlib/A.html#30edb7a318d221fa" class="t t">TaskCanceledException</a>&gt;();
+ 
+            <span class="c">// The minimum owned partitions count is the minimum amount of partitions every event processor needs to own when the distribution</span>
+            <span class="c">// is balanced.  If n = minimumOwnedPartitionsCount, a balanced distribution will only have processors that own n or n + 1 partitions</span>
+            <span class="c">// each.  We can guarantee the partition distribution has at least one key, which corresponds to this event processor instance, even</span>
+            <span class="c">// if it owns no partitions.</span>
+ 
+            <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r26 rd" class="r26 r">minimumOwnedPartitionsCount</span> = <span class="r24 r">partitionCount</span> / <a href="#2132590cb985e3fd" class="i field">ActiveOwnershipWithDistribution</a>.<a href="@0@mscorlib/A.html#9a3c0cb5c149c9f7" class="i property">Keys</a>.<a href="@0@mscorlib/A.html#4d2ca7d243bf0022" class="i property">Count</a>;
+            <a href="#260edd6eaae99247" class="i property">Logger</a>.<a href="../Diagnostics/PartitionLoadBalancerEventSource.cs.html#47077843cc90af73" class="i method">MinimumPartitionsPerEventProcessor</a>(<span class="r26 r">minimumOwnedPartitionsCount</span>);
+ 
+            <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r27 rd" class="r27 r">ownedPartitionsCount</span> = <a href="#2132590cb985e3fd" class="i field">ActiveOwnershipWithDistribution</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><a href="#bf8e285bbd9c37c5" class="i property">OwnerIdentifier</a>].<a href="@0@mscorlib/A.html#78a69d857716bc68" class="i property">Count</a>;
+            <a href="#260edd6eaae99247" class="i property">Logger</a>.<a href="../Diagnostics/PartitionLoadBalancerEventSource.cs.html#cbb4ff3dd3f9daf4" class="i method">CurrentOwnershipCount</a>(<span class="r27 r">ownedPartitionsCount</span>, <a href="#bf8e285bbd9c37c5" class="i property">OwnerIdentifier</a>);
+ 
+            <span class="c">// There are two possible situations in which we may need to claim a partition ownership:</span>
+            <span class="c">//</span>
+            <span class="c">//   - The first one is when we are below the minimum amount of owned partitions.  There&#39;s nothing more to check, as we need to claim more</span>
+            <span class="c">//     partitions to enforce balancing.</span>
+            <span class="c">//</span>
+            <span class="c">//   - The second case is a bit tricky.  Sometimes the claim must be performed by an event processor that already has reached the minimum</span>
+            <span class="c">//     amount of ownership.  This may happen, for instance, when we have 13 partitions and 3 processors, each of them owning 4 partitions.</span>
+            <span class="c">//     The minimum amount of partitions per processor is, in fact, 4, but in this example we still have 1 orphan partition to claim.  To</span>
+            <span class="c">//     avoid overlooking this kind of situation, we may want to claim an ownership when we have exactly the minimum amount of ownership,</span>
+            <span class="c">//     but we are making sure there are no better candidates among the other event processors.</span>
+ 
+            <b>if</b> (<span class="r27 r">ownedPartitionsCount</span> &lt; <span class="r26 r">minimumOwnedPartitionsCount</span>
+                || (<span class="r27 r">ownedPartitionsCount</span> == <span class="r26 r">minimumOwnedPartitionsCount</span> &amp;&amp; !<a href="#2132590cb985e3fd" class="i field">ActiveOwnershipWithDistribution</a>.<a href="@0@mscorlib/A.html#4367dd1e300ae797" class="i property">Values</a>.<a href="@0@System.Core/A.html#6a1af7c3d17845e3" class="i method">Any</a>(<span id="r28 rd" class="r28 r">partitions</span> =&gt; <span class="r28 r">partitions</span>.<a href="@0@mscorlib/A.html#78a69d857716bc68" class="i property">Count</a> &lt; <span class="r26 r">minimumOwnedPartitionsCount</span>)))
+            {
+                <span class="c">// Look for unclaimed partitions.  If any, randomly pick one of them to claim.</span>
+ 
+                <a href="#260edd6eaae99247" class="i property">Logger</a>.<a href="../Diagnostics/PartitionLoadBalancerEventSource.cs.html#cd5df67025c2200a" class="i method">UnclaimedPartitions</a>(<span class="r23 r">unclaimedPartitions</span>);
+ 
+                <b>if</b> (<span class="r23 r">unclaimedPartitions</span>.<a href="@0@System.Core/A.html#905bec8c22644c82" class="i property">Count</a> &gt; 0)
+                {
+                    <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r29 rd" class="r29 r">index</span> = <a href="#7c937db4483ee19b" class="i field">RandomNumberGenerator</a>.<a href="@0@mscorlib/A.html#bf5157f54273c48c" class="i property">Value</a>.<a href="@0@mscorlib/A.html#8aeb183c03bdcdcf" class="i method">Next</a>(<span class="r23 r">unclaimedPartitions</span>.<a href="@0@System.Core/A.html#905bec8c22644c82" class="i property">Count</a>);
+                    <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="k">var</a> <span id="r30 rd" class="r30 r">returnTask</span> = <a href="#0fad32194090a401" class="i method">ClaimOwnershipAsync</a>(<span class="r23 r">unclaimedPartitions</span>.<a href="@0@System.Core/A.html#7db56d44563d8761" class="i method">ElementAt</a>(<span class="r29 r">index</span>), <span class="r22 r">completeOwnershipEnumerable</span>, <span class="r25 r">cancellationToken</span>);
+ 
+                    <b>return</b> <b>new</b> <span class="i">ValueTask</span>&lt;(<b>bool</b>, <a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>)&gt;(<span class="r30 r">returnTask</span>);
+                }
+ 
+                <span class="c">// Only try to steal partitions if there are no unclaimed partitions left.  At first, only processors that have exceeded the</span>
+                <span class="c">// maximum owned partition count should be targeted.</span>
+ 
+                <a href="#260edd6eaae99247" class="i property">Logger</a>.<a href="../Diagnostics/PartitionLoadBalancerEventSource.cs.html#f5258d8c441c946f" class="i method">ShouldStealPartition</a>(<a href="#bf8e285bbd9c37c5" class="i property">OwnerIdentifier</a>);
+ 
+                <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r31 rd" class="r31 r">maximumOwnedPartitionsCount</span> = <span class="r26 r">minimumOwnedPartitionsCount</span> + 1;
+                <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r32 rd" class="r32 r">partitionsOwnedByProcessorWithGreaterThanMaximumOwnedPartitionsCount</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;();
+                <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r33 rd" class="r33 r">partitionsOwnedByProcessorWithExactlyMaximumOwnedPartitionsCount</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;();
+ 
+                <span class="c">// Build a list of partitions owned by processors owning exactly maximumOwnedPartitionsCount partitions</span>
+                <span class="c">// and a list of partitions owned by processors owning more than maximumOwnedPartitionsCount partitions.</span>
+                <span class="c">// Ignore the partitions already owned by this processor even though the current processor should never meet either criteria.</span>
+ 
+                <b>foreach</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r34 rd" class="r34 r">key</span> <b>in</b> <a href="#2132590cb985e3fd" class="i field">ActiveOwnershipWithDistribution</a>.<a href="@0@mscorlib/A.html#9a3c0cb5c149c9f7" class="i property">Keys</a>)
+                {
+                    <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r35 rd" class="r35 r">ownedPartitions</span> = <a href="#2132590cb985e3fd" class="i field">ActiveOwnershipWithDistribution</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="r34 r">key</span>];
+ 
+                    <b>if</b> (<span class="r35 r">ownedPartitions</span>.<a href="@0@mscorlib/A.html#78a69d857716bc68" class="i property">Count</a> &lt; <span class="r31 r">maximumOwnedPartitionsCount</span> || <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#d47c1f57ad1e1e6e" class="i method">Equals</a>(<span class="r34 r">key</span>, <a href="#bf8e285bbd9c37c5" class="i property">OwnerIdentifier</a>, <a href="@0@mscorlib/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@0@mscorlib/A.html#6c3139b940557bf9" class="i field">OrdinalIgnoreCase</a>))
+                    {
+                        <span class="c">// Skip if the common case is true.</span>
+ 
+                        <b>continue</b>;
+                    }
+                    <b>if</b> (<span class="r35 r">ownedPartitions</span>.<a href="@0@mscorlib/A.html#78a69d857716bc68" class="i property">Count</a> == <span class="r31 r">maximumOwnedPartitionsCount</span>)
+                    {
+                        <span class="r35 r">ownedPartitions</span>
+                            .<span class="i">ForEach</span>(<span id="r36 rd" class="r36 r">ownership</span> =&gt; <span class="r33 r">partitionsOwnedByProcessorWithExactlyMaximumOwnedPartitionsCount</span>.<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r36 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a>));
+                    }
+                    <b>else</b>
+                    {
+                        <span class="r35 r">ownedPartitions</span>
+                            .<span class="i">ForEach</span>(<span id="r37 rd" class="r37 r">ownership</span> =&gt; <span class="r32 r">partitionsOwnedByProcessorWithGreaterThanMaximumOwnedPartitionsCount</span>.<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r37 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a>));
+                    }
+                }
+ 
+                <span class="c">// Here&#39;s the important part.  If there are no processors that have exceeded the maximum owned partition count allowed, we may</span>
+                <span class="c">// need to steal from the processors that have exactly the maximum amount.  If this instance is below the minimum count, then</span>
+                <span class="c">// we have no choice as we need to enforce balancing.  Otherwise, leave it as it is because the distribution wouldn&#39;t change.</span>
+ 
+                <b>if</b> (<span class="r32 r">partitionsOwnedByProcessorWithGreaterThanMaximumOwnedPartitionsCount</span>.<a href="@0@mscorlib/A.html#78a69d857716bc68" class="i property">Count</a> &gt; 0)
+                {
+                    <span class="c">// If any stealable partitions were found, randomly pick one of them to claim.</span>
+ 
+                    <a href="#260edd6eaae99247" class="i property">Logger</a>.<a href="../Diagnostics/PartitionLoadBalancerEventSource.cs.html#90c8e773a2435a71" class="i method">StealPartition</a>(<a href="#bf8e285bbd9c37c5" class="i property">OwnerIdentifier</a>);
+ 
+                    <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r38 rd" class="r38 r">index</span> = <a href="#7c937db4483ee19b" class="i field">RandomNumberGenerator</a>.<a href="@0@mscorlib/A.html#bf5157f54273c48c" class="i property">Value</a>.<a href="@0@mscorlib/A.html#8aeb183c03bdcdcf" class="i method">Next</a>(<span class="r32 r">partitionsOwnedByProcessorWithGreaterThanMaximumOwnedPartitionsCount</span>.<a href="@0@mscorlib/A.html#78a69d857716bc68" class="i property">Count</a>);
+ 
+                    <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="k">var</a> <span id="r39 rd" class="r39 r">returnTask</span> = <a href="#0fad32194090a401" class="i method">ClaimOwnershipAsync</a>(
+                        <span class="r32 r">partitionsOwnedByProcessorWithGreaterThanMaximumOwnedPartitionsCount</span><a href="@0@mscorlib/A.html#0c65bec4d3fac21e">[</a><span class="r38 r">index</span>],
+                        <span class="r22 r">completeOwnershipEnumerable</span>,
+                        <span class="r25 r">cancellationToken</span>);
+ 
+                    <b>return</b> <b>new</b> <span class="i">ValueTask</span>&lt;(<b>bool</b>, <a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>)&gt;(<span class="r39 r">returnTask</span>);
+                }
+                <b>else</b> <b>if</b> (<span class="r27 r">ownedPartitionsCount</span> &lt; <span class="r26 r">minimumOwnedPartitionsCount</span>)
+                {
+                    <span class="c">// If any stealable partitions were found, randomly pick one of them to claim.</span>
+ 
+                    <a href="#260edd6eaae99247" class="i property">Logger</a>.<a href="../Diagnostics/PartitionLoadBalancerEventSource.cs.html#90c8e773a2435a71" class="i method">StealPartition</a>(<a href="#bf8e285bbd9c37c5" class="i property">OwnerIdentifier</a>);
+ 
+                    <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r40 rd" class="r40 r">index</span> = <a href="#7c937db4483ee19b" class="i field">RandomNumberGenerator</a>.<a href="@0@mscorlib/A.html#bf5157f54273c48c" class="i property">Value</a>.<a href="@0@mscorlib/A.html#8aeb183c03bdcdcf" class="i method">Next</a>(<span class="r33 r">partitionsOwnedByProcessorWithExactlyMaximumOwnedPartitionsCount</span>.<a href="@0@mscorlib/A.html#78a69d857716bc68" class="i property">Count</a>);
+ 
+                    <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="k">var</a> <span id="r41 rd" class="r41 r">returnTask</span> = <a href="#0fad32194090a401" class="i method">ClaimOwnershipAsync</a>(
+                        <span class="r33 r">partitionsOwnedByProcessorWithExactlyMaximumOwnedPartitionsCount</span><a href="@0@mscorlib/A.html#0c65bec4d3fac21e">[</a><span class="r40 r">index</span>],
+                        <span class="r22 r">completeOwnershipEnumerable</span>,
+                        <span class="r25 r">cancellationToken</span>);
+ 
+                    <b>return</b> <b>new</b> <span class="i">ValueTask</span>&lt;(<b>bool</b>, <a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>)&gt;(<span class="r41 r">returnTask</span>);
+                }
+            }
+ 
+            <span class="c">// No ownership has been claimed.</span>
+ 
+            <b>return</b> <b>new</b> <span class="i">ValueTask</span>&lt;(<b>bool</b>, <a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>)&gt;((<b>false</b>, <b>default</b>(<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>)));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Renews this instance&#39;s ownership so they don&#39;t expire.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r42 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="ac8b9ff9d0dd8b4f" href="../../R/ac8b9ff9d0dd8b4f.html" target="n" data-glyph="76,1" class="i method">RenewOwnershipAsync</a>(<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r42 rd" class="r42 r">cancellationToken</span>)
+        {
+            <span class="r42 r">cancellationToken</span>.<a href="../Core/CancellationTokenExtensions.cs.html#48bae066cbca26c9" class="i method">ThrowIfCancellationRequested</a>&lt;<a href="@0@mscorlib/A.html#30edb7a318d221fa" class="t t">TaskCanceledException</a>&gt;();
+ 
+            <a href="#260edd6eaae99247" class="i property">Logger</a>.<a href="../Diagnostics/PartitionLoadBalancerEventSource.cs.html#f8e9f83aca6b4348" class="i method">RenewOwnershipStart</a>(<a href="#bf8e285bbd9c37c5" class="i property">OwnerIdentifier</a>);
+ 
+            <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt; <span id="r43 rd" class="r43 r">ownershipToRenew</span> = <a href="#2b06ecc7849a19bc" class="i property">InstanceOwnership</a>.<a href="@0@mscorlib/A.html#4367dd1e300ae797" class="i property">Values</a>
+                .<span class="i">Select</span>(<span id="r44 rd" class="r44 r">ownership</span> =&gt; <b>new</b> <span class="t">EventProcessorPartitionOwnership</span>
+                {
+                    <a href="/Azure.Messaging.EventHubs/A.html#32a10c50b50b991b" class="i property">FullyQualifiedNamespace</a> = <span class="r44 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#32a10c50b50b991b" class="i property">FullyQualifiedNamespace</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#c918efefac954f70" class="i property">EventHubName</a> = <span class="r44 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#c918efefac954f70" class="i property">EventHubName</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#f020f76a29d0ee5e" class="i property">ConsumerGroup</a> = <span class="r44 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#f020f76a29d0ee5e" class="i property">ConsumerGroup</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#0a2651fca459d132" class="i property">OwnerIdentifier</a> = <span class="r44 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#0a2651fca459d132" class="i property">OwnerIdentifier</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a> = <span class="r44 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#316dcf4e9c1cf9ae" class="i property">LastModifiedTime</a> = <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@0@mscorlib/A.html#04abe0cac293ebd0" class="i property">UtcNow</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#9b3a949192b7c6eb" class="i property">Version</a> = <span class="r44 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#9b3a949192b7c6eb" class="i property">Version</a>
+                });
+ 
+            <b>try</b>
+            {
+                <span class="c">// Dispose of all previous partition ownership instances and get a whole new dictionary.</span>
+ 
+                <a href="#2b06ecc7849a19bc" class="i property">InstanceOwnership</a> = (<b>await</b> <a href="#8ea421a5da0000ec" class="i field">StorageManager</a>.<a href="StorageManager.cs.html#2518dddbde161122" class="i method">ClaimOwnershipAsync</a>(<span class="r43 r">ownershipToRenew</span>, <span class="r42 r">cancellationToken</span>)
+                    .<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>))
+                    .<span class="i">ToDictionary</span>(<span id="r45 rd" class="r45 r">ownership</span> =&gt; <span class="r45 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a>);
+            }
+            <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r46 rd" class="r46 r">ex</span>)
+            {
+                <span class="r42 r">cancellationToken</span>.<a href="../Core/CancellationTokenExtensions.cs.html#48bae066cbca26c9" class="i method">ThrowIfCancellationRequested</a>&lt;<a href="@0@mscorlib/A.html#30edb7a318d221fa" class="t t">TaskCanceledException</a>&gt;();
+ 
+                <span class="c">// If ownership renewal fails just give up and try again in the next cycle.  The processor may</span>
+                <span class="c">// end up losing some of its ownership.</span>
+ 
+                <a href="#260edd6eaae99247" class="i property">Logger</a>.<a href="../Diagnostics/PartitionLoadBalancerEventSource.cs.html#f383ad9f2ffc1f7b" class="i method">RenewOwnershipError</a>(<a href="#bf8e285bbd9c37c5" class="i property">OwnerIdentifier</a>, <span class="r46 r">ex</span>.<a href="@0@mscorlib/A.html#5fba0e16215b42a3" class="i property">Message</a>);
+ 
+                <span class="c">// Set the EventHubName to null so it doesn&#39;t modify the exception message. This exception message is</span>
+                <span class="c">// used so the processor can retrieve the raw Operation string, and adding the EventHubName would append</span>
+                <span class="c">// unwanted info to it.</span>
+ 
+                <b>throw</b> <b>new</b> <span class="t">EventHubsException</span>(<b>true</b>, <b>null</b>, <a href="../../Resources.Designer.cs.html#0f60eafa1a3b4f36" class="t t">Resources</a>.<a href="../../Resources.Designer.cs.html#efe710b0a7f1fde0" class="i property">OperationRenewOwnership</a>, <span class="r46 r">ex</span>);
+            }
+            <b>finally</b>
+            {
+                <a href="#260edd6eaae99247" class="i property">Logger</a>.<a href="../Diagnostics/PartitionLoadBalancerEventSource.cs.html#1449f6e9550714fd" class="i method">RenewOwnershipComplete</a>(<a href="#bf8e285bbd9c37c5" class="i property">OwnerIdentifier</a>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Tries to claim ownership of the specified partition.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r47 r">partitionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The identifier of the Event Hub partition the ownership is associated with.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r48 r">completeOwnershipEnumerable</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A complete enumerable of ownership obtained from the stored service provided by the user.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r49 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A tuple indicating whether a claim was attempted and the claimed ownership. The claimed ownership will be </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the claim attempt failed.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;(<b>bool</b> <span class="i field">wasClaimAttempted</span>, <a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a> <span class="i field">claimedPartition</span>)&gt; <a id="0fad32194090a401" href="../../R/0fad32194090a401.html" target="n" data-glyph="76,1" class="i method">ClaimOwnershipAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r47 rd" class="r47 r">partitionId</span>,
+                                                                                                                            <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt; <span id="r48 rd" class="r48 r">completeOwnershipEnumerable</span>,
+                                                                                                                            <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r49 rd" class="r49 r">cancellationToken</span>)
+        {
+            <span class="r49 r">cancellationToken</span>.<a href="../Core/CancellationTokenExtensions.cs.html#48bae066cbca26c9" class="i method">ThrowIfCancellationRequested</a>&lt;<a href="@0@mscorlib/A.html#30edb7a318d221fa" class="t t">TaskCanceledException</a>&gt;();
+ 
+            <a href="#260edd6eaae99247" class="i property">Logger</a>.<a href="../Diagnostics/PartitionLoadBalancerEventSource.cs.html#e23986f53ca24c48" class="i method">ClaimOwnershipStart</a>(<span class="r47 r">partitionId</span>);
+ 
+            <span class="c">// We need the eTag from the most recent ownership of this partition, even if it&#39;s expired.  We want to keep the offset and</span>
+            <span class="c">// the sequence number as well.</span>
+ 
+            <b>var</b> <span id="r50 rd" class="r50 r">oldOwnership</span> = <span class="r48 r">completeOwnershipEnumerable</span>.<span class="i">FirstOrDefault</span>(<span id="r51 rd" class="r51 r">ownership</span> =&gt; <span class="r51 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a> == <span class="r47 r">partitionId</span>);
+ 
+            <a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="k">var</a> <span id="r52 rd" class="r52 r">newOwnership</span> = <b>new</b> <span class="t">EventProcessorPartitionOwnership</span>
+            {
+                <a href="/Azure.Messaging.EventHubs/A.html#32a10c50b50b991b" class="i property">FullyQualifiedNamespace</a> = <a href="#e76cf56a5668d2da" class="i property">FullyQualifiedNamespace</a>,
+                <a href="/Azure.Messaging.EventHubs/A.html#c918efefac954f70" class="i property">EventHubName</a> = <a href="#ae1501fb0730d7b8" class="i property">EventHubName</a>,
+                <a href="/Azure.Messaging.EventHubs/A.html#f020f76a29d0ee5e" class="i property">ConsumerGroup</a> = <a href="#9573bc29d78d1e3c" class="i property">ConsumerGroup</a>,
+                <a href="/Azure.Messaging.EventHubs/A.html#0a2651fca459d132" class="i property">OwnerIdentifier</a> = <a href="#bf8e285bbd9c37c5" class="i property">OwnerIdentifier</a>,
+                <a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a> = <span class="r47 r">partitionId</span>,
+                <a href="/Azure.Messaging.EventHubs/A.html#316dcf4e9c1cf9ae" class="i property">LastModifiedTime</a> = <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@0@mscorlib/A.html#04abe0cac293ebd0" class="i property">UtcNow</a>,
+                <a href="/Azure.Messaging.EventHubs/A.html#9b3a949192b7c6eb" class="i property">Version</a> = <span class="r50 r">oldOwnership</span>?.<span class="i">Version</span>
+            };
+ 
+            <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="k">var</a> <span id="r53 rd" class="r53 r">claimedOwnership</span> = <b>default</b>(<a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt;);
+ 
+            <b>try</b>
+            {
+                <span class="r53 r">claimedOwnership</span> = <b>await</b> <a href="#8ea421a5da0000ec" class="i field">StorageManager</a>.<a href="StorageManager.cs.html#2518dddbde161122" class="i method">ClaimOwnershipAsync</a>(<b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt; { <span class="r52 r">newOwnership</span> }, <span class="r49 r">cancellationToken</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+            }
+            <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r54 rd" class="r54 r">ex</span>)
+            {
+                <span class="r49 r">cancellationToken</span>.<a href="../Core/CancellationTokenExtensions.cs.html#48bae066cbca26c9" class="i method">ThrowIfCancellationRequested</a>&lt;<a href="@0@mscorlib/A.html#30edb7a318d221fa" class="t t">TaskCanceledException</a>&gt;();
+ 
+                <span class="c">// If ownership claim fails, just treat it as a usual ownership claim failure.</span>
+ 
+                <a href="#260edd6eaae99247" class="i property">Logger</a>.<a href="../Diagnostics/PartitionLoadBalancerEventSource.cs.html#15725426b96bc169" class="i method">ClaimOwnershipError</a>(<span class="r47 r">partitionId</span>, <span class="r54 r">ex</span>.<a href="@0@mscorlib/A.html#5fba0e16215b42a3" class="i property">Message</a>);
+ 
+                <span class="c">// Set the EventHubName to null so it doesn&#39;t modify the exception message. This exception message is</span>
+                <span class="c">// used so the processor can retrieve the raw Operation string, and adding the EventHubName would append</span>
+                <span class="c">// unwanted info to it. This exception also communicates the PartitionId to the caller.</span>
+ 
+                <a href="/Azure.Messaging.EventHubs/A.html#fe9b3d9ffc64177d" class="k">var</a> <span id="r55 rd" class="r55 r">exception</span> = <b>new</b> <span class="t">EventHubsException</span>(<b>true</b>, <b>null</b>, <a href="../../Resources.Designer.cs.html#0f60eafa1a3b4f36" class="t t">Resources</a>.<a href="../../Resources.Designer.cs.html#1c02a053daf1f93c" class="i property">OperationClaimOwnership</a>, <span class="r54 r">ex</span>);
+                <span class="r55 r">exception</span>.<a href="../Core/EventHubsExceptionExtensions.cs.html#66b51b9c5c00dd71" class="i method">SetFailureOperation</a>(<span class="r55 r">exception</span>.<a href="/Azure.Messaging.EventHubs/A.html#6ae5ce7ceaa4f99e" class="i property">Message</a>);
+                <span class="r55 r">exception</span>.<a href="../Core/EventHubsExceptionExtensions.cs.html#d91a65c77ac9b99a" class="i method">SetFailureData</a>(<span class="r47 r">partitionId</span>);
+                <b>throw</b> <span class="r55 r">exception</span>;
+            }
+ 
+            <span class="c">// We are expecting an enumerable with a single element if the claim attempt succeeds.</span>
+ 
+            <b>return</b> (<b>true</b>, <span class="r53 r">claimedOwnership</span>.<a href="@0@System.Core/A.html#8087366974af11d2" class="i method">FirstOrDefault</a>());
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

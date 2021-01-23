@@ -1,0 +1,1410 @@
+﻿<!DOCTYPE html>
+<html><head><title>DataLakeStoreTransferClient.cs</title><link rel="stylesheet" href="../../../styles.css"><script src="../../../scripts.js"></script></head>
+<body class="cB" onload="i(1401);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.Management.DataLake.Store/Customizations/DataTransfer/DataLakeStoreTransferClient.cs" target="_top">Customizations\DataTransfer\DataLakeStoreTransferClient.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.Management.DataLake.Store" target="_top">src\Microsoft.Azure.Management.DataLake.Store.csproj</a> (Microsoft.Azure.Management.DataLake.Store)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">Rest</span>;
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Concurrent</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Management</span>.<span class="i n">DataLake</span>.<span class="i n">Store</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Represents a delegate that is called in the event of a thread transfering a file terminating unexpectedly.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>public delegate void</b> <a id="29dd7260b5548b61" href="../../R/29dd7260b5548b61.html" target="n" data-glyph="12,0" class="t t"><span id="6723cbb83ecc25c0">FileTransferThreadFailProgressUpdate</span></a>(<a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <span id="r0 rd" class="r0 r">failedFile</span>);
+ 
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Represents a general purpose file transfer client into a Data Lake Store. Supports the efficient transfer of large files.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>public sealed class</b> <a id="976b7e4d8dc73b48" href="../../R/976b7e4d8dc73b48.html" target="n" data-glyph="0,0" class="t t">DataLakeStoreTransferClient</a>
+    {
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Private
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The maximum number of parallel threads to allow. </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public const int</b> <a id="1da12bb7545b8ddb" href="../../R/1da12bb7545b8ddb.html" target="n" data-glyph="6,1" class="i field">MaxAllowedThreadsPerFile</a> = 1024;
+        <b>internal const int</b> <a id="248b5becb1976dd8" href="../../R/248b5becb1976dd8.html" target="n" data-glyph="8,1" class="i field">DefaultMaxPerFileThreadCount</a> = 75;
+        <b>internal const int</b> <a id="701b20d261fee682" href="../../R/701b20d261fee682.html" target="n" data-glyph="8,1" class="i field">DefaultIdealConcurrentFileCount</a> = 25;
+        <b>internal const int</b> <a id="53967306239c2691" href="../../R/53967306239c2691.html" target="n" data-glyph="8,1" class="i field">DefaultIdealPerFileThreadCountForFolders</a> = 100;
+        <b>private readonly</b> <a href="Common/IFrontEndAdapter.cs.html#d503d7a60084fa22" class="t t">IFrontEndAdapter</a> <a id="8654e36d587806f9" href="../../R/8654e36d587806f9.html" target="n" data-glyph="46,1" class="i field">_frontEnd</a>;
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<a href="Common/TransferProgress.cs.html#826dd519f4b122e1" class="t t">TransferProgress</a>&gt; <a id="f996953f427bfe1d" href="../../R/f996953f427bfe1d.html" target="n" data-glyph="46,1" class="i field">_progressTracker</a>;
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<a href="Common/TransferFolderProgress.cs.html#bff5545549325dae" class="t t">TransferFolderProgress</a>&gt; <a id="02a9f0f4f2b5ca25" href="../../R/02a9f0f4f2b5ca25.html" target="n" data-glyph="46,1" class="i field">_folderProgressTracker</a>;
+        <b>private readonly string</b> <a id="af19db13e4032d4b" href="../../R/af19db13e4032d4b.html" target="n" data-glyph="46,1" class="i field">_metadataFilePath</a>;
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <a id="89269c7cf60ea377" href="../../R/89269c7cf60ea377.html" target="n" data-glyph="46,1" class="i field">_token</a>;
+        <b>private bool</b> <a id="fee6f14e3f4ef9c0" href="../../R/fee6f14e3f4ef9c0.html" target="n" data-glyph="46,1" class="i field">isDirectory</a> = <b>false</b>;
+ 
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">FullNetFx</span>
+        <b>private int</b> <a id="59be0be13489ca78" href="../../R/59be0be13489ca78.html" target="n" data-glyph="46,1" class="i field">_previousDefaultConnectionLimit</a>;
+<span class="k preprocess">#</span><span class="k preprocess">endif</span>
+ 
+<span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+        <span class="c">// this is used to ensure that all threads, including tracking threads, ultimately terminate.</span>
+        <b>internal static</b> <a href="@0@mscorlib/A.html#18bcbcbdddbcfdcb" class="t t">ConcurrentQueue</a>&lt;<a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a>&gt; <a id="e06ba3ab70980f58" href="../../R/e06ba3ab70980f58.html" target="n" data-glyph="104,1" class="i property">AllFiles</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <b>internal static</b> <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="@0@mscorlib/A.html#3980e012bae82e96" class="t t">Thread</a>&gt; <a id="cfa6c1d8966c3885" href="../../R/cfa6c1d8966c3885.html" target="n" data-glyph="104,1" class="i property">ExecutionThreads</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">  An event that is registered to progress tracking to ensure that, in the event of an unexpected transfer failure,</span>
+        <span class="c">///</span><span class="c">  progress is properly updated.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public event</b> <a href="#29dd7260b5548b61" class="t t">FileTransferThreadFailProgressUpdate</a> <a id="f69018fa781c88e9" href="../../R/f69018fa781c88e9.html" target="n" data-glyph="30,1" class="i">OnFileTransferThreadFailProgressUpdate</a>;
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Constructor
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new instance of the DataLakeStoreTransferClient class, by specifying a pointer to the FrontEnd to use for the transfer.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">transferParameters</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The transfer parameters to use.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">frontEnd</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A pointer to the FrontEnd interface to use for the transfer.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">progressTracker</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">(Optional) A tracker that reports progress on the transfer.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">folderProgressTracker</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">(Optional) The folder progress tracker.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="c17f7ca83abd8028" href="../../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">DataLakeStoreTransferClient</a>(
+            <a href="Common/TransferParameters.cs.html#9d54476a1d8187dd" class="t t">TransferParameters</a> <span id="r1 rd" class="r1 r">transferParameters</span>,
+            <a href="Common/IFrontEndAdapter.cs.html#d503d7a60084fa22" class="t t">IFrontEndAdapter</a> <span id="r2 rd" class="r2 r">frontEnd</span>,
+            <a href="@0@mscorlib/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<a href="Common/TransferProgress.cs.html#826dd519f4b122e1" class="t t">TransferProgress</a>&gt; <span id="r3 rd" class="r3 r">progressTracker</span> = <b>null</b>,
+            <a href="@0@mscorlib/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<a href="Common/TransferFolderProgress.cs.html#bff5545549325dae" class="t t">TransferFolderProgress</a>&gt; <span id="r4 rd" class="r4 r">folderProgressTracker</span> = <b>null</b>) :
+            <a href="#b92e45ee4a7d4339" class="k">this</a>(<span class="r1 r">transferParameters</span>, <span class="r2 r">frontEnd</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>, <span class="r3 r">progressTracker</span>, <span class="r4 r">folderProgressTracker</span>)
+        {
+            
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a new instance of the DataLakeStoreTransferClient class, by specifying a pointer to the FrontEnd to use for the transfer.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">transferParameters</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The transfer Parameters to use.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">frontEnd</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A pointer to the FrontEnd interface to use for the transfer.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">token</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">progressTracker</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">(Optional) A tracker that reports progress on the transfer.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">folderProgressTracker</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">(Optional) The folder progress tracker.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="b92e45ee4a7d4339" href="../../R/b92e45ee4a7d4339.html" target="n" data-glyph="72,1" class="t constructor">DataLakeStoreTransferClient</a>(
+            <a href="Common/TransferParameters.cs.html#9d54476a1d8187dd" class="t t">TransferParameters</a> <span id="r5 rd" class="r5 r">transferParameters</span>,
+            <a href="Common/IFrontEndAdapter.cs.html#d503d7a60084fa22" class="t t">IFrontEndAdapter</a> <span id="r6 rd" class="r6 r">frontEnd</span>,
+            <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r7 rd" class="r7 r">token</span>,
+            <a href="@0@mscorlib/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<a href="Common/TransferProgress.cs.html#826dd519f4b122e1" class="t t">TransferProgress</a>&gt; <span id="r8 rd" class="r8 r">progressTracker</span> = <b>null</b>,
+            <a href="@0@mscorlib/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<a href="Common/TransferFolderProgress.cs.html#bff5545549325dae" class="t t">TransferFolderProgress</a>&gt; <span id="r9 rd" class="r9 r">folderProgressTracker</span> = <b>null</b>)
+        {
+            <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a> = <span class="r5 r">transferParameters</span>;
+            <a href="#8654e36d587806f9" class="i field">_frontEnd</a> = <span class="r6 r">frontEnd</span>;
+ 
+            <span class="c">//we need to override the default .NET value for max connections to a host to our number of threads, if necessary (otherwise we won&#39;t achieve the parallelism we want)</span>
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">FullNetFx</span>
+            <a href="#59be0be13489ca78" class="i field">_previousDefaultConnectionLimit</a> = <a href="@0@System/A.html#86ab68f9e9462330" class="t t">ServicePointManager</a>.<a href="@0@System/A.html#4a219b1bfef6af65" class="i property">DefaultConnectionLimit</a>;
+            <a href="@0@System/A.html#86ab68f9e9462330" class="t t">ServicePointManager</a>.<a href="@0@System/A.html#4a219b1bfef6af65" class="i property">DefaultConnectionLimit</a> = <a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#80ff956e9ca8e414" class="i method">Max</a>((<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#770374bbad546898" class="i property">PerFileThreadCount</a> * <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#f9997ab4908f86f1" class="i property">ConcurrentFileCount</a>) + <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#f9997ab4908f86f1" class="i property">ConcurrentFileCount</a>,
+                <a href="@0@System/A.html#86ab68f9e9462330" class="t t">ServicePointManager</a>.<a href="@0@System/A.html#4a219b1bfef6af65" class="i property">DefaultConnectionLimit</a>);
+<span class="k preprocess">#</span><span class="k preprocess">endif</span>
+            <span class="c">//ensure that input parameters are correct</span>
+            <a href="#75bfc5b12d74c3eb" class="i method">ValidateParameters</a>();
+ 
+            <a href="#af19db13e4032d4b" class="i field">_metadataFilePath</a> = <a href="#a9d453a6a57b7f8a" class="i method">GetCanonicalMetadataFilePath</a>();
+            <a href="#f996953f427bfe1d" class="i field">_progressTracker</a> = <span class="r8 r">progressTracker</span>;
+            <a href="#02a9f0f4f2b5ca25" class="i field">_folderProgressTracker</a> = <span class="r9 r">folderProgressTracker</span>;
+            <a href="#89269c7cf60ea377" class="i field">_token</a> = <span class="r7 r">token</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the canonical metadata file path.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private string</b> <a id="a9d453a6a57b7f8a" href="../../R/a9d453a6a57b7f8a.html" target="n" data-glyph="76,1" class="i method">GetCanonicalMetadataFilePath</a>()
+        {
+            <b>return</b> <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#2d7263f86a526264" class="i method">Combine</a>(<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#60f5c0708b77212d" class="i property">LocalMetadataLocation</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;{0}.transfer.xml&quot;</span>, <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#95facc58d06cadd0" class="i method">GetFileName</a>(<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#13433c7d7aa99dc0" class="i property">InputFilePath</a>)));
+        }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Invocation
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the parameters to use for this transfer.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a href="Common/TransferParameters.cs.html#9d54476a1d8187dd" class="t t">TransferParameters</a> <a id="5165c6e02ccf3b78" href="../../R/5165c6e02ccf3b78.html" target="n" data-glyph="102,1" class="i property">Parameters</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Executes the transfer as defined by the input parameters.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public void</b> <a id="ee0b3cc8caac54d9" href="../../R/ee0b3cc8caac54d9.html" target="n" data-glyph="72,1" class="i method">Execute</a>()
+        {
+            <b>try</b>
+            {
+                <span class="c">// check if we are transfering a file or a directory</span>
+                <b>if</b> (!<a href="#fee6f14e3f4ef9c0" class="i field">isDirectory</a>)
+                {
+                    <span class="c">//load up existing metadata or create a fresh one</span>
+                    <a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="k">var</a> <span id="r10 rd" class="r10 r">metadata</span> = <a href="#fd77a3dc4a480834" class="i method">GetMetadata</a>();
+ 
+                    <span class="c">//match up the metadata with the information on the server</span>
+                    <b>if</b> (<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#43f272b5b7cdb14c" class="i property">IsResume</a>)
+                    {
+                        <a href="#74ab4f9cd497f8c1" class="i method">ValidateMetadataForResume</a>(<span class="r10 r">metadata</span>);
+                    }
+                    <b>else</b>
+                    {
+                        <a href="#d3d6636b46d9d9b4" class="i method">ValidateMetadataForFreshTransfer</a>(<span class="r10 r">metadata</span>);
+                    }
+ 
+                    <span class="c">// set thread counts if defaults are desired.</span>
+                    <b>if</b>(<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#770374bbad546898" class="i property">PerFileThreadCount</a> &lt;= 0)
+                    {
+                        <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#770374bbad546898" class="i property">PerFileThreadCount</a> = <a href="#2eb2434e5f069ac2" class="i method">GetDefaultPerFileThreadCount</a>(
+                            <span class="r10 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#c2f4b2ebd90b6cb3" class="i property">FileLength</a>, 
+                            <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#c51c389eb8642a8c" class="i property">MaxSegementLength</a>);
+                    }
+ 
+                    <span class="c">// optimize thread count based on file size</span>
+                    <b>if</b> (<span class="r10 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#9131b8fdd074a557" class="i property">SegmentCount</a> &lt; <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#770374bbad546898" class="i property">PerFileThreadCount</a>)
+                    {
+                        <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#770374bbad546898" class="i property">PerFileThreadCount</a> = <span class="r10 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#9131b8fdd074a557" class="i property">SegmentCount</a>;
+                    }
+ 
+                    <span class="i">ServiceClientTracing</span>.<span class="i">Information</span>(<span class="s">&quot;Single file thread count validated and optimized to: {0}&quot;</span>, <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#770374bbad546898" class="i property">PerFileThreadCount</a>);
+                    
+                    <span class="c">//begin (or resume) uploading/downloading the file</span>
+                    <b>if</b>(<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>)
+                    {
+                        <a href="#5284d5d1cbdbef74" class="i method">DownloadFile</a>(<span class="r10 r">metadata</span>);
+                    }
+                    <b>else</b>
+                    {
+                        <a href="#cacc6604471bf340" class="i method">UploadFile</a>(<span class="r10 r">metadata</span>);
+                    }
+ 
+                    <span class="c">//clean up metadata after a successful transfer</span>
+                    <span class="r10 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#8df9131a57201660" class="i method">DeleteFile</a>();
+                }
+                <b>else</b>
+                {
+                    <a href="Common/TransferFolderMetadata.cs.html#e4a782a6b9f2d42c" class="k">var</a> <span id="r11 rd" class="r11 r">metadata</span> = <a href="#c0cc008d6def9742" class="i method">GetFolderMetadata</a>();
+                    
+                    <span class="c">//match up the metadata with the information on the server</span>
+                    <b>if</b> (<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#43f272b5b7cdb14c" class="i property">IsResume</a>)
+                    {
+                        <a href="#c2d25c1d3aed3de8" class="i method">ValidateFolderMetadataForResume</a>(<span class="r11 r">metadata</span>);
+                    }
+                    <b>else</b>
+                    {
+                        <a href="#f888b306448d72f8" class="i method">ValidateFolderMetadataForFreshTransfer</a>(<span class="r11 r">metadata</span>);
+                    }
+                    
+                    <span class="c">// set defaults for number of files and per file thread count</span>
+                    
+                    <b>int</b> <span id="r12 rd" class="r12 r">tempConcurrentFileCount</span>;
+ 
+                    <b>int</b> <span id="r13 rd" class="r13 r">tempPerFileThreadCount</span> = <a href="#fc9883de28e05cdb" class="i method">GetDefaultPerFileThreadCountForFolder</a>(
+                        <span class="r11 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#eddd4b4292178025" class="i property">TotalFileBytes</a>,
+                        <span class="r11 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#cd91bae708e4eea3" class="i property">FileCount</a>,
+                        <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#c51c389eb8642a8c" class="i property">MaxSegementLength</a>,
+                        <b>out</b> <span class="r12 r">tempConcurrentFileCount</span>);
+ 
+                    <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#f9997ab4908f86f1" class="i property">ConcurrentFileCount</a> = <span class="r12 r">tempConcurrentFileCount</span>;
+ 
+                    <b>if</b> (<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#770374bbad546898" class="i property">PerFileThreadCount</a> &lt;= 0)
+                    {
+                        <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#770374bbad546898" class="i property">PerFileThreadCount</a> = <span class="r13 r">tempPerFileThreadCount</span>;
+                    }
+ 
+                    <b>if</b> (<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#f9997ab4908f86f1" class="i property">ConcurrentFileCount</a> &gt; <span class="r11 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#cd91bae708e4eea3" class="i property">FileCount</a>)
+                    {
+                        <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#f9997ab4908f86f1" class="i property">ConcurrentFileCount</a> = <span class="r11 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#cd91bae708e4eea3" class="i property">FileCount</a>;
+                    }
+ 
+                    <span class="i">ServiceClientTracing</span>.<span class="i">Information</span>(<span class="s">&quot;Single file thread count validated and optimized to: {0}&quot;</span>, <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#770374bbad546898" class="i property">PerFileThreadCount</a>);
+                    <span class="i">ServiceClientTracing</span>.<span class="i">Information</span>(<span class="s">&quot;Concurrent file count validated and optimized to: {0}&quot;</span>, <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#f9997ab4908f86f1" class="i property">ConcurrentFileCount</a>);
+ 
+                    <b>try</b>
+                    {
+                        <a href="@0@mscorlib/A.html#3980e012bae82e96" class="t t">Thread</a> <span id="r14 rd" class="r14 r">progressThread</span>;
+                        <a href="@0@mscorlib/A.html#766adb700a2972f5" class="k">var</a> <span id="r15 rd" class="r15 r">fileProgressTracker</span> = <a href="#13c2a15582c26ca3" class="i method">CreateFileProgressTracker</a>(<span class="r11 r">metadata</span>, <b>out</b> <span class="r14 r">progressThread</span>);
+                        <a href="@0@mscorlib/A.html#18bcbcbdddbcfdcb" class="k">var</a> <span id="r16 rd" class="r16 r">exceptions</span> = <b>new</b> <a href="@0@mscorlib/A.html#a773570b1b021cff" class="t constructor">ConcurrentQueue</a>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt;();
+                        <a href="#e06ba3ab70980f58" class="i property">AllFiles</a> = <b>new</b> <a href="@0@mscorlib/A.html#50871c13ec8cfd35" class="t constructor">ConcurrentQueue</a>&lt;<a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a>&gt;(<span class="r11 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#9a427422bf099d1c" class="i property">Files</a>);
+                        <b>int</b> <span id="r17 rd" class="r17 r">threadCount</span> = <a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#f441d55c88d635ad" class="i method">Min</a>(<a href="#e06ba3ab70980f58" class="i property">AllFiles</a>.<a href="@0@mscorlib/A.html#f36684fa5c19fdfb" class="i property">Count</a>, <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#f9997ab4908f86f1" class="i property">ConcurrentFileCount</a>);
+ 
+                        <a href="#cfa6c1d8966c3885" class="i property">ExecutionThreads</a> = <b>new</b> <a href="@0@mscorlib/A.html#b65c1a07c4e5b13a" class="t constructor">List</a>&lt;<a href="@0@mscorlib/A.html#3980e012bae82e96" class="t t">Thread</a>&gt;(<span class="r17 r">threadCount</span>);
+ 
+                        <b>if</b> (<span class="r14 r">progressThread</span> != <b>null</b>)
+                        {
+                            <span class="r14 r">progressThread</span>.<a href="@0@mscorlib/A.html#cd2144b8dd6f4373" class="i method">Start</a>();
+                        }
+ 
+                        <span class="c">// break up the batch save into 100 even chunks. This is most important for very large directories</span>
+                        <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r18 rd" class="r18 r">filesPerSave</span> = (<b>int</b>)<a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#1841a5ce24ed9fb3" class="i method">Ceiling</a>((<b>double</b>)<span class="r11 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#cd91bae708e4eea3" class="i property">FileCount</a> / 100);
+                        <span class="c">//start a bunch of new threads that pull from the file list and then wait for them to finish</span>
+                        <b>int</b> <span id="r19 rd" class="r19 r">filesCompleted</span> = 0;
+                        <b>for</b> (<b>int</b> <span id="r20 rd" class="r20 r">i</span> = 0; <span class="r20 r">i</span> &lt; <span class="r17 r">threadCount</span>; <span class="r20 r">i</span>++)
+                        {
+                            <a href="@0@mscorlib/A.html#3980e012bae82e96" class="k">var</a> <span id="r21 rd" class="r21 r">t</span> = <b>new</b> <a href="@0@mscorlib/A.html#76f340c84df6da8d" class="t constructor">Thread</a>(() =&gt; {
+                                <a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <span id="r22 rd" class="r22 r">file</span>;
+                                <b>while</b> (<a href="#e06ba3ab70980f58" class="i property">AllFiles</a>.<a href="@0@mscorlib/A.html#88b9f17c9182267f" class="i method">TryDequeue</a>(<b>out</b> <span class="r22 r">file</span>))
+                                {
+                                    <b>try</b>
+                                    {
+                                        <a href="#89269c7cf60ea377" class="i field">_token</a>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+                                        <span class="c">// only initiate transfers for files that are not already complete</span>
+                                        <b>if</b> (<span class="r22 r">file</span>.<a href="Common/TransferMetadata.cs.html#a9be239c5fd0d8d5" class="i property">Status</a> != <a href="Common/SegmentTransferStatus.cs.html#f871cd80cd9814cc" class="t t">SegmentTransferStatus</a>.<a href="Common/SegmentTransferStatus.cs.html#2c215e272001fbf1" class="i field">Complete</a>)
+                                        {
+                                            <a href="@0@mscorlib/A.html#766adb700a2972f5" class="k">var</a> <span id="r23 rd" class="r23 r">segmentProgressTracker</span> = <a href="#53621545ff0be638" class="i method">CreateSegmentProgressTracker</a>(<span class="r22 r">file</span>, <span class="r15 r">fileProgressTracker</span>);
+                                            <b>if</b> (<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>)
+                                            {
+                                                <a href="#5284d5d1cbdbef74" class="i method">DownloadFile</a>(<span class="r22 r">file</span>, <span class="r23 r">segmentProgressTracker</span>);
+                                            }
+                                            <b>else</b>
+                                            {
+                                                <a href="#cacc6604471bf340" class="i method">UploadFile</a>(<span class="r22 r">file</span>, <span class="r23 r">segmentProgressTracker</span>);
+                                            }
+                                        }
+                                    }
+                                    <b>catch</b> (<a href="@0@mscorlib/A.html#a0a8b79c277cf327" class="t t">OperationCanceledException</a> <span id="r24 rd" class="r24 r">ex</span>)
+                                    {
+                                        <span class="c">// Add to the queue and re-throw so that we immediately abort</span>
+                                        <span class="r16 r">exceptions</span>.<a href="@0@mscorlib/A.html#62bea3a8141ed2a9" class="i method">Enqueue</a>(<span class="r24 r">ex</span>);
+ 
+                                        <span class="c">// on cancel definitely try to save the metadata</span>
+                                        <b>try</b>
+                                        {
+                                            <span class="c">// replace the file in the list with the one that we have been modifying</span>
+                                            <b>foreach</b> (<a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="k">var</a> <span id="r25 rd" class="r25 r">item</span> <b>in</b> <span class="r11 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#9a427422bf099d1c" class="i property">Files</a>.<a href="@0@System.Core/A.html#e73922753675387a" class="i method">Where</a>(<span id="r26 rd" class="r26 r">f</span> =&gt; <span class="r26 r">f</span>.<a href="Common/TransferMetadata.cs.html#94ead8daa60a5847" class="i property">TransferId</a>.<a href="@0@mscorlib/A.html#31b307b02a3bd6b9" class="i method">Equals</a>(<span class="r22 r">file</span>.<a href="Common/TransferMetadata.cs.html#94ead8daa60a5847" class="i property">TransferId</a>)))
+                                            {
+                                                <span class="r25 r">item</span>.<a href="Common/TransferMetadata.cs.html#a9be239c5fd0d8d5" class="i property">Status</a> = <span class="r22 r">file</span>.<a href="Common/TransferMetadata.cs.html#a9be239c5fd0d8d5" class="i property">Status</a>;
+                                                <span class="r25 r">item</span>.<a href="Common/TransferMetadata.cs.html#982540b694e3af39" class="i property">Segments</a> = <span class="r22 r">file</span>.<a href="Common/TransferMetadata.cs.html#982540b694e3af39" class="i property">Segments</a>;
+                                            }
+ 
+                                            <span class="r11 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#7f9329b140304dbb" class="i method">Save</a>();
+                                        }
+                                        <b>catch</b> { } <span class="c">// if we can&#39;t save the metadata we shouldn&#39;t fail out. </span>
+                                        <span class="c">// break out of the loop since the operation is cancelled.</span>
+                                        <b>break</b>;
+                                    }
+                                    <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r27 rd" class="r27 r">ex</span>)
+                                    {
+                                        <span class="c">// for all other exceptions just enqueue and continue.</span>
+                                        <span class="r16 r">exceptions</span>.<a href="@0@mscorlib/A.html#62bea3a8141ed2a9" class="i method">Enqueue</a>(<span class="r27 r">ex</span>);
+                                        <span class="c">// in this case we should save since something bad happened, but only if we aren&#39;t going to save anyway in the finally.</span>
+                                        <b>if</b> (<span class="r19 r">filesCompleted</span> % <span class="r18 r">filesPerSave</span> != 0)
+                                        {
+                                            <b>try</b>
+                                            {
+                                                <span class="c">// replace the file in the list with the one that we have been modifying</span>
+ 
+                                                <b>foreach</b> (<a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="k">var</a> <span id="r28 rd" class="r28 r">item</span> <b>in</b> <span class="r11 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#9a427422bf099d1c" class="i property">Files</a>.<a href="@0@System.Core/A.html#e73922753675387a" class="i method">Where</a>(<span id="r29 rd" class="r29 r">f</span> =&gt; <span class="r29 r">f</span>.<a href="Common/TransferMetadata.cs.html#94ead8daa60a5847" class="i property">TransferId</a>.<a href="@0@mscorlib/A.html#31b307b02a3bd6b9" class="i method">Equals</a>(<span class="r22 r">file</span>.<a href="Common/TransferMetadata.cs.html#94ead8daa60a5847" class="i property">TransferId</a>)))
+                                                {
+                                                    <span class="r28 r">item</span>.<a href="Common/TransferMetadata.cs.html#a9be239c5fd0d8d5" class="i property">Status</a> = <span class="r22 r">file</span>.<a href="Common/TransferMetadata.cs.html#a9be239c5fd0d8d5" class="i property">Status</a>;
+                                                    <span class="r28 r">item</span>.<a href="Common/TransferMetadata.cs.html#982540b694e3af39" class="i property">Segments</a> = <span class="r22 r">file</span>.<a href="Common/TransferMetadata.cs.html#982540b694e3af39" class="i property">Segments</a>;
+                                                }
+ 
+                                                <span class="r11 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#7f9329b140304dbb" class="i method">Save</a>();
+                                            }
+                                            <b>catch</b> { } <span class="c">// if we can&#39;t save the metadata we shouldn&#39;t fail out. </span>
+                                        }
+ 
+                                        <span class="c">// indicate we failed to tracking thread.</span>
+                                        <b>if</b>(<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#f69018fa781c88e9" class="i">OnFileTransferThreadFailProgressUpdate</a> != <b>null</b>)
+                                        {
+                                            <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#f69018fa781c88e9" class="i">OnFileTransferThreadFailProgressUpdate</a>(<span class="r22 r">file</span>);
+                                        }
+                                    }
+                                    <b>finally</b>
+                                    {
+                                        <span class="c">// increment the files that we have made it through (even if they have failed).</span>
+                                        <span class="c">// this ensures that we will periodically save the metadata</span>
+                                        <a href="@0@mscorlib/A.html#8792520ddc6dadcb" class="t t">Interlocked</a>.<a href="@0@mscorlib/A.html#09bb1e21afd76cf2" class="i method">Increment</a>(<b>ref</b> <span class="r19 r">filesCompleted</span>);
+                                        <b>try</b>
+                                        {
+                                            <b>foreach</b> (<a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="k">var</a> <span id="r30 rd" class="r30 r">item</span> <b>in</b> <span class="r11 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#9a427422bf099d1c" class="i property">Files</a>.<a href="@0@System.Core/A.html#e73922753675387a" class="i method">Where</a>(<span id="r31 rd" class="r31 r">f</span> =&gt; <span class="r31 r">f</span>.<a href="Common/TransferMetadata.cs.html#94ead8daa60a5847" class="i property">TransferId</a>.<a href="@0@mscorlib/A.html#31b307b02a3bd6b9" class="i method">Equals</a>(<span class="r22 r">file</span>.<a href="Common/TransferMetadata.cs.html#94ead8daa60a5847" class="i property">TransferId</a>)))
+                                            {
+                                                <span class="r30 r">item</span>.<a href="Common/TransferMetadata.cs.html#a9be239c5fd0d8d5" class="i property">Status</a> = <span class="r22 r">file</span>.<a href="Common/TransferMetadata.cs.html#a9be239c5fd0d8d5" class="i property">Status</a>;
+                                                <span class="r30 r">item</span>.<a href="Common/TransferMetadata.cs.html#982540b694e3af39" class="i property">Segments</a> = <span class="r22 r">file</span>.<a href="Common/TransferMetadata.cs.html#982540b694e3af39" class="i property">Segments</a>;
+                                            }
+ 
+                                            <span class="c">// delete the temp metadata created if it exists.</span>
+                                            <span class="r22 r">file</span>.<a href="Common/TransferMetadata.cs.html#8df9131a57201660" class="i method">DeleteFile</a>();
+                                            <span class="r22 r">file</span> = <b>null</b>;
+ 
+                                            <span class="c">// after each iteration for each file, check to see if state should be saved.</span>
+                                            <b>if</b> (<span class="r19 r">filesCompleted</span> % <span class="r18 r">filesPerSave</span> == 0)
+                                            {
+                                                <b>try</b>
+                                                {
+                                                    <span class="r11 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#7f9329b140304dbb" class="i method">Save</a>();
+                                                }
+                                                <b>catch</b> { } <span class="c">// if we can&#39;t save the metadata we shouldn&#39;t fail out. </span>
+                                            }
+                                        }
+                                        <b>catch</b> { } <span class="c">// if we can&#39;t delete a temp file we shouldn&#39;t fail out.</span>
+                                    }
+                                }
+                            });
+                            <span class="r21 r">t</span>.<a href="@0@mscorlib/A.html#cd2144b8dd6f4373" class="i method">Start</a>();
+                            <a href="#cfa6c1d8966c3885" class="i property">ExecutionThreads</a>.<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r21 r">t</span>);
+                        }
+ 
+                        <b>foreach</b> (<a href="@0@mscorlib/A.html#3980e012bae82e96" class="k">var</a> <span id="r32 rd" class="r32 r">t</span> <b>in</b> <a href="#cfa6c1d8966c3885" class="i property">ExecutionThreads</a>)
+                        {
+                            <span class="r32 r">t</span>.<a href="@0@mscorlib/A.html#6f7bed56e0efe767" class="i method">Join</a>();
+                        }
+ 
+                        <b>if</b> (<span class="r14 r">progressThread</span> != <b>null</b> &amp;&amp; !<span class="r14 r">progressThread</span>.<a href="@0@mscorlib/A.html#b0d4c2a9b8250c35" class="i method">Join</a>(2000)) <span class="c">// give the thread another 2 seconds to terminate.</span>
+                        {
+                            <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#d6f22d2fc99e22e6" class="i method">LogInfo</a>(<span class="s">&quot;The progress tracking thread did not terminate on its own after all other threads terminated. Progress tracking for this run may not be completely accurate but execution will complete.&quot;</span>);
+                        }
+ 
+                        <b>if</b> (<span class="r16 r">exceptions</span>.<a href="@0@mscorlib/A.html#f36684fa5c19fdfb" class="i property">Count</a> &gt; 0)
+                        {
+                            <a href="@0@mscorlib/A.html#be77e0a7fbc110e6" class="k">var</a> <span id="r33 rd" class="r33 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#1de0e8202e59539a" class="t constructor">AggregateException</a>(<span class="r16 r">exceptions</span>);
+                            <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r33 r">ex</span>);
+                            <b>throw</b> <span class="r33 r">ex</span>;
+                        }
+ 
+                        <span class="r11 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#c93d7fcc5ed39e4d" class="i method">DeleteFile</a>();
+                    }
+                    <b>catch</b> (<a href="@0@mscorlib/A.html#a0a8b79c277cf327" class="t t">OperationCanceledException</a>)
+                    {
+                        <span class="c">// do not rethrow in this case.</span>
+                        <b>try</b>
+                        {
+                            <span class="c">// if anything went wrong, make sure that we attempt to save the current state of the folder metadata</span>
+                            <span class="r11 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#7f9329b140304dbb" class="i method">Save</a>();
+                        }
+                        <b>catch</b> { } <span class="c">// saving the metadata is a best effort, we will not fail out for this reason and we want to ensure the root exception is preserved.</span>
+                    }
+                    <b>catch</b> (<a href="@0@mscorlib/A.html#be77e0a7fbc110e6" class="t t">AggregateException</a> <span id="r34 rd" class="r34 r">ex</span>)
+                    {
+                        <b>try</b>
+                        {
+                            <span class="c">// if anything went wrong, make sure that we attempt to save the current state of the folder metadata</span>
+                            <span class="r11 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#7f9329b140304dbb" class="i method">Save</a>();
+                        }
+                        <b>catch</b> { } <span class="c">// saving the metadata is a best effort, we will not fail out for this reason and we want to ensure the root exception is preserved.</span>
+ 
+                        <b>if</b> (!<span class="r34 r">ex</span>.<a href="@0@mscorlib/A.html#e9d864767768da2b" class="i property">InnerExceptions</a>.<a href="@0@System.Core/A.html#4ba4a3f8a5530e33" class="i method">OfType</a>&lt;<a href="@0@mscorlib/A.html#a0a8b79c277cf327" class="t t">OperationCanceledException</a>&gt;().<a href="@0@System.Core/A.html#8788153112b7ffd0" class="i method">Any</a>())
+                        {
+                            <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r34 r">ex</span>);
+ 
+                            <b>throw</b>;
+                        }
+                    }
+                    <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r35 rd" class="r35 r">ex</span>)
+                    {
+                        <b>try</b>
+                        {
+                            <span class="c">// if anything went wrong, make sure that we attempt to save the current state of the folder metadata</span>
+                            <span class="r11 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#7f9329b140304dbb" class="i method">Save</a>();
+                        }
+                        <b>catch</b> { } <span class="c">// saving the metadata is a best effort, we will not fail out for this reason and we want to ensure the root exception is preserved.</span>
+                        <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r35 r">ex</span>);
+ 
+                        <b>throw</b>;
+                    }
+                }
+            }
+            <b>catch</b> (<a href="@0@mscorlib/A.html#a0a8b79c277cf327" class="t t">OperationCanceledException</a>)
+            {
+                <span class="c">// do not throw this higher, since we have cancelled out.</span>
+            }
+            <b>finally</b>
+            {
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">FullNetFx</span>
+                <span class="c">//revert back the default .NET value for max connections to a host to whatever it was before</span>
+                <a href="@0@System/A.html#86ab68f9e9462330" class="t t">ServicePointManager</a>.<a href="@0@System/A.html#4a219b1bfef6af65" class="i property">DefaultConnectionLimit</a> = <a href="#59be0be13489ca78" class="i field">_previousDefaultConnectionLimit</a>;
+<span class="k preprocess">#</span><span class="k preprocess">endif</span>
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Validates the parameters.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">System</span>.<span class="i n">IO</span>.<a href="@0@mscorlib/A.html#fd582974d1f75ac7" class="t t">FileNotFoundException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Could not find input file</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">System</span>.<a href="@0@mscorlib/A.html#c742289497493bb8" class="t t">ArgumentNullException</a><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> TargetStreamPath;Null or empty Target Stream Path</span>
+        <span class="c">///</span><span class="c"> or</span>
+        <span class="c">///</span><span class="c"> AccountName;Null or empty Account Name</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">System</span>.<a href="@0@mscorlib/A.html#109b3ef6299ef9df" class="t t">ArgumentException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Invalid TargetStreamPath, a stream path should not end with /</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">System</span>.<a href="@0@mscorlib/A.html#2975f0aa875d4a32" class="t t">ArgumentOutOfRangeException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">ThreadCount</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="75bfc5b12d74c3eb" href="../../R/75bfc5b12d74c3eb.html" target="n" data-glyph="76,1" class="i method">ValidateParameters</a>()
+        {
+            <b>if</b> ((!<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a> &amp;&amp; !<a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#3360368484a9f131" class="i method">Exists</a>(<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#13433c7d7aa99dc0" class="i property">InputFilePath</a>) &amp;&amp; !<a href="@0@mscorlib/A.html#b3ad5f0ba800bb28" class="t t">Directory</a>.<a href="@0@mscorlib/A.html#6a2a3bee6b62826f" class="i method">Exists</a>(<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#13433c7d7aa99dc0" class="i property">InputFilePath</a>)) || (<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a> &amp;&amp; !<a href="#8654e36d587806f9" class="i field">_frontEnd</a>.<a href="Common/IFrontEndAdapter.cs.html#e4804a7c57de7ea6" class="i method">StreamExists</a>(<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#13433c7d7aa99dc0" class="i property">InputFilePath</a>)))
+            {
+                <a href="@0@mscorlib/A.html#fd582974d1f75ac7" class="k">var</a> <span id="r36 rd" class="r36 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#e49034af96bf20b2" class="t constructor">FileNotFoundException</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;Could not find {0} input file or folder&quot;</span>, <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a> ? <span class="s">&quot;Data Lake stream&quot;</span> : <span class="s">&quot;local&quot;</span>), <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#13433c7d7aa99dc0" class="i property">InputFilePath</a>);
+ 
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r36 r">ex</span>);
+ 
+                <b>throw</b> <span class="r36 r">ex</span>;
+            }
+ 
+            <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>(<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#71c8ba3b11d5aeee" class="i property">TargetStreamPath</a>))
+            {
+                <a href="@0@mscorlib/A.html#c742289497493bb8" class="k">var</a> <span id="r37 rd" class="r37 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#b50c77b2acc23eca" class="t constructor">ArgumentNullException</a>(<span class="s">&quot;TargetStreamPath&quot;</span>, <span class="s">&quot;Null or empty Target Stream Path&quot;</span>);
+ 
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r37 r">ex</span>);
+ 
+                <b>throw</b> <span class="r37 r">ex</span>;
+            }
+ 
+            <b>if</b> (<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#71c8ba3b11d5aeee" class="i property">TargetStreamPath</a>.<a href="@0@mscorlib/A.html#cb74053b3f2d03f4" class="i method">EndsWith</a>(<span class="s">&quot;/&quot;</span>))
+            {
+                <a href="@0@mscorlib/A.html#109b3ef6299ef9df" class="k">var</a> <span id="r38 rd" class="r38 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">&quot;Invalid TargetStreamPath, a stream path should not end with /&quot;</span>);
+ 
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r38 r">ex</span>);
+ 
+                <b>throw</b> <span class="r38 r">ex</span>;
+            }
+ 
+            <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>(<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#e11736f0f95191a4" class="i property">AccountName</a>))
+            {
+                <a href="@0@mscorlib/A.html#c742289497493bb8" class="k">var</a> <span id="r39 rd" class="r39 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#b50c77b2acc23eca" class="t constructor">ArgumentNullException</a>(<span class="s">&quot;AccountName&quot;</span>, <span class="s">&quot;Null or empty Account Name&quot;</span>);
+ 
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r39 r">ex</span>);
+ 
+                <b>throw</b> <span class="r39 r">ex</span>;
+            }
+ 
+            <b>if</b> (<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#770374bbad546898" class="i property">PerFileThreadCount</a> &gt; <a href="#1da12bb7545b8ddb" class="i field">MaxAllowedThreadsPerFile</a>)
+            {
+                <a href="@0@mscorlib/A.html#2975f0aa875d4a32" class="k">var</a> <span id="r40 rd" class="r40 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#27138d3b17d5ff6b" class="t constructor">ArgumentOutOfRangeException</a>(<span class="s">&quot;PerFileThreadCount&quot;</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;PerFileThreadCount must be less than {0}&quot;</span>, <a href="#1da12bb7545b8ddb" class="i field">MaxAllowedThreadsPerFile</a>));
+ 
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r40 r">ex</span>);
+ 
+                <b>throw</b> <span class="r40 r">ex</span>;
+            }
+ 
+            <b>if</b> (<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#f9997ab4908f86f1" class="i property">ConcurrentFileCount</a> &gt; <a href="#1da12bb7545b8ddb" class="i field">MaxAllowedThreadsPerFile</a>)
+            {
+                <a href="@0@mscorlib/A.html#2975f0aa875d4a32" class="k">var</a> <span id="r41 rd" class="r41 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#27138d3b17d5ff6b" class="t constructor">ArgumentOutOfRangeException</a>(<span class="s">&quot;ConcurrentFileCount&quot;</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;ConcurrentFileCount must be less than {0}&quot;</span>, <a href="#1da12bb7545b8ddb" class="i field">MaxAllowedThreadsPerFile</a>));
+ 
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r41 r">ex</span>);
+ 
+                <b>throw</b> <span class="r41 r">ex</span>;
+            }
+ 
+            <b>if</b> (<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#c51c389eb8642a8c" class="i property">MaxSegementLength</a> &lt; 1)
+            {
+                <a href="@0@mscorlib/A.html#2975f0aa875d4a32" class="k">var</a> <span id="r42 rd" class="r42 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#27138d3b17d5ff6b" class="t constructor">ArgumentOutOfRangeException</a>(<span class="s">&quot;MaxSegmentLength&quot;</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;MaxSegmentLength must be greater than 0 bytes. Value passed in: {0}&quot;</span>, <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#c51c389eb8642a8c" class="i property">MaxSegementLength</a>));
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r42 r">ex</span>);
+ 
+                <b>throw</b> <span class="r42 r">ex</span>;
+            }
+ 
+            <span class="c">// if the input is a directory, set it</span>
+            <a href="#fee6f14e3f4ef9c0" class="i field">isDirectory</a> = <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>? <a href="#8654e36d587806f9" class="i field">_frontEnd</a>.<a href="Common/IFrontEndAdapter.cs.html#119385e1ac8b4b04" class="i method">IsDirectory</a>(<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#13433c7d7aa99dc0" class="i property">InputFilePath</a>) : <a href="@0@mscorlib/A.html#b3ad5f0ba800bb28" class="t t">Directory</a>.<a href="@0@mscorlib/A.html#6a2a3bee6b62826f" class="i method">Exists</a>(<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#13433c7d7aa99dc0" class="i property">InputFilePath</a>);
+            
+        }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Metadata Operations
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the metadata.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private</b> <a href="Common/TransferFolderMetadata.cs.html#e4a782a6b9f2d42c" class="t t">TransferFolderMetadata</a> <a id="c0cc008d6def9742" href="../../R/c0cc008d6def9742.html" target="n" data-glyph="76,1" class="i method">GetFolderMetadata</a>()
+        {
+            <a href="Common/TransferFolderMetadataGenerator.cs.html#09741671ff602b6d" class="k">var</a> <span id="r43 rd" class="r43 r">metadataGenerator</span> = <b>new</b> <a href="Common/TransferFolderMetadataGenerator.cs.html#347c19a7966418a1" class="t constructor">TransferFolderMetadataGenerator</a>(<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>, <a href="#8654e36d587806f9" class="i field">_frontEnd</a>);
+            <b>if</b> (<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#43f272b5b7cdb14c" class="i property">IsResume</a>)
+            {
+                <b>return</b> <span class="r43 r">metadataGenerator</span>.<a href="Common/TransferFolderMetadataGenerator.cs.html#7fb4dd83696e0d35" class="i method">GetExistingMetadata</a>(<a href="#af19db13e4032d4b" class="i field">_metadataFilePath</a>);
+            }
+            <b>else</b>
+            {
+                <b>return</b> <span class="r43 r">metadataGenerator</span>.<a href="Common/TransferFolderMetadataGenerator.cs.html#3af4e21478e19746" class="i method">CreateNewMetadata</a>(<a href="#af19db13e4032d4b" class="i field">_metadataFilePath</a>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the metadata.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private</b> <a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <a id="fd77a3dc4a480834" href="../../R/fd77a3dc4a480834.html" target="n" data-glyph="76,1" class="i method">GetMetadata</a>()
+        {
+            <a href="Common/TransferMetadataGenerator.cs.html#333701dc5969b078" class="k">var</a> <span id="r44 rd" class="r44 r">metadataGenerator</span> = <b>new</b> <a href="Common/TransferMetadataGenerator.cs.html#9efe1c2b4ce3c47b" class="t constructor">TransferMetadataGenerator</a>(<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>, <a href="#8654e36d587806f9" class="i field">_frontEnd</a>);
+            <b>if</b> (<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#43f272b5b7cdb14c" class="i property">IsResume</a>)
+            {
+                <b>return</b> <span class="r44 r">metadataGenerator</span>.<a href="Common/TransferMetadataGenerator.cs.html#a70f2b26b74a07e4" class="i method">GetExistingMetadata</a>(<a href="#af19db13e4032d4b" class="i field">_metadataFilePath</a>);
+            }
+            <b>else</b>
+            {
+                <b>return</b> <span class="r44 r">metadataGenerator</span>.<a href="Common/TransferMetadataGenerator.cs.html#56107cd9ce939d83" class="i method">CreateNewMetadata</a>(<a href="#af19db13e4032d4b" class="i field">_metadataFilePath</a>);
+            }
+        }
+ 
+        <b>private int</b> <a id="2eb2434e5f069ac2" href="../../R/2eb2434e5f069ac2.html" target="n" data-glyph="76,1" class="i method">GetDefaultPerFileThreadCount</a>(<b>long</b> <span id="r45 rd" class="r45 r">fileLength</span>, <b>long</b> <span id="r46 rd" class="r46 r">maxSegmentLength</span>)
+        {
+            <b>if</b> (<span class="r46 r">maxSegmentLength</span> &lt; 1)
+            {
+                <a href="@0@mscorlib/A.html#2975f0aa875d4a32" class="k">var</a> <span id="r47 rd" class="r47 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#27138d3b17d5ff6b" class="t constructor">ArgumentOutOfRangeException</a>(<span class="s">&quot;maxSegmentLength&quot;</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;maxSegmentLength must be greater than 0 bytes. Value passed in: {0}&quot;</span>, <span class="r46 r">maxSegmentLength</span>));
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r47 r">ex</span>);
+ 
+                <b>throw</b> <span class="r47 r">ex</span>;
+            }
+ 
+            <b>return</b> (<b>int</b>)<a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#e248b38c0156e9dd" class="i method">Min</a>(<a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#1841a5ce24ed9fb3" class="i method">Ceiling</a>((<b>double</b>)<span class="r45 r">fileLength</span> / <span class="r46 r">maxSegmentLength</span>), <a href="#248b5becb1976dd8" class="i field">DefaultMaxPerFileThreadCount</a>);
+        }
+ 
+        <b>private int</b> <a id="fc9883de28e05cdb" href="../../R/fc9883de28e05cdb.html" target="n" data-glyph="76,1" class="i method">GetDefaultPerFileThreadCountForFolder</a>(<b>long</b> <span id="r48 rd" class="r48 r">folderSize</span>, <b>long</b> <span id="r49 rd" class="r49 r">fileCount</span>, <b>long</b> <span id="r50 rd" class="r50 r">maxSegmentLength</span>, <b>out int</b> <span id="r51 rd" class="r51 r">concurrentFileCount</span>)
+        {
+            <b>if</b> (<span class="r49 r">fileCount</span> &lt; 1)
+            {
+                <span class="c">// this case should never happen, but if it does we should throw</span>
+                <a href="@0@mscorlib/A.html#2975f0aa875d4a32" class="k">var</a> <span id="r52 rd" class="r52 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#27138d3b17d5ff6b" class="t constructor">ArgumentOutOfRangeException</a>(<span class="s">&quot;fileCount&quot;</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;fileCount must be greater than 0 for a transfer operation. Number of files: {0}&quot;</span>, <span class="r49 r">fileCount</span>));
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r52 r">ex</span>);
+ 
+                <b>throw</b> <span class="r52 r">ex</span>;
+            }
+ 
+            <b>if</b> (<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#f9997ab4908f86f1" class="i property">ConcurrentFileCount</a> &gt; 0)
+            {
+                <span class="r51 r">concurrentFileCount</span> = <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#f9997ab4908f86f1" class="i property">ConcurrentFileCount</a>;
+            }
+            <b>else</b>
+            {
+                <span class="r51 r">concurrentFileCount</span> = <a href="#701b20d261fee682" class="i field">DefaultIdealConcurrentFileCount</a>;
+            }
+ 
+            <b>long</b> <span id="r53 rd" class="r53 r">avgFileSize</span> = <span class="r48 r">folderSize</span> / <span class="r49 r">fileCount</span>;
+ 
+            <b>int</b> <span id="r54 rd" class="r54 r">perFileThreadCountToUse</span> = <a href="#2eb2434e5f069ac2" class="i method">GetDefaultPerFileThreadCount</a>(<span class="r53 r">avgFileSize</span>, <span class="r50 r">maxSegmentLength</span>);
+            <b>int</b> <span id="r55 rd" class="r55 r">idealPerFileThreadCount</span> = (<b>int</b>)<a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#1841a5ce24ed9fb3" class="i method">Ceiling</a>((<b>double</b>)<a href="#701b20d261fee682" class="i field">DefaultIdealConcurrentFileCount</a> / <span class="r51 r">concurrentFileCount</span>);
+ 
+ 
+            <b>if</b> (<span class="r54 r">perFileThreadCountToUse</span> &gt; <span class="r55 r">idealPerFileThreadCount</span>)
+            {
+                <span class="r54 r">perFileThreadCountToUse</span> = <span class="r55 r">idealPerFileThreadCount</span>;
+            }
+            <b>else</b> <b>if</b>(<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#f9997ab4908f86f1" class="i property">ConcurrentFileCount</a> &lt;= 0)
+            {
+                <span class="c">// Ideally 25 files transfering at once with four threads is good, However if possible we can increase this</span>
+                <span class="c">// if the ideal average number of threads is low ( &lt; 4).</span>
+                <span class="c">// this is only true in the case where the caller did not specify a folder thread count.</span>
+                <span class="r51 r">concurrentFileCount</span> = (<b>int</b>)<a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#1841a5ce24ed9fb3" class="i method">Ceiling</a>((<b>double</b>)<a href="#53967306239c2691" class="i field">DefaultIdealPerFileThreadCountForFolders</a> / <span class="r54 r">perFileThreadCountToUse</span>);
+            }
+            <b>else</b>
+            {
+                <span class="c">// here we can increase the number of threads per file</span>
+                <span class="c">// opportunistically, since it really just increases </span>
+                <span class="c">// the max number of threads for a given file.</span>
+                <span class="r54 r">perFileThreadCountToUse</span> = (<b>int</b>)<a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#1841a5ce24ed9fb3" class="i method">Ceiling</a>((<b>double</b>)<a href="#53967306239c2691" class="i field">DefaultIdealPerFileThreadCountForFolders</a> / <span class="r51 r">concurrentFileCount</span>);
+            }
+ 
+            <b>return</b> <span class="r54 r">perFileThreadCountToUse</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Deletes the metadata file from disk.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal void</b> <a id="babe44a8155311dd" href="../../R/../../0000000000.html" target="n" data-glyph="74,1" class="i method">DeleteMetadataFile</a>()
+        {
+            <b>if</b> (<a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#3360368484a9f131" class="i method">Exists</a>(<a href="#af19db13e4032d4b" class="i field">_metadataFilePath</a>))
+            {
+                <a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#c4e7406e837331d5" class="i method">Delete</a>(<a href="#af19db13e4032d4b" class="i field">_metadataFilePath</a>);
+            }
+        }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Transfer Operations
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Validates that the metadata is valid for a resume operation, and also updates the internal Segment States to match what the Server looks like.</span>
+        <span class="c">///</span><span class="c"> If any changes are made, the metadata will be saved to its canonical location.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r56 r">metadata</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>private</b> <a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <a id="74ab4f9cd497f8c1" href="../../R/74ab4f9cd497f8c1.html" target="n" data-glyph="76,1" class="i method">ValidateMetadataForResume</a>(<a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <span id="r56 rd" class="r56 r">metadata</span>, <b>bool</b> <span id="r57 rd" class="r57 r">isFolderTransfer</span> = <b>false</b>)
+        {
+            <a href="#e577a38edc58e9ed" class="i method">ValidateMetadataMatchesLocalFile</a>(<span class="r56 r">metadata</span>, <span class="r57 r">isFolderTransfer</span>);
+            <b>if</b>(<span class="r57 r">isFolderTransfer</span> &amp;&amp; <span class="r56 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#a9be239c5fd0d8d5" class="i property">Status</a> == <a href="Common/SegmentTransferStatus.cs.html#f871cd80cd9814cc" class="t t">SegmentTransferStatus</a>.<a href="Common/SegmentTransferStatus.cs.html#2c215e272001fbf1" class="i field">Complete</a>)
+            {
+                <span class="c">// validate that the target stream does exist. If not, set its status back to pending</span>
+                <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r58 rd" class="r58 r">retryCount</span> = 0;
+                <b>while</b> (<span class="r58 r">retryCount</span> &lt; <a href="Upload/SingleSegmentUploader.cs.html#62b7b26e3b4d119f" class="t t">SingleSegmentUploader</a>.<a href="Upload/SingleSegmentUploader.cs.html#7aa3318da19b9344" class="i field">MaxBufferUploadAttemptCount</a>)
+                {
+                    <a href="#89269c7cf60ea377" class="i field">_token</a>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+                    <span class="r58 r">retryCount</span>++;
+                    <b>try</b>
+                    {
+                        <span class="c">//verify that the stream exists and that the length is as expected</span>
+                        <b>if</b> (!<a href="#8654e36d587806f9" class="i field">_frontEnd</a>.<a href="Common/IFrontEndAdapter.cs.html#e4804a7c57de7ea6" class="i method">StreamExists</a>(<span class="r56 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>, <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>))
+                        {
+                            <span class="c">// this file was marked as completed, but no target stream exists; it needs to be retransferred</span>
+                            <span class="r56 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#a9be239c5fd0d8d5" class="i property">Status</a> = <a href="Common/SegmentTransferStatus.cs.html#f871cd80cd9814cc" class="t t">SegmentTransferStatus</a>.<a href="Common/SegmentTransferStatus.cs.html#e8c6f082f267929a" class="i field">Pending</a>;
+                        }
+                        <b>else</b>
+                        {
+                            <a href="@0@mscorlib/A.html#e566178cce890c36" class="k">var</a> <span id="r59 rd" class="r59 r">remoteLength</span> = <a href="#8654e36d587806f9" class="i field">_frontEnd</a>.<a href="Common/IFrontEndAdapter.cs.html#84a396ab34116429" class="i method">GetStreamLength</a>(<span class="r56 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>, <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>);
+                            <b>if</b> (<span class="r59 r">remoteLength</span> != <span class="r56 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#c2f4b2ebd90b6cb3" class="i property">FileLength</a>)
+                            {
+                                <span class="c">//the target stream has a different length than the input segment, which implies they are inconsistent; it needs to be retransferred</span>
+                                <span class="c">//in this case it is considered safe to delete the file on the server,</span>
+                                <span class="c">//since it is in an inconsistent state and we will be re-transfering it anyway</span>
+                                <a href="#8654e36d587806f9" class="i field">_frontEnd</a>.<a href="Common/IFrontEndAdapter.cs.html#9c8897c2d5792354" class="i method">DeleteStream</a>(<span class="r56 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>, <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>);
+                                <span class="r56 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#a9be239c5fd0d8d5" class="i property">Status</a> = <a href="Common/SegmentTransferStatus.cs.html#f871cd80cd9814cc" class="t t">SegmentTransferStatus</a>.<a href="Common/SegmentTransferStatus.cs.html#e8c6f082f267929a" class="i field">Pending</a>;
+                            }
+                        }
+ 
+                        <b>break</b>;
+                    }
+                    <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r60 rd" class="r60 r">e</span>)
+                    {
+                        <a href="#89269c7cf60ea377" class="i field">_token</a>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+                        <b>if</b> (<span class="r58 r">retryCount</span> &gt;= <a href="Upload/SingleSegmentUploader.cs.html#62b7b26e3b4d119f" class="t t">SingleSegmentUploader</a>.<a href="Upload/SingleSegmentUploader.cs.html#7aa3318da19b9344" class="i field">MaxBufferUploadAttemptCount</a>)
+                        {
+                            <a href="Common/TransferFailedException.cs.html#020a0db52cedc36b" class="k">var</a> <span id="r61 rd" class="r61 r">ex</span> = <b>new</b> <a href="Common/TransferFailedException.cs.html#0257d7104f85f50a" class="t constructor">TransferFailedException</a>(
+                                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#7432dab173fae5fc" class="i method">Format</a>(
+                                    <span class="s">&quot;Cannot validate metadata for stream: {0} in order to resume due to the following exception retrieving file information: {1}&quot;</span>,
+                                    <span class="r56 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>,
+                                    <span class="r60 r">e</span>));
+ 
+                            <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r61 r">ex</span>);
+ 
+                            <b>throw</b> <span class="r61 r">ex</span>;
+                        }
+ 
+                        <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r62 rd" class="r62 r">waitTime</span> = <a href="Upload/SingleSegmentUploader.cs.html#62b7b26e3b4d119f" class="t t">SingleSegmentUploader</a>.<a href="Upload/SingleSegmentUploader.cs.html#2b602a587e9dc188" class="i method">WaitForRetry</a>(<span class="r58 r">retryCount</span>, <a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#dc55e79a6c0931cd" class="i property">UseSegmentBlockBackOffRetryStrategy</a>, <a href="#89269c7cf60ea377" class="i field">_token</a>);
+                        <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#d6f22d2fc99e22e6" class="i method">LogInfo</a>(<span class="s">&quot;ValidateMetadataForResume - folder transfer: StreamExists and GetStreamLength at path:{0} failed on try: {1} with exception: {2}. Wait time in ms before retry: {3}&quot;</span>,
+                            <span class="r56 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>,
+                            <span class="r58 r">retryCount</span>,
+                            <span class="r60 r">e</span>,
+                            <span class="r62 r">waitTime</span>);
+                    }
+                }
+ 
+                <b>return</b> <span class="r56 r">metadata</span>;
+            }
+            
+            <span class="c">//verify that the target stream does not already exist and hasn&#39;t completed (in case we don&#39;t want to overwrite)</span>
+            <b>if</b> (!<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#186ef3dac2d4eb47" class="i property">IsOverwrite</a> &amp;&amp; <a href="#8654e36d587806f9" class="i field">_frontEnd</a>.<a href="Common/IFrontEndAdapter.cs.html#e4804a7c57de7ea6" class="i method">StreamExists</a>(<span class="r56 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>, <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>))
+            {
+                <a href="@0@mscorlib/A.html#beac22dfca574cd4" class="k">var</a> <span id="r63 rd" class="r63 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;Stream at path: {0} already exists. Please set overwrite to true to overwrite streams that exist.&quot;</span>, <span class="r56 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>));
+ 
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r63 r">ex</span>);
+ 
+                <b>throw</b> <span class="r63 r">ex</span>;
+            }
+ 
+            <span class="c">//make sure we don&#39;t transfer part of the file as binary, while the rest is non-binary (that&#39;s just asking for trouble)</span>
+            <b>if</b> (<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#ebfa48b5610ab87e" class="i property">IsBinary</a> != <span class="r56 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#ffdbb867506e256b" class="i property">IsBinary</a>)
+            {
+                <a href="@0@mscorlib/A.html#beac22dfca574cd4" class="k">var</a> <span id="r64 rd" class="r64 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#7432dab173fae5fc" class="i method">Format</a>(
+                        <span class="s">&quot;Existing metadata was created for a {0}binary file while the current parameters requested a {1}binary upload.&quot;</span>, 
+                        <span class="r56 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#ffdbb867506e256b" class="i property">IsBinary</a> ? <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#c9f70a27facb27cf" class="i field">Empty</a> : <span class="s">&quot;non-&quot;</span>, 
+                        <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#ebfa48b5610ab87e" class="i property">IsBinary</a> ? <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#c9f70a27facb27cf" class="i field">Empty</a> : <span class="s">&quot;non-&quot;</span>));
+ 
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r64 r">ex</span>);
+ 
+                <b>throw</b> <span class="r64 r">ex</span>;
+            }
+ 
+            <span class="c">//see what files(segments) already exist - update metadata accordingly (only for segments that are missing from server; if it&#39;s on the server but not in metadata, reupload)</span>
+            <b>foreach</b> (<a href="Common/TransferSegmentMetadata.cs.html#4a50ebae0a9351d2" class="k">var</a> <span id="r65 rd" class="r65 r">segment</span> <b>in</b> <span class="r56 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#982540b694e3af39" class="i property">Segments</a>)
+            {
+                <b>if</b> (<span class="r65 r">segment</span>.<a href="Common/TransferSegmentMetadata.cs.html#dad6b56604dbe3f7" class="i property">Status</a> == <a href="Common/SegmentTransferStatus.cs.html#f871cd80cd9814cc" class="t t">SegmentTransferStatus</a>.<a href="Common/SegmentTransferStatus.cs.html#2c215e272001fbf1" class="i field">Complete</a>)
+                {
+                    <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r66 rd" class="r66 r">retryCount</span> = 0;
+                    <b>while</b> (<span class="r66 r">retryCount</span> &lt; <a href="Upload/SingleSegmentUploader.cs.html#62b7b26e3b4d119f" class="t t">SingleSegmentUploader</a>.<a href="Upload/SingleSegmentUploader.cs.html#7aa3318da19b9344" class="i field">MaxBufferUploadAttemptCount</a>)
+                    {
+                        <a href="#89269c7cf60ea377" class="i field">_token</a>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+                        <span class="r66 r">retryCount</span>++;
+                        <b>try</b>
+                        {
+                            <span class="c">//verify that the stream exists and that the length is as expected</span>
+                            <b>if</b> (!<a href="#8654e36d587806f9" class="i field">_frontEnd</a>.<a href="Common/IFrontEndAdapter.cs.html#e4804a7c57de7ea6" class="i method">StreamExists</a>(<span class="r65 r">segment</span>.<a href="Common/TransferSegmentMetadata.cs.html#3e61c0eaf4a2746f" class="i property">Path</a>, <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>))
+                            {
+                                <span class="c">// this segment was marked as completed, but no target stream exists; it needs to be retransferred</span>
+                                <span class="r65 r">segment</span>.<a href="Common/TransferSegmentMetadata.cs.html#dad6b56604dbe3f7" class="i property">Status</a> = <a href="Common/SegmentTransferStatus.cs.html#f871cd80cd9814cc" class="t t">SegmentTransferStatus</a>.<a href="Common/SegmentTransferStatus.cs.html#e8c6f082f267929a" class="i field">Pending</a>;
+                            }
+                            <b>else</b>
+                            {
+                                <a href="@0@mscorlib/A.html#e566178cce890c36" class="k">var</a> <span id="r67 rd" class="r67 r">remoteLength</span> = <a href="#8654e36d587806f9" class="i field">_frontEnd</a>.<a href="Common/IFrontEndAdapter.cs.html#84a396ab34116429" class="i method">GetStreamLength</a>(<span class="r65 r">segment</span>.<a href="Common/TransferSegmentMetadata.cs.html#3e61c0eaf4a2746f" class="i property">Path</a>, <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>);
+                                <b>if</b> (<span class="r67 r">remoteLength</span> != <span class="r65 r">segment</span>.<a href="Common/TransferSegmentMetadata.cs.html#d35d9c4278e3e239" class="i property">Length</a>)
+                                {
+                                    <span class="c">//the target stream has a different length than the input segment, which implies they are inconsistent; it needs to be retransferred</span>
+                                    <span class="r65 r">segment</span>.<a href="Common/TransferSegmentMetadata.cs.html#dad6b56604dbe3f7" class="i property">Status</a> = <a href="Common/SegmentTransferStatus.cs.html#f871cd80cd9814cc" class="t t">SegmentTransferStatus</a>.<a href="Common/SegmentTransferStatus.cs.html#e8c6f082f267929a" class="i field">Pending</a>;
+                                }
+                            }
+ 
+                            <b>break</b>;
+                        }
+                        <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r68 rd" class="r68 r">e</span>)
+                        {
+                            <a href="#89269c7cf60ea377" class="i field">_token</a>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+                            <b>if</b> (<span class="r66 r">retryCount</span> &gt;= <a href="Upload/SingleSegmentUploader.cs.html#62b7b26e3b4d119f" class="t t">SingleSegmentUploader</a>.<a href="Upload/SingleSegmentUploader.cs.html#7aa3318da19b9344" class="i field">MaxBufferUploadAttemptCount</a>)
+                            {
+                                <a href="Common/TransferFailedException.cs.html#020a0db52cedc36b" class="k">var</a> <span id="r69 rd" class="r69 r">ex</span> = <b>new</b> <a href="Common/TransferFailedException.cs.html#0257d7104f85f50a" class="t constructor">TransferFailedException</a>(
+                                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#7432dab173fae5fc" class="i method">Format</a>(
+                                        <span class="s">&quot;Cannot validate metadata for stream: {0} in order to resume due to the following exception retrieving file information: {1}&quot;</span>,
+                                        <span class="r56 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>,
+                                        <span class="r68 r">e</span>));
+ 
+                                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r69 r">ex</span>);
+ 
+                                <b>throw</b> <span class="r69 r">ex</span>;
+                            }
+ 
+                            <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r70 rd" class="r70 r">waitTime</span> = <a href="Upload/SingleSegmentUploader.cs.html#62b7b26e3b4d119f" class="t t">SingleSegmentUploader</a>.<a href="Upload/SingleSegmentUploader.cs.html#2b602a587e9dc188" class="i method">WaitForRetry</a>(<span class="r66 r">retryCount</span>, <a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#dc55e79a6c0931cd" class="i property">UseSegmentBlockBackOffRetryStrategy</a>, <a href="#89269c7cf60ea377" class="i field">_token</a>);
+                            <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#d6f22d2fc99e22e6" class="i method">LogInfo</a>(<span class="s">&quot;ValidateMetadataForResume - file transfer: StreamExists and GetStreamLength at path:{0} failed on try: {1} with exception: {2}. Wait time in ms before retry: {3}&quot;</span>,
+                                <span class="r56 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>,
+                                <span class="r66 r">retryCount</span>,
+                                <span class="r68 r">e</span>,
+                                <span class="r70 r">waitTime</span>);
+                        }
+                    }
+                }
+                <b>else</b>
+                {
+                    <span class="c">//anything which is not in &#39;Completed&#39; status needs to be retransferred</span>
+                    <span class="r65 r">segment</span>.<a href="Common/TransferSegmentMetadata.cs.html#dad6b56604dbe3f7" class="i property">Status</a> = <a href="Common/SegmentTransferStatus.cs.html#f871cd80cd9814cc" class="t t">SegmentTransferStatus</a>.<a href="Common/SegmentTransferStatus.cs.html#e8c6f082f267929a" class="i field">Pending</a>;
+                }
+            }
+ 
+            <b>if</b> (!<span class="r57 r">isFolderTransfer</span>)
+            {
+                <span class="r56 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#f0e950a431f9279e" class="i method">Save</a>();
+            }
+ 
+            <b>return</b> <span class="r56 r">metadata</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Verifies that the metadata is valid for a fresh transfer.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r71 r">metadata</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="d3d6636b46d9d9b4" href="../../R/d3d6636b46d9d9b4.html" target="n" data-glyph="76,1" class="i method">ValidateMetadataForFreshTransfer</a>(<a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <span id="r71 rd" class="r71 r">metadata</span>)
+        {
+            <a href="#e577a38edc58e9ed" class="i method">ValidateMetadataMatchesLocalFile</a>(<span class="r71 r">metadata</span>);
+ 
+            <span class="c">//verify that the target stream does not already exist (in case we don&#39;t want to overwrite)</span>
+            <b>if</b> (!<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#186ef3dac2d4eb47" class="i property">IsOverwrite</a> &amp;&amp; <a href="#8654e36d587806f9" class="i field">_frontEnd</a>.<a href="Common/IFrontEndAdapter.cs.html#e4804a7c57de7ea6" class="i method">StreamExists</a>(<span class="r71 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>, <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>))
+            {
+                <a href="@0@mscorlib/A.html#beac22dfca574cd4" class="k">var</a> <span id="r72 rd" class="r72 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;Target Stream: {0} already exists&quot;</span>, <span class="r71 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>));
+ 
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r72 r">ex</span>);
+ 
+                <b>throw</b> <span class="r72 r">ex</span>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Verifies that the metadata is consistent with the local file information.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r73 r">metadata</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="e577a38edc58e9ed" href="../../R/e577a38edc58e9ed.html" target="n" data-glyph="76,1" class="i method">ValidateMetadataMatchesLocalFile</a>(<a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <span id="r73 rd" class="r73 r">metadata</span>, <b>bool</b> <span id="r74 rd" class="r74 r">isFolderTransfer</span> = <b>false</b>)
+        {
+            <span class="c">//verify that it matches against source file (size, name)</span>
+            <b>if</b> (<span class="r74 r">isFolderTransfer</span>)
+            {
+                <b>if</b> (!<span class="r73 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>.<a href="@0@mscorlib/A.html#06a5f7c688e69307" class="i method">Trim</a>().<a href="@0@mscorlib/A.html#428c5c9954dea844" class="i method">Contains</a>(<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#71c8ba3b11d5aeee" class="i property">TargetStreamPath</a>.<a href="@0@mscorlib/A.html#06a5f7c688e69307" class="i method">Trim</a>()))
+                {
+                    <a href="@0@mscorlib/A.html#beac22dfca574cd4" class="k">var</a> <span id="r75 rd" class="r75 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#7432dab173fae5fc" class="i method">Format</a>(<span class="s">&quot;Metadata points to a different target stream folder in path: {0} than the input parameters: {1}&quot;</span>, <span class="r73 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>, <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#71c8ba3b11d5aeee" class="i property">TargetStreamPath</a>));
+ 
+                    <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r75 r">ex</span>);
+ 
+                    <b>throw</b> <span class="r75 r">ex</span>;
+                }
+            }
+            <b>else</b>
+            {
+                <b>if</b> (<span class="r73 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>.<a href="@0@mscorlib/A.html#06a5f7c688e69307" class="i method">Trim</a>() != <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#71c8ba3b11d5aeee" class="i property">TargetStreamPath</a>.<a href="@0@mscorlib/A.html#06a5f7c688e69307" class="i method">Trim</a>())
+                {
+                    <a href="@0@mscorlib/A.html#beac22dfca574cd4" class="k">var</a> <span id="r76 rd" class="r76 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;Metadata points to a different target stream than the input parameters&quot;</span>);
+ 
+                    <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r76 r">ex</span>);
+ 
+                    <b>throw</b> <span class="r76 r">ex</span>;
+                }
+ 
+                <b>if</b> (!<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#13433c7d7aa99dc0" class="i property">InputFilePath</a>.<a href="@0@mscorlib/A.html#b98069ccbe2d3960" class="i method">Equals</a>(<span class="r73 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#190138f2a84df06b" class="i property">InputFilePath</a>, <a href="@0@mscorlib/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@0@mscorlib/A.html#6c3139b940557bf9" class="i field">OrdinalIgnoreCase</a>))
+                {
+                    <a href="@0@mscorlib/A.html#beac22dfca574cd4" class="k">var</a> <span id="r77 rd" class="r77 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;The metadata refers to different file than the one requested&quot;</span>);
+ 
+                    <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r77 r">ex</span>);
+ 
+                    <b>throw</b> <span class="r77 r">ex</span>;
+                }
+            }
+ 
+            <span class="c">// We only test for the stream existing and size for transfer, for download this</span>
+            <span class="c">// is covered in a separate check.</span>
+            <b>if</b> (!<span class="r73 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#bff991c0ada527f8" class="i property">IsDownload</a> &amp;&amp; !<a href="#8654e36d587806f9" class="i field">_frontEnd</a>.<a href="Common/IFrontEndAdapter.cs.html#e4804a7c57de7ea6" class="i method">StreamExists</a>(<span class="r73 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#190138f2a84df06b" class="i property">InputFilePath</a>, !<span class="r73 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#bff991c0ada527f8" class="i property">IsDownload</a>))
+            {
+                <a href="@0@mscorlib/A.html#beac22dfca574cd4" class="k">var</a> <span id="r78 rd" class="r78 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;The metadata refers to a file that does not exist&quot;</span>);
+ 
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r78 r">ex</span>);
+ 
+                <b>throw</b> <span class="r78 r">ex</span>;
+            }
+ 
+            <b>if</b> (!<span class="r73 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#bff991c0ada527f8" class="i property">IsDownload</a> &amp;&amp; <span class="r73 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#c2f4b2ebd90b6cb3" class="i property">FileLength</a> != <a href="#8654e36d587806f9" class="i field">_frontEnd</a>.<a href="Common/IFrontEndAdapter.cs.html#84a396ab34116429" class="i method">GetStreamLength</a>(<span class="r73 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#190138f2a84df06b" class="i property">InputFilePath</a>, !<span class="r73 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#bff991c0ada527f8" class="i property">IsDownload</a>))
+            {
+                <a href="@0@mscorlib/A.html#beac22dfca574cd4" class="k">var</a> <span id="r79 rd" class="r79 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;The metadata&#39;s file information differs from the actual file&quot;</span>);
+ 
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r79 r">ex</span>);
+ 
+                <b>throw</b> <span class="r79 r">ex</span>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Validates that the metadata is valid for a resume operation, and also updates the internal Segment States to match what the Server looks like.</span>
+        <span class="c">///</span><span class="c"> If any changes are made, the metadata will be saved to its canonical location.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r80 r">metadata</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="c2d25c1d3aed3de8" href="../../R/c2d25c1d3aed3de8.html" target="n" data-glyph="76,1" class="i method">ValidateFolderMetadataForResume</a>(<a href="Common/TransferFolderMetadata.cs.html#e4a782a6b9f2d42c" class="t t">TransferFolderMetadata</a> <span id="r80 rd" class="r80 r">metadata</span>)
+        {
+            <a href="#724f3a52ac0cca9b" class="i method">ValidateFolderMetadataMatchesLocalFile</a>(<span class="r80 r">metadata</span>);
+            <a href="@0@mscorlib/A.html#18bcbcbdddbcfdcb" class="k">var</a> <span id="r81 rd" class="r81 r">exceptions</span> = <b>new</b> <a href="@0@mscorlib/A.html#a773570b1b021cff" class="t constructor">ConcurrentQueue</a>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt;();
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r82 rd" class="r82 r">threadsToRun</span> = <b>new</b> <a href="@0@mscorlib/A.html#b65c1a07c4e5b13a" class="t constructor">List</a>&lt;<a href="@0@mscorlib/A.html#3980e012bae82e96" class="t t">Thread</a>&gt;(<span class="r80 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#9a427422bf099d1c" class="i property">Files</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>);
+            <a href="@0@mscorlib/A.html#18bcbcbdddbcfdcb" class="k">var</a> <span id="r83 rd" class="r83 r">files</span> = <b>new</b> <a href="@0@mscorlib/A.html#50871c13ec8cfd35" class="t constructor">ConcurrentQueue</a>&lt;<a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a>&gt;(<span class="r80 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#9a427422bf099d1c" class="i property">Files</a>);
+            <b>int</b> <span id="r84 rd" class="r84 r">threadCount</span> = <a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#f441d55c88d635ad" class="i method">Min</a>(<span class="r80 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#9a427422bf099d1c" class="i property">Files</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>, 500);
+            <b>for</b> (<b>int</b> <span id="r85 rd" class="r85 r">i</span> =0; <span class="r85 r">i</span> &lt; <span class="r84 r">threadCount</span>; <span class="r85 r">i</span>++)
+            {
+                <a href="@0@mscorlib/A.html#3980e012bae82e96" class="k">var</a> <span id="r86 rd" class="r86 r">t</span> = <b>new</b> <a href="@0@mscorlib/A.html#76f340c84df6da8d" class="t constructor">Thread</a>(() =&gt;
+                {
+                    <span class="c">//see what files already exist - update metadata accordingly (only for segments that are missing from server; if it&#39;s on the server but not in metadata, retransfer)</span>
+                    <a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <span id="r87 rd" class="r87 r">toValidate</span>;
+                    <b>while</b> (<span class="r83 r">files</span>.<a href="@0@mscorlib/A.html#88b9f17c9182267f" class="i method">TryDequeue</a>(<b>out</b> <span class="r87 r">toValidate</span>))
+                    {
+                        <a href="#89269c7cf60ea377" class="i field">_token</a>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+                        <b>try</b>
+                        {
+                            <a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="k">var</a> <span id="r88 rd" class="r88 r">toReplace</span> = <a href="#74ab4f9cd497f8c1" class="i method">ValidateMetadataForResume</a>(<span class="r87 r">toValidate</span>, <b>true</b>);
+                            <b>for</b> (<b>int</b> <span id="r89 rd" class="r89 r">j</span> = 0; <span class="r89 r">j</span> &lt; <span class="r80 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#9a427422bf099d1c" class="i property">Files</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>; <span class="r89 r">j</span>++)
+                            {
+                                <b>if</b> (<span class="r80 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#9a427422bf099d1c" class="i property">Files</a>[<span class="r89 r">j</span>].<a href="Common/TransferMetadata.cs.html#94ead8daa60a5847" class="i property">TransferId</a> == <span class="r88 r">toReplace</span>.<a href="Common/TransferMetadata.cs.html#94ead8daa60a5847" class="i property">TransferId</a>)
+                                {
+                                    <span class="r80 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#9a427422bf099d1c" class="i property">Files</a>[<span class="r89 r">j</span>] = <span class="r88 r">toReplace</span>;
+                                    <b>break</b>;
+                                }
+                            }
+                        }
+                        <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r90 rd" class="r90 r">e</span>)
+                        {
+                            <span class="r81 r">exceptions</span>.<a href="@0@mscorlib/A.html#62bea3a8141ed2a9" class="i method">Enqueue</a>(<span class="r90 r">e</span>);
+                        }
+                    }
+                });
+ 
+                <span class="r86 r">t</span>.<a href="@0@mscorlib/A.html#cd2144b8dd6f4373" class="i method">Start</a>();
+                <span class="r82 r">threadsToRun</span>.<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r86 r">t</span>);
+            }
+ 
+            <b>foreach</b>(<a href="@0@mscorlib/A.html#3980e012bae82e96" class="k">var</a> <span id="r91 rd" class="r91 r">t</span> <b>in</b> <span class="r82 r">threadsToRun</span>)
+            {
+                <span class="r91 r">t</span>.<a href="@0@mscorlib/A.html#6f7bed56e0efe767" class="i method">Join</a>();
+            }
+ 
+            <b>if</b>(<span class="r81 r">exceptions</span>.<a href="@0@mscorlib/A.html#f36684fa5c19fdfb" class="i property">Count</a> &gt; 0)
+            {
+                <a href="@0@mscorlib/A.html#be77e0a7fbc110e6" class="k">var</a> <span id="r92 rd" class="r92 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#1de0e8202e59539a" class="t constructor">AggregateException</a>(<span class="r81 r">exceptions</span>);
+ 
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r92 r">ex</span>);
+ 
+                <b>throw</b> <span class="r92 r">ex</span>;
+            }
+ 
+            <span class="r80 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#7f9329b140304dbb" class="i method">Save</a>();
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Verifies that the metadata is valid for a fresh transfer.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r93 r">metadata</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="f888b306448d72f8" href="../../R/f888b306448d72f8.html" target="n" data-glyph="76,1" class="i method">ValidateFolderMetadataForFreshTransfer</a>(<a href="Common/TransferFolderMetadata.cs.html#e4a782a6b9f2d42c" class="t t">TransferFolderMetadata</a> <span id="r93 rd" class="r93 r">metadata</span>)
+        {
+            <a href="#724f3a52ac0cca9b" class="i method">ValidateFolderMetadataMatchesLocalFile</a>(<span class="r93 r">metadata</span>);
+            <a href="@0@mscorlib/A.html#18bcbcbdddbcfdcb" class="k">var</a> <span id="r94 rd" class="r94 r">exceptions</span> = <b>new</b> <a href="@0@mscorlib/A.html#a773570b1b021cff" class="t constructor">ConcurrentQueue</a>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt;();
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r95 rd" class="r95 r">threadsToRun</span> = <b>new</b> <a href="@0@mscorlib/A.html#b65c1a07c4e5b13a" class="t constructor">List</a>&lt;<a href="@0@mscorlib/A.html#3980e012bae82e96" class="t t">Thread</a>&gt;(<span class="r93 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#9a427422bf099d1c" class="i property">Files</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>);
+            <a href="@0@mscorlib/A.html#18bcbcbdddbcfdcb" class="k">var</a> <span id="r96 rd" class="r96 r">files</span> = <b>new</b> <a href="@0@mscorlib/A.html#50871c13ec8cfd35" class="t constructor">ConcurrentQueue</a>&lt;<a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a>&gt;(<span class="r93 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#9a427422bf099d1c" class="i property">Files</a>);
+            <b>int</b> <span id="r97 rd" class="r97 r">threadCount</span> = <a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#f441d55c88d635ad" class="i method">Min</a>(<span class="r93 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#9a427422bf099d1c" class="i property">Files</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>, 500);
+            <b>for</b> (<b>int</b> <span id="r98 rd" class="r98 r">i</span> = 0; <span class="r98 r">i</span> &lt; <span class="r97 r">threadCount</span>; <span class="r98 r">i</span>++)
+            {
+                <a href="@0@mscorlib/A.html#3980e012bae82e96" class="k">var</a> <span id="r99 rd" class="r99 r">t</span> = <b>new</b> <a href="@0@mscorlib/A.html#76f340c84df6da8d" class="t constructor">Thread</a>(() =&gt;
+                {
+                    <a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <span id="r100 rd" class="r100 r">toValidate</span>;
+                    <b>while</b> (<span class="r96 r">files</span>.<a href="@0@mscorlib/A.html#88b9f17c9182267f" class="i method">TryDequeue</a>(<b>out</b> <span class="r100 r">toValidate</span>))
+                    {
+                        <a href="#89269c7cf60ea377" class="i field">_token</a>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+                        <span class="c">//verify that the target stream does not already exist (in case we don&#39;t want to overwrite)</span>
+                        <b>if</b> (!<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#186ef3dac2d4eb47" class="i property">IsOverwrite</a> &amp;&amp; <a href="#8654e36d587806f9" class="i field">_frontEnd</a>.<a href="Common/IFrontEndAdapter.cs.html#e4804a7c57de7ea6" class="i method">StreamExists</a>(<span class="r100 r">toValidate</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>, <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>))
+                        {
+                            <span class="r94 r">exceptions</span>.<a href="@0@mscorlib/A.html#62bea3a8141ed2a9" class="i method">Enqueue</a>(<b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;Stream at path: {0} already exists. Please set overwrite to true to overwrite streams that exist.&quot;</span>, <span class="r100 r">toValidate</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>)));
+                        }
+                    }
+                });
+ 
+                <span class="r99 r">t</span>.<a href="@0@mscorlib/A.html#cd2144b8dd6f4373" class="i method">Start</a>();
+                <span class="r95 r">threadsToRun</span>.<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r99 r">t</span>);
+            }
+ 
+            <b>foreach</b>(<a href="@0@mscorlib/A.html#3980e012bae82e96" class="k">var</a> <span id="r101 rd" class="r101 r">t</span> <b>in</b> <span class="r95 r">threadsToRun</span>)
+            {
+                <span class="r101 r">t</span>.<a href="@0@mscorlib/A.html#6f7bed56e0efe767" class="i method">Join</a>();
+            }
+ 
+            <b>if</b>(<span class="r94 r">exceptions</span>.<a href="@0@mscorlib/A.html#f36684fa5c19fdfb" class="i property">Count</a> &gt; 0)
+            {
+                <a href="@0@mscorlib/A.html#be77e0a7fbc110e6" class="k">var</a> <span id="r102 rd" class="r102 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#1de0e8202e59539a" class="t constructor">AggregateException</a>(<span class="r94 r">exceptions</span>);
+ 
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r102 r">ex</span>);
+ 
+                <b>throw</b> <span class="r102 r">ex</span>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Verifies that the metadata is consistent with the local file information.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r103 r">metadata</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="724f3a52ac0cca9b" href="../../R/724f3a52ac0cca9b.html" target="n" data-glyph="76,1" class="i method">ValidateFolderMetadataMatchesLocalFile</a>(<a href="Common/TransferFolderMetadata.cs.html#e4a782a6b9f2d42c" class="t t">TransferFolderMetadata</a> <span id="r103 rd" class="r103 r">metadata</span>)
+        {
+            <b>if</b> (<span class="r103 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#ea3e60e93666f87a" class="i property">TargetStreamFolderPath</a>.<a href="@0@mscorlib/A.html#06a5f7c688e69307" class="i method">Trim</a>() != <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#71c8ba3b11d5aeee" class="i property">TargetStreamPath</a>.<a href="@0@mscorlib/A.html#06a5f7c688e69307" class="i method">Trim</a>())
+            {
+                <a href="@0@mscorlib/A.html#beac22dfca574cd4" class="k">var</a> <span id="r104 rd" class="r104 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#7432dab173fae5fc" class="i method">Format</a>(<span class="s">&quot;Metadata points to a different target stream folder: {0} than the input parameters: {1}&quot;</span>, <span class="r103 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#ea3e60e93666f87a" class="i property">TargetStreamFolderPath</a>, <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#71c8ba3b11d5aeee" class="i property">TargetStreamPath</a>));
+ 
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r104 r">ex</span>);
+ 
+                <b>throw</b> <span class="r104 r">ex</span>;
+            }
+ 
+            <span class="c">//verify that it matches against source folder (size, name)</span>
+            <b>if</b> (!<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#13433c7d7aa99dc0" class="i property">InputFilePath</a>.<a href="@0@mscorlib/A.html#b98069ccbe2d3960" class="i method">Equals</a>(<span class="r103 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#b73f76db507ab6b0" class="i property">InputFolderPath</a>, <a href="@0@mscorlib/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@0@mscorlib/A.html#6c3139b940557bf9" class="i field">OrdinalIgnoreCase</a>))
+            {
+                <a href="@0@mscorlib/A.html#beac22dfca574cd4" class="k">var</a> <span id="r105 rd" class="r105 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;The metadata refers to different folder than the one requested&quot;</span>);
+ 
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r105 r">ex</span>);
+ 
+                <b>throw</b> <span class="r105 r">ex</span>;
+            }
+ 
+            <b>if</b> (!<a href="#8654e36d587806f9" class="i field">_frontEnd</a>.<a href="Common/IFrontEndAdapter.cs.html#e4804a7c57de7ea6" class="i method">StreamExists</a>(<span class="r103 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#b73f76db507ab6b0" class="i property">InputFolderPath</a>, !<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>))
+            {
+                <a href="@0@mscorlib/A.html#beac22dfca574cd4" class="k">var</a> <span id="r106 rd" class="r106 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;The metadata refers to a folder that does not exist&quot;</span>);
+ 
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r106 r">ex</span>);
+ 
+                <b>throw</b> <span class="r106 r">ex</span>;
+            }
+ 
+ 
+            <b>long</b> <span id="r107 rd" class="r107 r">totalBytes</span> = 0;
+            <a href="@0@mscorlib/A.html#d3599058f8d79be0" class="k">var</a> <span id="r108 rd" class="r108 r">fileAndSizePairs</span> = <b>new</b> <a href="@0@mscorlib/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <b>long</b>&gt;();
+            <b>if</b> (<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>)
+            {
+                <b>foreach</b> (<a href="@0@mscorlib/A.html#8585965bb176a426" class="k">var</a> <span id="r109 rd" class="r109 r">entry</span> <b>in</b> <a href="#8654e36d587806f9" class="i field">_frontEnd</a>.<a href="Common/IFrontEndAdapter.cs.html#d5f8e33a90b70382" class="i method">ListDirectory</a>(<span class="r103 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#b73f76db507ab6b0" class="i property">InputFolderPath</a>, <span class="r103 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#313438379c862aca" class="i property">IsRecursive</a>))
+                {
+                    <span class="r108 r">fileAndSizePairs</span>.<a href="@0@mscorlib/A.html#a7861da7aaa500fe" class="i method">Add</a>(<span class="r109 r">entry</span>.<a href="@0@mscorlib/A.html#f9d1c04feb1af032" class="i property">Key</a>, <span class="r109 r">entry</span>.<a href="@0@mscorlib/A.html#38c0e86cc4b30170" class="i property">Value</a>);
+                }
+ 
+                <span class="r107 r">totalBytes</span> = <span class="r108 r">fileAndSizePairs</span>.<a href="@0@mscorlib/A.html#4367dd1e300ae797" class="i property">Values</a>.<a href="@0@System.Core/A.html#0dc58a3881980fa9" class="i method">Sum</a>();
+            }
+            <b>else</b>
+            {
+                <a href="@0@mscorlib/A.html#30fa608717e5ce8e" class="k">var</a> <span id="r110 rd" class="r110 r">metadataInputFileInfo</span> = <b>new</b> <a href="@0@mscorlib/A.html#683f5ff112df8d3a" class="t constructor">DirectoryInfo</a>(<span class="r103 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#b73f76db507ab6b0" class="i property">InputFolderPath</a>);
+                <span class="r107 r">totalBytes</span> = <span class="r110 r">metadataInputFileInfo</span>.<a href="@0@mscorlib/A.html#46f5b2047b88b18d" class="i method">GetFiles</a>(<span class="s">&quot;*.*&quot;</span>,
+                    <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#c8c24ab47037c15d" class="i property">IsRecursive</a> ?
+                    <a href="@0@mscorlib/A.html#2cb8f758d1188030" class="t t">SearchOption</a>.<a href="@0@mscorlib/A.html#189c2c97fce85a03" class="i field">AllDirectories</a> :
+                    <a href="@0@mscorlib/A.html#2cb8f758d1188030" class="t t">SearchOption</a>.<a href="@0@mscorlib/A.html#db04cd5083907c24" class="i field">TopDirectoryOnly</a>).<a href="@0@System.Core/A.html#47c6324656bd90c5" class="i method">Sum</a>(<span id="r111 rd" class="r111 r">file</span> =&gt; <span class="r111 r">file</span>.<a href="@0@mscorlib/A.html#0ab84ec3507f6ed4" class="i property">Length</a>);
+            }
+            <b>if</b> (<span class="r103 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#eddd4b4292178025" class="i property">TotalFileBytes</a> != <span class="r107 r">totalBytes</span>)
+            {
+                <a href="@0@mscorlib/A.html#beac22dfca574cd4" class="k">var</a> <span id="r112 rd" class="r112 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;The metadata&#39;s total size information for all files in the directory differs from the actual directory information!&quot;</span>);
+ 
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r112 r">ex</span>);
+ 
+                <b>throw</b> <span class="r112 r">ex</span>;
+            }
+ 
+            <a href="@0@mscorlib/A.html#18bcbcbdddbcfdcb" class="k">var</a> <span id="r113 rd" class="r113 r">exceptions</span> = <b>new</b> <a href="@0@mscorlib/A.html#a773570b1b021cff" class="t constructor">ConcurrentQueue</a>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt;();
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r114 rd" class="r114 r">threadsToRun</span> = <b>new</b> <a href="@0@mscorlib/A.html#b65c1a07c4e5b13a" class="t constructor">List</a>&lt;<a href="@0@mscorlib/A.html#3980e012bae82e96" class="t t">Thread</a>&gt;(<span class="r103 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#9a427422bf099d1c" class="i property">Files</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>);
+            <a href="@0@mscorlib/A.html#18bcbcbdddbcfdcb" class="k">var</a> <span id="r115 rd" class="r115 r">files</span> = <b>new</b> <a href="@0@mscorlib/A.html#50871c13ec8cfd35" class="t constructor">ConcurrentQueue</a>&lt;<a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a>&gt;(<span class="r103 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#9a427422bf099d1c" class="i property">Files</a>);
+            <b>int</b> <span id="r116 rd" class="r116 r">threadCount</span> = <a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#f441d55c88d635ad" class="i method">Min</a>(<span class="r103 r">metadata</span>.<a href="Common/TransferFolderMetadata.cs.html#9a427422bf099d1c" class="i property">Files</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>, 500);
+            <b>for</b> (<b>int</b> <span id="r117 rd" class="r117 r">i</span> = 0; <span class="r117 r">i</span> &lt; <span class="r116 r">threadCount</span>; <span class="r117 r">i</span>++)
+            {
+                <a href="@0@mscorlib/A.html#3980e012bae82e96" class="k">var</a> <span id="r118 rd" class="r118 r">t</span> = <b>new</b> <a href="@0@mscorlib/A.html#76f340c84df6da8d" class="t constructor">Thread</a>(() =&gt;
+                {
+                    <a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <span id="r119 rd" class="r119 r">toValidate</span>;
+                    <b>while</b> (<span class="r115 r">files</span>.<a href="@0@mscorlib/A.html#88b9f17c9182267f" class="i method">TryDequeue</a>(<b>out</b> <span class="r119 r">toValidate</span>))
+                    {
+                        <a href="#89269c7cf60ea377" class="i field">_token</a>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+                        <b>try</b>
+                        {
+                            <a href="#e577a38edc58e9ed" class="i method">ValidateMetadataMatchesLocalFile</a>(<span class="r119 r">toValidate</span>, <b>true</b>);
+                            <b>if</b> (<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>)
+                            {
+                                <span class="c">// validate the file exists and the size is correct</span>
+                                <b>if</b> (!<span class="r108 r">fileAndSizePairs</span>.<a href="@0@mscorlib/A.html#22fd7cd7408aed6e" class="i method">ContainsKey</a>(<span class="r119 r">toValidate</span>.<a href="Common/TransferMetadata.cs.html#190138f2a84df06b" class="i property">InputFilePath</a>) || <span class="r108 r">fileAndSizePairs</span><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="r119 r">toValidate</span>.<a href="Common/TransferMetadata.cs.html#190138f2a84df06b" class="i property">InputFilePath</a>] != <span class="r119 r">toValidate</span>.<a href="Common/TransferMetadata.cs.html#c2f4b2ebd90b6cb3" class="i property">FileLength</a>)
+                                {
+                                    <a href="@0@mscorlib/A.html#beac22dfca574cd4" class="k">var</a> <span id="r120 rd" class="r120 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;The metadata refers to a file that does not exist or the file size does not match&quot;</span>);
+ 
+                                    <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r120 r">ex</span>);
+ 
+                                    <b>throw</b> <span class="r120 r">ex</span>;
+                                }
+                            }
+                        }
+                        <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r121 rd" class="r121 r">e</span>)
+                        {
+                            <span class="r113 r">exceptions</span>.<a href="@0@mscorlib/A.html#62bea3a8141ed2a9" class="i method">Enqueue</a>(<span class="r121 r">e</span>);
+                        }
+                    }
+                });
+ 
+                <span class="r118 r">t</span>.<a href="@0@mscorlib/A.html#cd2144b8dd6f4373" class="i method">Start</a>();
+                <span class="r114 r">threadsToRun</span>.<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r118 r">t</span>);
+            }
+ 
+            <b>foreach</b> (<a href="@0@mscorlib/A.html#3980e012bae82e96" class="k">var</a> <span id="r122 rd" class="r122 r">t</span> <b>in</b> <span class="r114 r">threadsToRun</span>)
+            {
+                <span class="r122 r">t</span>.<a href="@0@mscorlib/A.html#6f7bed56e0efe767" class="i method">Join</a>();
+            }
+ 
+            <b>if</b>(<span class="r113 r">exceptions</span>.<a href="@0@mscorlib/A.html#f36684fa5c19fdfb" class="i property">Count</a> &gt; 0)
+            {
+                <a href="@0@mscorlib/A.html#be77e0a7fbc110e6" class="k">var</a> <span id="r123 rd" class="r123 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#1de0e8202e59539a" class="t constructor">AggregateException</a>(<span class="r113 r">exceptions</span>);
+ 
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r123 r">ex</span>);
+ 
+                <b>throw</b> <span class="r123 r">ex</span>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Uploads the file using the given metadata.</span>
+        <span class="c">///</span><span class="c"> </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r124 r">metadata</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="cacc6604471bf340" href="../../R/cacc6604471bf340.html" target="n" data-glyph="76,1" class="i method">UploadFile</a>(<a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <span id="r124 rd" class="r124 r">metadata</span>, <a href="@0@mscorlib/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<a href="Common/SegmentTransferProgress.cs.html#47a2d1611194ef16" class="t t">SegmentTransferProgress</a>&gt; <span id="r125 rd" class="r125 r">segmentProgressTracker</span> = <b>null</b>)
+        {
+            <b>try</b>
+            {
+                <span class="r125 r">segmentProgressTracker</span> = <span class="r125 r">segmentProgressTracker</span> ?? <a href="#53621545ff0be638" class="i method">CreateSegmentProgressTracker</a>(<span class="r124 r">metadata</span>);
+ 
+                <b>if</b> (<span class="r124 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#9131b8fdd074a557" class="i property">SegmentCount</a> == 0)
+                {
+                    <span class="c">// simply create the target stream, overwriting existing streams if they exist</span>
+                    <a href="#8654e36d587806f9" class="i field">_frontEnd</a>.<a href="Common/IFrontEndAdapter.cs.html#2141f29b06afee70" class="i method">CreateStream</a>(<span class="r124 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>, <b>true</b>, <b>null</b>, 0);
+                }
+                <b>else</b> <b>if</b> (<span class="r124 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#9131b8fdd074a557" class="i property">SegmentCount</a> &gt; 1)
+                {
+                    <span class="c">//perform the multi-segment upload</span>
+                    <span class="c">// reducing the thread count to make it equal to the segment count</span>
+                    <span class="c">// if it is larger, since those extra threads will not be used.</span>
+                    <a href="Upload/MultipleSegmentUploader.cs.html#afadc6dda1c3408e" class="k">var</a> <span id="r126 rd" class="r126 r">msu</span> = <b>new</b> <a href="Upload/MultipleSegmentUploader.cs.html#c12144bdd1363f6f" class="t constructor">MultipleSegmentUploader</a>(<span class="r124 r">metadata</span>, 
+                        <span class="r124 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#9131b8fdd074a557" class="i property">SegmentCount</a> &lt; <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#770374bbad546898" class="i property">PerFileThreadCount</a> ? 
+                        <span class="r124 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#9131b8fdd074a557" class="i property">SegmentCount</a> : 
+                        <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#770374bbad546898" class="i property">PerFileThreadCount</a>, 
+                        <a href="#8654e36d587806f9" class="i field">_frontEnd</a>, <a href="#89269c7cf60ea377" class="i field">_token</a>,
+                        <span class="r125 r">segmentProgressTracker</span>);
+                    <span class="r126 r">msu</span>.<a href="Upload/MultipleSegmentUploader.cs.html#cb5da2b42b013ea1" class="i property">UseSegmentBlockBackOffRetryStrategy</a> = <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#dc55e79a6c0931cd" class="i property">UseSegmentBlockBackOffRetryStrategy</a>;
+                    <span class="r126 r">msu</span>.<a href="Upload/MultipleSegmentUploader.cs.html#895d1a3fb5d19b75" class="i method">Upload</a>();
+ 
+                    <span class="c">//concatenate the files at the end</span>
+                    <a href="#404fbe9654245ca5" class="i method">ConcatenateSegments</a>(<span class="r124 r">metadata</span>);
+                }
+                <b>else</b>
+                {
+                    <span class="c">//optimization if we only have one segment: upload it directly to the target stream</span>
+                    <span class="r124 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#982540b694e3af39" class="i property">Segments</a>[0].<a href="Common/TransferSegmentMetadata.cs.html#3e61c0eaf4a2746f" class="i property">Path</a> = <span class="r124 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>;
+                    <a href="Upload/SingleSegmentUploader.cs.html#62b7b26e3b4d119f" class="k">var</a> <span id="r127 rd" class="r127 r">ssu</span> = <b>new</b> <a href="Upload/SingleSegmentUploader.cs.html#655fdceeb69cb8ed" class="t constructor">SingleSegmentUploader</a>(0, <span class="r124 r">metadata</span>, <a href="#8654e36d587806f9" class="i field">_frontEnd</a>, <a href="#89269c7cf60ea377" class="i field">_token</a>, <span class="r125 r">segmentProgressTracker</span>);
+                    <span class="r127 r">ssu</span>.<a href="Upload/SingleSegmentUploader.cs.html#1f3cfffd2c17dddb" class="i property">UseBackOffRetryStrategy</a> = <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#dc55e79a6c0931cd" class="i property">UseSegmentBlockBackOffRetryStrategy</a>;
+                    <span class="r127 r">ssu</span>.<a href="Upload/SingleSegmentUploader.cs.html#ce622d6d79e9b5c3" class="i method">Upload</a>();
+                }
+                <span class="r124 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#a9be239c5fd0d8d5" class="i property">Status</a> = <a href="Common/SegmentTransferStatus.cs.html#f871cd80cd9814cc" class="t t">SegmentTransferStatus</a>.<a href="Common/SegmentTransferStatus.cs.html#2c215e272001fbf1" class="i field">Complete</a>;
+ 
+            }
+            <b>catch</b> (<a href="@0@mscorlib/A.html#a0a8b79c277cf327" class="t t">OperationCanceledException</a>)
+            {
+                <span class="c">// do nothing since we have already marked everything as failed</span>
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Downloads the file using the given metadata.</span>
+        <span class="c">///</span><span class="c"> </span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r128 r">metadata</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="5284d5d1cbdbef74" href="../../R/5284d5d1cbdbef74.html" target="n" data-glyph="76,1" class="i method">DownloadFile</a>(<a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <span id="r128 rd" class="r128 r">metadata</span>, <a href="@0@mscorlib/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<a href="Common/SegmentTransferProgress.cs.html#47a2d1611194ef16" class="t t">SegmentTransferProgress</a>&gt; <span id="r129 rd" class="r129 r">segmentProgressTracker</span> = <b>null</b>)
+        {
+            <b>if</b> (!<a href="#8654e36d587806f9" class="i field">_frontEnd</a>.<a href="Common/IFrontEndAdapter.cs.html#e4804a7c57de7ea6" class="i method">StreamExists</a>(<span class="r128 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#190138f2a84df06b" class="i property">InputFilePath</a>))
+            {
+                <a href="@0@mscorlib/A.html#fd582974d1f75ac7" class="k">var</a> <span id="r130 rd" class="r130 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#e49034af96bf20b2" class="t constructor">FileNotFoundException</a>(<span class="s">&quot;Unable to locate remote file&quot;</span>, <span class="r128 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#190138f2a84df06b" class="i property">InputFilePath</a>);
+ 
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r130 r">ex</span>);
+ 
+                <b>throw</b> <span class="r130 r">ex</span>;
+            }
+ 
+            <b>try</b>
+            {
+                <span class="r129 r">segmentProgressTracker</span> = <span class="r129 r">segmentProgressTracker</span> ?? <a href="#53621545ff0be638" class="i method">CreateSegmentProgressTracker</a>(<span class="r128 r">metadata</span>);
+ 
+                <span class="c">// ensure the full folder to the target file exists before attempting to create the target file.</span>
+                <a href="@0@mscorlib/A.html#b3ad5f0ba800bb28" class="t t">Directory</a>.<a href="@0@mscorlib/A.html#5c99436f88797b6a" class="i method">CreateDirectory</a>(<a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#f9128b02ffd0d3ea" class="i method">GetDirectoryName</a>(<span class="r128 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>));
+ 
+                <b>if</b> (<span class="r128 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#9131b8fdd074a557" class="i property">SegmentCount</a> == 0)
+                {
+                    <span class="c">// simply create the target stream, overwriting existing streams if they exist</span>
+                    <a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#5a3fc3377e185fea" class="i method">Create</a>(<span class="r128 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>);
+                }
+                <b>else</b> <b>if</b> (<span class="r128 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#9131b8fdd074a557" class="i property">SegmentCount</a> &gt; 1)
+                {
+                    <span class="c">//perform the multi-segment download</span>
+                    <span class="c">// reducing the thread count to make it equal to the segment count</span>
+                    <span class="c">// if it is larger, since those extra threads will not be used.</span>
+                    <b>using</b> (<a href="@0@mscorlib/A.html#e23a38af5d11ddd3" class="k">var</a> <span id="r131 rd" class="r131 r">targetStream</span> = <b>new</b> <a href="@0@mscorlib/A.html#756b978acfa47bc7" class="t constructor">FileStream</a>(<span class="r128 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a> + <span class="s">&quot;.inprogress&quot;</span>, <a href="@0@mscorlib/A.html#c0cb6ba6af625b3a" class="t t">FileMode</a>.<a href="@0@mscorlib/A.html#17684d43e30dc120" class="i field">Create</a>, <a href="@0@mscorlib/A.html#5cc5644ae3acd24b" class="t t">FileAccess</a>.<a href="@0@mscorlib/A.html#4715fa16da583c25" class="i field">Write</a>, <a href="@0@mscorlib/A.html#2bfafb4d44a4f126" class="t t">FileShare</a>.<a href="@0@mscorlib/A.html#e51e30298bd05259" class="i field">ReadWrite</a>))
+                    {
+                        <span class="c">// set length to the target length up front to test for disk space issues</span>
+                        <span class="c">// then reset it to 0.</span>
+                        <span class="r131 r">targetStream</span>.<a href="@0@mscorlib/A.html#212c0536642e78d6" class="i method">SetLength</a>(<span class="r128 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#c2f4b2ebd90b6cb3" class="i property">FileLength</a>);
+                        <span class="r131 r">targetStream</span>.<a href="@0@mscorlib/A.html#212c0536642e78d6" class="i method">SetLength</a>(0);
+                    }
+ 
+                    <a href="Download/MultipleSegmentDownloader.cs.html#b30227dd0559ec45" class="k">var</a> <span id="r132 rd" class="r132 r">msu</span> = <b>new</b> <a href="Download/MultipleSegmentDownloader.cs.html#727af74a5db9d4a9" class="t constructor">MultipleSegmentDownloader</a>(<span class="r128 r">metadata</span>,
+                        <span class="r128 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#9131b8fdd074a557" class="i property">SegmentCount</a> &lt; <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#770374bbad546898" class="i property">PerFileThreadCount</a> ?
+                        <span class="r128 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#9131b8fdd074a557" class="i property">SegmentCount</a> :
+                        <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#770374bbad546898" class="i property">PerFileThreadCount</a>,
+                        <a href="#8654e36d587806f9" class="i field">_frontEnd</a>, <a href="#89269c7cf60ea377" class="i field">_token</a>,
+                        <span class="r129 r">segmentProgressTracker</span>);
+                    <span class="r132 r">msu</span>.<a href="Download/MultipleSegmentDownloader.cs.html#22b5f7d3239cc9b0" class="i property">UseSegmentBlockBackOffRetryStrategy</a> = <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#dc55e79a6c0931cd" class="i property">UseSegmentBlockBackOffRetryStrategy</a>;
+                    <span class="r132 r">msu</span>.<a href="Download/MultipleSegmentDownloader.cs.html#7634b0d7fc98ffed" class="i method">Download</a>();
+ 
+                    <span class="c">//concatenate the files at the end</span>
+                    <a href="#404fbe9654245ca5" class="i method">ConcatenateSegments</a>(<span class="r128 r">metadata</span>);
+                    
+                }
+                <b>else</b>
+                {
+                    <span class="c">//optimization if we only have one segment: download it directly to the target stream</span>
+ 
+                    <b>using</b> (<a href="@0@mscorlib/A.html#e23a38af5d11ddd3" class="k">var</a> <span id="r133 rd" class="r133 r">targetStream</span> = <b>new</b> <a href="@0@mscorlib/A.html#234a29d0d3012e5c" class="t constructor">FileStream</a>(<span class="r128 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>, <a href="@0@mscorlib/A.html#c0cb6ba6af625b3a" class="t t">FileMode</a>.<a href="@0@mscorlib/A.html#17684d43e30dc120" class="i field">Create</a>, <a href="@0@mscorlib/A.html#5cc5644ae3acd24b" class="t t">FileAccess</a>.<a href="@0@mscorlib/A.html#4715fa16da583c25" class="i field">Write</a>))
+                    {
+                        <span class="c">// set length to the target length up front to test for disk space issues</span>
+                        <span class="c">// then reset it to 0 to ensure that we explicitly call out how big the file is.</span>
+                        <span class="r133 r">targetStream</span>.<a href="@0@mscorlib/A.html#212c0536642e78d6" class="i method">SetLength</a>(<span class="r128 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#c2f4b2ebd90b6cb3" class="i property">FileLength</a>);
+                        <span class="r133 r">targetStream</span>.<a href="@0@mscorlib/A.html#212c0536642e78d6" class="i method">SetLength</a>(0);
+                    }
+ 
+                    <span class="r128 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#982540b694e3af39" class="i property">Segments</a>[0].<a href="Common/TransferSegmentMetadata.cs.html#3e61c0eaf4a2746f" class="i property">Path</a> = <span class="r128 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>;
+                    <a href="Download/SingleSegmentDownloader.cs.html#642c31272c5a736d" class="k">var</a> <span id="r134 rd" class="r134 r">ssu</span> = <b>new</b> <a href="Download/SingleSegmentDownloader.cs.html#c02311206aba28f1" class="t constructor">SingleSegmentDownloader</a>(0, <span class="r128 r">metadata</span>, <a href="#8654e36d587806f9" class="i field">_frontEnd</a>, <a href="#89269c7cf60ea377" class="i field">_token</a>, <span class="r129 r">segmentProgressTracker</span>);
+                    <span class="r134 r">ssu</span>.<a href="Download/SingleSegmentDownloader.cs.html#8759a4d92b1e7860" class="i property">UseBackOffRetryStrategy</a> = <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#dc55e79a6c0931cd" class="i property">UseSegmentBlockBackOffRetryStrategy</a>;
+                    <span class="r134 r">ssu</span>.<a href="Download/SingleSegmentDownloader.cs.html#169868c06ddd32e8" class="i method">Download</a>();
+                    <span class="r134 r">ssu</span>.<a href="Download/SingleSegmentDownloader.cs.html#8cbad02afde545fe" class="i method">VerifyDownloadedStream</a>();
+                }
+                <span class="r128 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#a9be239c5fd0d8d5" class="i property">Status</a> = <a href="Common/SegmentTransferStatus.cs.html#f871cd80cd9814cc" class="t t">SegmentTransferStatus</a>.<a href="Common/SegmentTransferStatus.cs.html#2c215e272001fbf1" class="i field">Complete</a>;
+ 
+            }
+            <b>catch</b> (<a href="@0@mscorlib/A.html#a0a8b79c277cf327" class="t t">OperationCanceledException</a>)
+            {
+                <span class="c">// do nothing since we have already marked everything as failed</span>
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates the segment progress tracker.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r135 r">metadata</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The metadata.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private</b> <a href="@0@mscorlib/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<a href="Common/SegmentTransferProgress.cs.html#47a2d1611194ef16" class="t t">SegmentTransferProgress</a>&gt; <a id="53621545ff0be638" href="../../R/53621545ff0be638.html" target="n" data-glyph="76,1" class="i method">CreateSegmentProgressTracker</a>(<a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <span id="r135 rd" class="r135 r">metadata</span>, <a href="@0@mscorlib/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<a href="Common/TransferProgress.cs.html#826dd519f4b122e1" class="t t">TransferProgress</a>&gt; <span id="r136 rd" class="r136 r">customTracker</span> = <b>null</b>)
+        {
+            <b>if</b> (<a href="#f996953f427bfe1d" class="i field">_progressTracker</a> == <b>null</b> &amp;&amp; <span class="r136 r">customTracker</span> == <b>null</b>)
+            {
+                <b>return</b> <b>null</b>;
+            }
+         
+            <a href="Common/TransferProgress.cs.html#826dd519f4b122e1" class="k">var</a> <span id="r137 rd" class="r137 r">overallProgress</span> = <b>new</b> <a href="Common/TransferProgress.cs.html#139b7421a458a679" class="t constructor">TransferProgress</a>(<span class="r135 r">metadata</span>, <span class="r136 r">customTracker</span>);
+            <b>return</b> <b>new</b> <a href="@0@mscorlib/A.html#e897c5d45ca21246" class="t constructor">Progress</a>&lt;<a href="Common/SegmentTransferProgress.cs.html#47a2d1611194ef16" class="t t">SegmentTransferProgress</a>&gt;(
+                (<span id="r138 rd" class="r138 r">sup</span>) =&gt;
+                {
+                    <span class="c">//update the overall progress and report it back</span>
+                    <span class="r137 r">overallProgress</span>.<a href="Common/TransferProgress.cs.html#46365dcd844e992a" class="i method">SetSegmentProgress</a>(<span class="r138 r">sup</span>);
+ 
+                    <span class="c">// used in the folder transfer case.</span>
+                    <b>if</b> (<span class="r136 r">customTracker</span> != <b>null</b>)
+                    {
+                        <span class="r136 r">customTracker</span>.<a href="@0@mscorlib/A.html#cd87d052fb216d27" class="i method">Report</a>(<span class="r137 r">overallProgress</span>);
+                    }
+                    <b>else</b>
+                    {
+                        <a href="#f996953f427bfe1d" class="i field">_progressTracker</a>.<a href="@0@mscorlib/A.html#cd87d052fb216d27" class="i method">Report</a>(<span class="r137 r">overallProgress</span>);
+                    }
+                });
+ 
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Creates a file progress tracker.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r139 r">metadata</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The metadata.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private</b> <a href="@0@mscorlib/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<a href="Common/TransferProgress.cs.html#826dd519f4b122e1" class="t t">TransferProgress</a>&gt; <a id="13c2a15582c26ca3" href="../../R/13c2a15582c26ca3.html" target="n" data-glyph="76,1" class="i method">CreateFileProgressTracker</a>(<a href="Common/TransferFolderMetadata.cs.html#e4a782a6b9f2d42c" class="t t">TransferFolderMetadata</a> <span id="r139 rd" class="r139 r">metadata</span>, <b>out</b> <a href="@0@mscorlib/A.html#3980e012bae82e96" class="t t">Thread</a> <span id="r140 rd" class="r140 r">toStart</span>)
+        {
+            <span class="r140 r">toStart</span> = <b>null</b>;
+            <b>if</b> (<a href="#02a9f0f4f2b5ca25" class="i field">_folderProgressTracker</a> == <b>null</b>)
+            {
+                <b>return</b> <b>null</b>;
+            }
+ 
+            <a href="Common/TransferFolderProgress.cs.html#bff5545549325dae" class="k">var</a> <span id="r141 rd" class="r141 r">overallProgress</span> = <b>new</b> <a href="Common/TransferFolderProgress.cs.html#51eab58dc228198e" class="t constructor">TransferFolderProgress</a>(<span class="r139 r">metadata</span>);
+ 
+            <span class="c">// register an event to ensure that, no matter what, we account for all file transfers.</span>
+            <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#f69018fa781c88e9" class="i">OnFileTransferThreadFailProgressUpdate</a> += <span class="r141 r">overallProgress</span>.<a href="Common/TransferFolderProgress.cs.html#b9ba462005b44874" class="i method">OnFileTransferThreadAborted</a>;
+            <span class="r140 r">toStart</span> = <span class="r141 r">overallProgress</span>.<a href="Common/TransferFolderProgress.cs.html#2698a108fc4ae50e" class="i method">GetProgressTrackingThread</a>(<a href="#89269c7cf60ea377" class="i field">_token</a>);
+            <b>return</b> <b>new</b> <a href="@0@mscorlib/A.html#e897c5d45ca21246" class="t constructor">Progress</a>&lt;<a href="Common/TransferProgress.cs.html#826dd519f4b122e1" class="t t">TransferProgress</a>&gt;(
+                (<span id="r142 rd" class="r142 r">sup</span>) =&gt;
+                {
+                    <b>if</b>(<a href="#89269c7cf60ea377" class="i field">_token</a>.<a href="@0@mscorlib/A.html#f32abbe8e2f1f6c1" class="i property">IsCancellationRequested</a>)
+                    {
+                        <b>return</b>;
+                    }
+ 
+                    <span class="c">//update the overall progress and report it back</span>
+                    <span class="r141 r">overallProgress</span>.<a href="Common/TransferFolderProgress.cs.html#3c0f2d4d3e8dc007" class="i method">SetSegmentProgress</a>(<span class="r142 r">sup</span>);
+                    <a href="#02a9f0f4f2b5ca25" class="i field">_folderProgressTracker</a>.<a href="@0@mscorlib/A.html#cd87d052fb216d27" class="i method">Report</a>(<span class="r141 r">overallProgress</span>);
+                });
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Concatenates all the segments defined in the metadata into a single stream.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r143 r">metadata</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>private void</b> <a id="404fbe9654245ca5" href="../../R/404fbe9654245ca5.html" target="n" data-glyph="76,1" class="i method">ConcatenateSegments</a>(<a href="Common/TransferMetadata.cs.html#3c08d873a58fc637" class="t t">TransferMetadata</a> <span id="r143 rd" class="r143 r">metadata</span>)
+        {
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>[] <span id="r144 rd" class="r144 r">inputPaths</span> = <b>new</b> <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>[<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a> ? 2 : <span class="r143 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#9131b8fdd074a557" class="i property">SegmentCount</a>];
+            
+            <span class="c">//verify if target stream exists</span>
+            <b>if</b> (<a href="#8654e36d587806f9" class="i field">_frontEnd</a>.<a href="Common/IFrontEndAdapter.cs.html#e4804a7c57de7ea6" class="i method">StreamExists</a>(<span class="r143 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>, <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>))
+            {
+                <b>if</b> (<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#186ef3dac2d4eb47" class="i property">IsOverwrite</a>)
+                {
+                    <a href="#8654e36d587806f9" class="i field">_frontEnd</a>.<a href="Common/IFrontEndAdapter.cs.html#9c8897c2d5792354" class="i method">DeleteStream</a>(<span class="r143 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>, <b>false</b>, <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>);
+                }
+                <b>else</b>
+                {
+                    <a href="@0@mscorlib/A.html#beac22dfca574cd4" class="k">var</a> <span id="r145 rd" class="r145 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;Target Stream: {0} already exists&quot;</span>, <span class="r143 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>));
+ 
+                    <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r145 r">ex</span>);
+ 
+                    <b>throw</b> <span class="r145 r">ex</span>;
+                }
+            }
+ 
+            <a href="@0@mscorlib/A.html#18bcbcbdddbcfdcb" class="k">var</a> <span id="r146 rd" class="r146 r">exceptions</span> = <b>new</b> <a href="@0@mscorlib/A.html#a773570b1b021cff" class="t constructor">ConcurrentQueue</a>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt;();
+            <b>if</b> (<a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>)
+            {
+                <span class="c">// call concatenate, which really just renames</span>
+                <span class="c">// the &quot;inprogress&quot; file to complete.</span>
+                <span class="r144 r">inputPaths</span>[0] = <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(<span class="s">&quot;{0}.inprogress&quot;</span>, <span class="r143 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>);
+                <span class="r144 r">inputPaths</span>[1] = <span class="r143 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>;
+ 
+                <span class="c">// validate that the file is the right length.</span>
+                <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r147 rd" class="r147 r">retryCount</span> = 0;
+                <b>long</b> <span id="r148 rd" class="r148 r">remoteLength</span> = -1;
+                <b>try</b>
+                {
+                    <b>while</b> (<span class="r147 r">retryCount</span> &lt; <a href="Upload/SingleSegmentUploader.cs.html#62b7b26e3b4d119f" class="t t">SingleSegmentUploader</a>.<a href="Upload/SingleSegmentUploader.cs.html#7aa3318da19b9344" class="i field">MaxBufferUploadAttemptCount</a>)
+                    {
+                        <a href="#89269c7cf60ea377" class="i field">_token</a>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+                        <span class="r147 r">retryCount</span>++;
+                        <b>try</b>
+                        {
+                            <span class="r148 r">remoteLength</span> = <a href="#8654e36d587806f9" class="i field">_frontEnd</a>.<a href="Common/IFrontEndAdapter.cs.html#84a396ab34116429" class="i method">GetStreamLength</a>(<span class="r144 r">inputPaths</span>[0], <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>);
+                            <b>break</b>;
+                        }
+                        <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r149 rd" class="r149 r">e</span>)
+                        {
+                            <a href="#89269c7cf60ea377" class="i field">_token</a>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+                            <b>if</b> (<span class="r147 r">retryCount</span> &gt;= <a href="Upload/SingleSegmentUploader.cs.html#62b7b26e3b4d119f" class="t t">SingleSegmentUploader</a>.<a href="Upload/SingleSegmentUploader.cs.html#7aa3318da19b9344" class="i field">MaxBufferUploadAttemptCount</a>)
+                            {
+                                <a href="Common/TransferFailedException.cs.html#020a0db52cedc36b" class="k">var</a> <span id="r150 rd" class="r150 r">ex</span> = <b>new</b> <a href="Common/TransferFailedException.cs.html#0257d7104f85f50a" class="t constructor">TransferFailedException</a>(
+                                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#9d5604d4425b216f" class="i method">Format</a>(
+                                        <span class="s">&quot;Cannot perform &#39;Finalization&#39; operation due to the following exception retrieving file information: {0}&quot;</span>,
+                                        <span class="r149 r">e</span>));
+ 
+                                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r150 r">ex</span>);
+ 
+                                <b>throw</b> <span class="r150 r">ex</span>;
+                            }
+ 
+                            <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r151 rd" class="r151 r">waitTime</span> = <a href="Upload/SingleSegmentUploader.cs.html#62b7b26e3b4d119f" class="t t">SingleSegmentUploader</a>.<a href="Upload/SingleSegmentUploader.cs.html#2b602a587e9dc188" class="i method">WaitForRetry</a>(<span class="r147 r">retryCount</span>, <a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#dc55e79a6c0931cd" class="i property">UseSegmentBlockBackOffRetryStrategy</a>, <a href="#89269c7cf60ea377" class="i field">_token</a>);
+                            <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#d6f22d2fc99e22e6" class="i method">LogInfo</a>(<span class="s">&quot;ConcatenateSegments: GETFILESTATUS at path:{0} failed on try: {1} with exception: {2}. Wait time in ms before retry: {3}&quot;</span>,
+                                <span class="r143 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>,
+                                <span class="r147 r">retryCount</span>,
+                                <span class="r149 r">e</span>,
+                                <span class="r151 r">waitTime</span>);
+                        }
+                    }
+ 
+                    <b>if</b> (<span class="r148 r">remoteLength</span> != <span class="r143 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#c2f4b2ebd90b6cb3" class="i property">FileLength</a>)
+                    {
+                        <a href="Common/TransferFailedException.cs.html#020a0db52cedc36b" class="k">var</a> <span id="r152 rd" class="r152 r">ex</span> = <b>new</b> <a href="Common/TransferFailedException.cs.html#0257d7104f85f50a" class="t constructor">TransferFailedException</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#6e5f254563fed78e" class="i method">Format</a>(<span class="s">&quot;Cannot perform &#39;Finalization&#39; operation because in progress file {0} has an incorrect length (expected {1}, actual {2}).&quot;</span>, <span class="r144 r">inputPaths</span>[0], <span class="r143 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#c2f4b2ebd90b6cb3" class="i property">FileLength</a>, <span class="r148 r">remoteLength</span>));
+ 
+                        <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r152 r">ex</span>);
+ 
+                        <b>throw</b> <span class="r152 r">ex</span>;
+                    }
+                }
+                <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r153 rd" class="r153 r">ex</span>)
+                {
+                    <span class="r146 r">exceptions</span>.<a href="@0@mscorlib/A.html#62bea3a8141ed2a9" class="i method">Enqueue</a>(<span class="r153 r">ex</span>);
+                }
+            }
+            <b>else</b>
+            {
+                <span class="c">//ensure all segments in the metadata are marked as &#39;complete&#39;</span>
+                
+                <b>for</b> (<b>int</b> <span id="r154 rd" class="r154 r">i</span> = 0; <span class="r154 r">i</span> &lt; <span class="r143 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#9131b8fdd074a557" class="i property">SegmentCount</a>; <span class="r154 r">i</span>++)
+                {
+                    <b>try</b>
+                    {
+                        <b>if</b> (<span class="r143 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#982540b694e3af39" class="i property">Segments</a>[<span class="r154 r">i</span>].<a href="Common/TransferSegmentMetadata.cs.html#dad6b56604dbe3f7" class="i property">Status</a> != <a href="Common/SegmentTransferStatus.cs.html#f871cd80cd9814cc" class="t t">SegmentTransferStatus</a>.<a href="Common/SegmentTransferStatus.cs.html#2c215e272001fbf1" class="i field">Complete</a>)
+                        {
+                            <a href="Common/TransferFailedException.cs.html#020a0db52cedc36b" class="k">var</a> <span id="r155 rd" class="r155 r">ex</span> = <b>new</b> <a href="Common/TransferFailedException.cs.html#0257d7104f85f50a" class="t constructor">TransferFailedException</a>(<span class="s">&quot;Cannot perform &#39;Concatenate&#39; operation because not all streams are fully uploaded.&quot;</span>);
+ 
+                            <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r155 r">ex</span>);
+ 
+                            <b>throw</b> <span class="r155 r">ex</span>;
+                        }
+ 
+                        <span class="r144 r">inputPaths</span>[<span class="r154 r">i</span>] = <span class="r143 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#982540b694e3af39" class="i property">Segments</a>[<span class="r154 r">i</span>].<a href="Common/TransferSegmentMetadata.cs.html#3e61c0eaf4a2746f" class="i property">Path</a>.<a href="@0@mscorlib/A.html#987da5dfb39f1927" class="i method">Replace</a>(<span class="s">&#39;\\&#39;</span>,<span class="s">&#39;/&#39;</span>);
+                    }
+                    <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r156 rd" class="r156 r">ex</span>)
+                    {
+                        <span class="c">//collect any exceptions, whether we just generated them above or whether they come from the Front End,</span>
+                        <span class="r146 r">exceptions</span>.<a href="@0@mscorlib/A.html#62bea3a8141ed2a9" class="i method">Enqueue</a>(<span class="r156 r">ex</span>);
+                    }
+                }
+            }
+ 
+            <b>if</b> (<span class="r146 r">exceptions</span>.<a href="@0@mscorlib/A.html#f36684fa5c19fdfb" class="i property">Count</a> &gt; 0)
+            {
+                <a href="@0@mscorlib/A.html#be77e0a7fbc110e6" class="k">var</a> <span id="r157 rd" class="r157 r">ex</span> = <b>new</b> <a href="@0@mscorlib/A.html#a0d05fcdd509b0ab" class="t constructor">AggregateException</a>(<span class="s">&quot;At least one concatenate test failed&quot;</span>, <span class="r146 r">exceptions</span>.<a href="@0@mscorlib/A.html#956829c6ddc21632" class="i method">ToArray</a>());
+ 
+                <a href="Common/TracingHelper.cs.html#f5e26eb6ec4b2342" class="t t">TracingHelper</a>.<a href="Common/TracingHelper.cs.html#dcfce072ce42955d" class="i method">LogError</a>(<span class="r157 r">ex</span>);
+ 
+                <b>throw</b> <span class="r157 r">ex</span>;
+            }
+ 
+            <span class="c">//issue the command</span>
+            <a href="#8654e36d587806f9" class="i field">_frontEnd</a>.<a href="Common/IFrontEndAdapter.cs.html#6c50a2c738fbe128" class="i method">Concatenate</a>(<span class="r143 r">metadata</span>.<a href="Common/TransferMetadata.cs.html#fdcb0ca156a2a7cb" class="i property">TargetStreamPath</a>, <span class="r144 r">inputPaths</span>, <a href="#976b7e4d8dc73b48" class="k">this</a>.<a href="#5165c6e02ccf3b78" class="i property">Parameters</a>.<a href="Common/TransferParameters.cs.html#a8e3927f643da125" class="i property">IsDownload</a>);            
+        }
+        
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+    }
+}
+</pre></td></tr></table></div></body></html>

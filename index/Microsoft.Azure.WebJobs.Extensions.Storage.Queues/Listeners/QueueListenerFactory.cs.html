@@ -1,0 +1,129 @@
+﻿<!DOCTYPE html>
+<html><head><title>QueueListenerFactory.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(120);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Queues/Listeners/QueueListenerFactory.cs" target="_top">Listeners\QueueListenerFactory.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Queues" target="_top">Microsoft.Azure.WebJobs.Extensions.Storage.Queues\src\Microsoft.Azure.WebJobs.Extensions.Storage.Queues.csproj</a> (Microsoft.Azure.WebJobs.Extensions.Storage.Queues)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Queues</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Common</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Common</span>.<span class="i n">Listeners</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Executors</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Listeners</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Protocols</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i n">Queues</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Timers</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Logging</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Queues</span>.<span class="i n">Listeners</span>
+{
+    <b>internal class</b> <a id="7ec269ede139d631" href="../R/7ec269ede139d631.html" target="n" data-glyph="2,0" class="t t">QueueListenerFactory</a> : <span class="i">IListenerFactory</span>
+    {
+        <b>private static string</b> <a id="8a00112224634090" href="../R/8a00112224634090.html" target="n" data-glyph="46,1" class="i field">poisonQueueSuffix</a> = <span class="s">&quot;-poison&quot;</span>;
+ 
+        <b>private readonly</b> <a href="/Azure.Storage.Queues/A.html#9deade59b6175965" class="t t">QueueClient</a> <a id="8d2819bf554fed93" href="../R/8d2819bf554fed93.html" target="n" data-glyph="46,1" class="i field">_queue</a>;
+        <b>private readonly</b> <a href="/Azure.Storage.Queues/A.html#9deade59b6175965" class="t t">QueueClient</a> <a id="4d385bfe0c8db2d6" href="../R/4d385bfe0c8db2d6.html" target="n" data-glyph="46,1" class="i field">_poisonQueue</a>;
+        <b>private readonly</b> <a href="../Shared/Queues/QueuesOptions.cs.html#10aa607ae6dd925f" class="t t">QueuesOptions</a> <a id="52ba48754f9fb24d" href="../R/52ba48754f9fb24d.html" target="n" data-glyph="46,1" class="i field">_queueOptions</a>;
+        <b>private readonly</b> <span class="i">IWebJobsExceptionHandler</span> <a id="92d232977a8d0295" href="../R/92d232977a8d0295.html" target="n" data-glyph="46,1" class="i field">_exceptionHandler</a>;
+        <b>private readonly</b> <a href="../Shared/Queues/SharedQueueWatcher.cs.html#85491c179e24020e" class="t t">SharedQueueWatcher</a> <a id="20812adc64a56d3a" href="../R/20812adc64a56d3a.html" target="n" data-glyph="46,1" class="i field">_messageEnqueuedWatcherSetter</a>;
+        <b>private readonly</b> <span class="i">ILoggerFactory</span> <a id="f8200a5e06c24f36" href="../R/f8200a5e06c24f36.html" target="n" data-glyph="46,1" class="i field">_loggerFactory</a>;
+        <b>private readonly</b> <span class="i">ITriggeredFunctionExecutor</span> <a id="19ad5d84d4228c5e" href="../R/19ad5d84d4228c5e.html" target="n" data-glyph="46,1" class="i field">_executor</a>;
+        <b>private readonly</b> <span class="i">FunctionDescriptor</span> <a id="f66f50d4521bb55e" href="../R/f66f50d4521bb55e.html" target="n" data-glyph="46,1" class="i field">_descriptor</a>;
+        <b>private readonly</b> <a href="../IQueueProcessorFactory.cs.html#53188dce1c78e31f" class="t t">IQueueProcessorFactory</a> <a id="93eb44e12182517d" href="../R/93eb44e12182517d.html" target="n" data-glyph="46,1" class="i field">_queueProcessorFactory</a>;
+        <b>private readonly</b> <a href="../QueueCausalityManager.cs.html#ed673c4e51a0b077" class="t t">QueueCausalityManager</a> <a id="948dcbe9cbe24252" href="../R/948dcbe9cbe24252.html" target="n" data-glyph="46,1" class="i field">_queueCausalityManager</a>;
+ 
+        <b>public</b> <a id="0d43cb7e640eeeae" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">QueueListenerFactory</a>(
+            <a href="/Azure.Storage.Queues/A.html#ef0f353b721b0444" class="t t">QueueServiceClient</a> <span id="r0 rd" class="r0 r">queueServiceClient</span>,
+            <a href="/Azure.Storage.Queues/A.html#9deade59b6175965" class="t t">QueueClient</a> <span id="r1 rd" class="r1 r">queue</span>,
+            <a href="../Shared/Queues/QueuesOptions.cs.html#10aa607ae6dd925f" class="t t">QueuesOptions</a> <span id="r2 rd" class="r2 r">queueOptions</span>,
+            <span class="i">IWebJobsExceptionHandler</span> <span id="r3 rd" class="r3 r">exceptionHandler</span>,
+            <a href="../Shared/Queues/SharedQueueWatcher.cs.html#85491c179e24020e" class="t t">SharedQueueWatcher</a> <span id="r4 rd" class="r4 r">messageEnqueuedWatcherSetter</span>,
+            <span class="i">ILoggerFactory</span> <span id="r5 rd" class="r5 r">loggerFactory</span>,
+            <span class="i">ITriggeredFunctionExecutor</span> <span id="r6 rd" class="r6 r">executor</span>,
+            <a href="../IQueueProcessorFactory.cs.html#53188dce1c78e31f" class="t t">IQueueProcessorFactory</a> <span id="r7 rd" class="r7 r">queueProcessorFactory</span>,
+            <a href="../QueueCausalityManager.cs.html#ed673c4e51a0b077" class="t t">QueueCausalityManager</a> <span id="r8 rd" class="r8 r">queueCausalityManager</span>,
+            <span class="i">FunctionDescriptor</span> <span id="r9 rd" class="r9 r">descriptor</span>
+            )
+        {
+            <a href="#8d2819bf554fed93" class="i field">_queue</a> = <span class="r1 r">queue</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r1 r">queue</span>));
+            <a href="#52ba48754f9fb24d" class="i field">_queueOptions</a> = <span class="r2 r">queueOptions</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r2 r">queueOptions</span>));
+            <a href="#92d232977a8d0295" class="i field">_exceptionHandler</a> = <span class="r3 r">exceptionHandler</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r3 r">exceptionHandler</span>));
+            <a href="#20812adc64a56d3a" class="i field">_messageEnqueuedWatcherSetter</a> = <span class="r4 r">messageEnqueuedWatcherSetter</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r4 r">messageEnqueuedWatcherSetter</span>));
+            <a href="#19ad5d84d4228c5e" class="i field">_executor</a> = <span class="r6 r">executor</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r6 r">executor</span>));
+            <a href="#f66f50d4521bb55e" class="i field">_descriptor</a> = <span class="r9 r">descriptor</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r9 r">descriptor</span>));
+            <a href="#948dcbe9cbe24252" class="i field">_queueCausalityManager</a> = <span class="r8 r">queueCausalityManager</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r8 r">queueCausalityManager</span>));
+ 
+            <a href="#4d385bfe0c8db2d6" class="i field">_poisonQueue</a> = <a href="#2c1fe26781516980" class="i method">CreatePoisonQueueReference</a>(<span class="r0 r">queueServiceClient</span>, <span class="r1 r">queue</span>.<a href="/Azure.Storage.Queues/A.html#d1847b1478db81e4" class="i property">Name</a>);
+            <a href="#f8200a5e06c24f36" class="i field">_loggerFactory</a> = <span class="r5 r">loggerFactory</span>;
+            <a href="#93eb44e12182517d" class="i field">_queueProcessorFactory</a> = <span class="r7 r">queueProcessorFactory</span>;
+        }
+ 
+        [<span class="i">System</span>.<span class="i">Diagnostics</span>.<span class="i">CodeAnalysis</span>.<span class="i">SuppressMessage</span>(<span class="s">&quot;Microsoft.Reliability&quot;</span>, <span class="s">&quot;CA2000:Dispose objects before losing scope&quot;</span>)]
+        <b>public</b> <span class="i">Task</span>&lt;<span class="i">IListener</span>&gt; <a id="64d87a4a4540c3d7" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">CreateAsync</a>(<span class="i">CancellationToken</span> <span id="r10 rd" class="r10 r">cancellationToken</span>)
+        {
+            <a href="QueueTriggerExecutor.cs.html#7d5b8df49d861b6e" class="t t">QueueTriggerExecutor</a> <span id="r11 rd" class="r11 r">triggerExecutor</span> = <b>new</b> <a href="QueueTriggerExecutor.cs.html#bef80e8690ddfb2e" class="t constructor">QueueTriggerExecutor</a>(<a href="#19ad5d84d4228c5e" class="i field">_executor</a>, <a href="#948dcbe9cbe24252" class="i field">_queueCausalityManager</a>);
+ 
+            <a href="../Shared/Queues/QueueProcessor.cs.html#0d92dbb32568bea4" class="k">var</a> <span id="r12 rd" class="r12 r">queueProcessor</span> = <a href="#33c5c9641efb4497" class="i method">CreateQueueProcessor</a>(<a href="#8d2819bf554fed93" class="i field">_queue</a>, <a href="#4d385bfe0c8db2d6" class="i field">_poisonQueue</a>, <a href="#f8200a5e06c24f36" class="i field">_loggerFactory</a>, <a href="#93eb44e12182517d" class="i field">_queueProcessorFactory</a>, <a href="#52ba48754f9fb24d" class="i field">_queueOptions</a>, <a href="#20812adc64a56d3a" class="i field">_messageEnqueuedWatcherSetter</a>);
+            <span class="i">IListener</span> <span id="r13 rd" class="r13 r">listener</span> = <b>new</b> <a href="../Shared/Queues/QueueListener.cs.html#4d34b6854e2bffd7" class="t constructor">QueueListener</a>(<a href="#8d2819bf554fed93" class="i field">_queue</a>, <a href="#4d385bfe0c8db2d6" class="i field">_poisonQueue</a>, <span class="r11 r">triggerExecutor</span>, <a href="#92d232977a8d0295" class="i field">_exceptionHandler</a>, <a href="#f8200a5e06c24f36" class="i field">_loggerFactory</a>,
+                <a href="#20812adc64a56d3a" class="i field">_messageEnqueuedWatcherSetter</a>, <a href="#52ba48754f9fb24d" class="i field">_queueOptions</a>, <span class="r12 r">queueProcessor</span>, <a href="#f66f50d4521bb55e" class="i field">_descriptor</a>);
+ 
+            <b>return</b> <span class="i">Task</span>.<span class="i">FromResult</span>(<span class="r13 r">listener</span>);
+        }
+ 
+        <b>internal static</b> <a href="../Shared/Queues/QueueProcessor.cs.html#0d92dbb32568bea4" class="t t">QueueProcessor</a> <a id="33c5c9641efb4497" href="../R/33c5c9641efb4497.html" target="n" data-glyph="74,1" class="i method">CreateQueueProcessor</a>(<a href="/Azure.Storage.Queues/A.html#9deade59b6175965" class="t t">QueueClient</a> <span id="r14 rd" class="r14 r">queue</span>, <a href="/Azure.Storage.Queues/A.html#9deade59b6175965" class="t t">QueueClient</a> <span id="r15 rd" class="r15 r">poisonQueue</span>, <span class="i">ILoggerFactory</span> <span id="r16 rd" class="r16 r">loggerFactory</span>, <a href="../IQueueProcessorFactory.cs.html#53188dce1c78e31f" class="t t">IQueueProcessorFactory</a> <span id="r17 rd" class="r17 r">queueProcessorFactory</span>,
+            <a href="../Shared/Queues/QueuesOptions.cs.html#10aa607ae6dd925f" class="t t">QueuesOptions</a> <span id="r18 rd" class="r18 r">queuesOptions</span>, <a href="../Shared/IMessageEnqueuedWatcher.cs.html#44bf86d2541a35e1" class="t t">IMessageEnqueuedWatcher</a> <span id="r19 rd" class="r19 r">sharedWatcher</span>)
+        {
+            <a href="../Shared/Queues/QueueProcessorOptions.cs.html#7322725ffb9ba882" class="t t">QueueProcessorOptions</a> <span id="r20 rd" class="r20 r">context</span> = <b>new</b> <a href="../Shared/Queues/QueueProcessorOptions.cs.html#cffbacaddee48833" class="t constructor">QueueProcessorOptions</a>(<span class="r14 r">queue</span>, <span class="r16 r">loggerFactory</span>, <span class="r18 r">queuesOptions</span>, <span class="r15 r">poisonQueue</span>);
+ 
+            <a href="../Shared/Queues/QueueProcessor.cs.html#0d92dbb32568bea4" class="t t">QueueProcessor</a> <span id="r21 rd" class="r21 r">queueProcessor</span> = <b>null</b>;
+            <b>if</b> (<a href="../Shared/HostQueueNames.cs.html#a7d39a9ce13e3a6e" class="t t">HostQueueNames</a>.<a href="../Shared/HostQueueNames.cs.html#9213e71c4aa680db" class="i method">IsHostQueue</a>(<span class="r14 r">queue</span>.<a href="/Azure.Storage.Queues/A.html#d1847b1478db81e4" class="i property">Name</a>))
+            {
+                <span class="c">// We only delegate to the processor factory for application queues,</span>
+                <span class="c">// not our built in control queues</span>
+                <span class="r21 r">queueProcessor</span> = <b>new</b> <a href="../Shared/Queues/QueueProcessor.cs.html#46c76f1f339f38c5" class="t constructor">QueueProcessor</a>(<span class="r20 r">context</span>);
+            }
+            <b>else</b>
+            {
+                <span class="r21 r">queueProcessor</span> = <span class="r17 r">queueProcessorFactory</span>.<a href="../IQueueProcessorFactory.cs.html#e2e9e1ebcaf0ca2f" class="i method">Create</a>(<span class="r20 r">context</span>);
+            }
+ 
+            <a href="../P/b7371ab585831a7b.html#b7371ab585831a7b" class="t t">QueueListener</a>.<a href="../Shared/Queues/QueueListener.cs.html#9c9bab45fef0f1d3" class="i method">RegisterSharedWatcherWithQueueProcessor</a>(<span class="r21 r">queueProcessor</span>, <span class="r19 r">sharedWatcher</span>);
+ 
+            <b>return</b> <span class="r21 r">queueProcessor</span>;
+        }
+ 
+        <b>private static</b> <a href="/Azure.Storage.Queues/A.html#9deade59b6175965" class="t t">QueueClient</a> <a id="2c1fe26781516980" href="../R/2c1fe26781516980.html" target="n" data-glyph="76,1" class="i method">CreatePoisonQueueReference</a>(<a href="/Azure.Storage.Queues/A.html#ef0f353b721b0444" class="t t">QueueServiceClient</a> <span id="r22 rd" class="r22 r">client</span>, <b>string</b> <span id="r23 rd" class="r23 r">name</span>)
+        {
+            <span class="i">Debug</span>.<span class="i">Assert</span>(<span class="r22 r">client</span> != <b>null</b>);
+ 
+            <span class="c">// Only use a corresponding poison queue if:</span>
+            <span class="c">// 1. The poison queue name would be valid (adding &quot;-poison&quot; doesn&#39;t make the name too long), and</span>
+            <span class="c">// 2. The queue itself isn&#39;t already a poison queue.</span>
+ 
+            <b>if</b> (<span class="r23 r">name</span> == <b>null</b> || <span class="r23 r">name</span>.<span class="i">EndsWith</span>(<a href="#8a00112224634090" class="i field">poisonQueueSuffix</a>, <span class="i">StringComparison</span>.<span class="i">Ordinal</span>))
+            {
+                <b>return</b> <b>null</b>;
+            }
+ 
+            <b>string</b> <span id="r24 rd" class="r24 r">possiblePoisonQueueName</span> = <span class="r23 r">name</span> + <a href="#8a00112224634090" class="i field">poisonQueueSuffix</a>;
+ 
+            <b>if</b> (!<a href="../QueueClientExtensions.cs.html#3e38cba9b743acc5" class="t t">QueueClientExtensions</a>.<a href="../QueueClientExtensions.cs.html#4564578013c3c10f" class="i method">IsValidQueueName</a>(<span class="r24 r">possiblePoisonQueueName</span>))
+            {
+                <b>return</b> <b>null</b>;
+            }
+ 
+            <b>return</b> <span class="r22 r">client</span>.<span class="i">GetQueueClient</span>(<span class="r24 r">possiblePoisonQueueName</span>);
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

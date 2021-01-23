@@ -1,0 +1,570 @@
+﻿<!DOCTYPE html>
+<html><head><title>EventHubConnection.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(561);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Messaging.EventHubs/EventHubConnection.cs" target="_top">EventHubConnection.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Messaging.EventHubs" target="_top">src\Azure.Messaging.EventHubs.csproj</a> (Azure.Messaging.EventHubs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">ComponentModel</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Globalization</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Amqp</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Authorization</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Consumer</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Producer</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">   A connection to the Azure Event Hubs service, enabling client communications with a specific</span>
+    <span class="c">///</span><span class="c">   Event Hub instance within an Event Hubs namespace.  A single connection may be shared among multiple</span>
+    <span class="c">///</span><span class="c">   Event Hub producers and/or consumers, or may be used as a dedicated connection for a single</span>
+    <span class="c">///</span><span class="c">   producer or consumer client.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">href</span><span class="c">=</span><span class="c">&quot;</span><span class="c">https://docs.microsoft.com/en-us/Azure/event-hubs/event-hubs-about</span><span class="c">&quot;</span> <span class="c">/&gt;</span>
+    <span class="c">///</span>
+    <b>public class</b> <a id="0646809725209998" href="R/0646809725209998.html" target="n" data-glyph="0,0" class="t t">EventHubConnection</a> : <span class="i">IAsyncDisposable</span>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The default transport type to assume when forming credentials, when no</span>
+        <span class="c">///</span><span class="c">   transport type was specified.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static</b> <a href="EventHubsTransportType.cs.html#3dd6cae2fa33065d" class="t t">EventHubsTransportType</a> <a id="c07de79180bd4dee" href="R/c07de79180bd4dee.html" target="n" data-glyph="106,1" class="i property">DefaultCredentialTransportType</a> { <b>get</b>; } = <b>new</b> <span class="t">EventHubConnectionOptions</span>().<a href="EventHubConnectionOptions.cs.html#4575d7c04a9f7d54" class="i property">TransportType</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The fully qualified Event Hubs namespace that the connection is associated with.  This is likely</span>
+        <span class="c">///</span><span class="c">   to be similar to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">{yournamespace}.servicebus.windows.net</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public string</b> <a id="42574858f23f2a35" href="R/42574858f23f2a35.html" target="n" data-glyph="102,1" class="i property">FullyQualifiedNamespace</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The name of the Event Hub that the connection is associated with, specific to the</span>
+        <span class="c">///</span><span class="c">   Event Hubs namespace that contains it.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public string</b> <a id="9d66313561b8598d" href="R/9d66313561b8598d.html" target="n" data-glyph="102,1" class="i property">EventHubName</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Indicates whether or not this </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#0646809725209998" class="t t">EventHubConnection</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> has been closed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the connection is closed; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public bool</b> <a id="cb0e6dd6cd986dab" href="R/cb0e6dd6cd986dab.html" target="n" data-glyph="102,1" class="i property">IsClosed</a> =&gt; <a href="#3b43ba8f5223e9c2" class="i property">InnerClient</a>.<a href="Core/TransportClient.cs.html#9923c64d2a025465" class="i property">IsClosed</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The endpoint for the Event Hubs service to which the connection is associated.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal</b> <span class="i">Uri</span> <a id="bdca92e9a3626af9" href="R/../../0000000000.html" target="n" data-glyph="104,1" class="i property">ServiceEndpoint</a> =&gt; <a href="#3b43ba8f5223e9c2" class="i property">InnerClient</a>.<a href="Core/TransportClient.cs.html#5bd4d4b06e003690" class="i property">ServiceEndpoint</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The set of client options used for creation of this client.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <a href="EventHubConnectionOptions.cs.html#f8df5ce6477308ff" class="t t">EventHubConnectionOptions</a> <a id="4a04afbea05e8b20" href="R/4a04afbea05e8b20.html" target="n" data-glyph="106,1" class="i property">Options</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   An abstracted Event Hub Client specific to the active protocol and transport intended to perform delegated operations.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <a href="Core/TransportClient.cs.html#9812723e0dd3e9dc" class="t t">TransportClient</a> <a id="3b43ba8f5223e9c2" href="R/3b43ba8f5223e9c2.html" target="n" data-glyph="106,1" class="i property">InnerClient</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#0646809725209998" class="t t">EventHubConnection</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">connectionString</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The connection string to use for connecting to the Event Hubs namespace; it is expected that the Event Hub name and the shared key properties are contained in this connection string.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   If the connection string is copied from the Event Hubs namespace, it will likely not contain the name of the desired Event Hub,</span>
+        <span class="c">///</span><span class="c">   which is needed.  In this case, the name can be added manually by adding &quot;;EntityPath=[[ EVENT HUB NAME ]]&quot; to the end of the</span>
+        <span class="c">///</span><span class="c">   connection string.  For example, &quot;;EntityPath=telemetry-hub&quot;.</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c">   If you have defined a shared access policy directly on the Event Hub itself, then copying the connection string from that</span>
+        <span class="c">///</span><span class="c">   Event Hub will result in a connection string that contains the name.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="46d542da8e684c3c" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">EventHubConnection</a>(<b>string</b> <span id="r0 rd" class="r0 r">connectionString</span>) : <a href="#298a945ee13156f2" class="k">this</a>(<span class="r0 r">connectionString</span>, <b>null</b>, <span class="r1 r">connectionOptions</span>: <b>null</b>)
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#0646809725209998" class="t t">EventHubConnection</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">connectionString</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The connection string to use for connecting to the Event Hubs namespace; it is expected that the Event Hub name and the shared key properties are contained in this connection string.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">connectionOptions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A set of options to apply when configuring the connection.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   If the connection string is copied from the Event Hubs namespace, it will likely not contain the name of the desired Event Hub,</span>
+        <span class="c">///</span><span class="c">   which is needed.  In this case, the name can be added manually by adding &quot;;EntityPath=[[ EVENT HUB NAME ]]&quot; to the end of the</span>
+        <span class="c">///</span><span class="c">   connection string.  For example, &quot;;EntityPath=telemetry-hub&quot;.</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c">   If you have defined a shared access policy directly on the Event Hub itself, then copying the connection string from that</span>
+        <span class="c">///</span><span class="c">   Event Hub will result in a connection string that contains the name.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="631abc8d6eb2fd08" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">EventHubConnection</a>(<b>string</b> <span id="r2 rd" class="r2 r">connectionString</span>,
+                                  <a href="EventHubConnectionOptions.cs.html#f8df5ce6477308ff" class="t t">EventHubConnectionOptions</a> <span id="r3 rd" class="r3 r">connectionOptions</span>) : <a href="#298a945ee13156f2" class="k">this</a>(<span class="r2 r">connectionString</span>, <b>null</b>, <span class="r3 r">connectionOptions</span>)
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#0646809725209998" class="t t">EventHubConnection</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">connectionString</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The connection string to use for connecting to the Event Hubs namespace; it is expected that the shared key properties are contained in this connection string, but not the Event Hub name.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">eventHubName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the specific Event Hub to associate the connection with.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   If the connection string is copied from the Event Hub itself, it will contain the name of the desired Event Hub,</span>
+        <span class="c">///</span><span class="c">   and can be used directly without passing the </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">eventHubName</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.  The name of the Event Hub should be</span>
+        <span class="c">///</span><span class="c">   passed only once, either as part of the connection string or separately.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="ffcd24772749fead" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">EventHubConnection</a>(<b>string</b> <span id="r4 rd" class="r4 r">connectionString</span>,
+                                  <b>string</b> <span id="r5 rd" class="r5 r">eventHubName</span>) : <a href="#298a945ee13156f2" class="k">this</a>(<span class="r4 r">connectionString</span>, <span class="r5 r">eventHubName</span>, <span class="r1 r">connectionOptions</span>: <b>null</b>)
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#0646809725209998" class="t t">EventHubConnection</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">connectionString</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The connection string to use for connecting to the Event Hubs namespace; it is expected that the shared key properties are contained in this connection string, but not the Event Hub name.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">eventHubName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the specific Event Hub to associate the connection with.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">connectionOptions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A set of options to apply when configuring the connection.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   If the connection string is copied from the Event Hub itself, it will contain the name of the desired Event Hub,</span>
+        <span class="c">///</span><span class="c">   and can be used directly without passing the </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">eventHubName</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.  The name of the Event Hub should be</span>
+        <span class="c">///</span><span class="c">   passed only once, either as part of the connection string or separately.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="298a945ee13156f2" href="R/298a945ee13156f2.html" target="n" data-glyph="72,1" class="t constructor">EventHubConnection</a>(<b>string</b> <span id="r6 rd" class="r6 r">connectionString</span>,
+                                  <b>string</b> <span id="r7 rd" class="r7 r">eventHubName</span>,
+                                  <a href="EventHubConnectionOptions.cs.html#f8df5ce6477308ff" class="t t">EventHubConnectionOptions</a> <span id="r1 rd" class="r1 r">connectionOptions</span>)
+        {
+            <a href="P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r6 r">connectionString</span>, <b>nameof</b>(<span class="r6 r">connectionString</span>));
+ 
+            <span class="r1 r">connectionOptions</span> = <span class="r1 r">connectionOptions</span>?.<span class="i">Clone</span>() ?? <b>new</b> <span class="t">EventHubConnectionOptions</span>();
+            <a href="#e270d8d7074705d1" class="i method">ValidateConnectionOptions</a>(<span class="r1 r">connectionOptions</span>);
+ 
+            <a href="EventHubsConnectionStringProperties.cs.html#64f2aa76721ecc75" class="k">var</a> <span id="r8 rd" class="r8 r">connectionStringProperties</span> = <a href="EventHubsConnectionStringProperties.cs.html#64f2aa76721ecc75" class="t t">EventHubsConnectionStringProperties</a>.<a href="EventHubsConnectionStringProperties.cs.html#1ffd9748a1d0ca94" class="i method">Parse</a>(<span class="r6 r">connectionString</span>);
+            <span class="r8 r">connectionStringProperties</span>.<a href="EventHubsConnectionStringProperties.cs.html#3dc4c9f3292b8007" class="i method">Validate</a>(<span class="r7 r">eventHubName</span>, <b>nameof</b>(<span class="r6 r">connectionString</span>));
+ 
+            <b>var</b> <span id="r9 rd" class="r9 r">fullyQualifiedNamespace</span> = <span class="r8 r">connectionStringProperties</span>.<a href="EventHubsConnectionStringProperties.cs.html#15495bc30c6945da" class="i property">FullyQualifiedNamespace</a>;
+ 
+            <b>if</b> (<b>string</b>.<span class="i">IsNullOrEmpty</span>(<span class="r7 r">eventHubName</span>))
+            {
+                <span class="r7 r">eventHubName</span> = <span class="r8 r">connectionStringProperties</span>.<a href="EventHubsConnectionStringProperties.cs.html#a257c559bfc92583" class="i property">EventHubName</a>;
+            }
+ 
+            <a href="SharedSource/Authorization/SharedAccessSignature.cs.html#f4285b7f2ba55474" class="t t">SharedAccessSignature</a> <span id="r10 rd" class="r10 r">sharedAccessSignature</span>;
+ 
+            <b>if</b> (<b>string</b>.<span class="i">IsNullOrEmpty</span>(<span class="r8 r">connectionStringProperties</span>.<a href="EventHubsConnectionStringProperties.cs.html#d7e5b453179ca4e4" class="i property">SharedAccessSignature</a>))
+            {
+                <span class="r10 r">sharedAccessSignature</span> = <b>new</b> <a href="SharedSource/Authorization/SharedAccessSignature.cs.html#a72e529da64e2bff" class="t constructor">SharedAccessSignature</a>(
+                     <a href="#ca9b2482fecc6e8e" class="i method">BuildConnectionAudience</a>(<span class="r1 r">connectionOptions</span>.<a href="EventHubConnectionOptions.cs.html#4575d7c04a9f7d54" class="i property">TransportType</a>, <span class="r9 r">fullyQualifiedNamespace</span>, <span class="r7 r">eventHubName</span>),
+                     <span class="r8 r">connectionStringProperties</span>.<a href="EventHubsConnectionStringProperties.cs.html#f0bb784da77dbb58" class="i property">SharedAccessKeyName</a>,
+                     <span class="r8 r">connectionStringProperties</span>.<a href="EventHubsConnectionStringProperties.cs.html#55335bfbd79a0fe6" class="i property">SharedAccessKey</a>);
+            }
+            <b>else</b>
+            {
+                <span class="r10 r">sharedAccessSignature</span> = <b>new</b> <a href="SharedSource/Authorization/SharedAccessSignature.cs.html#c7c49e889d3bf348" class="t constructor">SharedAccessSignature</a>(<span class="r8 r">connectionStringProperties</span>.<a href="EventHubsConnectionStringProperties.cs.html#d7e5b453179ca4e4" class="i property">SharedAccessSignature</a>);
+            }
+ 
+            <a href="SharedSource/Authorization/SharedAccessSignatureCredential.cs.html#e1304b8cd937300e" class="k">var</a> <span id="r11 rd" class="r11 r">sharedCredentials</span> = <b>new</b> <a href="SharedSource/Authorization/SharedAccessSignatureCredential.cs.html#be7100207e6dbd0a" class="t constructor">SharedAccessSignatureCredential</a>(<span class="r10 r">sharedAccessSignature</span>);
+            <a href="SharedSource/Authorization/EventHubTokenCredential.cs.html#799a8f6651c6d656" class="k">var</a> <span id="r12 rd" class="r12 r">tokenCredentials</span> = <b>new</b> <span class="t">EventHubTokenCredential</span>(<span class="r11 r">sharedCredentials</span>, <a href="#ca9b2482fecc6e8e" class="i method">BuildConnectionAudience</a>(<span class="r1 r">connectionOptions</span>.<a href="EventHubConnectionOptions.cs.html#4575d7c04a9f7d54" class="i property">TransportType</a>, <span class="r9 r">fullyQualifiedNamespace</span>, <span class="r7 r">eventHubName</span>));
+ 
+            <a href="#42574858f23f2a35" class="i property">FullyQualifiedNamespace</a> = <span class="r9 r">fullyQualifiedNamespace</span>;
+            <a href="#9d66313561b8598d" class="i property">EventHubName</a> = <span class="r7 r">eventHubName</span>;
+            <a href="#4a04afbea05e8b20" class="i property">Options</a> = <span class="r1 r">connectionOptions</span>;
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA2214</span> <span class="c">// Do not call overridable methods in constructors. This internal method is virtual for testing purposes.</span>
+            <a href="#3b43ba8f5223e9c2" class="i property">InnerClient</a> = <a href="#f85d967f1baea638" class="i method">CreateTransportClient</a>(<span class="r9 r">fullyQualifiedNamespace</span>, <span class="r7 r">eventHubName</span>, <span class="r12 r">tokenCredentials</span>, <span class="r1 r">connectionOptions</span>);
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">CA2214</span> <span class="c">// Do not call overridable methods in constructors.</span>
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#0646809725209998" class="t t">EventHubConnection</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">fullyQualifiedNamespace</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The fully qualified Event Hubs namespace to connect to.  This is likely to be similar to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">{yournamespace}.servicebus.windows.net</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r14 r">eventHubName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the specific Event Hub to associate the connection with.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">credential</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Authorization/EventHubsSharedAccessKeyCredential.cs.html#fedd60277cbbbc1c" class="t t">EventHubsSharedAccessKeyCredential</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to use for authorization.  Access controls may be specified by the Event Hubs namespace or the requested Event Hub, depending on Azure configuration.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r16 r">connectionOptions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A set of options to apply when configuring the connection.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal</b> <a id="99fd244d7decbc90" href="R/99fd244d7decbc90.html" target="n" data-glyph="74,1" class="t constructor">EventHubConnection</a>(<b>string</b> <span id="r13 rd" class="r13 r">fullyQualifiedNamespace</span>,
+                                    <b>string</b> <span id="r14 rd" class="r14 r">eventHubName</span>,
+                                    <a href="Authorization/EventHubsSharedAccessKeyCredential.cs.html#fedd60277cbbbc1c" class="t t">EventHubsSharedAccessKeyCredential</a> <span id="r15 rd" class="r15 r">credential</span>,
+                                    <a href="EventHubConnectionOptions.cs.html#f8df5ce6477308ff" class="t t">EventHubConnectionOptions</a> <span id="r16 rd" class="r16 r">connectionOptions</span> = <b>default</b>) : <b>this</b>(<span class="r13 r">fullyQualifiedNamespace</span>,
+                                                                                                  <span class="r14 r">eventHubName</span>,
+                                                                                                  <a href="#9bdf61ddcd97cf66" class="i method">TranslateSharedKeyCredential</a>(<span class="r15 r">credential</span>, <span class="r13 r">fullyQualifiedNamespace</span>, <span class="r14 r">eventHubName</span>, <span class="r16 r">connectionOptions</span>?.<a href="EventHubConnectionOptions.cs.html#4575d7c04a9f7d54" class="i property">TransportType</a>),
+                                                                                                  <span class="r16 r">connectionOptions</span>)
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#0646809725209998" class="t t">EventHubConnection</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r17 r">fullyQualifiedNamespace</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The fully qualified Event Hubs namespace to connect to.  This is likely to be similar to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">{yournamespace}.servicebus.windows.net</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r18 r">eventHubName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the specific Event Hub to associate the connection with.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r19 r">credential</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The Azure managed identity credential to use for authorization.  Access controls may be specified by the Event Hubs namespace or the requested Event Hub, depending on Azure configuration.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r20 r">connectionOptions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A set of options to apply when configuring the connection.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="ef4fd1a74911ddaa" href="R/ef4fd1a74911ddaa.html" target="n" data-glyph="72,1" class="t constructor">EventHubConnection</a>(<b>string</b> <span id="r17 rd" class="r17 r">fullyQualifiedNamespace</span>,
+                                  <b>string</b> <span id="r18 rd" class="r18 r">eventHubName</span>,
+                                  <span class="i">TokenCredential</span> <span id="r19 rd" class="r19 r">credential</span>,
+                                  <a href="EventHubConnectionOptions.cs.html#f8df5ce6477308ff" class="t t">EventHubConnectionOptions</a> <span id="r20 rd" class="r20 r">connectionOptions</span> = <b>default</b>)
+        {
+            <a href="P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="SharedSource/Core/Argument.cs.html#4b3e3f504d747537" class="i method">AssertWellFormedEventHubsNamespace</a>(<span class="r17 r">fullyQualifiedNamespace</span>, <b>nameof</b>(<span class="r17 r">fullyQualifiedNamespace</span>));
+            <a href="P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r18 r">eventHubName</span>, <b>nameof</b>(<span class="r18 r">eventHubName</span>));
+            <a href="P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<span class="i">AssertNotNull</span>(<span class="r19 r">credential</span>, <b>nameof</b>(<span class="r19 r">credential</span>));
+ 
+            <span class="r20 r">connectionOptions</span> = <span class="r20 r">connectionOptions</span>?.<span class="i">Clone</span>() ?? <b>new</b> <span class="t">EventHubConnectionOptions</span>();
+            <a href="#e270d8d7074705d1" class="i method">ValidateConnectionOptions</a>(<span class="r20 r">connectionOptions</span>);
+ 
+            <a href="SharedSource/Authorization/EventHubTokenCredential.cs.html#799a8f6651c6d656" class="k">var</a> <span id="r21 rd" class="r21 r">tokenCredential</span> = <b>new</b> <a href="SharedSource/Authorization/EventHubTokenCredential.cs.html#f0ca405488d27fc3" class="t constructor">EventHubTokenCredential</a>(<span class="r19 r">credential</span>, <a href="#ca9b2482fecc6e8e" class="i method">BuildConnectionAudience</a>(<span class="r20 r">connectionOptions</span>.<a href="EventHubConnectionOptions.cs.html#4575d7c04a9f7d54" class="i property">TransportType</a>, <span class="r17 r">fullyQualifiedNamespace</span>, <span class="r18 r">eventHubName</span>));
+ 
+            <a href="#42574858f23f2a35" class="i property">FullyQualifiedNamespace</a> = <span class="r17 r">fullyQualifiedNamespace</span>;
+            <a href="#9d66313561b8598d" class="i property">EventHubName</a> = <span class="r18 r">eventHubName</span>;
+            <a href="#4a04afbea05e8b20" class="i property">Options</a> = <span class="r20 r">connectionOptions</span>;
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA2214</span> <span class="c">// Do not call overridable methods in constructors. This internal method is virtual for testing purposes.</span>
+            <a href="#3b43ba8f5223e9c2" class="i property">InnerClient</a> = <a href="#f85d967f1baea638" class="i method">CreateTransportClient</a>(<span class="r17 r">fullyQualifiedNamespace</span>, <span class="r18 r">eventHubName</span>, <span class="r21 r">tokenCredential</span>, <span class="r20 r">connectionOptions</span>);
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">CA2214</span> <span class="c">// Do not call overridable methods in constructors.</span>
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#0646809725209998" class="t t">EventHubConnection</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>protected</b> <a id="882553ed814b1ef7" href="R/../../0000000000.html" target="n" data-glyph="75,1" class="t constructor">EventHubConnection</a>()
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Closes the connection to the Event Hubs namespace and associated Event Hub.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r22 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A task to be resolved on when the operation has completed.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public virtual async</b> <span class="i">Task</span> <a id="6160fbba0992b87c" href="R/6160fbba0992b87c.html" target="n" data-glyph="72,1" class="i method">CloseAsync</a>(<span class="i">CancellationToken</span> <span id="r22 rd" class="r22 r">cancellationToken</span> = <b>default</b>)
+        {
+            <span class="r22 r">cancellationToken</span>.<a href="SharedSource/Core/CancellationTokenExtensions.cs.html#b1bf96f66d5d14e6" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+            <a href="Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a>.<a href="Diagnostics/EventHubsEventSource.cs.html#c960e5896e4dd589" class="i property">Log</a>.<a href="Diagnostics/EventHubsEventSource.cs.html#56966cf73c9a3478" class="i method">ClientCloseStart</a>(<b>nameof</b>(<a href="#0646809725209998" class="t t">EventHubConnection</a>), <a href="#9d66313561b8598d" class="i property">EventHubName</a>, <a href="#42574858f23f2a35" class="i property">FullyQualifiedNamespace</a>);
+ 
+            <b>try</b>
+            {
+                <b>await</b> <a href="#3b43ba8f5223e9c2" class="i property">InnerClient</a>.<a href="Core/TransportClient.cs.html#2d458fb903aaa053" class="i method">CloseAsync</a>(<span class="r22 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r23 rd" class="r23 r">ex</span>)
+            {
+                <a href="Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a>.<a href="Diagnostics/EventHubsEventSource.cs.html#c960e5896e4dd589" class="i property">Log</a>.<span class="i">ClientCloseError</span>(<b>nameof</b>(<a href="#0646809725209998" class="t t">EventHubConnection</a>), <a href="#9d66313561b8598d" class="i property">EventHubName</a>, <a href="#42574858f23f2a35" class="i property">FullyQualifiedNamespace</a>, <span class="r23 r">ex</span>.<span class="i">Message</span>);
+                <b>throw</b>;
+            }
+            <b>finally</b>
+            {
+                <a href="Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a>.<a href="Diagnostics/EventHubsEventSource.cs.html#c960e5896e4dd589" class="i property">Log</a>.<a href="Diagnostics/EventHubsEventSource.cs.html#001d1b45b857f69e" class="i method">ClientCloseComplete</a>(<b>nameof</b>(<a href="#0646809725209998" class="t t">EventHubConnection</a>), <a href="#9d66313561b8598d" class="i property">EventHubName</a>, <a href="#42574858f23f2a35" class="i property">FullyQualifiedNamespace</a>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Performs the task needed to clean up resources used by the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#0646809725209998" class="t t">EventHubConnection</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">,</span>
+        <span class="c">///</span><span class="c">   including ensuring that the connection itself has been closed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A task to be resolved on when the operation has completed.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public virtual async</b> <span class="i">ValueTask</span> <a id="47a00649977d6404" href="R/47a00649977d6404.html" target="n" data-glyph="72,1" class="i method">DisposeAsync</a>()
+        {
+            <b>await</b> <a href="#6160fbba0992b87c" class="i method">CloseAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+            <span class="i">GC</span>.<span class="i">SuppressFinalize</span>(<a href="#0646809725209998" class="k">this</a>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Determines whether the specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">System</span>.<span class="i">Object</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> is equal to this instance.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r24 r">obj</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">System</span>.<span class="i">Object</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> to compare with this instance.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">System</span>.<span class="i">Object</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> is equal to this instance; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="i">EditorBrowsable</span>(<span class="i">EditorBrowsableState</span>.<span class="i">Never</span>)]
+        <b>public override bool</b> <a id="690c61514efb0434" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Equals</a>(<b>object</b> <span id="r24 rd" class="r24 r">obj</span>) =&gt; <b>base</b>.<span class="i">Equals</span>(<span class="r24 r">obj</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Returns a hash code for this instance.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A hash code for this instance, suitable for use in hashing algorithms and data structures like a hash table.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="i">EditorBrowsable</span>(<span class="i">EditorBrowsableState</span>.<span class="i">Never</span>)]
+        <b>public override int</b> <a id="ba406112759d4986" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetHashCode</a>() =&gt; <b>base</b>.<span class="i">GetHashCode</span>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Converts the instance to string representation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">System</span>.<span class="i">String</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> that represents this instance.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="i">EditorBrowsable</span>(<span class="i">EditorBrowsableState</span>.<span class="i">Never</span>)]
+        <b>public override string</b> <a id="75ed2cafa364f207" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ToString</a>() =&gt; <b>base</b>.<span class="i">ToString</span>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Retrieves information about the Event Hub that the connection is associated with, including</span>
+        <span class="c">///</span><span class="c">   the number of partitions present and their identifiers.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r25 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The retry policy to use as the basis for retrieving the information.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r26 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The set of information for the Event Hub that this connection is associated with.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal virtual async</b> <span class="i">Task</span>&lt;<a href="EventHubProperties.cs.html#6ee60bd5de616192" class="t t">EventHubProperties</a>&gt; <a id="46fd9439be893b6a" href="R/46fd9439be893b6a.html" target="n" data-glyph="74,1" class="i method">GetPropertiesAsync</a>(<a href="EventHubsRetryPolicy.cs.html#bc28d871ab581a88" class="t t">EventHubsRetryPolicy</a> <span id="r25 rd" class="r25 r">retryPolicy</span>,
+                                                                           <span class="i">CancellationToken</span> <span id="r26 rd" class="r26 r">cancellationToken</span> = <b>default</b>) =&gt; <b>await</b> <a href="#3b43ba8f5223e9c2" class="i property">InnerClient</a>.<a href="Core/TransportClient.cs.html#24232c7128e6226e" class="i method">GetPropertiesAsync</a>(<span class="r25 r">retryPolicy</span>, <span class="r26 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Retrieves the set of identifiers for the partitions of an Event Hub.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r27 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The retry policy to use as the basis for retrieving the information.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r28 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The set of identifiers for the partitions within the Event Hub that this connection is associated with.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   This method is synonymous with invoking </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#46fd9439be893b6a" class="i method">GetPropertiesAsync</a>(<a href="EventHubsRetryPolicy.cs.html#bc28d871ab581a88" class="t t">EventHubsRetryPolicy</a>, <span class="i">CancellationToken</span>)<span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> and reading the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="EventHubProperties.cs.html#6ee60bd5de616192" class="t t">EventHubProperties</a>.<a href="EventHubProperties.cs.html#8f4d5f8630f084c0" class="i property">PartitionIds</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <span class="c">///</span><span class="c">   property that is returned. It is offered as a convenience for quick access to the set of partition identifiers for the associated Event Hub.</span>
+        <span class="c">///</span><span class="c">   No new or extended information is presented.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal virtual async</b> <span class="i">Task</span>&lt;<b>string</b>[]&gt; <a id="bb16debc2789e9bc" href="R/bb16debc2789e9bc.html" target="n" data-glyph="74,1" class="i method">GetPartitionIdsAsync</a>(<a href="EventHubsRetryPolicy.cs.html#bc28d871ab581a88" class="t t">EventHubsRetryPolicy</a> <span id="r27 rd" class="r27 r">retryPolicy</span>,
+                                                                   <span class="i">CancellationToken</span> <span id="r28 rd" class="r28 r">cancellationToken</span> = <b>default</b>) =&gt;
+            (<b>await</b> <a href="#46fd9439be893b6a" class="i method">GetPropertiesAsync</a>(<span class="r27 r">retryPolicy</span>, <span class="r28 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>)).<span class="i">PartitionIds</span>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Retrieves information about a specific partition for an Event Hub, including elements that describe the available</span>
+        <span class="c">///</span><span class="c">   events in the partition event stream.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r29 r">partitionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The unique identifier of a partition associated with the Event Hub.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r30 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The retry policy to use as the basis for retrieving the information.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r31 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The set of information for the requested partition under the Event Hub this connection is associated with.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal virtual async</b> <span class="i">Task</span>&lt;<a href="PartitionProperties.cs.html#9311a292681a1af8" class="t t">PartitionProperties</a>&gt; <a id="66202595647feb89" href="R/66202595647feb89.html" target="n" data-glyph="74,1" class="i method">GetPartitionPropertiesAsync</a>(<b>string</b> <span id="r29 rd" class="r29 r">partitionId</span>,
+                                                                                     <a href="EventHubsRetryPolicy.cs.html#bc28d871ab581a88" class="t t">EventHubsRetryPolicy</a> <span id="r30 rd" class="r30 r">retryPolicy</span>,
+                                                                                     <span class="i">CancellationToken</span> <span id="r31 rd" class="r31 r">cancellationToken</span> = <b>default</b>) =&gt; <b>await</b> <a href="#3b43ba8f5223e9c2" class="i property">InnerClient</a>.<a href="Core/TransportClient.cs.html#87860ef5cf11a6d5" class="i method">GetPartitionPropertiesAsync</a>(<span class="r29 r">partitionId</span>, <span class="r30 r">retryPolicy</span>, <span class="r31 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Creates a producer strongly aligned with the active protocol and transport,</span>
+        <span class="c">///</span><span class="c">   responsible for publishing </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="EventData.cs.html#557aa370d1369b89" class="t t">EventData</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> to the Event Hub.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r32 r">partitionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The identifier of the partition to which the transport producer should be bound; if </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">, the producer is unbound.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r33 r">requestedFeatures</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The flags specifying the set of special transport features that should be opted-into.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r34 r">partitionOptions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The set of options, if any, that should be considered when initializing the producer.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r35 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The policy which governs retry behavior and try timeouts.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Core/TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> configured in the requested manner.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal virtual</b> <a href="Core/TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a> <a id="70206bd0a4e0c7b6" href="R/70206bd0a4e0c7b6.html" target="n" data-glyph="74,1" class="i method">CreateTransportProducer</a>(<b>string</b> <span id="r32 rd" class="r32 r">partitionId</span>,
+                                                                   <a href="Core/TransportProducerFeatures.cs.html#012a1c2da3174f00" class="t t">TransportProducerFeatures</a> <span id="r33 rd" class="r33 r">requestedFeatures</span>,
+                                                                   <a href="Producer/PartitionPublishingOptions.cs.html#063aaefcca0dd9a1" class="t t">PartitionPublishingOptions</a> <span id="r34 rd" class="r34 r">partitionOptions</span>,
+                                                                   <a href="EventHubsRetryPolicy.cs.html#bc28d871ab581a88" class="t t">EventHubsRetryPolicy</a> <span id="r35 rd" class="r35 r">retryPolicy</span>)
+        {
+            <a href="P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r35 r">retryPolicy</span>, <b>nameof</b>(<span class="r35 r">retryPolicy</span>));
+            <b>return</b> <a href="#3b43ba8f5223e9c2" class="i property">InnerClient</a>.<a href="Core/TransportClient.cs.html#80aa42d296551a95" class="i method">CreateProducer</a>(<span class="r32 r">partitionId</span>, <span class="r33 r">requestedFeatures</span>, <span class="r34 r">partitionOptions</span>, <span class="r35 r">retryPolicy</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Creates a consumer strongly aligned with the active protocol and transport, responsible</span>
+        <span class="c">///</span><span class="c">   for reading </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="EventData.cs.html#557aa370d1369b89" class="t t">EventData</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> from a specific Event Hub partition, in the context</span>
+        <span class="c">///</span><span class="c">   of a specific consumer group.</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c">   A consumer may be exclusive, which asserts ownership over the partition for the consumer</span>
+        <span class="c">///</span><span class="c">   group to ensure that only one consumer from that group is reading the from the partition.</span>
+        <span class="c">///</span><span class="c">   These exclusive consumers are sometimes referred to as &quot;Epoch Consumers.&quot;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c">   A consumer may also be non-exclusive, allowing multiple consumers from the same consumer</span>
+        <span class="c">///</span><span class="c">   group to be actively reading events from the partition.  These non-exclusive consumers are</span>
+        <span class="c">///</span><span class="c">   sometimes referred to as &quot;Non-epoch Consumers.&quot;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c">   Designating a consumer as exclusive may be specified by setting the </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r36 r">ownerLevel</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c">   When </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">, consumers are created as non-exclusive.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r37 r">consumerGroup</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the consumer group this consumer is associated with.  Events are read in the context of this group.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r38 r">partitionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The identifier of the Event Hub partition from which events will be received.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r39 r">eventPosition</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The position within the partition where the consumer should begin reading events.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r40 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The policy which governs retry behavior and try timeouts.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r41 r">trackLastEnqueuedEventProperties</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Indicates whether information on the last enqueued event on the partition is sent as events are received.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r36 r">ownerLevel</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The relative priority to associate with the link; for a non-exclusive link, this value should be </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r42 r">prefetchCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Controls the number of events received and queued locally without regard to whether an operation was requested.  If </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> a default will be used.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r43 r">prefetchSizeInBytes</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The cache size of the prefetch queue. When set, the link makes a best effort to ensure prefetched messages fit into the specified size.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Core/TransportConsumer.cs.html#265a21c281157aa2" class="t t">TransportConsumer</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> configured in the requested manner.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal virtual</b> <a href="Core/TransportConsumer.cs.html#265a21c281157aa2" class="t t">TransportConsumer</a> <a id="8da5d70f281c7142" href="R/8da5d70f281c7142.html" target="n" data-glyph="74,1" class="i method">CreateTransportConsumer</a>(<b>string</b> <span id="r37 rd" class="r37 r">consumerGroup</span>,
+                                                                   <b>string</b> <span id="r38 rd" class="r38 r">partitionId</span>,
+                                                                   <a href="Consumer/EventPosition.cs.html#97742fa7b7b6b68f" class="t t">EventPosition</a> <span id="r39 rd" class="r39 r">eventPosition</span>,
+                                                                   <a href="EventHubsRetryPolicy.cs.html#bc28d871ab581a88" class="t t">EventHubsRetryPolicy</a> <span id="r40 rd" class="r40 r">retryPolicy</span>,
+                                                                   <b>bool</b> <span id="r41 rd" class="r41 r">trackLastEnqueuedEventProperties</span> = <b>true</b>,
+                                                                   <b>long</b>? <span id="r36 rd" class="r36 r">ownerLevel</span> = <b>default</b>,
+                                                                   <b>uint</b>? <span id="r42 rd" class="r42 r">prefetchCount</span> = <b>default</b>,
+                                                                   <b>long</b>? <span id="r43 rd" class="r43 r">prefetchSizeInBytes</span> = <b>default</b>)
+        {
+            <a href="P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r37 r">consumerGroup</span>, <b>nameof</b>(<span class="r37 r">consumerGroup</span>));
+            <a href="P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r38 r">partitionId</span>, <b>nameof</b>(<span class="r38 r">partitionId</span>));
+            <a href="P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r40 r">retryPolicy</span>, <b>nameof</b>(<span class="r40 r">retryPolicy</span>));
+ 
+            <b>return</b> <a href="#3b43ba8f5223e9c2" class="i property">InnerClient</a>.<a href="Core/TransportClient.cs.html#23e9c951a0f4c2d4" class="i method">CreateConsumer</a>(<span class="r37 r">consumerGroup</span>, <span class="r38 r">partitionId</span>, <span class="r39 r">eventPosition</span>, <span class="r40 r">retryPolicy</span>, <span class="r41 r">trackLastEnqueuedEventProperties</span>, <span class="r36 r">ownerLevel</span>, <span class="r42 r">prefetchCount</span>, <span class="r43 r">prefetchSizeInBytes</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Builds an Event Hub client specific to the protocol and transport specified by the</span>
+        <span class="c">///</span><span class="c">   requested connection type of the </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r44 r">options</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r45 r">fullyQualifiedNamespace</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The fully qualified Event Hubs namespace.  This is likely to be similar to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">{yournamespace}.servicebus.windows.net</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r46 r">eventHubName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of a specific Event Hub.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r47 r">credential</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The Azure managed identity credential to use for authorization.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r44 r">options</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The set of options to use for the client.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A client generalization specific to the specified protocol/transport to which operations may be delegated.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   As an internal method, only basic sanity checks are performed against arguments.  It is</span>
+        <span class="c">///</span><span class="c">   assumed that callers are trusted and have performed deep validation.</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c">   Parameters passed are also assumed to be owned by thee transport client and safe to mutate or dispose;</span>
+        <span class="c">///</span><span class="c">   creation of clones or otherwise protecting the parameters is assumed to be the purview of the caller.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal virtual</b> <a href="Core/TransportClient.cs.html#9812723e0dd3e9dc" class="t t">TransportClient</a> <a id="f85d967f1baea638" href="R/f85d967f1baea638.html" target="n" data-glyph="74,1" class="i method">CreateTransportClient</a>(<b>string</b> <span id="r45 rd" class="r45 r">fullyQualifiedNamespace</span>,
+                                                               <b>string</b> <span id="r46 rd" class="r46 r">eventHubName</span>,
+                                                               <a href="SharedSource/Authorization/EventHubTokenCredential.cs.html#799a8f6651c6d656" class="t t">EventHubTokenCredential</a> <span id="r47 rd" class="r47 r">credential</span>,
+                                                               <a href="EventHubConnectionOptions.cs.html#f8df5ce6477308ff" class="t t">EventHubConnectionOptions</a> <span id="r44 rd" class="r44 r">options</span>)
+        {
+            <b>switch</b> (<span class="r44 r">options</span>.<a href="EventHubConnectionOptions.cs.html#4575d7c04a9f7d54" class="i property">TransportType</a>)
+            {
+                <b>case</b> <a href="EventHubsTransportType.cs.html#3dd6cae2fa33065d" class="t t">EventHubsTransportType</a>.<a href="EventHubsTransportType.cs.html#e60f62318ee8aeb4" class="i field">AmqpTcp</a>:
+                <b>case</b> <a href="EventHubsTransportType.cs.html#3dd6cae2fa33065d" class="t t">EventHubsTransportType</a>.<a href="EventHubsTransportType.cs.html#e822ffa74cacc275" class="i field">AmqpWebSockets</a>:
+                    <b>return</b> <b>new</b> <a href="Amqp/AmqpClient.cs.html#89ff6a85c0324d8b" class="t constructor">AmqpClient</a>(<span class="r45 r">fullyQualifiedNamespace</span>, <span class="r46 r">eventHubName</span>, <span class="r47 r">credential</span>, <span class="r44 r">options</span>);
+ 
+                <b>default</b>:
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA2208</span> <span class="c">// Instantiate argument exceptions correctly.  &quot;TransportType&quot; is a reasonable name.  It&#39;s the property on the options argument which is invalid.</span>
+                    <b>throw</b> <b>new</b> <span class="i">ArgumentException</span>(<b>string</b>.<span class="i">Format</span>(<span class="i">CultureInfo</span>.<span class="i">CurrentCulture</span>, <a href="Resources.Designer.cs.html#0f60eafa1a3b4f36" class="t t">Resources</a>.<a href="Resources.Designer.cs.html#75f2e09ce6026ef6" class="i property">InvalidTransportType</a>, <span class="r44 r">options</span>.<a href="EventHubConnectionOptions.cs.html#4575d7c04a9f7d54" class="i property">TransportType</a>.<span class="i">ToString</span>()), <b>nameof</b>(<span class="r44 r">options</span>.<a href="EventHubConnectionOptions.cs.html#4575d7c04a9f7d54" class="i property">TransportType</a>));
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">CA2208</span> <span class="c">// Instantiate argument exceptions correctly</span>
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Builds the audience of the connection for use in the signature.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r48 r">transportType</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The type of protocol and transport that will be used for communicating with the Event Hubs service.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r49 r">fullyQualifiedNamespace</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The fully qualified Event Hubs namespace.  This is likely to be similar to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">{yournamespace}.servicebus.windows.net</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r50 r">eventHubName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the specific Event Hub to connect the client to.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The value to use as the audience of the signature.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal static string</b> <a id="ca9b2482fecc6e8e" href="R/ca9b2482fecc6e8e.html" target="n" data-glyph="74,1" class="i method">BuildConnectionAudience</a>(<a href="EventHubsTransportType.cs.html#3dd6cae2fa33065d" class="t t">EventHubsTransportType</a> <span id="r48 rd" class="r48 r">transportType</span>,
+                                                       <b>string</b> <span id="r49 rd" class="r49 r">fullyQualifiedNamespace</span>,
+                                                       <b>string</b> <span id="r50 rd" class="r50 r">eventHubName</span>)
+        {
+            <b>var</b> <span id="r51 rd" class="r51 r">builder</span> = <b>new</b> <span class="i">UriBuilder</span>(<span class="r49 r">fullyQualifiedNamespace</span>)
+            {
+                <span class="i">Scheme</span> = <span class="r48 r">transportType</span>.<a href="Core/TransportTypeExtensions.cs.html#67be0a4a11377c7c" class="i method">GetUriScheme</a>(),
+                <span class="i">Path</span> = <span class="r50 r">eventHubName</span>,
+                <span class="i">Port</span> = -1,
+                <span class="i">Fragment</span> = <b>string</b>.<span class="i">Empty</span>,
+                <span class="i">Password</span> = <b>string</b>.<span class="i">Empty</span>,
+                <span class="i">UserName</span> = <b>string</b>.<span class="i">Empty</span>,
+            };
+ 
+            <b>if</b> (<span class="r51 r">builder</span>.<span class="i">Path</span>.<span class="i">EndsWith</span>(<span class="s">&quot;/&quot;</span>, <span class="i">StringComparison</span>.<span class="i">Ordinal</span>))
+            {
+                <span class="r51 r">builder</span>.<span class="i">Path</span> = <span class="r51 r">builder</span>.<span class="i">Path</span>.<span class="i">TrimEnd</span>(<span class="s">&#39;/&#39;</span>);
+            }
+ 
+            <b>return</b> <span class="r51 r">builder</span>.<span class="i">Uri</span>.<span class="i">AbsoluteUri</span>.<span class="i">ToLowerInvariant</span>();
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Translates an </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="Authorization/EventHubsSharedAccessKeyCredential.cs.html#fedd60277cbbbc1c" class="t t">EventHubsSharedAccessKeyCredential</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> into the equivalent shared access signature credential.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r52 r">credential</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The credential to translate.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r53 r">fullyQualifiedNamespace</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The fully qualified Event Hubs namespace being connected to.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r54 r">eventHubName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the Event Hub being connected to.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r55 r">transportType</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The type of transport being used for the connection.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="SharedSource/Authorization/SharedAccessSignatureCredential.cs.html#e1304b8cd937300e" class="t t">SharedAccessSignatureCredential</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> which the </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r52 r">credential</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> was translated into, if the parameters were populated; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal static</b> <a href="SharedSource/Authorization/SharedAccessSignatureCredential.cs.html#e1304b8cd937300e" class="t t">SharedAccessSignatureCredential</a> <a id="9bdf61ddcd97cf66" href="R/9bdf61ddcd97cf66.html" target="n" data-glyph="74,1" class="i method">TranslateSharedKeyCredential</a>(<a href="Authorization/EventHubsSharedAccessKeyCredential.cs.html#fedd60277cbbbc1c" class="t t">EventHubsSharedAccessKeyCredential</a> <span id="r52 rd" class="r52 r">credential</span>,
+                                                                                     <b>string</b> <span id="r53 rd" class="r53 r">fullyQualifiedNamespace</span>,
+                                                                                     <b>string</b> <span id="r54 rd" class="r54 r">eventHubName</span>,
+                                                                                     <a href="EventHubsTransportType.cs.html#3dd6cae2fa33065d" class="t t">EventHubsTransportType</a>? <span id="r55 rd" class="r55 r">transportType</span>)
+        {
+            <b>if</b> ((<span class="r52 r">credential</span> == <b>null</b>) || (<b>string</b>.<span class="i">IsNullOrEmpty</span>(<span class="r53 r">fullyQualifiedNamespace</span>)) || (<b>string</b>.<span class="i">IsNullOrEmpty</span>(<span class="r54 r">eventHubName</span>)))
+            {
+                <b>return</b> <b>null</b>;
+            }
+ 
+            <b>return</b> <span class="r52 r">credential</span>.<a href="Authorization/EventHubsSharedAccessKeyCredential.cs.html#39169be72df6fed2" class="i method">AsSharedAccessSignatureCredential</a>(<span class="i">BuildConnectionAudience</span>(<span class="r55 r">transportType</span> ?? <a href="#c07de79180bd4dee" class="i property">DefaultCredentialTransportType</a>, <span class="r53 r">fullyQualifiedNamespace</span>, <span class="r54 r">eventHubName</span>));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Performs the actions needed to validate the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="EventHubConnectionOptions.cs.html#f8df5ce6477308ff" class="t t">EventHubConnectionOptions</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> associated</span>
+        <span class="c">///</span><span class="c">   with this client.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r56 r">connectionOptions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The set of options to validate.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   In the case that the options violate an invariant or otherwise represent a combination that</span>
+        <span class="c">///</span><span class="c">   is not permissible, an appropriate exception will be thrown.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static void</b> <a id="e270d8d7074705d1" href="R/e270d8d7074705d1.html" target="n" data-glyph="76,1" class="i method">ValidateConnectionOptions</a>(<a href="EventHubConnectionOptions.cs.html#f8df5ce6477308ff" class="t t">EventHubConnectionOptions</a> <span id="r56 rd" class="r56 r">connectionOptions</span>)
+        {
+            <span class="c">// If there were no options passed, they cannot be in an invalid state.</span>
+ 
+            <b>if</b> (<span class="r56 r">connectionOptions</span> == <b>null</b>)
+            {
+                <b>return</b>;
+            }
+ 
+            <span class="c">// A proxy is only valid when web sockets is used as the transport.</span>
+ 
+            <b>if</b> ((!<span class="r56 r">connectionOptions</span>.<a href="EventHubConnectionOptions.cs.html#4575d7c04a9f7d54" class="i property">TransportType</a>.<a href="Core/TransportTypeExtensions.cs.html#7600b4ebc6e4171b" class="i method">IsWebSocketTransport</a>()) &amp;&amp; (<span class="r56 r">connectionOptions</span>.<a href="EventHubConnectionOptions.cs.html#3be783ff92ed18c8" class="i property">Proxy</a> != <b>null</b>))
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentException</span>(<b>string</b>.<span class="i">Format</span>(<span class="i">CultureInfo</span>.<span class="i">CurrentCulture</span>, <a href="Resources.Designer.cs.html#0f60eafa1a3b4f36" class="t t">Resources</a>.<a href="Resources.Designer.cs.html#e0558a9aad9cf429" class="i property">ProxyMustUseWebSockets</a>), <b>nameof</b>(<span class="r56 r">connectionOptions</span>));
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

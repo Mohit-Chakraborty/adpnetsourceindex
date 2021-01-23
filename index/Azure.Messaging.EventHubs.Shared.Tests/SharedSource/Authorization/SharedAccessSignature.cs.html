@@ -1,0 +1,390 @@
+﻿<!DOCTYPE html>
+<html><head><title>SharedAccessSignature.cs</title><link rel="stylesheet" href="../../../styles.css"><script src="../../../scripts.js"></script></head>
+<body class="cB" onload="i(381);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Messaging.EventHubs.Shared.Tests/SharedSource/Authorization/SharedAccessSignature.cs" target="_top">SharedSource\Authorization\SharedAccessSignature.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Messaging.EventHubs.Shared.Tests" target="_top">tests\Azure.Messaging.EventHubs.Shared.Tests.csproj</a> (Azure.Messaging.EventHubs.Shared.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Globalization</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Security</span>.<span class="i n">Cryptography</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Authorization</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">   A shared access signature, which can be used for authorization to an Event Hubs namespace</span>
+    <span class="c">///</span><span class="c">   or a specific Event Hub.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <b>internal class</b> <a id="f4285b7f2ba55474" href="../../R/f4285b7f2ba55474.html" target="n" data-glyph="2,0" class="t t">SharedAccessSignature</a>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The maximum allowed length of the SAS key name.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const int</b> <a id="98f71a61678733d4" href="../../R/98f71a61678733d4.html" target="n" data-glyph="10,1" class="i field">MaximumKeyNameLength</a> = 256;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The maximum allowed length of the SAS key.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const int</b> <a id="24443f74a6f82c85" href="../../R/24443f74a6f82c85.html" target="n" data-glyph="10,1" class="i field">MaximumKeyLength</a> = 256;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The token that represents the type of authentication used.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const string</b> <a id="5a8eaf8a7fb05408" href="../../R/5a8eaf8a7fb05408.html" target="n" data-glyph="10,1" class="i field">AuthenticationTypeToken</a> = <span class="s">&quot;SharedAccessSignature&quot;</span>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The token that identifies the signed component of the shared access signature.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const string</b> <a id="2e637c657e7160b2" href="../../R/2e637c657e7160b2.html" target="n" data-glyph="10,1" class="i field">SignedResourceToken</a> = <span class="s">&quot;sr&quot;</span>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The token that identifies the signature component of the shared access signature.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const string</b> <a id="f393eb171f71a00d" href="../../R/f393eb171f71a00d.html" target="n" data-glyph="10,1" class="i field">SignatureToken</a> = <span class="s">&quot;sig&quot;</span>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The token that identifies the signed SAS key component of the shared access signature.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const string</b> <a id="e7c644e315628966" href="../../R/e7c644e315628966.html" target="n" data-glyph="10,1" class="i field">SignedKeyNameToken</a> = <span class="s">&quot;skn&quot;</span>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The token that identifies the signed expiration time of the shared access signature.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const string</b> <a id="da78a3bd03d11539" href="../../R/da78a3bd03d11539.html" target="n" data-glyph="10,1" class="i field">SignedExpiryToken</a> = <span class="s">&quot;se&quot;</span>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The token that fully identifies the signed resource within the signature.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const string</b> <a id="9710040c63880ec8" href="../../R/9710040c63880ec8.html" target="n" data-glyph="10,1" class="i field">SignedResourceFullIdentifierToken</a> = <a href="#5a8eaf8a7fb05408" class="i field">AuthenticationTypeToken</a> + <span class="s">&quot; &quot;</span> + <a href="#2e637c657e7160b2" class="i field">SignedResourceToken</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The character used to separate a token and its value in the connection string.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const char</b> <a id="69613d146cfdb204" href="../../R/69613d146cfdb204.html" target="n" data-glyph="10,1" class="i field">TokenValueSeparator</a> = <span class="s">&#39;=&#39;</span>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The character used to mark the beginning of a new token/value pair in the signature.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const char</b> <a id="84bcd31b51194093" href="../../R/84bcd31b51194093.html" target="n" data-glyph="10,1" class="i field">TokenValuePairDelimiter</a> = <span class="s">&#39;&amp;&#39;</span>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The default length of time to consider a signature valid, if not otherwise specified.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static readonly</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="2234c88e10bc1c46" href="../../R/2234c88e10bc1c46.html" target="n" data-glyph="46,1" class="i field">DefaultSignatureValidityDuration</a> = <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#ae74be5264df78d8" class="i method">FromMinutes</a>(30);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">Represents the Unix epoch time value, January 1, 1970 12:00:00, UTC.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static readonly</b> <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a> <a id="88036a8a5a742d67" href="../../R/88036a8a5a742d67.html" target="n" data-glyph="46,1" class="i field">Epoch</a> = <b>new</b> <a href="@0@mscorlib/A.html#c5a5d2a27921e551" class="t constructor">DateTimeOffset</a>(1970, 1, 1, 0, 0, 0, <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#225346b4cd3a8300" class="i field">Zero</a>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The name of the shared access key, either for the Event Hubs namespace</span>
+        <span class="c">///</span><span class="c">   or the Event Hub.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public string</b> <a id="9eb66e75a87ffb34" href="../../R/9eb66e75a87ffb34.html" target="n" data-glyph="102,1" class="i property">SharedAccessKeyName</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The value of the shared access key, either for the Event Hubs namespace</span>
+        <span class="c">///</span><span class="c">   or the Event Hub.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public string</b> <a id="cafae851ea22cc22" href="../../R/cafae851ea22cc22.html" target="n" data-glyph="102,1" class="i property">SharedAccessKey</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The date and time that the shared access signature expires, in UTC.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a> <a id="5fc52558a5a07930" href="../../R/5fc52558a5a07930.html" target="n" data-glyph="102,1" class="i property">SignatureExpiration</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The resource to which the shared access signature is intended to serve as</span>
+        <span class="c">///</span><span class="c">   authorization.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public string</b> <a id="18cd53f2ec71f9e9" href="../../R/18cd53f2ec71f9e9.html" target="n" data-glyph="102,1" class="i property">Resource</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The shared access signature to be used for authorization, either for the Event Hubs namespace</span>
+        <span class="c">///</span><span class="c">   or the Event Hub.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public string</b> <a id="928eb7c4148c310a" href="../../R/928eb7c4148c310a.html" target="n" data-glyph="102,1" class="i property">Value</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#f4285b7f2ba55474" class="t t">SharedAccessSignature</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">eventHubResource</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The Event Hubs resource to which the token is intended to serve as authorization.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">sharedAccessKeyName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the shared access key that the signature should be based on.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">sharedAccessKey</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The value of the shared access key for the signature.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">signatureValidityDuration</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The duration that the signature should be considered valid; if not specified, a default will be assumed.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="38d452481fa15d96" href="../../R/38d452481fa15d96.html" target="n" data-glyph="72,1" class="t constructor">SharedAccessSignature</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r0 rd" class="r0 r">eventHubResource</span>,
+                                     <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r1 rd" class="r1 r">sharedAccessKeyName</span>,
+                                     <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r2 rd" class="r2 r">sharedAccessKey</span>,
+                                     <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>? <span id="r3 rd" class="r3 r">signatureValidityDuration</span> = <b>default</b>)
+        {
+            <span class="r3 r">signatureValidityDuration</span> ??= <a href="#2234c88e10bc1c46" class="i field">DefaultSignatureValidityDuration</a>;
+ 
+            <a href="../../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r0 r">eventHubResource</span>, <b>nameof</b>(<span class="r0 r">eventHubResource</span>));
+            <a href="../../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r1 r">sharedAccessKeyName</span>, <b>nameof</b>(<span class="r1 r">sharedAccessKeyName</span>));
+            <a href="../../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r2 r">sharedAccessKey</span>, <b>nameof</b>(<span class="r2 r">sharedAccessKey</span>));
+ 
+            <a href="../../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Core/Argument.cs.html#39455e562629fa1a" class="i method">AssertNotTooLong</a>(<span class="r1 r">sharedAccessKeyName</span>, <a href="#98f71a61678733d4" class="i field">MaximumKeyNameLength</a>, <b>nameof</b>(<span class="r1 r">sharedAccessKeyName</span>));
+            <a href="../../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Core/Argument.cs.html#39455e562629fa1a" class="i method">AssertNotTooLong</a>(<span class="r2 r">sharedAccessKey</span>, <a href="#24443f74a6f82c85" class="i field">MaximumKeyLength</a>, <b>nameof</b>(<span class="r2 r">sharedAccessKey</span>));
+            <a href="../../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Core/Argument.cs.html#9a26810a183caba7" class="i method">AssertNotNegative</a>(<span class="r3 r">signatureValidityDuration</span>.<a href="@0@mscorlib/A.html#7b38d1fa76071c95" class="i property">Value</a>, <b>nameof</b>(<span class="r3 r">signatureValidityDuration</span>));
+ 
+            <a href="#9eb66e75a87ffb34" class="i property">SharedAccessKeyName</a> = <span class="r1 r">sharedAccessKeyName</span>;
+            <a href="#cafae851ea22cc22" class="i property">SharedAccessKey</a> = <span class="r2 r">sharedAccessKey</span>;
+            <a href="#5fc52558a5a07930" class="i property">SignatureExpiration</a> = <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@0@mscorlib/A.html#04abe0cac293ebd0" class="i property">UtcNow</a>.<a href="@0@mscorlib/A.html#5cff8f26f5c7c095" class="i method">Add</a>(<span class="r3 r">signatureValidityDuration</span>.<a href="@0@mscorlib/A.html#7b38d1fa76071c95" class="i property">Value</a>);
+            <a href="#18cd53f2ec71f9e9" class="i property">Resource</a> = <span class="r0 r">eventHubResource</span>;
+            <a href="#928eb7c4148c310a" class="i property">Value</a> = <a href="#6505d5faf751d270" class="i method">BuildSignature</a>(<a href="#18cd53f2ec71f9e9" class="i property">Resource</a>, <span class="r1 r">sharedAccessKeyName</span>, <span class="r2 r">sharedAccessKey</span>, <a href="#5fc52558a5a07930" class="i property">SignatureExpiration</a>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#f4285b7f2ba55474" class="t t">SharedAccessSignature</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">sharedAccessSignature</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The shared access signature that will be parsed as the basis of this instance.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">sharedAccessKey</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The value of the shared access key for the signature.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="7bc6fddbc5276120" href="../../R/7bc6fddbc5276120.html" target="n" data-glyph="72,1" class="t constructor">SharedAccessSignature</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r4 rd" class="r4 r">sharedAccessSignature</span>,
+                                     <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r5 rd" class="r5 r">sharedAccessKey</span>)
+        {
+            <a href="../../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r4 r">sharedAccessSignature</span>, <b>nameof</b>(<span class="r4 r">sharedAccessSignature</span>));
+            <a href="../../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Core/Argument.cs.html#39455e562629fa1a" class="i method">AssertNotTooLong</a>(<span class="r5 r">sharedAccessKey</span>, <a href="#24443f74a6f82c85" class="i field">MaximumKeyLength</a>, <b>nameof</b>(<span class="r5 r">sharedAccessKey</span>));
+ 
+            (<a href="#9eb66e75a87ffb34" class="i property">SharedAccessKeyName</a>, <a href="#18cd53f2ec71f9e9" class="i property">Resource</a>, <a href="#5fc52558a5a07930" class="i property">SignatureExpiration</a>) = <a href="#cff2f50f57253261" class="i method">ParseSignature</a>(<span class="r4 r">sharedAccessSignature</span>);
+ 
+            <a href="#cafae851ea22cc22" class="i property">SharedAccessKey</a> = <span class="r5 r">sharedAccessKey</span>;
+            <a href="#928eb7c4148c310a" class="i property">Value</a> = <span class="r4 r">sharedAccessSignature</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#f4285b7f2ba55474" class="t t">SharedAccessSignature</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">sharedAccessSignature</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The shared access signature that will be parsed as the basis of this instance.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="c7c49e889d3bf348" href="../../R/c7c49e889d3bf348.html" target="n" data-glyph="72,1" class="t constructor">SharedAccessSignature</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r6 rd" class="r6 r">sharedAccessSignature</span>) : <a href="#7bc6fddbc5276120" class="k">this</a>(<span class="r6 r">sharedAccessSignature</span>, <b>null</b>)
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#f4285b7f2ba55474" class="t t">SharedAccessSignature</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">eventHubResource</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The Event Hubs resource to which the token is intended to serve as authorization.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">sharedAccessKeyName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the shared access key that the signature should be based on.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">sharedAccessKey</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The value of the shared access key for the signature.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r10 r">value</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The shared access signature to be used for authorization.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r11 r">signatureExpiration</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The date and time that the shared access signature expires, in UTC.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="ff183c4696ccde11" href="../../R/ff183c4696ccde11.html" target="n" data-glyph="72,1" class="t constructor">SharedAccessSignature</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r7 rd" class="r7 r">eventHubResource</span>,
+                                     <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r8 rd" class="r8 r">sharedAccessKeyName</span>,
+                                     <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r9 rd" class="r9 r">sharedAccessKey</span>,
+                                     <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r10 rd" class="r10 r">value</span>,
+                                     <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a> <span id="r11 rd" class="r11 r">signatureExpiration</span>)
+        {
+            <a href="../../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r7 r">eventHubResource</span>, <b>nameof</b>(<span class="r7 r">eventHubResource</span>));
+            <a href="../../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r8 r">sharedAccessKeyName</span>, <b>nameof</b>(<span class="r8 r">sharedAccessKeyName</span>));
+            <a href="../../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r9 r">sharedAccessKey</span>, <b>nameof</b>(<span class="r9 r">sharedAccessKey</span>));
+ 
+            <a href="../../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Core/Argument.cs.html#39455e562629fa1a" class="i method">AssertNotTooLong</a>(<span class="r8 r">sharedAccessKeyName</span>, <a href="#98f71a61678733d4" class="i field">MaximumKeyNameLength</a>, <b>nameof</b>(<span class="r8 r">sharedAccessKeyName</span>));
+            <a href="../../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Core/Argument.cs.html#39455e562629fa1a" class="i method">AssertNotTooLong</a>(<span class="r9 r">sharedAccessKey</span>, <a href="#24443f74a6f82c85" class="i field">MaximumKeyLength</a>, <b>nameof</b>(<span class="r9 r">sharedAccessKey</span>));
+ 
+            <a href="#18cd53f2ec71f9e9" class="i property">Resource</a> = <span class="r7 r">eventHubResource</span>;
+            <a href="#9eb66e75a87ffb34" class="i property">SharedAccessKeyName</a> = <span class="r8 r">sharedAccessKeyName</span>;
+            <a href="#cafae851ea22cc22" class="i property">SharedAccessKey</a> = <span class="r9 r">sharedAccessKey</span>;
+            <a href="#928eb7c4148c310a" class="i property">Value</a> = <span class="r10 r">value</span>;
+            <a href="#5fc52558a5a07930" class="i property">SignatureExpiration</a> = <span class="r11 r">signatureExpiration</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Creates a new signature with the specified period for which the shared access signature is considered valid.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">signatureValidityDuration</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The duration that the signature should be considered valid.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A new </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#f4285b7f2ba55474" class="t t">SharedAccessSignature</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> based on the same key, but with a new expiration time.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a href="#f4285b7f2ba55474" class="t t">SharedAccessSignature</a> <a id="0213189449ac8780" href="../../R/0213189449ac8780.html" target="n" data-glyph="72,1" class="i method">CloneWithNewExpiration</a>(<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r12 rd" class="r12 r">signatureValidityDuration</span>)
+        {
+            <a href="../../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Core/Argument.cs.html#9a26810a183caba7" class="i method">AssertNotNegative</a>(<span class="r12 r">signatureValidityDuration</span>, <b>nameof</b>(<span class="r12 r">signatureValidityDuration</span>));
+ 
+            <span class="c">// The key must have been provided at construction in order to manipulate the signature.</span>
+ 
+            <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<a href="#cafae851ea22cc22" class="i property">SharedAccessKey</a>))
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<a href="../../Resources.Designer.cs.html#0f60eafa1a3b4f36" class="t t">Resources</a>.<a href="../../Resources.Designer.cs.html#5042f79e7d817e9b" class="i property">SharedAccessKeyIsRequired</a>);
+            }
+ 
+            <b>return</b> <b>new</b> <a href="#38d452481fa15d96" class="t constructor">SharedAccessSignature</a>(<a href="#18cd53f2ec71f9e9" class="i property">Resource</a>, <a href="#9eb66e75a87ffb34" class="i property">SharedAccessKeyName</a>, <a href="#cafae851ea22cc22" class="i property">SharedAccessKey</a>, <span class="r12 r">signatureValidityDuration</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Converts the instance to string representation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">System</span>.<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="t t">String</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> that represents this instance.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override string</b> <a id="529e1280df9b40a3" href="../../R/529e1280df9b40a3.html" target="n" data-glyph="72,1" class="i method">ToString</a>() =&gt; <a href="#928eb7c4148c310a" class="i property">Value</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Parses a shared access signature into its component parts.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">sharedAccessSignature</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The shared access signature to parse.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The set of composite properties parsed from the signature.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <a id="98694b32f1596a52" href="../../R/../../0000000000.html" target="n" data-glyph="42,1" class="i field">KeyName</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <a id="35387c7dbe552ba6" href="../../R/../../0000000000.html" target="n" data-glyph="42,1" class="i field">Resource</a>, <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a> <a id="c8bc8066d3ade111" href="../../R/../../0000000000.html" target="n" data-glyph="42,1" class="i field">ExpirationTime</a>) <a id="cff2f50f57253261" href="../../R/cff2f50f57253261.html" target="n" data-glyph="76,1" class="i method">ParseSignature</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r13 rd" class="r13 r">sharedAccessSignature</span>)
+        {
+            <b>int</b> <span id="r14 rd" class="r14 r">tokenPositionModifier</span> = (<span class="r13 r">sharedAccessSignature</span>[0] == <a href="#84bcd31b51194093" class="i field">TokenValuePairDelimiter</a>) ? 0 : 1;
+            <b>int</b> <span id="r15 rd" class="r15 r">lastPosition</span> = 0;
+            <b>int</b> <span id="r16 rd" class="r16 r">currentPosition</span> = 0;
+            <b>int</b> <span id="r17 rd" class="r17 r">valueStart</span>;
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r18 rd" class="r18 r">slice</span>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r19 rd" class="r19 r">token</span>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r20 rd" class="r20 r">value</span>;
+ 
+            <a href="/System.ValueTuple/A.html#a4ad7dc5629aa617" class="k">var</a> <span id="r21 rd" class="r21 r">parsedValues</span> =
+            (
+                <a href="/System.ValueTuple/A.html#98694b32f1596a52" class="i field">KeyName</a>: <b>default</b>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>),
+                <a href="/System.ValueTuple/A.html#35387c7dbe552ba6" class="i field">Resource</a>: <b>default</b>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>),
+                <a href="/System.ValueTuple/A.html#c8bc8066d3ade111" class="i field">ExpirationTime</a>: <b>default</b>(<a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>)
+            );
+ 
+            <b>while</b> (<span class="r16 r">currentPosition</span> != -1)
+            {
+                <span class="c">// Slice the string into the next token/value pair.</span>
+ 
+                <span class="r16 r">currentPosition</span> = <span class="r13 r">sharedAccessSignature</span>.<a href="@0@mscorlib/A.html#a3e563d9d6528abf" class="i method">IndexOf</a>(<a href="#84bcd31b51194093" class="i field">TokenValuePairDelimiter</a>, <span class="r15 r">lastPosition</span> + 1);
+ 
+                <b>if</b> (<span class="r16 r">currentPosition</span> &gt;= 0)
+                {
+                    <span class="r18 r">slice</span> = <span class="r13 r">sharedAccessSignature</span>.<a href="@0@mscorlib/A.html#8124961f027d9ac9" class="i method">Substring</a>(<span class="r15 r">lastPosition</span>, (<span class="r16 r">currentPosition</span> - <span class="r15 r">lastPosition</span>));
+                }
+                <b>else</b>
+                {
+                    <span class="r18 r">slice</span> = <span class="r13 r">sharedAccessSignature</span>.<a href="@0@mscorlib/A.html#882fa7998d6ca35a" class="i method">Substring</a>(<span class="r15 r">lastPosition</span>);
+                }
+ 
+                <span class="c">// Break the token and value apart, if this is a legal pair.</span>
+ 
+                <span class="r17 r">valueStart</span> = <span class="r18 r">slice</span>.<a href="@0@mscorlib/A.html#eb06d6d166f6a3d9" class="i method">IndexOf</a>(<a href="#69613d146cfdb204" class="i field">TokenValueSeparator</a>);
+ 
+                <b>if</b> (<span class="r17 r">valueStart</span> &gt;= 0)
+                {
+                    <span class="r19 r">token</span> = <span class="r18 r">slice</span>.<a href="@0@mscorlib/A.html#8124961f027d9ac9" class="i method">Substring</a>((1 - <span class="r14 r">tokenPositionModifier</span>), (<span class="r17 r">valueStart</span> - 1 + <span class="r14 r">tokenPositionModifier</span>));
+                    <span class="r20 r">value</span> = <span class="r18 r">slice</span>.<a href="@0@mscorlib/A.html#882fa7998d6ca35a" class="i method">Substring</a>(<span class="r17 r">valueStart</span> + 1);
+ 
+                    <span class="c">// Guard against leading and trailing spaces, only trimming if there is a need.</span>
+ 
+                    <b>if</b> ((!<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r19 r">token</span>)) &amp;&amp; (<b>char</b>.<a href="@0@mscorlib/A.html#cda2cc9b76535970" class="i method">IsWhiteSpace</a>(<span class="r19 r">token</span>[0])) || <b>char</b>.<a href="@0@mscorlib/A.html#cda2cc9b76535970" class="i method">IsWhiteSpace</a>(<span class="r19 r">token</span><a href="@0@mscorlib/A.html#8307d03426b56fe1">[</a><span class="r19 r">token</span>.<a href="@0@mscorlib/A.html#e13f5829ef28aa07" class="i property">Length</a> - 1]))
+                    {
+                        <span class="r19 r">token</span> = <span class="r19 r">token</span>.<a href="@0@mscorlib/A.html#06a5f7c688e69307" class="i method">Trim</a>();
+                    }
+ 
+                    <b>if</b> ((!<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r20 r">value</span>)) &amp;&amp; (<b>char</b>.<a href="@0@mscorlib/A.html#cda2cc9b76535970" class="i method">IsWhiteSpace</a>(<span class="r20 r">value</span>[0]) || <b>char</b>.<a href="@0@mscorlib/A.html#cda2cc9b76535970" class="i method">IsWhiteSpace</a>(<span class="r20 r">value</span><a href="@0@mscorlib/A.html#8307d03426b56fe1">[</a><span class="r20 r">value</span>.<a href="@0@mscorlib/A.html#e13f5829ef28aa07" class="i property">Length</a> - 1])))
+                    {
+                        <span class="r20 r">value</span> = <span class="r20 r">value</span>.<a href="@0@mscorlib/A.html#06a5f7c688e69307" class="i method">Trim</a>();
+                    }
+ 
+                    <span class="c">// If there was no value for a key, then consider the signature to be malformed.</span>
+ 
+                    <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r20 r">value</span>))
+                    {
+                        <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#4b20cd3790b6426a" class="t constructor">ArgumentException</a>(<a href="../../Resources.Designer.cs.html#0f60eafa1a3b4f36" class="t t">Resources</a>.<a href="../../Resources.Designer.cs.html#7357d3f23d48e56b" class="i property">InvalidSharedAccessSignature</a>, <b>nameof</b>(<span class="r13 r">sharedAccessSignature</span>));
+                    }
+ 
+                    <span class="c">// Compare the token against the known signature properties and capture the</span>
+                    <span class="c">// pair if they are a known attribute.</span>
+ 
+                    <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#0be9474bc8e160b6" class="i method">Compare</a>(<a href="#9710040c63880ec8" class="i field">SignedResourceFullIdentifierToken</a>, <span class="r19 r">token</span>, <a href="@0@mscorlib/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@0@mscorlib/A.html#6c3139b940557bf9" class="i field">OrdinalIgnoreCase</a>) == 0)
+                    {
+                        <span class="r21 r">parsedValues</span>.<a href="/System.ValueTuple/A.html#35387c7dbe552ba6" class="i field">Resource</a> = <a href="@0@System/A.html#be62bd8978189a87" class="t t">WebUtility</a>.<a href="@0@System/A.html#73c04b8a4fde5039" class="i method">UrlDecode</a>(<span class="r20 r">value</span>);
+                    }
+                    <b>else</b> <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#0be9474bc8e160b6" class="i method">Compare</a>(<a href="#e7c644e315628966" class="i field">SignedKeyNameToken</a>, <span class="r19 r">token</span>, <a href="@0@mscorlib/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@0@mscorlib/A.html#6c3139b940557bf9" class="i field">OrdinalIgnoreCase</a>) == 0)
+                    {
+                        <span class="r21 r">parsedValues</span>.<a href="/System.ValueTuple/A.html#98694b32f1596a52" class="i field">KeyName</a> = <a href="@0@System/A.html#be62bd8978189a87" class="t t">WebUtility</a>.<a href="@0@System/A.html#73c04b8a4fde5039" class="i method">UrlDecode</a>(<span class="r20 r">value</span>);
+                    }
+                    <b>else</b> <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#0be9474bc8e160b6" class="i method">Compare</a>(<a href="#da78a3bd03d11539" class="i field">SignedExpiryToken</a>, <span class="r19 r">token</span>, <a href="@0@mscorlib/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@0@mscorlib/A.html#6c3139b940557bf9" class="i field">OrdinalIgnoreCase</a>) == 0)
+                    {
+                        <b>if</b> (!<b>long</b>.<a href="@0@mscorlib/A.html#10e2d1bed36c76f3" class="i method">TryParse</a>(<a href="@0@System/A.html#be62bd8978189a87" class="t t">WebUtility</a>.<a href="@0@System/A.html#73c04b8a4fde5039" class="i method">UrlDecode</a>(<span class="r20 r">value</span>), <a href="@0@mscorlib/A.html#4523c5163ff35e41" class="t t">NumberStyles</a>.<a href="@0@mscorlib/A.html#2e8a2ade4d29a578" class="i field">Integer</a>, <a href="@0@mscorlib/A.html#e319c6636909012f" class="t t">CultureInfo</a>.<a href="@0@mscorlib/A.html#26ef1c020f0dbb7a" class="i property">InvariantCulture</a>, <b>out</b> <a href="@0@mscorlib/A.html#e566178cce890c36" class="k">var</a> <span id="r22 rd" class="r22 r">unixTime</span>))
+                        {
+                            <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#4b20cd3790b6426a" class="t constructor">ArgumentException</a>(<a href="../../Resources.Designer.cs.html#0f60eafa1a3b4f36" class="t t">Resources</a>.<a href="../../Resources.Designer.cs.html#7357d3f23d48e56b" class="i property">InvalidSharedAccessSignature</a>, <b>nameof</b>(<span class="r13 r">sharedAccessSignature</span>));
+                        }
+ 
+                        <span class="r21 r">parsedValues</span>.<a href="/System.ValueTuple/A.html#c8bc8066d3ade111" class="i field">ExpirationTime</a> = <a href="#6a2eedcbe6636b1e" class="i method">ConvertFromUnixTime</a>(<span class="r22 r">unixTime</span>);
+                    }
+                }
+                <b>else</b> <b>if</b> ((<span class="r18 r">slice</span>.<a href="@0@mscorlib/A.html#e13f5829ef28aa07" class="i property">Length</a> != 1) || (<span class="r18 r">slice</span>[0] != <a href="#84bcd31b51194093" class="i field">TokenValuePairDelimiter</a>))
+                {
+                    <span class="c">// This wasn&#39;t a legal pair and it is not simply a trailing delimiter; consider</span>
+                    <span class="c">// the signature to be malformed.</span>
+ 
+                    <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#4b20cd3790b6426a" class="t constructor">ArgumentException</a>(<a href="../../Resources.Designer.cs.html#0f60eafa1a3b4f36" class="t t">Resources</a>.<a href="../../Resources.Designer.cs.html#7357d3f23d48e56b" class="i property">InvalidSharedAccessSignature</a>, <b>nameof</b>(<span class="r13 r">sharedAccessSignature</span>));
+                }
+ 
+                <span class="r14 r">tokenPositionModifier</span> = 0;
+                <span class="r15 r">lastPosition</span> = <span class="r16 r">currentPosition</span>;
+            }
+ 
+            <span class="c">// Validate that the required components were able to be parsed from the</span>
+            <span class="c">// signature.</span>
+ 
+            <b>if</b> ((<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r21 r">parsedValues</span>.<a href="/System.ValueTuple/A.html#35387c7dbe552ba6" class="i field">Resource</a>))
+                || (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r21 r">parsedValues</span>.<a href="/System.ValueTuple/A.html#98694b32f1596a52" class="i field">KeyName</a>))
+                || (<span class="r21 r">parsedValues</span>.<a href="/System.ValueTuple/A.html#c8bc8066d3ade111" class="i field">ExpirationTime</a> == <b>default</b>))
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#4b20cd3790b6426a" class="t constructor">ArgumentException</a>(<a href="../../Resources.Designer.cs.html#0f60eafa1a3b4f36" class="t t">Resources</a>.<a href="../../Resources.Designer.cs.html#7357d3f23d48e56b" class="i property">InvalidSharedAccessSignature</a>, <b>nameof</b>(<span class="r13 r">sharedAccessSignature</span>));
+            }
+ 
+            <b>return</b> <span class="r21 r">parsedValues</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Builds the shared access signature value, which can be used as a token for</span>
+        <span class="c">///</span><span class="c">   access to the Event Hubs service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r23 r">audience</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The audience scope to which this signature applies.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r24 r">sharedAccessKeyName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the shared access key that the signature should be based on.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r25 r">sharedAccessKey</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The value of the shared access key for the signature.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r26 r">expirationTime</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The date/time, in UTC, that the signature expires.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The value of the shared access signature.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static string</b> <a id="6505d5faf751d270" href="../../R/6505d5faf751d270.html" target="n" data-glyph="76,1" class="i method">BuildSignature</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r23 rd" class="r23 r">audience</span>,
+                                             <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r24 rd" class="r24 r">sharedAccessKeyName</span>,
+                                             <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r25 rd" class="r25 r">sharedAccessKey</span>,
+                                             <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a> <span id="r26 rd" class="r26 r">expirationTime</span>)
+        {
+            <b>using</b> (<a href="@0@mscorlib/A.html#fbe807e4ab1f7871" class="k">var</a> <span id="r27 rd" class="r27 r">hmac</span> = <b>new</b> <a href="@0@mscorlib/A.html#3d67bd9194463174" class="t constructor">HMACSHA256</a>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<span class="r25 r">sharedAccessKey</span>)))
+            {
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r28 rd" class="r28 r">encodedAudience</span> = <a href="@0@System/A.html#be62bd8978189a87" class="t t">WebUtility</a>.<a href="@0@System/A.html#c74b8742f6516acd" class="i method">UrlEncode</a>(<span class="r23 r">audience</span>);
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r29 rd" class="r29 r">expiration</span> = <a href="@0@mscorlib/A.html#fc990bd1275d43d6" class="t t">Convert</a>.<a href="@0@mscorlib/A.html#113e3a4d721fd512" class="i method">ToString</a>(<a href="#8aece414d4d13224" class="i method">ConvertToUnixTime</a>(<span class="r26 r">expirationTime</span>), <a href="@0@mscorlib/A.html#e319c6636909012f" class="t t">CultureInfo</a>.<a href="@0@mscorlib/A.html#26ef1c020f0dbb7a" class="i property">InvariantCulture</a>);
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r30 rd" class="r30 r">signature</span> = <a href="@0@mscorlib/A.html#fc990bd1275d43d6" class="t t">Convert</a>.<a href="@0@mscorlib/A.html#f9e5bd7b69c5f334" class="i method">ToBase64String</a>(<span class="r27 r">hmac</span>.<a href="@0@mscorlib/A.html#a71a3cba2c656040" class="i method">ComputeHash</a>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<span class="s">$&quot;</span>{ <span class="r28 r">encodedAudience</span> }\n{ <span class="r29 r">expiration</span> }<span class="s">&quot;</span>)));
+ 
+                <b>return</b> <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#691a34e179b91fdb" class="i method">Format</a>(<a href="@0@mscorlib/A.html#e319c6636909012f" class="t t">CultureInfo</a>.<a href="@0@mscorlib/A.html#26ef1c020f0dbb7a" class="i property">InvariantCulture</a>, <span class="s">&quot;{0} {1}={2}&amp;{3}={4}&amp;{5}={6}&amp;{7}={8}&quot;</span>,
+                    <a href="#5a8eaf8a7fb05408" class="i field">AuthenticationTypeToken</a>,
+                    <a href="#2e637c657e7160b2" class="i field">SignedResourceToken</a>, <span class="r28 r">encodedAudience</span>,
+                    <a href="#f393eb171f71a00d" class="i field">SignatureToken</a>, <a href="@0@System/A.html#be62bd8978189a87" class="t t">WebUtility</a>.<a href="@0@System/A.html#c74b8742f6516acd" class="i method">UrlEncode</a>(<span class="r30 r">signature</span>),
+                    <a href="#da78a3bd03d11539" class="i field">SignedExpiryToken</a>, <a href="@0@System/A.html#be62bd8978189a87" class="t t">WebUtility</a>.<a href="@0@System/A.html#c74b8742f6516acd" class="i method">UrlEncode</a>(<span class="r29 r">expiration</span>),
+                    <a href="#e7c644e315628966" class="i field">SignedKeyNameToken</a>, <a href="@0@System/A.html#be62bd8978189a87" class="t t">WebUtility</a>.<a href="@0@System/A.html#c74b8742f6516acd" class="i method">UrlEncode</a>(<span class="r24 r">sharedAccessKeyName</span>));
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Converts a Unix-style timestamp into the corresponding </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a><span class="c">&quot;</span> <span class="c">/&gt;</span>
+        <span class="c">///</span><span class="c">   value.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r31 r">unixTime</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The timestamp to convert.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The date/time, in UTC, which corresponds to the specified timestamp.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static</b> <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a> <a id="6a2eedcbe6636b1e" href="../../R/6a2eedcbe6636b1e.html" target="n" data-glyph="76,1" class="i method">ConvertFromUnixTime</a>(<b>long</b> <span id="r31 rd" class="r31 r">unixTime</span>) =&gt;
+            <a href="#88036a8a5a742d67" class="i field">Epoch</a>.<a href="@0@mscorlib/A.html#b1f3371f1ec3f990" class="i method">AddSeconds</a>(<span class="r31 r">unixTime</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Converts a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> value to the corresponding Unix-style timestamp.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r32 r">dateTimeOffset</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The date/time to convert.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The Unix-style timestamp which corresponds to the specified date/time.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static long</b> <a id="8aece414d4d13224" href="../../R/8aece414d4d13224.html" target="n" data-glyph="76,1" class="i method">ConvertToUnixTime</a>(<a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a> <span id="r32 rd" class="r32 r">dateTimeOffset</span>) =&gt;
+            <a href="@0@mscorlib/A.html#fc990bd1275d43d6" class="t t">Convert</a>.<a href="@0@mscorlib/A.html#a13c2ee73c21081e" class="i method">ToInt64</a>((<span class="r32 r">dateTimeOffset</span> - <a href="#88036a8a5a742d67" class="i field">Epoch</a>).<a href="@0@mscorlib/A.html#061d7498e3227cfb" class="i property">TotalSeconds</a>);
+    }
+}
+</pre></td></tr></table></div></body></html>

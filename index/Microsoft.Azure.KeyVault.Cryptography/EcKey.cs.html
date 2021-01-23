@@ -1,0 +1,658 @@
+﻿<!DOCTYPE html>
+<html><head><title>EcKey.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(649);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.KeyVault.Cryptography/EcKey.cs" target="_top">EcKey.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.KeyVault.Cryptography" target="_top">Microsoft.Azure.KeyVault.Cryptography\src\Microsoft.Azure.KeyVault.Cryptography.csproj</a> (Microsoft.Azure.KeyVault.Cryptography)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for</span>
+<span class="c">// license information.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Security</span>.<span class="i n">Cryptography</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">KeyVault</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">KeyVault</span>.<span class="i n">Cryptography</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">KeyVault</span>.<span class="i n">Cryptography</span>.<span class="i n">Algorithms</span>;
+ 
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">NETSTANDARD</span>
+<span class="e">using TaskException = System.Threading.Tasks.Task;
+</span><span class="k preprocess">#</span><span class="k preprocess">endif</span>
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">KeyVault</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> An elliptic curve key.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>public class</b> <a id="f7db18826fbaaa2b" href="R/f7db18826fbaaa2b.html" target="n" data-glyph="0,0" class="t t">EcKey</a> : <a href="/Microsoft.Azure.KeyVault.Core/A.html#f936b5b17e061da7" class="t t">IKey</a>
+    {
+        <b>public const string</b> <a id="4959651e93671dab" href="R/4959651e93671dab.html" target="n" data-glyph="6,1" class="i field">P256</a> = <span class="s">&quot;P-256&quot;</span>;
+        <b>public const string</b> <a id="fd61c08fed7f809d" href="R/fd61c08fed7f809d.html" target="n" data-glyph="6,1" class="i field">P384</a> = <span class="s">&quot;P-384&quot;</span>;
+        <b>public const string</b> <a id="f3cae6cb096aa168" href="R/f3cae6cb096aa168.html" target="n" data-glyph="6,1" class="i field">P521</a> = <span class="s">&quot;P-521&quot;</span>;
+        <b>public const string</b> <a id="b0aeb2b611221758" href="R/b0aeb2b611221758.html" target="n" data-glyph="6,1" class="i field">P256K</a> = <span class="s">&quot;P-256K&quot;</span>;
+ 
+        <b>private static readonly string</b> <a id="28828aafc086e235" href="R/28828aafc086e235.html" target="n" data-glyph="46,1" class="i field">DefaultCurve</a> = <a href="#4959651e93671dab" class="i field">P256</a>;
+ 
+        <b>private</b> <a href="@0@System.Core/A.html#59084d68c76f225c" class="t t">ECDsa</a> <a id="85904979053a1642" href="R/85904979053a1642.html" target="n" data-glyph="46,1" class="i field">_ecdsa</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Key Identifier</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public string</b> <a id="0089bfb8238eb2ad" href="R/0089bfb8238eb2ad.html" target="n" data-glyph="102,1" class="i property">Kid</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Constructor, creates a P-256 key with a GUID identifier.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a id="a9ef2b7733baa1d3" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">EcKey</a>() : <a href="#9f0ed0a0e7f4c5bb" class="k">this</a>( <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#8015cb30da6ca742" class="i method">ToString</a>( <span class="s">&quot;D&quot;</span> ), <a href="#28828aafc086e235" class="i field">DefaultCurve</a> )
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Constructor, creates a P-256 key.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">kid</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The key identifier to use</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="220ed53e3cd6f0e4" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">EcKey</a>( <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r0 rd" class="r0 r">kid</span> ) : <a href="#9f0ed0a0e7f4c5bb" class="k">this</a>( <span class="r0 r">kid</span>, <a href="#28828aafc086e235" class="i field">DefaultCurve</a> )
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Constructor.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">kid</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The key identifier to use</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">curve</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of elliptic curve to use</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="9f0ed0a0e7f4c5bb" href="R/9f0ed0a0e7f4c5bb.html" target="n" data-glyph="72,1" class="t constructor">EcKey</a>( <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r1 rd" class="r1 r">kid</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r2 rd" class="r2 r">curve</span> )
+        {
+            <b>if</b> ( <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>( <span class="r1 r">kid</span> ) )
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>( <b>nameof</b>( <span class="r1 r">kid</span> ) );
+ 
+            <a href="#0089bfb8238eb2ad" class="i property">Kid</a> = <span class="r1 r">kid</span>;
+ 
+            <a href="@0@System.Core/A.html#849bcfa612bcf097" class="k">var</a> <span id="r3 rd" class="r3 r">kcp</span> = <b>new</b> <a href="@0@System.Core/A.html#2934898eeaad404b" class="t constructor">CngKeyCreationParameters</a>();
+            <span class="r3 r">kcp</span>.<a href="@0@System.Core/A.html#cda7df1ec7a64281" class="i property">ExportPolicy</a> = <a href="@0@System.Core/A.html#9dfd8402656557e3" class="t t">CngExportPolicies</a>.<a href="@0@System.Core/A.html#f2322ad7b9b9254a" class="i field">AllowPlaintextExport</a>;
+            <span class="r3 r">kcp</span>.<a href="@0@System.Core/A.html#10aacc9a19aaf4e2" class="i property">KeyUsage</a> = <a href="@0@System.Core/A.html#9ce8d7c267170a57" class="t t">CngKeyUsages</a>.<a href="@0@System.Core/A.html#c1818bb914fd99b6" class="i field">Signing</a>;
+ 
+            <a href="@0@System.Core/A.html#46d0be971fbf8134" class="t t">CngAlgorithm</a> <span id="r4 rd" class="r4 r">cngAlgo</span>;
+            <b>switch</b> ( <span class="r2 r">curve</span> )
+            {
+                <b>case</b> <a href="#4959651e93671dab" class="i field">P256</a>:
+                    <span class="r4 r">cngAlgo</span> = <a href="@0@System.Core/A.html#46d0be971fbf8134" class="t t">CngAlgorithm</a>.<a href="@0@System.Core/A.html#bb1b85afafc141e5" class="i property">ECDsaP256</a>;
+                    <a href="#f7d1c6e692f8f47b" class="i property">DefaultSignatureAlgorithm</a> = <a href="Algorithms/Es256.cs.html#40c5e6ca89818e29" class="t t">Es256</a>.<a href="Algorithms/Es256.cs.html#0541a65b7ec351fe" class="i field">AlgorithmName</a>;
+                    <b>break</b>;
+ 
+                <b>case</b> <a href="#fd61c08fed7f809d" class="i field">P384</a>:
+                    <span class="r4 r">cngAlgo</span> = <a href="@0@System.Core/A.html#46d0be971fbf8134" class="t t">CngAlgorithm</a>.<a href="@0@System.Core/A.html#5fbd27b1737e97af" class="i property">ECDsaP384</a>;
+                    <a href="#f7d1c6e692f8f47b" class="i property">DefaultSignatureAlgorithm</a> = <a href="Algorithms/Es384.cs.html#bb2614692f58da05" class="t t">Es384</a>.<a href="Algorithms/Es384.cs.html#f8b9de617794a3a7" class="i field">AlgorithmName</a>;
+                    <b>break</b>;
+ 
+                <b>case</b> <a href="#f3cae6cb096aa168" class="i field">P521</a>:
+                    <span class="r4 r">cngAlgo</span> = <a href="@0@System.Core/A.html#46d0be971fbf8134" class="t t">CngAlgorithm</a>.<a href="@0@System.Core/A.html#2cb97702d616aeed" class="i property">ECDsaP521</a>;
+                    <a href="#f7d1c6e692f8f47b" class="i property">DefaultSignatureAlgorithm</a> = <a href="Algorithms/Es512.cs.html#9927cb88ff7abde9" class="t t">Es512</a>.<a href="Algorithms/Es512.cs.html#ff324af84d4d8db5" class="i field">AlgorithmName</a>;
+                    <b>break</b>;
+ 
+                <b>case</b> <a href="#b0aeb2b611221758" class="i field">P256K</a>:
+                    <span class="r4 r">cngAlgo</span> = <a href="#9d791ca3fffbabef" class="i field">CngAlgorithm_Generic_ECDSA</a>;
+                    <span class="r3 r">kcp</span>.<a href="@0@System.Core/A.html#0623e51a980487cf" class="i property">Parameters</a>.<a href="@0@mscorlib/A.html#5c61cc24de82f7e7" class="i method">Add</a>( <b>new</b> <a href="@0@System.Core/A.html#7acd3b3dedd33dfe" class="t constructor">CngProperty</a>( <a href="Algorithms/NativeMethods.cs.html#60ee5e369aecafa8" class="t t">NativeMethods</a>.<a href="Algorithms/NativeMethods.cs.html#18a13299a5e0139a" class="i field">BCRYPT_ECC_PARAMETERS</a>, <a href="#9aaedb1f9447eebf" class="i property">Secp256k1Parameters</a>.<a href="#6eb83b8e89e28b31" class="i property">CurveBlob</a>, <a href="@0@System.Core/A.html#6be7c8f8868a871f" class="t t">CngPropertyOptions</a>.<a href="@0@System.Core/A.html#e50a1259b4edeb83" class="i field">None</a> ) );
+                    <a href="#f7d1c6e692f8f47b" class="i property">DefaultSignatureAlgorithm</a> = <a href="Algorithms/Ecdsa256.cs.html#93579530cf8004f4" class="t t">ES256K</a>.<a href="Algorithms/Ecdsa256.cs.html#54e447cc7f36ef22" class="i field">AlgorithmName</a>;
+                    <b>break</b>;
+ 
+                <b>default</b>:
+                    <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>( <span class="s">$&quot;</span><span class="s">Unsupported curve: \&quot;</span>{<span class="r2 r">curve</span>}<span class="s">\&quot;.</span><span class="s">&quot;</span> );
+            }
+ 
+            <a href="@0@System.Core/A.html#d22415edef5b8a28" class="k">var</a> <span id="r5 rd" class="r5 r">key</span> = <a href="@0@System.Core/A.html#d22415edef5b8a28" class="t t">CngKey</a>.<a href="@0@System.Core/A.html#e71832db201a177c" class="i method">Create</a>( <span class="r4 r">cngAlgo</span>, <b>null</b>, <span class="r3 r">kcp</span> );
+            <a href="#85904979053a1642" class="i field">_ecdsa</a> = <b>new</b> <a href="@0@System.Core/A.html#1ee60f249b2afc62" class="t constructor">ECDsaCng</a>( <span class="r5 r">key</span> );
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Constructor</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">kid</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The key identifier to use</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">curve</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of elliptic curve to use; supported values are constants described in this class.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">x</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The value of public point field X.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">y</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The value of public point field Y.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r10 r">d</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The value of private key D. If null, only the public key operations will be allowed.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="42dd770963b95c0f" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">EcKey</a>( <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r6 rd" class="r6 r">kid</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r7 rd" class="r7 r">curve</span>, <b>byte</b>[] <span id="r8 rd" class="r8 r">x</span>, <b>byte</b>[] <span id="r9 rd" class="r9 r">y</span>, <b>byte</b>[] <span id="r10 rd" class="r10 r">d</span> = <b>null</b> )
+        {
+            <b>if</b> ( <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>( <span class="r6 r">kid</span> ) )
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>( <b>nameof</b>( <span class="r6 r">kid</span> ) );
+ 
+            <b>if</b> ( <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>( <span class="r7 r">curve</span> ) )
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>( <b>nameof</b>( <span class="r7 r">curve</span> ) );
+ 
+            <b>if</b> ( <span class="r8 r">x</span> == <b>null</b> )
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>( <b>nameof</b>( <span class="r8 r">x</span> ) );
+ 
+            <b>if</b> ( <span class="r9 r">y</span> == <b>null</b> )
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>( <b>nameof</b>( <span class="r9 r">y</span> ) );
+ 
+            <a href="#0089bfb8238eb2ad" class="i property">Kid</a> = <span class="r6 r">kid</span>;
+ 
+            <a href="@0@System.Core/A.html#d22415edef5b8a28" class="t t">CngKey</a> <span id="r11 rd" class="r11 r">key</span>;
+ 
+            <b>switch</b> ( <span class="r7 r">curve</span> )
+            {
+                <b>case</b> <a href="#4959651e93671dab" class="i field">P256</a>:
+                    <span class="r11 r">key</span> = <a href="#b955d771252c448b" class="i method">ImportNistKey</a>( <a href="Algorithms/NativeMethods.cs.html#60ee5e369aecafa8" class="t t">NativeMethods</a>.<a href="Algorithms/NativeMethods.cs.html#3cf31ee95993127e" class="i field">BCRYPT_ECDSA_PRIVATE_P256_MAGIC</a>, <a href="Algorithms/NativeMethods.cs.html#60ee5e369aecafa8" class="t t">NativeMethods</a>.<a href="Algorithms/NativeMethods.cs.html#0516074d5aab15f9" class="i field">BCRYPT_ECDSA_PUBLIC_P256_MAGIC</a>, 32, <span class="r8 r">x</span>, <span class="r9 r">y</span>, <span class="r10 r">d</span> );
+                    <a href="#f7d1c6e692f8f47b" class="i property">DefaultSignatureAlgorithm</a> = <a href="Algorithms/Es256.cs.html#40c5e6ca89818e29" class="t t">Es256</a>.<a href="Algorithms/Es256.cs.html#0541a65b7ec351fe" class="i field">AlgorithmName</a>;
+                    <b>break</b>;
+ 
+                <b>case</b> <a href="#fd61c08fed7f809d" class="i field">P384</a>:
+                    <span class="r11 r">key</span> = <a href="#b955d771252c448b" class="i method">ImportNistKey</a>( <a href="Algorithms/NativeMethods.cs.html#60ee5e369aecafa8" class="t t">NativeMethods</a>.<a href="Algorithms/NativeMethods.cs.html#d8ecec49e3bfc352" class="i field">BCRYPT_ECDSA_PRIVATE_P384_MAGIC</a>, <a href="Algorithms/NativeMethods.cs.html#60ee5e369aecafa8" class="t t">NativeMethods</a>.<a href="Algorithms/NativeMethods.cs.html#43a719ae97c3e5a6" class="i field">BCRYPT_ECDSA_PUBLIC_P384_MAGIC</a>, 48, <span class="r8 r">x</span>, <span class="r9 r">y</span>, <span class="r10 r">d</span> );
+                    <a href="#f7d1c6e692f8f47b" class="i property">DefaultSignatureAlgorithm</a> = <a href="Algorithms/Es384.cs.html#bb2614692f58da05" class="t t">Es384</a>.<a href="Algorithms/Es384.cs.html#f8b9de617794a3a7" class="i field">AlgorithmName</a>;
+                    <b>break</b>;
+ 
+                <b>case</b> <a href="#f3cae6cb096aa168" class="i field">P521</a>:
+                    <span class="r11 r">key</span> = <a href="#b955d771252c448b" class="i method">ImportNistKey</a>( <a href="Algorithms/NativeMethods.cs.html#60ee5e369aecafa8" class="t t">NativeMethods</a>.<a href="Algorithms/NativeMethods.cs.html#ff56445b07b7a16c" class="i field">BCRYPT_ECDSA_PRIVATE_P521_MAGIC</a>, <a href="Algorithms/NativeMethods.cs.html#60ee5e369aecafa8" class="t t">NativeMethods</a>.<a href="Algorithms/NativeMethods.cs.html#03846fad97fd4a3c" class="i field">BCRYPT_ECDSA_PUBLIC_P521_MAGIC</a>, 66, <span class="r8 r">x</span>, <span class="r9 r">y</span>, <span class="r10 r">d</span> );
+                    <a href="#f7d1c6e692f8f47b" class="i property">DefaultSignatureAlgorithm</a> = <a href="Algorithms/Es512.cs.html#9927cb88ff7abde9" class="t t">Es512</a>.<a href="Algorithms/Es512.cs.html#ff324af84d4d8db5" class="i field">AlgorithmName</a>;
+                    <b>break</b>;
+ 
+                <b>case</b> <a href="#b0aeb2b611221758" class="i field">P256K</a>:
+                    <span class="r11 r">key</span> = <a href="#cf29ff248644583c" class="i method">ImportGenericKey</a>( <a href="#9aaedb1f9447eebf" class="i property">Secp256k1Parameters</a>, <span class="r8 r">x</span>, <span class="r9 r">y</span>, <span class="r10 r">d</span> );
+                    <a href="#f7d1c6e692f8f47b" class="i property">DefaultSignatureAlgorithm</a> = <a href="Algorithms/Ecdsa256.cs.html#93579530cf8004f4" class="t t">ES256K</a>.<a href="Algorithms/Ecdsa256.cs.html#54e447cc7f36ef22" class="i field">AlgorithmName</a>;
+                    <b>break</b>;
+ 
+                <b>default</b>:
+                    <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#4b20cd3790b6426a" class="t constructor">ArgumentException</a>( <span class="s">$&quot;</span><span class="s">Invalid curve name: \&quot;</span>{<span class="r7 r">curve</span>}\&quot;<span class="s">&quot;</span>, <b>nameof</b>( <span class="r7 r">curve</span> ) );
+            }
+ 
+            <a href="#85904979053a1642" class="i field">_ecdsa</a> = <b>new</b> <a href="@0@System.Core/A.html#1ee60f249b2afc62" class="t constructor">ECDsaCng</a>( <span class="r11 r">key</span> );
+        }
+ 
+        <b>private</b> <a href="@0@System.Core/A.html#d22415edef5b8a28" class="t t">CngKey</a> <a id="b955d771252c448b" href="R/b955d771252c448b.html" target="n" data-glyph="76,1" class="i method">ImportNistKey</a>( <b>int</b> <span id="r12 rd" class="r12 r">privateMagic</span>, <b>int</b> <span id="r13 rd" class="r13 r">publicMagic</span>, <b>int</b> <span id="r14 rd" class="r14 r">size</span>, <b>byte</b>[] <span id="r15 rd" class="r15 r">x</span>, <b>byte</b>[] <span id="r16 rd" class="r16 r">y</span>, <b>byte</b>[] <span id="r17 rd" class="r17 r">d</span> )
+        {
+            <b>if</b> ( <span class="r17 r">d</span> == <b>null</b> || <a href="#5946e497d079ab19" class="i method">IsZero</a>( <span class="r17 r">d</span> ) )
+                <b>return</b> <a href="#5cee8f7ed42e7048" class="i method">ImportNistPublicKey</a>( <span class="r13 r">publicMagic</span>, <span class="r14 r">size</span>, <span class="r15 r">x</span>, <span class="r16 r">y</span> );
+ 
+            <b>return</b> <a href="#e08526cb88673a08" class="i method">ImportNistPrivateKey</a>( <span class="r12 r">privateMagic</span>, <span class="r14 r">size</span>, <span class="r15 r">x</span>, <span class="r16 r">y</span>, <span class="r17 r">d</span> );
+        }
+ 
+        <b>private</b> <a href="@0@System.Core/A.html#d22415edef5b8a28" class="t t">CngKey</a> <a id="5cee8f7ed42e7048" href="R/5cee8f7ed42e7048.html" target="n" data-glyph="76,1" class="i method">ImportNistPublicKey</a>( <b>int</b> <span id="r18 rd" class="r18 r">magic</span>, <b>int</b> <span id="r19 rd" class="r19 r">sizeInBytes</span>, <b>byte</b>[] <span id="r20 rd" class="r20 r">x</span>, <b>byte</b>[] <span id="r21 rd" class="r21 r">y</span> )
+        {
+            <span class="c">// Format described by BCRYPT_ECCKEY_BLOB (BCRYPT_ECCPUBLIC_BLOB).</span>
+            <span class="c">// https://msdn.microsoft.com/en-us/library/windows/desktop/aa375520(v=vs.85).aspx</span>
+ 
+            <b>var</b> <span id="r22 rd" class="r22 r">keyBlob</span> = <b>new</b> <b>byte</b>[4 + 4 + <span class="r19 r">sizeInBytes</span> + <span class="r19 r">sizeInBytes</span>];
+            <b>using</b> ( <a href="@0@mscorlib/A.html#cf806b417abe1a35" class="k">var</a> <span id="r23 rd" class="r23 r">writer</span> = <b>new</b> <a href="@0@mscorlib/A.html#93163b0edbac85a5" class="t constructor">BinaryWriter</a>( <b>new</b> <a href="@0@mscorlib/A.html#f92fa270fda9a82b" class="t constructor">MemoryStream</a>( <span class="r22 r">keyBlob</span> ) ) )
+            {
+                <span class="r23 r">writer</span>.<a href="@0@mscorlib/A.html#0dcb1e4b7b6cce02" class="i method">Write</a>( <span class="r18 r">magic</span> );
+                <span class="r23 r">writer</span>.<a href="@0@mscorlib/A.html#0dcb1e4b7b6cce02" class="i method">Write</a>( <span class="r19 r">sizeInBytes</span> );
+                <a href="#6b2722efbcc1d956" class="i method">AlignAndWrite</a>( <span class="r23 r">writer</span>, <span class="r20 r">x</span>, <span class="r19 r">sizeInBytes</span>, <b>nameof</b>( <span class="r20 r">x</span> ) );
+                <a href="#6b2722efbcc1d956" class="i method">AlignAndWrite</a>( <span class="r23 r">writer</span>, <span class="r21 r">y</span>, <span class="r19 r">sizeInBytes</span>, <b>nameof</b>( <span class="r21 r">y</span> ) );
+            }
+ 
+            <b>return</b> <a href="@0@System.Core/A.html#d22415edef5b8a28" class="t t">CngKey</a>.<a href="@0@System.Core/A.html#9a999db22eb5332e" class="i method">Import</a>( <span class="r22 r">keyBlob</span>, <a href="@0@System.Core/A.html#d5fe5c517d3c590f" class="t t">CngKeyBlobFormat</a>.<a href="@0@System.Core/A.html#3dba1487cc6061d8" class="i property">EccPublicBlob</a> );
+        }
+ 
+        <b>private</b> <a href="@0@System.Core/A.html#d22415edef5b8a28" class="t t">CngKey</a> <a id="e08526cb88673a08" href="R/e08526cb88673a08.html" target="n" data-glyph="76,1" class="i method">ImportNistPrivateKey</a>( <b>int</b> <span id="r24 rd" class="r24 r">magic</span>, <b>int</b> <span id="r25 rd" class="r25 r">sizeInBytes</span>, <b>byte</b>[] <span id="r26 rd" class="r26 r">x</span>, <b>byte</b>[] <span id="r27 rd" class="r27 r">y</span>, <b>byte</b>[] <span id="r28 rd" class="r28 r">d</span> )
+        {
+            <span class="c">// Format described by BCRYPT_ECCKEY_BLOB (BCRYPT_ECCPRIVATE_BLOB).</span>
+            <span class="c">// https://msdn.microsoft.com/en-us/library/windows/desktop/aa375520(v=vs.85).aspx</span>
+ 
+            <b>var</b> <span id="r29 rd" class="r29 r">keyBlob</span> = <b>new</b> <b>byte</b>[4 + 4 + <span class="r25 r">sizeInBytes</span> + <span class="r25 r">sizeInBytes</span> + <span class="r25 r">sizeInBytes</span>];
+            <b>using</b> ( <a href="@0@mscorlib/A.html#cf806b417abe1a35" class="k">var</a> <span id="r30 rd" class="r30 r">writer</span> = <b>new</b> <a href="@0@mscorlib/A.html#93163b0edbac85a5" class="t constructor">BinaryWriter</a>( <b>new</b> <a href="@0@mscorlib/A.html#f92fa270fda9a82b" class="t constructor">MemoryStream</a>( <span class="r29 r">keyBlob</span> ) ) )
+            {
+                <span class="r30 r">writer</span>.<a href="@0@mscorlib/A.html#0dcb1e4b7b6cce02" class="i method">Write</a>( <span class="r24 r">magic</span> );
+                <span class="r30 r">writer</span>.<a href="@0@mscorlib/A.html#0dcb1e4b7b6cce02" class="i method">Write</a>( <span class="r25 r">sizeInBytes</span> );
+                <a href="#6b2722efbcc1d956" class="i method">AlignAndWrite</a>( <span class="r30 r">writer</span>, <span class="r26 r">x</span>, <span class="r25 r">sizeInBytes</span>, <b>nameof</b>( <span class="r26 r">x</span> ) );
+                <a href="#6b2722efbcc1d956" class="i method">AlignAndWrite</a>( <span class="r30 r">writer</span>, <span class="r27 r">y</span>, <span class="r25 r">sizeInBytes</span>, <b>nameof</b>( <span class="r27 r">y</span> ) );
+                <a href="#6b2722efbcc1d956" class="i method">AlignAndWrite</a>( <span class="r30 r">writer</span>, <span class="r28 r">d</span>, <span class="r25 r">sizeInBytes</span>, <b>nameof</b>( <span class="r28 r">d</span> ) );
+            }
+ 
+            <b>return</b> <a href="@0@System.Core/A.html#d22415edef5b8a28" class="t t">CngKey</a>.<a href="@0@System.Core/A.html#9a999db22eb5332e" class="i method">Import</a>( <span class="r29 r">keyBlob</span>, <a href="@0@System.Core/A.html#d5fe5c517d3c590f" class="t t">CngKeyBlobFormat</a>.<a href="@0@System.Core/A.html#8930480a09293f41" class="i property">EccPrivateBlob</a> );
+        }
+ 
+        <b>private</b> <a href="@0@System.Core/A.html#d22415edef5b8a28" class="t t">CngKey</a> <a id="cf29ff248644583c" href="R/cf29ff248644583c.html" target="n" data-glyph="76,1" class="i method">ImportGenericKey</a>( <a href="#21d503e02018adb5" class="t t">EcKeyCurveParameters</a> <span id="r31 rd" class="r31 r">curveParameters</span>, <b>byte</b>[] <span id="r32 rd" class="r32 r">x</span>, <b>byte</b>[] <span id="r33 rd" class="r33 r">y</span>, <b>byte</b>[] <span id="r34 rd" class="r34 r">d</span> )
+        {
+            <b>if</b> ( <span class="r34 r">d</span> == <b>null</b> || <a href="#5946e497d079ab19" class="i method">IsZero</a>( <span class="r34 r">d</span> ) )
+                <b>return</b> <a href="#c99650e577748e49" class="i method">ImportGenericPublicKey</a>( <span class="r31 r">curveParameters</span>, <span class="r32 r">x</span>, <span class="r33 r">y</span> );
+ 
+            <b>return</b> <a href="#fec7ae4954099e7a" class="i method">ImportGenericPrivateKey</a>( <span class="r31 r">curveParameters</span>, <span class="r32 r">x</span>, <span class="r33 r">y</span>, <span class="r34 r">d</span> );
+        }
+ 
+        <b>private</b> <a href="@0@System.Core/A.html#d22415edef5b8a28" class="t t">CngKey</a> <a id="c99650e577748e49" href="R/c99650e577748e49.html" target="n" data-glyph="76,1" class="i method">ImportGenericPublicKey</a>( <a href="#21d503e02018adb5" class="t t">EcKeyCurveParameters</a> <span id="r35 rd" class="r35 r">curveParameters</span>, <b>byte</b>[] <span id="r36 rd" class="r36 r">x</span>, <b>byte</b>[] <span id="r37 rd" class="r37 r">y</span> )
+        {
+            <span class="c">/*  struct BCRYPT_ECCFULLKEY_BLOB
+                {
+                    ULONG dwMagic;              // BCRYPT_ECDSA_PUBLIC_GENERIC_MAGIC or BCRYPT_ECDSA_PRIVATE_GENERIC_MAGIC
+                    BCRYPT_ECC_PARAMETER_HEADER curveParameters;
+                    BYTE Qx[cbFieldLength]      // X-coordinate of the public point.
+                    BYTE Qy[cbFieldLength]      // Y-coordinate of the public point.
+                    BYTE d[cbSubgroupOrder]     // Private key. Zero if only public key is required.
+                }
+            */</span>
+ 
+            <b>var</b> <span id="r38 rd" class="r38 r">keyBlob</span> = <b>new</b> <b>byte</b>[<span class="r35 r">curveParameters</span>.<a href="#ddf574bc1a00a784" class="i property">KeyBlobSize</a>];
+            <b>using</b> ( <a href="@0@mscorlib/A.html#cf806b417abe1a35" class="k">var</a> <span id="r39 rd" class="r39 r">writer</span> = <b>new</b> <a href="@0@mscorlib/A.html#93163b0edbac85a5" class="t constructor">BinaryWriter</a>( <b>new</b> <a href="@0@mscorlib/A.html#f92fa270fda9a82b" class="t constructor">MemoryStream</a>( <span class="r38 r">keyBlob</span> ) ) )
+            {
+                <span class="r39 r">writer</span>.<a href="@0@mscorlib/A.html#0dcb1e4b7b6cce02" class="i method">Write</a>( <a href="Algorithms/NativeMethods.cs.html#60ee5e369aecafa8" class="t t">NativeMethods</a>.<a href="Algorithms/NativeMethods.cs.html#c8f3ea5635cc1f34" class="i field">BCRYPT_ECDSA_PUBLIC_GENERIC_MAGIC</a> );
+                <span class="r35 r">curveParameters</span>.<a href="#72818d4873fb6aa2" class="i method">WriteTo</a>( <span class="r39 r">writer</span> );
+ 
+                <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r40 rd" class="r40 r">size</span> = <span class="r35 r">curveParameters</span>.<a href="#d36ad6cf1d740c89" class="i property">KeySizeInBytes</a>;
+                <a href="#6b2722efbcc1d956" class="i method">AlignAndWrite</a>( <span class="r39 r">writer</span>, <span class="r36 r">x</span>, <span class="r40 r">size</span>, <b>nameof</b>( <span class="r36 r">x</span> ) );
+                <a href="#6b2722efbcc1d956" class="i method">AlignAndWrite</a>( <span class="r39 r">writer</span>, <span class="r37 r">y</span>, <span class="r40 r">size</span>, <b>nameof</b>( <span class="r37 r">y</span> ) );
+            }
+ 
+            <b>return</b> <a href="@0@System.Core/A.html#d22415edef5b8a28" class="t t">CngKey</a>.<a href="@0@System.Core/A.html#9a999db22eb5332e" class="i method">Import</a>( <span class="r38 r">keyBlob</span>, <a href="#2b62658f889f1b87" class="i field">CngKeyBlobFormat_Generic_Public</a> );
+        }
+ 
+        <b>private</b> <a href="@0@System.Core/A.html#d22415edef5b8a28" class="t t">CngKey</a> <a id="fec7ae4954099e7a" href="R/fec7ae4954099e7a.html" target="n" data-glyph="76,1" class="i method">ImportGenericPrivateKey</a>( <a href="#21d503e02018adb5" class="t t">EcKeyCurveParameters</a> <span id="r41 rd" class="r41 r">curveParameters</span>, <b>byte</b>[] <span id="r42 rd" class="r42 r">x</span>, <b>byte</b>[] <span id="r43 rd" class="r43 r">y</span>, <b>byte</b>[] <span id="r44 rd" class="r44 r">d</span> )
+        {
+            <span class="c">/*  struct BCRYPT_ECCFULLKEY_BLOB
+                {
+                    ULONG dwMagic;              // BCRYPT_ECDSA_PUBLIC_GENERIC_MAGIC or BCRYPT_ECDSA_PRIVATE_GENERIC_MAGIC
+                    BCRYPT_ECC_PARAMETER_HEADER curveParameters;
+                    BYTE Qx[cbFieldLength]      // X-coordinate of the public point.
+                    BYTE Qy[cbFieldLength]      // Y-coordinate of the public point.
+                    BYTE d[cbSubgroupOrder]     // Private key. Zero if only public key is required.
+                }
+            */</span>
+ 
+            <b>var</b> <span id="r45 rd" class="r45 r">keyBlob</span> = <b>new</b> <b>byte</b>[<span class="r41 r">curveParameters</span>.<a href="#ddf574bc1a00a784" class="i property">KeyBlobSize</a>];
+            <b>using</b> ( <a href="@0@mscorlib/A.html#cf806b417abe1a35" class="k">var</a> <span id="r46 rd" class="r46 r">writer</span> = <b>new</b> <a href="@0@mscorlib/A.html#93163b0edbac85a5" class="t constructor">BinaryWriter</a>( <b>new</b> <a href="@0@mscorlib/A.html#f92fa270fda9a82b" class="t constructor">MemoryStream</a>( <span class="r45 r">keyBlob</span> ) ) )
+            {
+                <span class="r46 r">writer</span>.<a href="@0@mscorlib/A.html#0dcb1e4b7b6cce02" class="i method">Write</a>( <a href="Algorithms/NativeMethods.cs.html#60ee5e369aecafa8" class="t t">NativeMethods</a>.<a href="Algorithms/NativeMethods.cs.html#5c1de4cf64eb7b36" class="i field">BCRYPT_ECDSA_PRIVATE_GENERIC_MAGIC</a> );
+                <span class="r41 r">curveParameters</span>.<a href="#72818d4873fb6aa2" class="i method">WriteTo</a>( <span class="r46 r">writer</span> );
+ 
+                <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r47 rd" class="r47 r">size</span> = <span class="r41 r">curveParameters</span>.<a href="#d36ad6cf1d740c89" class="i property">KeySizeInBytes</a>;
+                <a href="#6b2722efbcc1d956" class="i method">AlignAndWrite</a>( <span class="r46 r">writer</span>, <span class="r42 r">x</span>, <span class="r47 r">size</span>, <b>nameof</b>( <span class="r42 r">x</span> ) );
+                <a href="#6b2722efbcc1d956" class="i method">AlignAndWrite</a>( <span class="r46 r">writer</span>, <span class="r43 r">y</span>, <span class="r47 r">size</span>, <b>nameof</b>( <span class="r43 r">y</span> ) );
+                <a href="#6b2722efbcc1d956" class="i method">AlignAndWrite</a>( <span class="r46 r">writer</span>, <span class="r44 r">d</span>, <span class="r47 r">size</span>, <b>nameof</b>( <span class="r44 r">d</span> ) );
+            }
+ 
+            <b>return</b> <a href="@0@System.Core/A.html#d22415edef5b8a28" class="t t">CngKey</a>.<a href="@0@System.Core/A.html#9a999db22eb5332e" class="i method">Import</a>( <span class="r45 r">keyBlob</span>, <a href="#6269842838548aad" class="i field">CngKeyBlobFormat_Generic_Private</a> );
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Constructor.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r48 r">kid</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The key identifier to use</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r49 r">ecdsa</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The ECDsa object for the key</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span><span class="c">The ECDsa object is IDisposable, this class will hold a</span>
+        <span class="c">///</span><span class="c"> reference to the ECDsa object but will not dispose it, the caller</span>
+        <span class="c">///</span><span class="c"> of this constructor is responsible for the lifetime of this</span>
+        <span class="c">///</span><span class="c"> parameter.</span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public</b> <a id="a1b60821cf032305" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">EcKey</a>( <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r48 rd" class="r48 r">kid</span>, <a href="@0@System.Core/A.html#59084d68c76f225c" class="t t">ECDsa</a> <span id="r49 rd" class="r49 r">ecdsa</span> )
+        {
+            <b>if</b> ( <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>( <span class="r48 r">kid</span> ) )
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>( <b>nameof</b>( <span class="r48 r">kid</span> ) );
+ 
+            <b>if</b> ( <span class="r49 r">ecdsa</span> == <b>null</b> )
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>( <b>nameof</b>( <span class="r49 r">ecdsa</span> ) );
+ 
+            <a href="#0089bfb8238eb2ad" class="i property">Kid</a> = <span class="r48 r">kid</span>;
+ 
+            <span class="c">// NOTE: ECDsa is disposable and that may lead to runtime errors later.</span>
+            <a href="#85904979053a1642" class="i field">_ecdsa</a> = <span class="r49 r">ecdsa</span>;
+        }
+ 
+        <span class="c">// Intentionally excluded.</span>
+        <span class="c">//~EcKey()</span>
+        <span class="c">//{</span>
+        <span class="c">//    Dispose( false );</span>
+        <span class="c">//}</span>
+ 
+        <b>public void</b> <a id="6e5ae17d64cdf04c" href="R/6e5ae17d64cdf04c.html" target="n" data-glyph="72,1" class="i method">Dispose</a>()
+        {
+            <a href="#d046786941f06e49" class="i method">Dispose</a>( <b>true</b> );
+            <a href="@0@mscorlib/A.html#25d9c1e022317a99" class="t t">GC</a>.<a href="@0@mscorlib/A.html#2673f5220a565bf2" class="i method">SuppressFinalize</a>( <a href="#f7db18826fbaaa2b" class="k">this</a> );
+        }
+ 
+        <b>protected virtual void</b> <a id="d046786941f06e49" href="R/d046786941f06e49.html" target="n" data-glyph="75,1" class="i method">Dispose</a>( <b>bool</b> <span id="r50 rd" class="r50 r">disposing</span> )
+        {
+            <span class="c">// Clean up managed resources if Dispose was called</span>
+            <b>if</b> ( <span class="r50 r">disposing</span> )
+            {
+                <b>if</b> ( <a href="#85904979053a1642" class="i field">_ecdsa</a> != <b>null</b> )
+                {
+                    <a href="#85904979053a1642" class="i field">_ecdsa</a>.<a href="@0@mscorlib/A.html#496ab6e6cbd2d299" class="i method">Dispose</a>();
+                    <a href="#85904979053a1642" class="i field">_ecdsa</a> = <b>null</b>;
+                }
+            }
+        }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> IKey implementation
+ 
+        <b>public string</b> <a id="667857cb68517f60" href="R/667857cb68517f60.html" target="n" data-glyph="102,1" class="i property">DefaultEncryptionAlgorithm</a> =&gt; <b>null</b>;
+ 
+        <b>public string</b> <a id="12633a4e6efa81ef" href="R/12633a4e6efa81ef.html" target="n" data-glyph="102,1" class="i property">DefaultKeyWrapAlgorithm</a> =&gt; <b>null</b>;
+ 
+        <b>public string</b> <a id="f7d1c6e692f8f47b" href="R/f7d1c6e692f8f47b.html" target="n" data-glyph="102,1" class="i property">DefaultSignatureAlgorithm</a> { <b>get</b>; <b>set</b>; }
+ 
+        <b>public</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>byte</b>[]&gt; <a id="1a6de7d74d8c9f88" href="R/1a6de7d74d8c9f88.html" target="n" data-glyph="72,1" class="i method">DecryptAsync</a>( <b>byte</b>[] <span id="r51 rd" class="r51 r">ciphertext</span>, <b>byte</b>[] <span id="r52 rd" class="r52 r">iv</span>, <b>byte</b>[] <span id="r53 rd" class="r53 r">authenticationData</span> = <b>null</b>, <b>byte</b>[] <span id="r54 rd" class="r54 r">authenticationTag</span> = <b>null</b>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r55 rd" class="r55 r">algorithm</span> = <a href="Algorithms/RsaOaep.cs.html#0173c8445861a70f" class="t t">RsaOaep</a>.<a href="Algorithms/RsaOaep.cs.html#ae94444913156adb" class="i field">AlgorithmName</a>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r56 rd" class="r56 r">token</span> = <b>default</b>( <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> ) )
+        {
+            <b>throw</b> <a href="#52cd34324caa8abf" class="i method">MethodNotSupported</a>( <b>nameof</b>( <span class="i">DecryptAsync</span> ) );
+        }
+ 
+        <b>public</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@0@mscorlib/A.html#ec6128d1b3907918" class="t t">Tuple</a>&lt;<b>byte</b>[], <b>byte</b>[], <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;&gt; <a id="d56bf0effb836939" href="R/d56bf0effb836939.html" target="n" data-glyph="72,1" class="i method">EncryptAsync</a>( <b>byte</b>[] <span id="r57 rd" class="r57 r">plaintext</span>, <b>byte</b>[] <span id="r58 rd" class="r58 r">iv</span> = <b>null</b>, <b>byte</b>[] <span id="r59 rd" class="r59 r">authenticationData</span> = <b>null</b>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r60 rd" class="r60 r">algorithm</span> = <a href="Algorithms/RsaOaep.cs.html#0173c8445861a70f" class="t t">RsaOaep</a>.<a href="Algorithms/RsaOaep.cs.html#ae94444913156adb" class="i field">AlgorithmName</a>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r61 rd" class="r61 r">token</span> = <b>default</b>( <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> ) )
+        {
+            <b>throw</b> <a href="#52cd34324caa8abf" class="i method">MethodNotSupported</a>( <b>nameof</b>( <span class="i">EncryptAsync</span> ) );
+        }
+ 
+        <b>public</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@0@mscorlib/A.html#1806cf6634f5a371" class="t t">Tuple</a>&lt;<b>byte</b>[], <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;&gt; <a id="ec5ea162c01e30a8" href="R/ec5ea162c01e30a8.html" target="n" data-glyph="72,1" class="i method">WrapKeyAsync</a>( <b>byte</b>[] <span id="r62 rd" class="r62 r">key</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r63 rd" class="r63 r">algorithm</span> = <a href="Algorithms/RsaOaep.cs.html#0173c8445861a70f" class="t t">RsaOaep</a>.<a href="Algorithms/RsaOaep.cs.html#ae94444913156adb" class="i field">AlgorithmName</a>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r64 rd" class="r64 r">token</span> = <b>default</b>( <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> ) )
+        {
+            <b>throw</b> <a href="#52cd34324caa8abf" class="i method">MethodNotSupported</a>( <b>nameof</b>( <span class="i">WrapKeyAsync</span> ) );
+        }
+ 
+        <b>public</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>byte</b>[]&gt; <a id="ca7c9e7ef3207a1d" href="R/ca7c9e7ef3207a1d.html" target="n" data-glyph="72,1" class="i method">UnwrapKeyAsync</a>( <b>byte</b>[] <span id="r65 rd" class="r65 r">encryptedKey</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r66 rd" class="r66 r">algorithm</span> = <a href="Algorithms/RsaOaep.cs.html#0173c8445861a70f" class="t t">RsaOaep</a>.<a href="Algorithms/RsaOaep.cs.html#ae94444913156adb" class="i field">AlgorithmName</a>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r67 rd" class="r67 r">token</span> = <b>default</b>( <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> ) )
+        {
+            <b>throw</b> <a href="#52cd34324caa8abf" class="i method">MethodNotSupported</a>( <b>nameof</b>( <span class="i">UnwrapKeyAsync</span> ) );
+        }
+ 
+        <b>private</b> <a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <a id="52cd34324caa8abf" href="R/52cd34324caa8abf.html" target="n" data-glyph="76,1" class="i method">MethodNotSupported</a>( <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r68 rd" class="r68 r">methodName</span> )
+        {
+            <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#3d3c2c03118be4f8" class="t constructor">NotSupportedException</a>( <span class="s">$&quot;</span><span class="s">Method </span>{<span class="r68 r">methodName</span>}<span class="s"> cannot is not supported by EcKey </span>{<a href="#0089bfb8238eb2ad" class="i property">Kid</a>}<span class="s">.</span><span class="s">&quot;</span> );
+        }
+ 
+        <b>public</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@0@mscorlib/A.html#1806cf6634f5a371" class="t t">Tuple</a>&lt;<b>byte</b>[], <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;&gt; <a id="c314a5edebf10b04" href="R/c314a5edebf10b04.html" target="n" data-glyph="72,1" class="i method">SignAsync</a>( <b>byte</b>[] <span id="r69 rd" class="r69 r">digest</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r70 rd" class="r70 r">algorithm</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r71 rd" class="r71 r">token</span> = <b>default</b>( <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> ) )
+        {
+            <b>if</b> ( <a href="#85904979053a1642" class="i field">_ecdsa</a> == <b>null</b> )
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#53515c848f859933" class="t constructor">ObjectDisposedException</a>( <span class="s">$&quot;</span><span class="s">EcKey </span>{<a href="#0089bfb8238eb2ad" class="i property">Kid</a>}<span class="s"> is disposed</span><span class="s">&quot;</span> );
+ 
+            <b>if</b> ( <span class="r70 r">algorithm</span> == <b>null</b> )
+                <span class="r70 r">algorithm</span> = <a href="#f7d1c6e692f8f47b" class="i property">DefaultSignatureAlgorithm</a>;
+ 
+            <b>if</b> ( <span class="r69 r">digest</span> == <b>null</b> )
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>( <b>nameof</b>( <span class="r69 r">digest</span> ) );
+ 
+            <a href="SignatureAlgorithm.cs.html#7c73358b98cbf076" class="k">var</a> <span id="r72 rd" class="r72 r">algo</span> = <a href="AlgorithmResolver.cs.html#165493d8325dd042" class="t t">AlgorithmResolver</a>.<a href="AlgorithmResolver.cs.html#0c346ca8da89f28f" class="i field">Default</a><a href="AlgorithmResolver.cs.html#6fccb0c948237218">[</a><span class="r70 r">algorithm</span>] <b>as</b> <a href="SignatureAlgorithm.cs.html#7c73358b98cbf076" class="t t">AsymmetricSignatureAlgorithm</a>;
+            <a href="ISignatureTransform.cs.html#23919f553c3d4c51" class="k">var</a> <span id="r73 rd" class="r73 r">transform</span> = <span class="r72 r">algo</span>?.<a href="SignatureAlgorithm.cs.html#2f1205032e16331a" class="i method">CreateSignatureTransform</a>( <a href="#85904979053a1642" class="i field">_ecdsa</a> );
+ 
+            <b>if</b> ( <span class="r72 r">algo</span> == <b>null</b> || <span class="r73 r">transform</span> == <b>null</b> )
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#3d3c2c03118be4f8" class="t constructor">NotSupportedException</a>( <span class="s">$&quot;</span><span class="s">algorithm </span>{<span class="r70 r">algorithm</span>}<span class="s"> is not supported by EcKey </span>{<a href="#0089bfb8238eb2ad" class="i property">Kid</a>}<span class="s">&quot;</span> );
+ 
+            <b>try</b>
+            {
+                <a href="@0@mscorlib/A.html#1806cf6634f5a371" class="k">var</a> <span id="r74 rd" class="r74 r">result</span> = <b>new</b> <a href="@0@mscorlib/A.html#ee1efa9bd0176f36" class="t constructor">Tuple</a>&lt;<b>byte</b>[], <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;( <span class="r73 r">transform</span>.<a href="ISignatureTransform.cs.html#d64afdeb97a9782f" class="i method">Sign</a>( <span class="r69 r">digest</span> ), <span class="r70 r">algorithm</span> );
+ 
+                <b>return</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#11a386e7d7cae64a" class="i method">FromResult</a>( <span class="r74 r">result</span> );
+            }
+            <b>catch</b> ( <a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r75 rd" class="r75 r">ex</span> )
+            {
+                <b>return</b> <a href="TaskExtensions.cs.html#eece92c003f195a7" class="t t">TaskException</a>.<a href="TaskExtensions.cs.html#8999101f8057f49a" class="i method">FromException</a>&lt;<a href="@0@mscorlib/A.html#1806cf6634f5a371" class="t t">Tuple</a>&lt;<b>byte</b>[], <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;&gt;( <span class="r75 r">ex</span> );
+            }
+        }
+ 
+        <b>public</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>bool</b>&gt; <a id="fe2a7327fc39bdcc" href="R/fe2a7327fc39bdcc.html" target="n" data-glyph="72,1" class="i method">VerifyAsync</a>( <b>byte</b>[] <span id="r76 rd" class="r76 r">digest</span>, <b>byte</b>[] <span id="r77 rd" class="r77 r">signature</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r78 rd" class="r78 r">algorithm</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r79 rd" class="r79 r">token</span> = <b>default</b>( <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> ) )
+        {
+            <b>if</b> ( <a href="#85904979053a1642" class="i field">_ecdsa</a> == <b>null</b> )
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#53515c848f859933" class="t constructor">ObjectDisposedException</a>( <span class="s">$&quot;</span><span class="s">EcKey </span>{<a href="#0089bfb8238eb2ad" class="i property">Kid</a>}<span class="s"> is disposed</span><span class="s">&quot;</span> );
+ 
+            <b>if</b> ( <span class="r76 r">digest</span> == <b>null</b> )
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>( <b>nameof</b>( <span class="r76 r">digest</span> ) );
+ 
+            <b>if</b> ( <span class="r77 r">signature</span> == <b>null</b> )
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>( <b>nameof</b>( <span class="r77 r">signature</span> ) );
+ 
+            <b>if</b> ( <span class="r78 r">algorithm</span> == <b>null</b> )
+                <span class="r78 r">algorithm</span> = <a href="#f7d1c6e692f8f47b" class="i property">DefaultSignatureAlgorithm</a>;
+ 
+            <a href="SignatureAlgorithm.cs.html#7c73358b98cbf076" class="k">var</a> <span id="r80 rd" class="r80 r">algo</span> = <a href="AlgorithmResolver.cs.html#165493d8325dd042" class="t t">AlgorithmResolver</a>.<a href="AlgorithmResolver.cs.html#0c346ca8da89f28f" class="i field">Default</a><a href="AlgorithmResolver.cs.html#6fccb0c948237218">[</a><span class="r78 r">algorithm</span>] <b>as</b> <a href="SignatureAlgorithm.cs.html#7c73358b98cbf076" class="t t">AsymmetricSignatureAlgorithm</a>;
+            <a href="ISignatureTransform.cs.html#23919f553c3d4c51" class="k">var</a> <span id="r81 rd" class="r81 r">transform</span> = <span class="r80 r">algo</span>?.<a href="SignatureAlgorithm.cs.html#2f1205032e16331a" class="i method">CreateSignatureTransform</a>( <a href="#85904979053a1642" class="i field">_ecdsa</a> );
+ 
+            <b>if</b> ( <span class="r80 r">algo</span> == <b>null</b> || <span class="r81 r">transform</span> == <b>null</b> )
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#3d3c2c03118be4f8" class="t constructor">NotSupportedException</a>( <span class="s">$&quot;</span><span class="s">algorithm </span>{<span class="r78 r">algorithm</span>}<span class="s"> is not supported by EcKey </span>{<a href="#0089bfb8238eb2ad" class="i property">Kid</a>}<span class="s">&quot;</span> );
+ 
+            <b>try</b>
+            {
+                <a href="@0@mscorlib/A.html#f1b135ff6c380b37" class="k">var</a> <span id="r82 rd" class="r82 r">result</span> = <span class="r81 r">transform</span>.<a href="ISignatureTransform.cs.html#76d94608730294cb" class="i method">Verify</a>( <span class="r76 r">digest</span>, <span class="r77 r">signature</span> );
+ 
+                <b>return</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#11a386e7d7cae64a" class="i method">FromResult</a>( <span class="r82 r">result</span> );
+            }
+            <b>catch</b> ( <a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r83 rd" class="r83 r">ex</span> )
+            {
+                <b>return</b> <a href="TaskExtensions.cs.html#eece92c003f195a7" class="t t">TaskException</a>.<a href="TaskExtensions.cs.html#8999101f8057f49a" class="i method">FromException</a>&lt;<b>bool</b>&gt;( <span class="r83 r">ex</span> );
+            }
+        }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Utilities
+ 
+        <b>private static bool</b> <a id="5946e497d079ab19" href="R/5946e497d079ab19.html" target="n" data-glyph="76,1" class="i method">IsZero</a>( <b>byte</b>[] <span id="r84 rd" class="r84 r">v</span> )
+        {
+            <b>if</b> ( <span class="r84 r">v</span> == <b>null</b> )
+                <b>return</b> <b>true</b>;
+ 
+            <b>for</b> ( <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r85 rd" class="r85 r">i</span> = 0; <span class="r85 r">i</span> &lt; <span class="r84 r">v</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>; ++<span class="r85 r">i</span> )
+                <b>if</b> ( <span class="r84 r">v</span>[<span class="r85 r">i</span>] != 0 )
+                    <b>return</b> <b>false</b>;
+ 
+            <b>return</b> <b>true</b>;
+        }
+ 
+        <b>private static void</b> <a id="6b2722efbcc1d956" href="R/6b2722efbcc1d956.html" target="n" data-glyph="76,1" class="i method">AlignAndWrite</a>( <a href="@0@mscorlib/A.html#cf806b417abe1a35" class="t t">BinaryWriter</a> <span id="r86 rd" class="r86 r">writer</span>, <b>byte</b>[] <span id="r87 rd" class="r87 r">bytes</span>, <b>int</b> <span id="r88 rd" class="r88 r">size</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r89 rd" class="r89 r">paramName</span> )
+        {
+            <b>if</b> ( <span class="r87 r">bytes</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a> &gt;= <span class="r88 r">size</span> )
+            {
+                <b>for</b> ( <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r90 rd" class="r90 r">i</span> = 0; <span class="r90 r">i</span> &lt; <span class="r87 r">bytes</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a> - <span class="r88 r">size</span>; ++<span class="r90 r">i</span> )
+                    <b>if</b> ( <span class="r87 r">bytes</span>[<span class="r90 r">i</span>] != 0 )
+                        <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>( <span class="s">$&quot;</span><span class="s">Value of </span>{<span class="r89 r">paramName</span>}<span class="s"> is bigger than allowed for this key.</span><span class="s">&quot;</span> );
+ 
+                <span class="r86 r">writer</span>.<a href="@0@mscorlib/A.html#fae34c4f5667c7a2" class="i method">Write</a>( <span class="r87 r">bytes</span>, <span class="r87 r">bytes</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a> - <span class="r88 r">size</span>, <span class="r88 r">size</span> );
+                <b>return</b>;
+            }
+ 
+            <b>for</b> ( <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r91 rd" class="r91 r">i</span> = <span class="r87 r">bytes</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>; <span class="r91 r">i</span> &lt; <span class="r88 r">size</span>; ++<span class="r91 r">i</span> )
+                <span class="r86 r">writer</span>.<a href="@0@mscorlib/A.html#430d3c5573a2b429" class="i method">Write</a>( (<b>byte</b>) 0 );
+            <span class="r86 r">writer</span>.<a href="@0@mscorlib/A.html#3b784e1877648aef" class="i method">Write</a>( <span class="r87 r">bytes</span> );
+        }
+ 
+        <b>private static readonly</b> <a href="@0@System.Core/A.html#d5fe5c517d3c590f" class="t t">CngKeyBlobFormat</a> <a id="2b62658f889f1b87" href="R/2b62658f889f1b87.html" target="n" data-glyph="46,1" class="i field">CngKeyBlobFormat_Generic_Public</a> = <b>new</b> <a href="@0@System.Core/A.html#20b5095557b65a9a" class="t constructor">CngKeyBlobFormat</a>( <a href="Algorithms/NativeMethods.cs.html#60ee5e369aecafa8" class="t t">NativeMethods</a>.<a href="Algorithms/NativeMethods.cs.html#4d25a362c91d61f5" class="i field">BCRYPT_ECCFULLPUBLIC_BLOB</a> );
+        <b>private static readonly</b> <a href="@0@System.Core/A.html#d5fe5c517d3c590f" class="t t">CngKeyBlobFormat</a> <a id="6269842838548aad" href="R/6269842838548aad.html" target="n" data-glyph="46,1" class="i field">CngKeyBlobFormat_Generic_Private</a> = <b>new</b> <a href="@0@System.Core/A.html#20b5095557b65a9a" class="t constructor">CngKeyBlobFormat</a>( <a href="Algorithms/NativeMethods.cs.html#60ee5e369aecafa8" class="t t">NativeMethods</a>.<a href="Algorithms/NativeMethods.cs.html#5e272a9a14ebf01d" class="i field">BCRYPT_ECCFULLPRIVATE_BLOB</a> );
+ 
+        <b>private static readonly</b> <a href="@0@System.Core/A.html#46d0be971fbf8134" class="t t">CngAlgorithm</a> <a id="9d791ca3fffbabef" href="R/9d791ca3fffbabef.html" target="n" data-glyph="46,1" class="i field">CngAlgorithm_Generic_ECDSA</a> = <b>new</b> <a href="@0@System.Core/A.html#40159cf70f20247e" class="t constructor">CngAlgorithm</a>( <span class="s">&quot;ECDSA&quot;</span> );
+ 
+        <b>private static</b> <a href="#21d503e02018adb5" class="t t">EcKeyCurveParameters</a> <a id="c351e452c32ab14d" href="R/c351e452c32ab14d.html" target="n" data-glyph="46,1" class="i field">_secp256k1Parameters</a>;
+ 
+        <b>private static</b> <a href="#21d503e02018adb5" class="t t">EcKeyCurveParameters</a> <a id="9aaedb1f9447eebf" href="R/9aaedb1f9447eebf.html" target="n" data-glyph="106,1" class="i property">Secp256k1Parameters</a>
+        {
+            <b>get</b>
+            {
+                <b>if</b> ( <a href="#c351e452c32ab14d" class="i field">_secp256k1Parameters</a> != <b>null</b> )
+                    <b>return</b> <a href="#c351e452c32ab14d" class="i field">_secp256k1Parameters</a>;
+ 
+                <b>return</b> <a href="#c351e452c32ab14d" class="i field">_secp256k1Parameters</a> = <b>new</b> <a href="#21d503e02018adb5" class="t constructor">EcKeyCurveParameters</a>
+                {
+                    <span class="c">// Copied from http://www.secg.org/sec2-v2.pdf and verified to match https://en.bitcoin.it/wiki/Secp256k1.</span>
+                    <a href="#7f2fb24c4fb97902" class="i property">CurveType</a> = <a href="#36ebcccb67ab2afc" class="t t">EcKeyCurveType</a>.<a href="#0b421532a305ac3e" class="i field">PrimeShortWeierstrass</a>,
+                    <a href="#ec149009e7149890" class="i property">Hash</a> = <b>null</b>,
+                    <a href="#7c2c0b167eb5e6db" class="i property">Prime</a> = <a href="@0@mscorlib/A.html#fc990bd1275d43d6" class="t t">Convert</a>.<a href="@0@mscorlib/A.html#08c34f52087ba624" class="i method">FromBase64String</a>( <span class="s">&quot;/////////////////////////////////////v///C8=&quot;</span> ),
+                    <a href="#dce175f9a5639f80" class="i property">A</a> = <a href="@0@mscorlib/A.html#fc990bd1275d43d6" class="t t">Convert</a>.<a href="@0@mscorlib/A.html#08c34f52087ba624" class="i method">FromBase64String</a>( <span class="s">&quot;AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=&quot;</span> ),
+                    <a href="#8a3c74ba323a83e3" class="i property">B</a> = <a href="@0@mscorlib/A.html#fc990bd1275d43d6" class="t t">Convert</a>.<a href="@0@mscorlib/A.html#08c34f52087ba624" class="i method">FromBase64String</a>( <span class="s">&quot;AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAc=&quot;</span> ),
+                    <a href="#02d7f063b92566b3" class="i property">Gx</a> = <a href="@0@mscorlib/A.html#fc990bd1275d43d6" class="t t">Convert</a>.<a href="@0@mscorlib/A.html#08c34f52087ba624" class="i method">FromBase64String</a>( <span class="s">&quot;eb5mfvncu6xVoGKVzocLBwKb/NstzijZWfKBWxb4F5g=&quot;</span> ),
+                    <a href="#da296e4a6e7141fa" class="i property">Gy</a> = <a href="@0@mscorlib/A.html#fc990bd1275d43d6" class="t t">Convert</a>.<a href="@0@mscorlib/A.html#08c34f52087ba624" class="i method">FromBase64String</a>( <span class="s">&quot;SDradyajxGVdpPv8DhEIqP0XtEimhVQZnEfQj/sQ1Lg=&quot;</span> ),
+                    <a href="#82fe775c3b9f8dbc" class="i property">Order</a> = <a href="@0@mscorlib/A.html#fc990bd1275d43d6" class="t t">Convert</a>.<a href="@0@mscorlib/A.html#08c34f52087ba624" class="i method">FromBase64String</a>( <span class="s">&quot;/////////////////////rqu3OavSKA7v9JejNA2QUE=&quot;</span> ),
+                    <a href="#7e1be6bd0025051a" class="i property">Cofactor</a> = <a href="@0@mscorlib/A.html#fc990bd1275d43d6" class="t t">Convert</a>.<a href="@0@mscorlib/A.html#08c34f52087ba624" class="i method">FromBase64String</a>( <span class="s">&quot;AQ==&quot;</span> ),
+                    <a href="#31ab9a955b55f352" class="i property">Seed</a> = <a href="@0@mscorlib/A.html#fc990bd1275d43d6" class="t t">Convert</a>.<a href="@0@mscorlib/A.html#08c34f52087ba624" class="i method">FromBase64String</a>( <span class="s">&quot;&quot;</span> ),
+                };
+            }
+        }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+    }
+ 
+    <b>internal sealed class</b> <a id="21d503e02018adb5" href="R/21d503e02018adb5.html" target="n" data-glyph="2,0" class="t t"><span id="08612c202f30352e">EcKeyCurveParameters</span></a>
+    {
+        <b>public</b> <a href="#36ebcccb67ab2afc" class="t t">EcKeyCurveType</a> <a id="7f2fb24c4fb97902" href="R/7f2fb24c4fb97902.html" target="n" data-glyph="102,1" class="i property">CurveType</a> { <b>get</b>; <b>set</b>; }
+        <b>public string</b> <a id="ec149009e7149890" href="R/ec149009e7149890.html" target="n" data-glyph="102,1" class="i property">Hash</a> { <b>get</b>; <b>set</b>; }
+        <b>public byte</b>[] <a id="7c2c0b167eb5e6db" href="R/7c2c0b167eb5e6db.html" target="n" data-glyph="102,1" class="i property">Prime</a> { <b>get</b>; <b>set</b>; }
+        <b>public byte</b>[] <a id="dce175f9a5639f80" href="R/dce175f9a5639f80.html" target="n" data-glyph="102,1" class="i property">A</a> { <b>get</b>; <b>set</b>; }
+        <b>public byte</b>[] <a id="8a3c74ba323a83e3" href="R/8a3c74ba323a83e3.html" target="n" data-glyph="102,1" class="i property">B</a> { <b>get</b>; <b>set</b>; }
+        <b>public byte</b>[] <a id="02d7f063b92566b3" href="R/02d7f063b92566b3.html" target="n" data-glyph="102,1" class="i property">Gx</a> { <b>get</b>; <b>set</b>; }
+        <b>public byte</b>[] <a id="da296e4a6e7141fa" href="R/da296e4a6e7141fa.html" target="n" data-glyph="102,1" class="i property">Gy</a> { <b>get</b>; <b>set</b>; }
+        <b>public byte</b>[] <a id="82fe775c3b9f8dbc" href="R/82fe775c3b9f8dbc.html" target="n" data-glyph="102,1" class="i property">Order</a> { <b>get</b>; <b>set</b>; }
+        <b>public byte</b>[] <a id="7e1be6bd0025051a" href="R/7e1be6bd0025051a.html" target="n" data-glyph="102,1" class="i property">Cofactor</a> { <b>get</b>; <b>set</b>; }
+        <b>public byte</b>[] <a id="31ab9a955b55f352" href="R/31ab9a955b55f352.html" target="n" data-glyph="102,1" class="i property">Seed</a> { <b>get</b>; <b>set</b>; }
+ 
+        <b>public int</b> <a id="d36ad6cf1d740c89" href="R/d36ad6cf1d740c89.html" target="n" data-glyph="102,1" class="i property">KeySizeInBytes</a> =&gt; <a href="#7c2c0b167eb5e6db" class="i property">Prime</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>;
+ 
+        <b>public int</b> <a id="092c771c6b75cac0" href="R/092c771c6b75cac0.html" target="n" data-glyph="102,1" class="i property">CurveBlobSize</a>
+        {
+            <b>get</b>
+            {
+                <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r92 rd" class="r92 r">cbFieldLength</span> = <a href="#7c2c0b167eb5e6db" class="i property">Prime</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>;
+                <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r93 rd" class="r93 r">cbSubgroupOrder</span> = <a href="#82fe775c3b9f8dbc" class="i property">Order</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>;
+                <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r94 rd" class="r94 r">cbCofactor</span> = <a href="#7e1be6bd0025051a" class="i property">Cofactor</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>;
+                <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r95 rd" class="r95 r">cbSeed</span> = <a href="#31ab9a955b55f352" class="i property">Seed</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>;
+ 
+                <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r96 rd" class="r96 r">size</span> = 7 * <b>sizeof</b>( <b>uint</b> ) + 5 * <span class="r92 r">cbFieldLength</span> + <span class="r93 r">cbSubgroupOrder</span> + <span class="r94 r">cbCofactor</span> + <span class="r95 r">cbSeed</span>;
+ 
+                <b>return</b> <span class="r96 r">size</span>;
+            }
+        }
+ 
+        <b>public byte</b>[] <a id="6eb83b8e89e28b31" href="R/6eb83b8e89e28b31.html" target="n" data-glyph="102,1" class="i property">CurveBlob</a>
+        {
+            <b>get</b>
+            {
+                <b>var</b> <span id="r97 rd" class="r97 r">result</span> = <b>new</b> <b>byte</b>[<a href="#092c771c6b75cac0" class="i property">CurveBlobSize</a>];
+                <b>using</b> ( <a href="@0@mscorlib/A.html#cf806b417abe1a35" class="k">var</a> <span id="r98 rd" class="r98 r">writer</span> = <b>new</b> <a href="@0@mscorlib/A.html#93163b0edbac85a5" class="t constructor">BinaryWriter</a>( <b>new</b> <a href="@0@mscorlib/A.html#f92fa270fda9a82b" class="t constructor">MemoryStream</a>( <span class="r97 r">result</span> ) ) )
+                    <a href="#72818d4873fb6aa2" class="i method">WriteTo</a>( <span class="r98 r">writer</span> );
+                <b>return</b> <span class="r97 r">result</span>;
+            }
+        }
+ 
+        <b>public int</b> <a id="ddf574bc1a00a784" href="R/ddf574bc1a00a784.html" target="n" data-glyph="102,1" class="i property">KeyBlobSize</a>
+        {
+            <b>get</b>
+            {
+                <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r99 rd" class="r99 r">cbFieldLength</span> = <a href="#7c2c0b167eb5e6db" class="i property">Prime</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>;
+                <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r100 rd" class="r100 r">size</span> = <b>sizeof</b>( <b>uint</b> ) + <a href="#092c771c6b75cac0" class="i property">CurveBlobSize</a> + 3 * <span class="r99 r">cbFieldLength</span>;
+                <b>return</b> <span class="r100 r">size</span>;
+            }
+        }
+ 
+        <b>public override string</b> <a id="094ff332727e1521" href="R/094ff332727e1521.html" target="n" data-glyph="72,1" class="i method">ToString</a>()
+        {
+            <a href="@0@mscorlib/A.html#adf60ee46ebd299f" class="k">var</a> <span id="r101 rd" class="r101 r">sb</span> = <b>new</b> <a href="@0@mscorlib/A.html#6e631639c1e2746b" class="t constructor">StringBuilder</a>();
+            <span class="r101 r">sb</span>.<a href="@0@mscorlib/A.html#73bc75596acbac77" class="i method">AppendLine</a>( <span class="s">$&quot;</span><span class="s">new </span>{<b>nameof</b>( <a href="#21d503e02018adb5" class="t t">EcKeyCurveParameters</a> )}<span class="s">&quot;</span> );
+            <span class="r101 r">sb</span>.<a href="@0@mscorlib/A.html#73bc75596acbac77" class="i method">AppendLine</a>( <span class="s">&quot;{&quot;</span> );
+            <span class="r101 r">sb</span>.<a href="@0@mscorlib/A.html#73bc75596acbac77" class="i method">AppendLine</a>( <span class="s">$&quot;</span><span class="s">    </span>{<b>nameof</b>( <a href="#7f2fb24c4fb97902" class="i property">CurveType</a> )}<span class="s"> = </span>{<b>nameof</b>( <a href="#36ebcccb67ab2afc" class="t t">EcKeyCurveType</a> )}<span class="s">.</span>{<a href="#7f2fb24c4fb97902" class="i property">CurveType</a>}<span class="s">,</span><span class="s">&quot;</span> );
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r102 rd" class="r102 r">hashDesc</span> = <a href="#ec149009e7149890" class="i property">Hash</a> == <b>null</b> ? <span class="s">&quot;null&quot;</span> : <span class="s">$&quot;</span>\&quot;{<a href="#ec149009e7149890" class="i property">Hash</a>}\&quot;<span class="s">&quot;</span>;
+            <span class="r101 r">sb</span>.<a href="@0@mscorlib/A.html#73bc75596acbac77" class="i method">AppendLine</a>( <span class="s">$&quot;</span><span class="s">    </span>{<b>nameof</b>( <a href="#ec149009e7149890" class="i property">Hash</a> )}<span class="s"> = </span>{<span class="r102 r">hashDesc</span>}<span class="s">,</span><span class="s">&quot;</span> );
+            <span class="r101 r">sb</span>.<a href="@0@mscorlib/A.html#73bc75596acbac77" class="i method">AppendLine</a>( <span class="s">$&quot;</span><span class="s">    </span>{<b>nameof</b>( <a href="#7c2c0b167eb5e6db" class="i property">Prime</a> )}<span class="s"> = </span>{<a href="#e5d94c0121a24e72" class="i method">GetBytesDesc</a>( <a href="#7c2c0b167eb5e6db" class="i property">Prime</a> )}<span class="s">,</span><span class="s">&quot;</span> );
+            <span class="r101 r">sb</span>.<a href="@0@mscorlib/A.html#73bc75596acbac77" class="i method">AppendLine</a>( <span class="s">$&quot;</span><span class="s">    </span>{<b>nameof</b>( <a href="#dce175f9a5639f80" class="i property">A</a> )}<span class="s"> = </span>{<a href="#e5d94c0121a24e72" class="i method">GetBytesDesc</a>( <a href="#dce175f9a5639f80" class="i property">A</a> )}<span class="s">,</span><span class="s">&quot;</span> );
+            <span class="r101 r">sb</span>.<a href="@0@mscorlib/A.html#73bc75596acbac77" class="i method">AppendLine</a>( <span class="s">$&quot;</span><span class="s">    </span>{<b>nameof</b>( <a href="#8a3c74ba323a83e3" class="i property">B</a> )}<span class="s"> = </span>{<a href="#e5d94c0121a24e72" class="i method">GetBytesDesc</a>( <a href="#8a3c74ba323a83e3" class="i property">B</a> )}<span class="s">,</span><span class="s">&quot;</span> );
+            <span class="r101 r">sb</span>.<a href="@0@mscorlib/A.html#73bc75596acbac77" class="i method">AppendLine</a>( <span class="s">$&quot;</span><span class="s">    </span>{<b>nameof</b>( <a href="#02d7f063b92566b3" class="i property">Gx</a> )}<span class="s"> = </span>{<a href="#e5d94c0121a24e72" class="i method">GetBytesDesc</a>( <a href="#02d7f063b92566b3" class="i property">Gx</a> )}<span class="s">,</span><span class="s">&quot;</span> );
+            <span class="r101 r">sb</span>.<a href="@0@mscorlib/A.html#73bc75596acbac77" class="i method">AppendLine</a>( <span class="s">$&quot;</span><span class="s">    </span>{<b>nameof</b>( <a href="#da296e4a6e7141fa" class="i property">Gy</a> )}<span class="s"> = </span>{<a href="#e5d94c0121a24e72" class="i method">GetBytesDesc</a>( <a href="#da296e4a6e7141fa" class="i property">Gy</a> )}<span class="s">,</span><span class="s">&quot;</span> );
+            <span class="r101 r">sb</span>.<a href="@0@mscorlib/A.html#73bc75596acbac77" class="i method">AppendLine</a>( <span class="s">$&quot;</span><span class="s">    </span>{<b>nameof</b>( <a href="#82fe775c3b9f8dbc" class="i property">Order</a> )}<span class="s"> = </span>{<a href="#e5d94c0121a24e72" class="i method">GetBytesDesc</a>( <a href="#82fe775c3b9f8dbc" class="i property">Order</a> )}<span class="s">,</span><span class="s">&quot;</span> );
+            <span class="r101 r">sb</span>.<a href="@0@mscorlib/A.html#73bc75596acbac77" class="i method">AppendLine</a>( <span class="s">$&quot;</span><span class="s">    </span>{<b>nameof</b>( <a href="#7e1be6bd0025051a" class="i property">Cofactor</a> )}<span class="s"> = </span>{<a href="#e5d94c0121a24e72" class="i method">GetBytesDesc</a>( <a href="#7e1be6bd0025051a" class="i property">Cofactor</a> )}<span class="s">,</span><span class="s">&quot;</span> );
+            <span class="r101 r">sb</span>.<a href="@0@mscorlib/A.html#73bc75596acbac77" class="i method">AppendLine</a>( <span class="s">$&quot;</span><span class="s">    </span>{<b>nameof</b>( <a href="#31ab9a955b55f352" class="i property">Seed</a> )}<span class="s"> = </span>{<a href="#e5d94c0121a24e72" class="i method">GetBytesDesc</a>( <a href="#31ab9a955b55f352" class="i property">Seed</a> )}<span class="s">,</span><span class="s">&quot;</span> );
+            <span class="r101 r">sb</span>.<a href="@0@mscorlib/A.html#73bc75596acbac77" class="i method">AppendLine</a>( <span class="s">&quot;}&quot;</span> );
+            <b>return</b> <span class="r101 r">sb</span>.<a href="@0@mscorlib/A.html#5a97da49a158a3c9" class="i method">ToString</a>();
+        }
+ 
+        <b>private static string</b> <a id="e5d94c0121a24e72" href="R/e5d94c0121a24e72.html" target="n" data-glyph="76,1" class="i method">GetBytesDesc</a>( <b>byte</b>[] <span id="r103 rd" class="r103 r">bytes</span> )
+        {
+            <b>if</b> ( <span class="r103 r">bytes</span> == <b>null</b> )
+                <b>return</b> <span class="s">&quot;null&quot;</span>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r104 rd" class="r104 r">base64</span> = <a href="@0@mscorlib/A.html#fc990bd1275d43d6" class="t t">Convert</a>.<a href="@0@mscorlib/A.html#f9e5bd7b69c5f334" class="i method">ToBase64String</a>( <span class="r103 r">bytes</span> );
+            <b>return</b> <span class="s">$&quot;</span><span class="s">Convert.FromBase64String(\&quot;</span>{<span class="r104 r">base64</span>}<span class="s">\&quot;)</span><span class="s">&quot;</span>;
+        }
+ 
+        <b>public void</b> <a id="72818d4873fb6aa2" href="R/72818d4873fb6aa2.html" target="n" data-glyph="72,1" class="i method">WriteTo</a>( <a href="@0@mscorlib/A.html#cf806b417abe1a35" class="t t">BinaryWriter</a> <span id="r105 rd" class="r105 r">writer</span> )
+        {
+            <span class="c">/*
+                struct BCRYPT_ECC_PARAMETER_HEADER
+                {
+                    ULONG                   dwVersion;              //Version of the structure
+                    ECC_CURVE_TYPE_ENUM     dwCurveType;            //Supported curve types.
+                    ECC_CURVE_ALG_ID_ENUM   dwCurveGenerationAlgId; //For X.592 verification purposes, if we include Seed we will need to include the algorithm ID.
+                    ULONG                   cbFieldLength;          //Byte length of the fields P, A, B, X, Y.
+                    ULONG                   cbSubgroupOrder;        //Byte length of the subgroup.
+                    ULONG                   cbCofactor;             //Byte length of cofactor of G in E.
+                    ULONG                   cbSeed;                 //Byte length of the seed used to generate the curve.
+                    //P[cbFieldLength]              Prime specifying the base field.
+                    //A[cbFieldLength]              Coefficient A of the equation y^2 = x^3 + A*x + B mod p
+                    //B[cbFieldLength]              Coefficient B of the equation y^2 = x^3 + A*x + B mod p
+                    //Gx[cbFieldLength]             X-coordinate of the base point.
+                    //Gy[cbFieldLength]             Y-coordinate of the base point.
+                    //n[cbSubgroupOrder]            Order of the group generated by G = (x,y)
+                    //h[cbCofactor]                 Cofactor of G in E.
+                    //S[cbSeed]                     Seed of the curve.
+                }
+             */</span>
+ 
+            <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r106 rd" class="r106 r">cbFieldLength</span> = <a href="#7c2c0b167eb5e6db" class="i property">Prime</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>;
+            <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r107 rd" class="r107 r">cbSubgroupOrder</span> = <a href="#82fe775c3b9f8dbc" class="i property">Order</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>;
+            <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r108 rd" class="r108 r">cbCofactor</span> = <a href="#7e1be6bd0025051a" class="i property">Cofactor</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>;
+            <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r109 rd" class="r109 r">cbSeed</span> = <a href="#31ab9a955b55f352" class="i property">Seed</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>;
+ 
+            <span class="r105 r">writer</span>.<a href="@0@mscorlib/A.html#0dcb1e4b7b6cce02" class="i method">Write</a>( 1 ); <span class="c">// version</span>
+            <span class="r105 r">writer</span>.<a href="@0@mscorlib/A.html#0dcb1e4b7b6cce02" class="i method">Write</a>( <a href="#68b0441d7e75d6e8" class="i method">ToCurveType</a>( <a href="#7f2fb24c4fb97902" class="i property">CurveType</a> ) );
+            <span class="r105 r">writer</span>.<a href="@0@mscorlib/A.html#0dcb1e4b7b6cce02" class="i method">Write</a>( <a href="#72cdcde86f46fb74" class="i method">ToCurveGenerationAlgId</a>( <a href="#ec149009e7149890" class="i property">Hash</a> ) );
+            <span class="r105 r">writer</span>.<a href="@0@mscorlib/A.html#0dcb1e4b7b6cce02" class="i method">Write</a>( <span class="r106 r">cbFieldLength</span> );
+            <span class="r105 r">writer</span>.<a href="@0@mscorlib/A.html#0dcb1e4b7b6cce02" class="i method">Write</a>( <span class="r107 r">cbSubgroupOrder</span> );
+            <span class="r105 r">writer</span>.<a href="@0@mscorlib/A.html#0dcb1e4b7b6cce02" class="i method">Write</a>( <span class="r108 r">cbCofactor</span> );
+            <span class="r105 r">writer</span>.<a href="@0@mscorlib/A.html#0dcb1e4b7b6cce02" class="i method">Write</a>( <span class="r109 r">cbSeed</span> );
+ 
+            <a href="#22b10c6762fdbb23" class="i method">AlignAndWrite</a>( <span class="r105 r">writer</span>, <a href="#7c2c0b167eb5e6db" class="i property">Prime</a>, <span class="r106 r">cbFieldLength</span>, <b>nameof</b>( <a href="#7c2c0b167eb5e6db" class="i property">Prime</a> ) );
+            <a href="#22b10c6762fdbb23" class="i method">AlignAndWrite</a>( <span class="r105 r">writer</span>, <a href="#dce175f9a5639f80" class="i property">A</a>, <span class="r106 r">cbFieldLength</span>, <b>nameof</b>( <a href="#dce175f9a5639f80" class="i property">A</a> ) );
+            <a href="#22b10c6762fdbb23" class="i method">AlignAndWrite</a>( <span class="r105 r">writer</span>, <a href="#8a3c74ba323a83e3" class="i property">B</a>, <span class="r106 r">cbFieldLength</span>, <b>nameof</b>( <a href="#8a3c74ba323a83e3" class="i property">B</a> ) );
+            <a href="#22b10c6762fdbb23" class="i method">AlignAndWrite</a>( <span class="r105 r">writer</span>, <a href="#02d7f063b92566b3" class="i property">Gx</a>, <span class="r106 r">cbFieldLength</span>, <b>nameof</b>( <a href="#02d7f063b92566b3" class="i property">Gx</a> ) );
+            <a href="#22b10c6762fdbb23" class="i method">AlignAndWrite</a>( <span class="r105 r">writer</span>, <a href="#da296e4a6e7141fa" class="i property">Gy</a>, <span class="r106 r">cbFieldLength</span>, <b>nameof</b>( <a href="#da296e4a6e7141fa" class="i property">Gy</a> ) );
+            <a href="#22b10c6762fdbb23" class="i method">AlignAndWrite</a>( <span class="r105 r">writer</span>, <a href="#82fe775c3b9f8dbc" class="i property">Order</a>, <span class="r107 r">cbSubgroupOrder</span>, <b>nameof</b>( <a href="#82fe775c3b9f8dbc" class="i property">Order</a> ) );
+            <a href="#22b10c6762fdbb23" class="i method">AlignAndWrite</a>( <span class="r105 r">writer</span>, <a href="#7e1be6bd0025051a" class="i property">Cofactor</a>, <span class="r108 r">cbCofactor</span>, <b>nameof</b>( <a href="#7e1be6bd0025051a" class="i property">Cofactor</a> ) );
+            <a href="#22b10c6762fdbb23" class="i method">AlignAndWrite</a>( <span class="r105 r">writer</span>, <a href="#31ab9a955b55f352" class="i property">Seed</a>, <span class="r109 r">cbSeed</span>, <b>nameof</b>( <a href="#31ab9a955b55f352" class="i property">Seed</a> ) );
+        }
+ 
+        <b>private static int</b> <a id="68b0441d7e75d6e8" href="R/68b0441d7e75d6e8.html" target="n" data-glyph="76,1" class="i method">ToCurveType</a>( <a href="#36ebcccb67ab2afc" class="t t">EcKeyCurveType</a> <span id="r110 rd" class="r110 r">type</span> )
+        {
+            <b>switch</b> ( <span class="r110 r">type</span> )
+            {
+                <b>case</b> <a href="#36ebcccb67ab2afc" class="t t">EcKeyCurveType</a>.<a href="#72c007ea0bc029ec" class="i field">PrimeMontgomery</a>:
+                    <b>return</b> <a href="Algorithms/NativeMethods.cs.html#60ee5e369aecafa8" class="t t">NativeMethods</a>.<a href="Algorithms/NativeMethods.cs.html#7e2abd3cfbdcc43c" class="i field">BCRYPT_ECC_PRIME_MONTGOMERY_CURVE</a>;
+ 
+                <b>case</b> <a href="#36ebcccb67ab2afc" class="t t">EcKeyCurveType</a>.<a href="#0b421532a305ac3e" class="i field">PrimeShortWeierstrass</a>:
+                    <b>return</b> <a href="Algorithms/NativeMethods.cs.html#60ee5e369aecafa8" class="t t">NativeMethods</a>.<a href="Algorithms/NativeMethods.cs.html#b7d0bb5fc9ae8985" class="i field">BCRYPT_ECC_PRIME_SHORT_WEIERSTRASS_CURVE</a>;
+ 
+                <b>case</b> <a href="#36ebcccb67ab2afc" class="t t">EcKeyCurveType</a>.<a href="#4897605017410779" class="i field">PrimeTwistedEdwards</a>:
+                    <b>return</b> <a href="Algorithms/NativeMethods.cs.html#60ee5e369aecafa8" class="t t">NativeMethods</a>.<a href="Algorithms/NativeMethods.cs.html#0dfe09075b446f44" class="i field">BCRYPT_ECC_PRIME_TWISTED_EDWARDS_CURVE</a>;
+ 
+                <b>default</b>:
+                    <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>( <span class="s">$&quot;</span><span class="s">Unsupported curve type: </span>{<span class="r110 r">type</span>}<span class="s">&quot;</span> );
+            }
+        }
+ 
+        <b>private static int</b> <a id="72cdcde86f46fb74" href="R/72cdcde86f46fb74.html" target="n" data-glyph="76,1" class="i method">ToCurveGenerationAlgId</a>( <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r111 rd" class="r111 r">hash</span> )
+        {
+            <b>if</b> ( !<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>( <span class="r111 r">hash</span> ) )
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>( <span class="s">$&quot;</span><span class="s">Unsupported curve generation hash algorithm: </span>{<span class="r111 r">hash</span>}<span class="s">&quot;</span> );
+            <b>return</b> <a href="Algorithms/NativeMethods.cs.html#60ee5e369aecafa8" class="t t">NativeMethods</a>.<a href="Algorithms/NativeMethods.cs.html#685aae11b7ae50ae" class="i field">BCRYPT_NO_CURVE_GENERATION_ALG_ID</a>;
+        }
+ 
+        <b>private static void</b> <a id="22b10c6762fdbb23" href="R/22b10c6762fdbb23.html" target="n" data-glyph="76,1" class="i method">AlignAndWrite</a>( <a href="@0@mscorlib/A.html#cf806b417abe1a35" class="t t">BinaryWriter</a> <span id="r112 rd" class="r112 r">writer</span>, <b>byte</b>[] <span id="r113 rd" class="r113 r">bytes</span>, <b>int</b> <span id="r114 rd" class="r114 r">size</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r115 rd" class="r115 r">paramName</span> )
+        {
+            <b>if</b> ( <span class="r113 r">bytes</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a> &gt;= <span class="r114 r">size</span> )
+            {
+                <b>for</b> ( <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r116 rd" class="r116 r">i</span> = 0; <span class="r116 r">i</span> &lt; <span class="r113 r">bytes</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a> - <span class="r114 r">size</span>; ++<span class="r116 r">i</span> )
+                    <b>if</b> ( <span class="r113 r">bytes</span>[<span class="r116 r">i</span>] != 0 )
+                        <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>( <span class="s">$&quot;</span><span class="s">Value of </span>{<span class="r115 r">paramName</span>}<span class="s"> is bigger than allowed for this curve.</span><span class="s">&quot;</span> );
+ 
+                <span class="r112 r">writer</span>.<a href="@0@mscorlib/A.html#fae34c4f5667c7a2" class="i method">Write</a>( <span class="r113 r">bytes</span>, <span class="r113 r">bytes</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a> - <span class="r114 r">size</span>, <span class="r114 r">size</span> );
+                <b>return</b>;
+            }
+ 
+            <b>for</b> ( <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r117 rd" class="r117 r">i</span> = <span class="r113 r">bytes</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>; <span class="r117 r">i</span> &lt; <span class="r114 r">size</span>; ++<span class="r117 r">i</span> )
+                <span class="r112 r">writer</span>.<a href="@0@mscorlib/A.html#430d3c5573a2b429" class="i method">Write</a>( (<b>byte</b>) 0 );
+ 
+            <span class="r112 r">writer</span>.<a href="@0@mscorlib/A.html#3b784e1877648aef" class="i method">Write</a>( <span class="r113 r">bytes</span> );
+        }
+    }
+ 
+    <b>internal enum</b> <a id="36ebcccb67ab2afc" href="R/36ebcccb67ab2afc.html" target="n" data-glyph="20,0" class="t t"><span id="8c303ce9dbb25475">EcKeyCurveType</span></a>
+    {
+        <a id="3279d05ac66fc8ae" href="R/../../0000000000.html" target="n" data-glyph="24,1" class="i field">Characteristic2</a>,
+        <a id="a3c87a346e0b270f" href="R/../../0000000000.html" target="n" data-glyph="24,1" class="i field">Implicit</a>,
+        <a id="072f41142b0a96e7" href="R/../../0000000000.html" target="n" data-glyph="24,1" class="i field">Named</a>,
+        <a id="72c007ea0bc029ec" href="R/72c007ea0bc029ec.html" target="n" data-glyph="24,1" class="i field">PrimeMontgomery</a>,
+        <a id="0b421532a305ac3e" href="R/0b421532a305ac3e.html" target="n" data-glyph="24,1" class="i field">PrimeShortWeierstrass</a>,
+        <a id="4897605017410779" href="R/4897605017410779.html" target="n" data-glyph="24,1" class="i field">PrimeTwistedEdwards</a>
+    }
+}</pre></td></tr></table></div></body></html>

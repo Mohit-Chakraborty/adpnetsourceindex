@@ -1,0 +1,380 @@
+﻿<!DOCTYPE html>
+<html><head><title>BatchRequest.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(371);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.Batch/Protocol/BatchRequest.cs" target="_top">Protocol\BatchRequest.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.Batch" target="_top">src\Microsoft.Azure.Batch.csproj</a> (Microsoft.Azure.Batch)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Batch</span>.<span class="i n">Protocol</span>
+{
+    <b>using</b> <span class="i n">System</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Diagnostics</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Runtime</span>.<span class="i n">ExceptionServices</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+    <b>using</b> <span class="i n">Common</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i">Rest</span>.<span class="i">Azure</span>;
+    <b>using</b> <span class="i n">Models</span>;
+    
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> A base class for all Batch service requests. Represents the information required to make a particular call with no request body to the Batch service REST API.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r t">TOptions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The type of the parameters passed outside the request body associated with the request.</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r t">TResponse</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The response type expected from the request.</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+    <b>public abstract class</b> <a id="e489b64a0029d5ba" href="../R/e489b64a0029d5ba.html" target="n" data-glyph="0,0" class="t t">BatchRequestBase</a>&lt;<span id="r0 rd t" class="r0 r t">TOptions</span>, <span id="r1 rd t" class="r1 r t">TResponse</span>&gt; : <a href="IBatchRequest.cs.html#aeefa472737140bb" class="t t">IBatchRequest</a>&lt;<span class="r1 r t">TResponse</span>&gt;
+        <b>where</b> <span class="r0 r t">TOptions</span> : <a href="Models/IOptions.cs.html#93ece7f0bd94cb8a" class="t t">IOptions</a>, <b>new</b>()
+        <b>where</b> <span class="r1 r t">TResponse</span> : <span class="i">IAzureOperationResponse</span>
+    {
+        <b>private volatile bool</b> <a id="ea92deb538551093" href="../R/ea92deb538551093.html" target="n" data-glyph="46,1" class="i field">hasRequestExecutionStarted</a>;
+        <b>private</b> <a href="@0@mscorlib/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>, <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="r1 r t">TResponse</span>&gt;&gt; <a id="d715cd51fc16ff1d" href="../R/d715cd51fc16ff1d.html" target="n" data-glyph="46,1" class="i field">serviceRequestFunc</a>;
+        <b>private</b> <span class="r0 r t">TOptions</span> <a id="e32f92dc4c938d82" href="../R/e32f92dc4c938d82.html" target="n" data-glyph="46,1" class="i field">options</a>;
+        <b>private</b> <a href="../Common/IRetryPolicy.cs.html#f8017ef517b211bf" class="t t">IRetryPolicy</a> <a id="16d8a0bc7a771ad6" href="../R/16d8a0bc7a771ad6.html" target="n" data-glyph="46,1" class="i field">retryPolicy</a>;
+        <b>private</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="261eb69973b906af" href="../R/261eb69973b906af.html" target="n" data-glyph="46,1" class="i field">timeout</a>;
+        <b>private</b> <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <a id="a6d2199131bd62e6" href="../R/a6d2199131bd62e6.html" target="n" data-glyph="46,1" class="i field">cancellationToken</a>;
+        <b>private</b> <a href="../ClientRequestIdProvider.cs.html#6db49a04d1b955fa" class="t t">ClientRequestIdProvider</a> <a id="98c86924c499a46c" href="../R/98c86924c499a46c.html" target="n" data-glyph="46,1" class="i field">clientRequestIdProvider</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the headers used for the request.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a href="@0@mscorlib/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;&gt; <a id="998da2bd703bbb18" href="../R/998da2bd703bbb18.html" target="n" data-glyph="102,1" class="i property">CustomHeaders</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets the function which will create a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> calling the Batch service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a href="@0@mscorlib/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>, <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="r1 r t">TResponse</span>&gt;&gt; <a id="97ea54b6a098cb05" href="../R/97ea54b6a098cb05.html" target="n" data-glyph="102,1" class="i property">ServiceRequestFunc</a> 
+        {
+            <b>get</b> { <b>return</b> <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#d715cd51fc16ff1d" class="i field">serviceRequestFunc</a>; }
+            <b>set</b>
+            {
+                <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#72737de89df9e00c" class="i method">ThrowIfRequestExecutionHasStarted</a>();
+                <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#d715cd51fc16ff1d" class="i field">serviceRequestFunc</a> = <b>value</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets the options used for the request.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <span class="r0 r t">TOptions</span> <a id="fe3dcf7eac62c085" href="../R/fe3dcf7eac62c085.html" target="n" data-glyph="102,1" class="i property">Options</a>
+        {
+            <b>get</b> { <b>return</b> <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#e32f92dc4c938d82" class="i field">options</a>; }
+            <b>set</b>
+            {
+                <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#72737de89df9e00c" class="i method">ThrowIfRequestExecutionHasStarted</a>();
+                <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#e32f92dc4c938d82" class="i field">options</a> = <b>value</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the options needed by the REST proxy for the current request.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <a href="Models/IOptions.cs.html#93ece7f0bd94cb8a" class="t t">IOptions</a> <a href="IBatchRequest.cs.html#db591edc93adb428" class="t t">IBatchRequest</a>.<a href="IBatchRequest.cs.html#7d4e0947fd57ad7a" class="i property">Options</a> { <b>get</b> { <b>return</b> <a href="#fe3dcf7eac62c085" class="i property">Options</a>; } }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the REST client that will be used for this request.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <span class="i n">Protocol</span>.<a href="../GeneratedProtocol/BatchServiceClient.cs.html#f97a5b7fd9f3d062" class="t t">BatchServiceClient</a> <a id="008d8849c99b9aad" href="../R/008d8849c99b9aad.html" target="n" data-glyph="102,1" class="i property">RestClient</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets the retry policy to be applied.</span>
+        <span class="c">///</span><span class="c"> Null means no retries will be attempted.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a href="../Common/IRetryPolicy.cs.html#f8017ef517b211bf" class="t t">IRetryPolicy</a> <a id="85dd090702944271" href="../R/85dd090702944271.html" target="n" data-glyph="102,1" class="i property">RetryPolicy</a>
+        {
+            <b>get</b> { <b>return</b> <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#16d8a0bc7a771ad6" class="i field">retryPolicy</a>; }
+            <b>set</b>
+            {
+                <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#72737de89df9e00c" class="i method">ThrowIfRequestExecutionHasStarted</a>();
+                <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#16d8a0bc7a771ad6" class="i field">retryPolicy</a> = <b>value</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets the operation context associated with this </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="IBatchRequest.cs.html#db591edc93adb428" class="t t">IBatchRequest</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a href="../Common/OperationContext.cs.html#1a0b5d8611d9a39b" class="t t">OperationContext</a> <a id="29549bb99b1942ec" href="../R/29549bb99b1942ec.html" target="n" data-glyph="102,1" class="i property">OperationContext</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets the client side timeout for a request to the Batch service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">para</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> This timeout applies to a single Batch service request; if a retry policy is specified, then each retry will be granted the</span>
+        <span class="c">///</span><span class="c"> full duration of this value.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">para</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="5b34fdfe538709a3" href="../R/5b34fdfe538709a3.html" target="n" data-glyph="102,1" class="i property">Timeout</a>
+        {
+            <b>get</b> { <b>return</b> <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#261eb69973b906af" class="i field">timeout</a>; }
+            <b>set</b>
+            {
+                <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#72737de89df9e00c" class="i method">ThrowIfRequestExecutionHasStarted</a>();
+                <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#261eb69973b906af" class="i field">timeout</a> = <b>value</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#74b85b8cf39e7832" class="i property">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> associated with this </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="IBatchRequest.cs.html#db591edc93adb428" class="t t">IBatchRequest</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">para</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Cancelling this token will cancel the currently ongoing request. This applies to the initial request as well</span>
+        <span class="c">///</span><span class="c"> as any subsequent requests created due to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#85dd090702944271" class="i property">RetryPolicy</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">. Cancelling this token also forbids all</span>
+        <span class="c">///</span><span class="c"> future retries of this </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="IBatchRequest.cs.html#db591edc93adb428" class="t t">IBatchRequest</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">para</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public</b> <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <a id="74b85b8cf39e7832" href="../R/74b85b8cf39e7832.html" target="n" data-glyph="102,1" class="i property">CancellationToken</a>
+        {
+            <b>get</b> { <b>return</b> <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#a6d2199131bd62e6" class="i field">cancellationToken</a>; }
+            <b>set</b>
+            {
+                <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#72737de89df9e00c" class="i method">ThrowIfRequestExecutionHasStarted</a>();
+                <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#a6d2199131bd62e6" class="i field">cancellationToken</a> = <b>value</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#8159e0e3f65e6c91" class="i property">ClientRequestIdProvider</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> used by this request to generate client request ids.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a href="../ClientRequestIdProvider.cs.html#6db49a04d1b955fa" class="t t">ClientRequestIdProvider</a> <a id="8159e0e3f65e6c91" href="../R/8159e0e3f65e6c91.html" target="n" data-glyph="102,1" class="i property">ClientRequestIdProvider</a>
+        {
+            <b>get</b> { <b>return</b> <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#98c86924c499a46c" class="i field">clientRequestIdProvider</a>; }
+            <b>set</b>
+            {
+                <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#72737de89df9e00c" class="i method">ThrowIfRequestExecutionHasStarted</a>();
+                <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#98c86924c499a46c" class="i field">clientRequestIdProvider</a> = <b>value</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#e489b64a0029d5ba" class="t t">BatchRequestBase</a>{<span class="r2 r t">TOptions</span>,<span class="r3 r t">TResponse</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">restClient</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The REST client to use.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The cancellationToken to use.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>protected</b> <a id="9256b8fbfc97b40e" href="../R/9256b8fbfc97b40e.html" target="n" data-glyph="75,1" class="t constructor">BatchRequestBase</a>(<span class="i n">Protocol</span>.<a href="../GeneratedProtocol/BatchServiceClient.cs.html#f97a5b7fd9f3d062" class="t t">BatchServiceClient</a> <span id="r4 rd" class="r4 r">restClient</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r5 rd" class="r5 r">cancellationToken</span>)
+        {
+            <span class="c">//Construct a default set of options</span>
+            <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#fe3dcf7eac62c085" class="i property">Options</a> = <b>new</b> <span class="t">TOptions</span>();
+            <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#29549bb99b1942ec" class="i property">OperationContext</a> = <b>new</b> <a href="../Common/OperationContext.cs.html#a8fb0c38ed510b3c" class="t constructor">OperationContext</a>();
+            <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#008d8849c99b9aad" class="i property">RestClient</a> = <span class="r4 r">restClient</span>;
+            <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#5b34fdfe538709a3" class="i property">Timeout</a> = <a href="../Constants.cs.html#9295672bd7b4088f" class="t t">Constants</a>.<a href="../Constants.cs.html#57f7d17787f3699e" class="i field">DefaultSingleRestRequestClientTimeout</a>;
+            <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#74b85b8cf39e7832" class="i property">CancellationToken</a> = <span class="r5 r">cancellationToken</span>;
+            <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#998da2bd703bbb18" class="i property">CustomHeaders</a> = <b>new</b> <a href="@0@mscorlib/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;&gt;();
+            <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#ea92deb538551093" class="i field">hasRequestExecutionStarted</a> = <b>false</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Executes the request.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">An asynchronous operation of return type </span><span class="c">&lt;</span><span class="c">typeparamref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r t">TResponse</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="r1 r t">TResponse</span>&gt; <a id="0fd5b44cfcd32853" href="../R/0fd5b44cfcd32853.html" target="n" data-glyph="72,1" class="i method">ExecuteRequestAsync</a>()
+        {
+            <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#ea92deb538551093" class="i field">hasRequestExecutionStarted</a> = <b>true</b>;
+ 
+            <b>bool</b> <span id="r6 rd" class="r6 r">shouldRetry</span>;
+            <b>do</b>
+            {
+                <span class="r6 r">shouldRetry</span> = <b>false</b>; <span class="c">//Start every request execution assuming there will be no retry</span>
+                <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="r1 r t">TResponse</span>&gt; <span id="r7 rd" class="r7 r">serviceRequestTask</span> = <b>null</b>;
+                <a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r8 rd" class="r8 r">capturedException</span>;
+ 
+                <span class="c">//Participate in cooperative cancellation</span>
+                <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#74b85b8cf39e7832" class="i property">CancellationToken</a>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+ 
+                <b>try</b>
+                {
+                    <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#4b756f68c6e5d16a" class="i method">ApplyClientRequestIdBehaviorToParams</a>();
+ 
+                    <span class="r7 r">serviceRequestTask</span> = <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#b2e417e4295e04af" class="i method">ExecuteRequestWithCancellationAsync</a>(<a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#97ea54b6a098cb05" class="i property">ServiceRequestFunc</a>);
+ 
+                    <span class="r1 r t">TResponse</span> <span id="r9 rd" class="r9 r">response</span> = <b>await</b> <span class="r7 r">serviceRequestTask</span>.<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<span class="r10 r">continueOnCapturedContext</span>: <b>false</b>);
+ 
+                    <span class="c">//TODO: It would be nice if we could add to OperationContext.RequestResults here</span>
+                    <b>return</b> <span class="r9 r">response</span>;
+                }
+                <b>catch</b> (<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r11 rd" class="r11 r">e</span>)
+                {
+                    <span class="c">//If the caught exception was a BatchErrorException, we wrap it in the object model exception type</span>
+                    <a href="../Common/BatchException.cs.html#11968400ddac5a84" class="t t">BatchException</a> <span id="r12 rd" class="r12 r">batchException</span> = <b>null</b>;
+                    <b>if</b> (<span class="r11 r">e</span> <b>is</b> <a href="../GeneratedProtocol/Models/BatchErrorException.cs.html#afb146b0c7f5c1a7" class="t t">BatchErrorException</a>)
+                    {
+                        <span class="r12 r">batchException</span> = <b>new</b> <a href="../Common/BatchException.cs.html#c166531b0ac95a95" class="t constructor">BatchException</a>(<span class="r11 r">e</span> <b>as</b> <a href="../GeneratedProtocol/Models/BatchErrorException.cs.html#afb146b0c7f5c1a7" class="t t">BatchErrorException</a>);
+                    }
+ 
+                    <a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r13 rd" class="r13 r">wrappedException</span> = <span class="r12 r">batchException</span> ?? <span class="r11 r">e</span>;
+ 
+                    <b>if</b> (<a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#85dd090702944271" class="i property">RetryPolicy</a> != <b>null</b> &amp;&amp;
+                        <span class="c">//If cancellation is requested at this point, just skip calling the retry policy and throw</span>
+                        <span class="c">//This is the most honest thing to do since we will not be issuing another request on the users behalf</span>
+                        <span class="c">//(since the cancellation token has already been set) and thus calling their retry policy would just</span>
+                        <span class="c">//be confusing.</span>
+                        !<a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#74b85b8cf39e7832" class="i property">CancellationToken</a>.<a href="@0@mscorlib/A.html#f32abbe8e2f1f6c1" class="i property">IsCancellationRequested</a>)
+                    {
+                        <a href="../Common/RequestInformation.cs.html#70b72ccc6286eacf" class="t t">RequestInformation</a> <span id="r14 rd" class="r14 r">requestInformation</span>;
+ 
+                        <b>if</b> (<span class="r12 r">batchException</span> != <b>null</b>)
+                        {
+                            <span class="c">//If there is a BatchException, extract the RequestInformation and capture it</span>
+                            <span class="r14 r">requestInformation</span> = <span class="r12 r">batchException</span>.<a href="../Common/BatchException.cs.html#14692f6c736a59f8" class="i property">RequestInformation</a>;
+                        }
+                        <b>else</b>
+                        {
+                            <span class="r14 r">requestInformation</span> = <b>new</b> <a href="../Common/RequestInformation.cs.html#70b72ccc6286eacf" class="t constructor">RequestInformation</a>()
+                            {
+                                <a href="../Common/RequestInformation.cs.html#326ff5f9ae34220e" class="i property">ClientRequestId</a> = <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#fe3dcf7eac62c085" class="i property">Options</a>.<a href="Models/IOptions.cs.html#96c72a4173baba53" class="i property">ClientRequestId</a>
+                            };
+                        }
+ 
+                        <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#29549bb99b1942ec" class="i property">OperationContext</a>.<a href="../Common/OperationContext.cs.html#949f475b598c6b64" class="i property">RequestResults</a>.<a href="@0@mscorlib/A.html#a9319db8c62ae453" class="i method">Add</a>(<b>new</b> <a href="../Common/RequestResult.cs.html#b63dea389bf03e32" class="t constructor">RequestResult</a>(<span class="r14 r">requestInformation</span>, <span class="r13 r">wrappedException</span>) { <a href="../Common/RequestResult.cs.html#1bab8de56007f452" class="i property">Task</a> = <span class="r7 r">serviceRequestTask</span> });
+                        <span class="r8 r">capturedException</span> = <span class="r13 r">wrappedException</span>;
+                    }
+                    <b>else</b>
+                    {
+                        <b>if</b> (<span class="r12 r">batchException</span> != <b>null</b>)
+                        {
+                            <b>throw</b> <span class="r12 r">batchException</span>; <span class="c">//Just forward the wrapped exception if there was one</span>
+                        }
+                        <b>else</b>
+                        {
+                            <b>throw</b>;
+                        }
+                    }
+                }
+ 
+                <b>if</b> (<span class="r8 r">capturedException</span> != <b>null</b>)
+                {
+                    <span class="c">//On an exception, invoke the retry policy</span>
+                    <a href="../Common/RetryDecision.cs.html#05c94e336dba3bf4" class="t t">RetryDecision</a> <span id="r15 rd" class="r15 r">retryDecision</span> = <b>await</b> <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#85dd090702944271" class="i property">RetryPolicy</a>.<a href="../Common/IRetryPolicy.cs.html#883e027be9662885" class="i method">ShouldRetryAsync</a>(<span class="r8 r">capturedException</span>, <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#29549bb99b1942ec" class="i property">OperationContext</a>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<span class="r16 r">continueOnCapturedContext</span>: <b>false</b>);
+                    <span class="r6 r">shouldRetry</span> = <span class="r15 r">retryDecision</span>.<a href="../Common/RetryDecision.cs.html#508485132be2ccd1" class="i property">ShouldRetry</a>;
+ 
+                    <b>if</b> (!<span class="r6 r">shouldRetry</span>)
+                    {
+                        <span class="c">//Rethrow the exception and explicitly preserve the stack trace</span>
+                        <a href="@0@mscorlib/A.html#1443447025759846" class="t t">ExceptionDispatchInfo</a>.<a href="@0@mscorlib/A.html#139923899a417d5a" class="i method">Capture</a>(<span class="r8 r">capturedException</span>).<a href="@0@mscorlib/A.html#fc3b312e2d0ab87a" class="i method">Throw</a>();
+                    }
+                    <b>else</b>
+                    {
+                        <b>if</b> (<span class="r15 r">retryDecision</span>.<a href="../Common/RetryDecision.cs.html#dbf4cfd340ca7695" class="i property">RetryDelay</a>.<a href="@0@mscorlib/A.html#7bbe60e33e857298" class="i property">HasValue</a>)
+                        {
+                            <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#87a671fb5b9b4384" class="i method">Delay</a>(<span class="r15 r">retryDecision</span>.<a href="../Common/RetryDecision.cs.html#dbf4cfd340ca7695" class="i property">RetryDelay</a>.<a href="@0@mscorlib/A.html#7b38d1fa76071c95" class="i property">Value</a>).<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<span class="r17 r">continueOnCapturedContext</span>: <b>false</b>);
+                        }
+                        <b>else</b>
+                        {
+                            <a href="@0@System/A.html#632c6da37ce825df" class="t t">Debug</a>.<a href="@0@System/A.html#4f55cf5792dfc5e6" class="i method">Assert</a>(<b>false</b>, <span class="s">&quot;RetryDecision.ShouldRetry = true but RetryDelay has no value&quot;</span>);
+                        }
+                    }
+                }
+ 
+            } <b>while</b> (<span class="r6 r">shouldRetry</span>);
+ 
+            <span class="c">//Reaching here is a bug, by now the request should have either thrown or returned</span>
+            <b>const string</b> <span id="r18 rd" class="r18 r">errorMessage</span> = <span class="s">&quot;Exited ExecuteRequestAsync without throwing or returning&quot;</span>;
+            <a href="@0@System/A.html#632c6da37ce825df" class="t t">Debug</a>.<a href="@0@System/A.html#4f55cf5792dfc5e6" class="i method">Assert</a>(<b>false</b>, <span class="r18 r">errorMessage</span>);
+            <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="r18 r">errorMessage</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Throws an exception if request execution has started.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>protected void</b> <a id="72737de89df9e00c" href="../R/72737de89df9e00c.html" target="n" data-glyph="75,1" class="i method">ThrowIfRequestExecutionHasStarted</a>()
+        {
+            <b>if</b> (<a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#ea92deb538551093" class="i field">hasRequestExecutionStarted</a>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<a href="../BatchErrorMessages.Designer.cs.html#3c2fda6d707d8e3d" class="t t">BatchErrorMessages</a>.<a href="../BatchErrorMessages.Designer.cs.html#033ff1046d50bf88" class="i property">BatchRequestCannotBeModified</a>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Executes the specified function with a cancellation token which is a composite token for the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="IBatchRequest.cs.html#db591edc93adb428" class="t t">IBatchRequest</a>.<a href="IBatchRequest.cs.html#ad8d75aab65566d1" class="i property">Timeout</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <span class="c">///</span><span class="c"> and the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="IBatchRequest.cs.html#db591edc93adb428" class="t t">IBatchRequest</a>.<a href="IBatchRequest.cs.html#ecb2ee57ee6df27c" class="i property">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r19 r">func</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The function defining what work to be called in a cancellable way</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A task with the async state of the func</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="r1 r t">TResponse</span>&gt; <a id="b2e417e4295e04af" href="../R/b2e417e4295e04af.html" target="n" data-glyph="76,1" class="i method">ExecuteRequestWithCancellationAsync</a>(<a href="@0@mscorlib/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>, <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="r1 r t">TResponse</span>&gt;&gt; <span id="r19 rd" class="r19 r">func</span>)
+        {
+            <span class="c">//CancellationToken(from outside) should cancel BOTH the retries and the currently ongoing REST request</span>
+            <span class="c">//CancellationToken(from timeout) should cancel just the currently ongoing REST request</span>
+ 
+            <b>using</b> (<a href="@0@mscorlib/A.html#130a9536ac96b392" class="t t">CancellationTokenSource</a> <span id="r20 rd" class="r20 r">timeoutCancellationTokenSource</span> = <b>new</b> <a href="@0@mscorlib/A.html#2f4ad148fd857d6f" class="t constructor">CancellationTokenSource</a>(<a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#5b34fdfe538709a3" class="i property">Timeout</a>))
+            {
+                <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r21 rd" class="r21 r">timeoutToken</span> = <span class="r20 r">timeoutCancellationTokenSource</span>.<a href="@0@mscorlib/A.html#9e22b9c8995bf195" class="i property">Token</a>;
+                <b>using</b> (<a href="@0@mscorlib/A.html#130a9536ac96b392" class="t t">CancellationTokenSource</a> <span id="r22 rd" class="r22 r">linkedTokenSource</span> = <a href="@0@mscorlib/A.html#130a9536ac96b392" class="t t">CancellationTokenSource</a>.<a href="@0@mscorlib/A.html#03f4ba87373778ca" class="i method">CreateLinkedTokenSource</a>(<span class="r21 r">timeoutToken</span>, <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#74b85b8cf39e7832" class="i property">CancellationToken</a>))
+                {
+                    <b>return</b> <b>await</b> <span class="r19 r">func</span>(<span class="r22 r">linkedTokenSource</span>.<a href="@0@mscorlib/A.html#9e22b9c8995bf195" class="i property">Token</a>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<span class="r10 r">continueOnCapturedContext</span>: <b>false</b>);
+                }
+            }
+        }
+ 
+        <b>private void</b> <a id="4b756f68c6e5d16a" href="../R/4b756f68c6e5d16a.html" target="n" data-glyph="76,1" class="i method">ApplyClientRequestIdBehaviorToParams</a>()
+        {
+            <b>if</b> (<a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#8159e0e3f65e6c91" class="i property">ClientRequestIdProvider</a> == <b>null</b>)
+            {
+                <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a> <span id="r23 rd" class="r23 r">clientRequestId</span> = <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>();
+                <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#fe3dcf7eac62c085" class="i property">Options</a>.<a href="Models/IOptions.cs.html#96c72a4173baba53" class="i property">ClientRequestId</a> = <span class="r23 r">clientRequestId</span>;
+            }
+            <b>else</b>
+            {
+                <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#fe3dcf7eac62c085" class="i property">Options</a>.<a href="Models/IOptions.cs.html#96c72a4173baba53" class="i property">ClientRequestId</a> = <a href="#e489b64a0029d5ba" class="k">this</a>.<a href="#8159e0e3f65e6c91" class="i property">ClientRequestIdProvider</a>.<a href="../ClientRequestIdProvider.cs.html#ac0fca80f201946f" class="i property">GenerateClientRequestIdFunc</a>(<a href="#e489b64a0029d5ba" class="k">this</a>);
+            }
+        }
+    }
+ 
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Represents the information required to make a particular call with no request body to the Batch service REST API.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r24 r t">TOptions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The type of the parameters passed outside the request body associated with the request.</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r25 r t">TResponse</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The response type expected from the request.</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+    <b>public class</b> <a id="5c6c6dfb6c17e6d0" href="../R/5c6c6dfb6c17e6d0.html" target="n" data-glyph="0,0" class="t t">BatchRequest</a>&lt;<span id="r24 rd t" class="r24 r t">TOptions</span>, <span id="r25 rd t" class="r25 r t">TResponse</span>&gt; : <a href="#e489b64a0029d5ba" class="t t">BatchRequestBase</a>&lt;<span class="r24 r t">TOptions</span>, <span class="r25 r t">TResponse</span>&gt;
+        <b>where</b> <span class="r24 r t">TOptions</span> : <a href="Models/IOptions.cs.html#93ece7f0bd94cb8a" class="t t">IOptions</a>, <b>new</b>()
+        <b>where</b> <span class="r25 r t">TResponse</span> : <span class="i">IAzureOperationResponse</span>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#5c6c6dfb6c17e6d0" class="t t">BatchRequest</a>{<span class="r26 r t">TOptions</span>,<span class="r27 r t">TResponse</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r28 r">restClient</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The REST client to use.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r29 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The cancellationToken to use.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="0a9a7f7f52a534c9" href="../R/0a9a7f7f52a534c9.html" target="n" data-glyph="72,1" class="t constructor">BatchRequest</a>(<a href="../GeneratedProtocol/BatchServiceClient.cs.html#f97a5b7fd9f3d062" class="t t">BatchServiceClient</a> <span id="r28 rd" class="r28 r">restClient</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r29 rd" class="r29 r">cancellationToken</span>)
+            : <a href="#9256b8fbfc97b40e" class="k">base</a>(<span class="r28 r">restClient</span>, <span class="r29 r">cancellationToken</span>)
+        {
+        }
+    }
+ 
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Represents the information required to make a particular call with a request body of type </span><span class="c">&lt;</span><span class="c">typeparamref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r30 r t">TBody</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to the Batch service REST API.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r30 r t">TBody</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The type of the body parameters associated with the request.</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r31 r t">TOptions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The type of the parameters passed outside the request body associated with the request.</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r32 r t">TResponse</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The response type expected from the request.</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+    <b>public class</b> <a id="caddc6010ed08f1f" href="../R/caddc6010ed08f1f.html" target="n" data-glyph="0,0" class="t t">BatchRequest</a>&lt;<span id="r30 rd t" class="r30 r t">TBody</span>, <span id="r31 rd t" class="r31 r t">TOptions</span>, <span id="r32 rd t" class="r32 r t">TResponse</span>&gt; : <a href="#e489b64a0029d5ba" class="t t">BatchRequestBase</a>&lt;<span class="r31 r t">TOptions</span>, <span class="r32 r t">TResponse</span>&gt;
+        <b>where</b> <span class="r31 r t">TOptions</span>: <a href="Models/IOptions.cs.html#93ece7f0bd94cb8a" class="t t">IOptions</a>, <b>new</b>()
+        <b>where</b> <span class="r32 r t">TResponse</span> : <span class="i">IAzureOperationResponse</span>
+    {
+        <b>private</b> <span class="r30 r t">TBody</span> <a id="8d57c04c0435bca7" href="../R/8d57c04c0435bca7.html" target="n" data-glyph="46,1" class="i field">parameters</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets the parameters passed in the REST API request body.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <span class="r30 r t">TBody</span> <a id="369415f8349d34c3" href="../R/369415f8349d34c3.html" target="n" data-glyph="102,1" class="i property">Parameters</a>
+        {
+            <b>get</b> { <b>return</b> <a href="#caddc6010ed08f1f" class="k">this</a>.<a href="#8d57c04c0435bca7" class="i field">parameters</a>; }
+            <b>set</b>
+            {
+                <a href="#caddc6010ed08f1f" class="k">this</a>.<a href="#72737de89df9e00c" class="i method">ThrowIfRequestExecutionHasStarted</a>();
+                <a href="#caddc6010ed08f1f" class="k">this</a>.<a href="#8d57c04c0435bca7" class="i field">parameters</a> = <b>value</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#caddc6010ed08f1f" class="t t">BatchRequest</a>{<span class="r33 r t">TParameters</span>,<span class="r34 r t">TOptions</span>,<span class="r35 r t">TResponse</span>}<span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r36 r">restClient</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The REST client to use.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r37 r">parameters</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The parameters to use.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r38 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The cancellationToken to use.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="90f8955034aae468" href="../R/90f8955034aae468.html" target="n" data-glyph="72,1" class="t constructor">BatchRequest</a>(<span class="i n">Protocol</span>.<a href="../GeneratedProtocol/BatchServiceClient.cs.html#f97a5b7fd9f3d062" class="t t">BatchServiceClient</a> <span id="r36 rd" class="r36 r">restClient</span>, <span class="r30 r t">TBody</span> <span id="r37 rd" class="r37 r">parameters</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r38 rd" class="r38 r">cancellationToken</span>) : <a href="#9256b8fbfc97b40e" class="k">base</a>(<span class="r36 r">restClient</span>, <span class="r38 r">cancellationToken</span>)
+        {
+            <a href="#369415f8349d34c3" class="i property">Parameters</a> = <span class="r37 r">parameters</span>;
+        }
+    }
+}</pre></td></tr></table></div></body></html>

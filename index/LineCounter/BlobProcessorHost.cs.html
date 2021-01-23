@@ -1,0 +1,155 @@
+﻿<!DOCTYPE html>
+<html><head><title>BlobProcessorHost.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(146);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#LineCounter/BlobProcessorHost.cs" target="_top">BlobProcessorHost.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#LineCounter" target="_top">LineCounter.csproj</a> (LineCounter)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">IO</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Text</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i">EventHubs</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i">EventHubs</span>.<span class="i">Consumer</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i">EventHubs</span>.<span class="i">Processor</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i">EventHubs</span>.<span class="i">Producer</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i">Storage</span>.<span class="i">Blobs</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i n">Azure</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Configuration</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Hosting</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Logging</span>;
+ 
+<b>namespace</b> <span class="i n">LineCounter</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Hosted service that listens to uploads events hub and calculates line counts for the blobs in background updating blob metadata and posting a message into results event hub</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>public class</b> <a id="c6e8e7cd96b04ce8" href="R/c6e8e7cd96b04ce8.html" target="n" data-glyph="0,0" class="t t">LineCounterService</a> : <span class="i">IHostedService</span>
+    {
+        <b>private readonly</b> <span class="i">CancellationTokenSource</span> <a id="e60103386fda52c8" href="R/e60103386fda52c8.html" target="n" data-glyph="46,1" class="i field">_cancellationTokenSource</a> = <b>new</b> <span class="i">CancellationTokenSource</span>();
+        <b>private readonly</b> <span class="i">ILogger</span>&lt;<a href="#c6e8e7cd96b04ce8" class="t t">LineCounterService</a>&gt; <a id="a302560f55c0fe82" href="R/a302560f55c0fe82.html" target="n" data-glyph="46,1" class="i field">_logger</a>;
+ 
+        <b>private readonly</b> <span class="i">BlobContainerClient</span> <a id="af1f4592a3f47970" href="R/af1f4592a3f47970.html" target="n" data-glyph="46,1" class="i field">_blobContainerClient</a>;
+        <b>private readonly</b> <span class="i">EventHubProducerClient</span> <a id="b77de7aa9e4816d6" href="R/b77de7aa9e4816d6.html" target="n" data-glyph="46,1" class="i field">_resultsClient</a>;
+ 
+        <b>private readonly</b> <span class="i">EventProcessorClient</span> <a id="47b2b76664765eb3" href="R/47b2b76664765eb3.html" target="n" data-glyph="46,1" class="i field">_processor</a>;
+ 
+        <b>public</b> <a id="2a321f996987467b" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">LineCounterService</a>(
+            <span class="i">IAzureClientFactory</span>&lt;<span class="i">EventHubProducerClient</span>&gt; <span id="r0 rd" class="r0 r">producerFactory</span>,
+            <span class="i">BlobServiceClient</span> <span id="r1 rd" class="r1 r">blobServiceClient</span>,
+            <span class="i">ILogger</span>&lt;<a href="#c6e8e7cd96b04ce8" class="t t">LineCounterService</a>&gt; <span id="r2 rd" class="r2 r">logger</span>,
+            <span class="i">IConfiguration</span> <span id="r3 rd" class="r3 r">configuration</span>)
+        {
+            <a href="#a302560f55c0fe82" class="i field">_logger</a> = <span class="r2 r">logger</span>;
+            <a href="#af1f4592a3f47970" class="i field">_blobContainerClient</a> = <span class="r1 r">blobServiceClient</span>.<span class="i">GetBlobContainerClient</span>(<span class="s">&quot;uploads&quot;</span>);
+            <a href="#b77de7aa9e4816d6" class="i field">_resultsClient</a> = <span class="r0 r">producerFactory</span>.<span class="i">CreateClient</span>(<span class="s">&quot;Results&quot;</span>);
+            <a href="#47b2b76664765eb3" class="i field">_processor</a> = <b>new</b> <span class="i">EventProcessorClient</span>(
+                <a href="#af1f4592a3f47970" class="i field">_blobContainerClient</a>,
+                <span class="i">EventHubConsumerClient</span>.<span class="i">DefaultConsumerGroupName</span>,
+                <span class="r3 r">configuration</span>[<span class="s">&quot;Uploads:connectionString&quot;</span>],
+                <span class="r3 r">configuration</span>[<span class="s">&quot;Uploads:eventHubName&quot;</span>]);
+        }
+ 
+        <b>public async</b> <span class="i">Task</span> <a id="a3162bd94855c147" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">StartAsync</a>(<span class="i">CancellationToken</span> <span id="r4 rd" class="r4 r">cancellationToken</span>)
+        {
+            <a href="#a302560f55c0fe82" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">&quot;Starting processor host&quot;</span>);
+            <a href="#47b2b76664765eb3" class="i field">_processor</a>.<span class="i">ProcessEventAsync</span> += <span class="i">ProcessEvent</span>;
+            <a href="#47b2b76664765eb3" class="i field">_processor</a>.<span class="i">ProcessErrorAsync</span> += (<span id="r5 rd" class="r5 r">eventArgs</span>) =&gt;
+            {
+                <a href="#a302560f55c0fe82" class="i field">_logger</a>.<span class="i">LogError</span>(<span class="r5 r">eventArgs</span>.<span class="i">Exception</span>, <span class="s">&quot;Error in &quot;</span> + <span class="r5 r">eventArgs</span>.<span class="i">PartitionId</span>);
+                <b>return</b> <span class="i">Task</span>.<span class="i">CompletedTask</span>;
+            };
+            <b>await</b> <a href="#47b2b76664765eb3" class="i field">_processor</a>.<span class="i">StartProcessingAsync</span>();
+        }
+ 
+        <b>private async</b> <span class="i">Task</span> <a id="d76e5b563b19fa81" href="R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">ProcessEvent</a>(<span class="i">ProcessEventArgs</span> <span id="r6 rd" class="r6 r">eventArgs</span>)
+        {
+            <b>if</b> (<span class="r6 r">eventArgs</span>.<span class="i">HasEvent</span>)
+            {
+                <b>var</b> <span id="r7 rd" class="r7 r">totalCount</span> = 0;
+                <b>var</b> <span id="r8 rd" class="r8 r">cancellationToken</span> = <a href="#e60103386fda52c8" class="i field">_cancellationTokenSource</a>.<span class="i">Token</span>;
+ 
+                <b>var</b> <span id="r9 rd" class="r9 r">blobName</span> = <span class="i">Encoding</span>.<span class="i">UTF8</span>.<span class="i">GetString</span>(<span class="r6 r">eventArgs</span>.<span class="i">Data</span>.<span class="i">Body</span>.<span class="i">Span</span>);
+ 
+                <b>var</b> <span id="r10 rd" class="r10 r">blobClient</span> = <a href="#af1f4592a3f47970" class="i field">_blobContainerClient</a>.<span class="i">GetBlobClient</span>(<span class="r9 r">blobName</span>);
+                <b>var</b> <span id="r11 rd" class="r11 r">downloadInfo</span> = <b>await</b> <span class="r10 r">blobClient</span>.<span class="i">DownloadAsync</span>(<span class="r8 r">cancellationToken</span>);
+ 
+                <a href="#a302560f55c0fe82" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">&quot;Processing {blob}&quot;</span>, <span class="r9 r">blobName</span>);
+ 
+                <a href="#9fc0821e012ecc30" class="k">var</a> <span id="r12 rd" class="r12 r">newLineCountingStream</span> = <b>new</b> <span class="t">NewLineCountingStream</span>();
+                <b>await</b> <span class="r11 r">downloadInfo</span>.<span class="i">Value</span>.<span class="i">Content</span>.<span class="i">CopyToAsync</span>(<span class="r12 r">newLineCountingStream</span>, <span class="r8 r">cancellationToken</span>);
+                <b>var</b> <span id="r13 rd" class="r13 r">newLineCount</span> = <span class="r12 r">newLineCountingStream</span>.<a href="#0e25b406beb77f50" class="i property">NewLineCount</a>;
+ 
+                <b>await</b> <span class="r10 r">blobClient</span>.<span class="i">SetMetadataAsync</span>(
+                    <b>new</b> <span class="i">Dictionary</span>&lt;<b>string</b>, <b>string</b>&gt;()
+                    {
+                        { <span class="s">&quot;whitespacecount&quot;</span>, <span class="r13 r">newLineCount</span>.<span class="i">ToString</span>()}
+                    },
+                    <span class="i">cancellationToken</span>: <span class="r8 r">cancellationToken</span>);
+ 
+                <a href="#a302560f55c0fe82" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">&quot;{blob} had {lines} lines&quot;</span>, <span class="r9 r">blobName</span>, <span class="r13 r">newLineCount</span>);
+ 
+                <span class="r7 r">totalCount</span> += <span class="r13 r">newLineCount</span>;
+ 
+                <b>using</b> <span class="i">EventDataBatch</span> <span id="r14 rd" class="r14 r">eventBatch</span> = <b>await</b> <a href="#b77de7aa9e4816d6" class="i field">_resultsClient</a>.<span class="i">CreateBatchAsync</span>();
+                <span class="r14 r">eventBatch</span>.<span class="i">TryAdd</span>(<b>new</b> <span class="i">EventData</span>(<span class="i">BitConverter</span>.<span class="i">GetBytes</span>(<span class="r7 r">totalCount</span>)));
+                <b>await</b> <a href="#b77de7aa9e4816d6" class="i field">_resultsClient</a>.<span class="i">SendAsync</span>(<span class="r14 r">eventBatch</span>, <span class="r8 r">cancellationToken</span>);
+                <b>await</b> <span class="r6 r">eventArgs</span>.<span class="i">UpdateCheckpointAsync</span>();
+            }
+        }
+ 
+        <b>public async</b> <span class="i">Task</span> <a id="f618922683fa8109" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">StopAsync</a>(<span class="i">CancellationToken</span> <span id="r15 rd" class="r15 r">cancellationToken</span>)
+        {
+            <a href="#e60103386fda52c8" class="i field">_cancellationTokenSource</a>.<span class="i">Cancel</span>();
+            <b>await</b> <a href="#47b2b76664765eb3" class="i field">_processor</a>.<span class="i">StopProcessingAsync</span>();
+        }
+ 
+        <b>private class</b> <a id="9fc0821e012ecc30" href="R/9fc0821e012ecc30.html" target="n" data-glyph="4,1" class="t t"><span id="6c6663687760446c">NewLineCountingStream</span></a> : <span class="i">Stream</span>
+        {
+            <b>public int</b> <a id="0e25b406beb77f50" href="R/0e25b406beb77f50.html" target="n" data-glyph="102,2" class="i property">NewLineCount</a> { <b>get</b>; <b>private set</b>; }
+ 
+            <b>public override void</b> <a id="7f9d38cef29ed5c6" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">Flush</a>()
+            {
+            }
+ 
+            <b>public override int</b> <a id="9f7241aba4b74e9b" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">Read</a>(<b>byte</b>[] <span id="r16 rd" class="r16 r">buffer</span>, <b>int</b> <span id="r17 rd" class="r17 r">offset</span>, <b>int</b> <span id="r18 rd" class="r18 r">count</span>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">NotImplementedException</span>();
+            }
+ 
+            <b>public override long</b> <a id="f0186c0db801cedc" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">Seek</a>(<b>long</b> <span id="r19 rd" class="r19 r">offset</span>, <span class="i">SeekOrigin</span> <span id="r20 rd" class="r20 r">origin</span>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">NotImplementedException</span>();
+            }
+ 
+            <b>public override void</b> <a id="c8ea07b8812c5022" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">SetLength</a>(<b>long</b> <span id="r21 rd" class="r21 r">value</span>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">NotImplementedException</span>();
+            }
+ 
+            <b>public override void</b> <a id="5445e1d1cffaf126" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">Write</a>(<b>byte</b>[] <span id="r22 rd" class="r22 r">buffer</span>, <b>int</b> <span id="r23 rd" class="r23 r">offset</span>, <b>int</b> <span id="r24 rd" class="r24 r">count</span>)
+            {
+                <b>foreach</b> (<b>var</b> <span id="r25 rd" class="r25 r">b</span> <b>in</b> <span class="r22 r">buffer</span>)
+                {
+                    <b>if</b> (<span class="r25 r">b</span> == (<b>byte</b>)<span class="s">&#39;\n&#39;</span>)
+                    {
+                        <a href="#0e25b406beb77f50" class="i property">NewLineCount</a>++;
+                    }
+                }
+            }
+ 
+            <b>public override bool</b> <a id="4f1dadf83af4572d" href="R/../../0000000000.html" target="n" data-glyph="102,2" class="i property">CanRead</a> { <b>get</b>; }
+            <b>public override bool</b> <a id="df39608d4659859f" href="R/../../0000000000.html" target="n" data-glyph="102,2" class="i property">CanSeek</a> { <b>get</b>; }
+            <b>public override bool</b> <a id="964637e1f1da494a" href="R/../../0000000000.html" target="n" data-glyph="102,2" class="i property">CanWrite</a> =&gt; <b>true</b>;
+            <b>public override long</b> <a id="8039759488dfa0fb" href="R/../../0000000000.html" target="n" data-glyph="102,2" class="i property">Length</a> { <b>get</b>; }
+            <b>public override long</b> <a id="db4db61a06acca10" href="R/../../0000000000.html" target="n" data-glyph="102,2" class="i property">Position</a> { <b>get</b>; <b>set</b>; }
+        }
+    }
+}</pre></td></tr></table></div></body></html>

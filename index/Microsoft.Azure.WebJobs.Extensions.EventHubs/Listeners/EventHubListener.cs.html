@@ -1,0 +1,303 @@
+﻿<!DOCTYPE html>
+<html><head><title>EventHubListener.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(294);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.EventHubs/Listeners/EventHubListener.cs" target="_top">Listeners\EventHubListener.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.EventHubs" target="_top">src\Microsoft.Azure.WebJobs.Extensions.EventHubs.csproj</a> (Microsoft.Azure.WebJobs.Extensions.EventHubs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) .NET Foundation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Globalization</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">IO</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Linq</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Processor</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">EventHubs</span>.<span class="i n">Listeners</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">EventHubs</span>.<span class="i n">Processor</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i">Host</span>.<span class="i">Executors</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i">Host</span>.<span class="i">Listeners</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i">Host</span>.<span class="i">Scale</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Logging</span>;
+<b>using</b> <span class="i">Newtonsoft</span>.<span class="i">Json</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">EventHubs</span>
+{
+    <b>internal sealed class</b> <a id="4b3989fec2e10566" href="../R/../../0000000000.html" target="n" data-glyph="2,0" class="t t">EventHubListener</a> : <span class="i">IListener</span>, <a href="../Processor/IEventProcessorFactory.cs.html#71bbfe73a504246c" class="t t">IEventProcessorFactory</a>, <span class="i">IScaleMonitorProvider</span>
+    {
+        <b>private readonly</b> <span class="i">ITriggeredFunctionExecutor</span> <a id="c38a9ae67f0b990e" href="../R/c38a9ae67f0b990e.html" target="n" data-glyph="46,1" class="i field">_executor</a>;
+        <b>private readonly</b> <a href="../Processor/EventProcessorHost.cs.html#51b3dce758b6996a" class="t t">EventProcessorHost</a> <a id="5f324cfe50bef3a0" href="../R/5f324cfe50bef3a0.html" target="n" data-glyph="46,1" class="i field">_eventProcessorHost</a>;
+        <b>private readonly bool</b> <a id="6bd0e3536dcf58bb" href="../R/6bd0e3536dcf58bb.html" target="n" data-glyph="46,1" class="i field">_singleDispatch</a>;
+        <b>private readonly</b> <a href="../P/fd9aa4b94caeba25.html#fd9aa4b94caeba25" class="t t">BlobsCheckpointStore</a> <a id="d851df0e3f26e641" href="../R/d851df0e3f26e641.html" target="n" data-glyph="46,1" class="i field">_checkpointStore</a>;
+        <b>private readonly</b> <a href="../Config/EventHubOptions.cs.html#9d2c8806e713ed80" class="t t">EventHubOptions</a> <a id="e89ad80539c0e96a" href="../R/e89ad80539c0e96a.html" target="n" data-glyph="46,1" class="i field">_options</a>;
+        <b>private readonly</b> <span class="i">ILogger</span> <a id="58fc9d566af7f6eb" href="../R/58fc9d566af7f6eb.html" target="n" data-glyph="46,1" class="i field">_logger</a>;
+ 
+        <b>private</b> <span class="i">Lazy</span>&lt;<a href="EventHubsScaleMonitor.cs.html#9eea28105f8cf94e" class="t t">EventHubsScaleMonitor</a>&gt; <a id="1c5de6a15f188624" href="../R/1c5de6a15f188624.html" target="n" data-glyph="46,1" class="i field">_scaleMonitor</a>;
+ 
+        <b>public</b> <a id="e77420b70cb76297" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">EventHubListener</a>(
+            <b>string</b> <span id="r0 rd" class="r0 r">functionId</span>,
+            <span class="i">ITriggeredFunctionExecutor</span> <span id="r1 rd" class="r1 r">executor</span>,
+            <a href="../Processor/EventProcessorHost.cs.html#51b3dce758b6996a" class="t t">EventProcessorHost</a> <span id="r2 rd" class="r2 r">eventProcessorHost</span>,
+            <b>bool</b> <span id="r3 rd" class="r3 r">singleDispatch</span>,
+            <a href="../IEventHubConsumerClient.cs.html#c3b58af628117e60" class="t t">IEventHubConsumerClient</a> <span id="r4 rd" class="r4 r">consumerClient</span>,
+            <a href="../P/fd9aa4b94caeba25.html#fd9aa4b94caeba25" class="t t">BlobsCheckpointStore</a> <span id="r5 rd" class="r5 r">checkpointStore</span>,
+            <a href="../Config/EventHubOptions.cs.html#9d2c8806e713ed80" class="t t">EventHubOptions</a> <span id="r6 rd" class="r6 r">options</span>,
+            <span class="i">ILogger</span> <span id="r7 rd" class="r7 r">logger</span>)
+        {
+            <a href="#58fc9d566af7f6eb" class="i field">_logger</a> = <span class="r7 r">logger</span>;
+            <a href="#c38a9ae67f0b990e" class="i field">_executor</a> = <span class="r1 r">executor</span>;
+            <a href="#5f324cfe50bef3a0" class="i field">_eventProcessorHost</a> = <span class="r2 r">eventProcessorHost</span>;
+            <a href="#6bd0e3536dcf58bb" class="i field">_singleDispatch</a> = <span class="r3 r">singleDispatch</span>;
+            <a href="#d851df0e3f26e641" class="i field">_checkpointStore</a> = <span class="r5 r">checkpointStore</span>;
+            <a href="#e89ad80539c0e96a" class="i field">_options</a> = <span class="r6 r">options</span>;
+ 
+            <a href="#1c5de6a15f188624" class="i field">_scaleMonitor</a> = <b>new</b> <span class="i">Lazy</span>&lt;<a href="EventHubsScaleMonitor.cs.html#9eea28105f8cf94e" class="t t">EventHubsScaleMonitor</a>&gt;(
+                () =&gt; <b>new</b> <a href="EventHubsScaleMonitor.cs.html#72e7834a3f93cdc1" class="t constructor">EventHubsScaleMonitor</a>(
+                    <span class="r0 r">functionId</span>,
+                    <span class="r4 r">consumerClient</span>,
+                    <span class="r5 r">checkpointStore</span>,
+                    <a href="#58fc9d566af7f6eb" class="i field">_logger</a>));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Cancel any in progress listen operation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>void</b> <span class="i">IListener</span>.<a id="6893002b4096f350" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">Cancel</a>()
+        {
+            <span class="i">StopAsync</span>(<span class="i">CancellationToken</span>.<span class="i">None</span>).<span class="i">Wait</span>();
+        }
+ 
+        <b>void</b> <span class="i">IDisposable</span>.<a id="49afa78c38b285a5" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">Dispose</a>()
+        {
+        }
+ 
+        <b>public async</b> <span class="i">Task</span> <a id="f1cd523f2f3d4498" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">StartAsync</a>(<span class="i">CancellationToken</span> <span id="r8 rd" class="r8 r">cancellationToken</span>)
+        {
+            <b>await</b> <a href="#d851df0e3f26e641" class="i field">_checkpointStore</a>.<a href="../BlobsCheckpointStore.cs.html#bf430b5de878e7a6" class="i method">CreateIfNotExistsAsync</a>(<span class="r8 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            <b>await</b> <a href="#5f324cfe50bef3a0" class="i field">_eventProcessorHost</a>.<a href="../Processor/EventProcessorHost.cs.html#7ac48e9aa1be3a4a" class="i method">StartProcessingAsync</a>(<a href="#4b3989fec2e10566" class="k">this</a>, <a href="#d851df0e3f26e641" class="i field">_checkpointStore</a>, <span class="r8 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+        }
+ 
+        <b>public async</b> <span class="i">Task</span> <a id="c55ceeb1379f522a" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">StopAsync</a>(<span class="i">CancellationToken</span> <span id="r9 rd" class="r9 r">cancellationToken</span>)
+        {
+            <b>await</b> <a href="#5f324cfe50bef3a0" class="i field">_eventProcessorHost</a>.<span class="i">StopProcessingAsync</span>(<span class="r9 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+        }
+ 
+        <a href="../Processor/IEventProcessor.cs.html#599f64b59ab1cd48" class="t t">IEventProcessor</a> <a href="../Processor/IEventProcessorFactory.cs.html#71bbfe73a504246c" class="t t">IEventProcessorFactory</a>.<a href="../Processor/IEventProcessorFactory.cs.html#700c2a89f1ee0d92" class="i method">CreateEventProcessor</a>()
+        {
+            <b>return</b> <b>new</b> <a href="#31f2db402a506078" class="t constructor">EventProcessor</a>(<a href="#e89ad80539c0e96a" class="i field">_options</a>, <a href="#c38a9ae67f0b990e" class="i field">_executor</a>, <a href="#58fc9d566af7f6eb" class="i field">_logger</a>, <a href="#6bd0e3536dcf58bb" class="i field">_singleDispatch</a>);
+        }
+ 
+        <b>public</b> <span class="i">IScaleMonitor</span> <a id="b30408a5f472dc3f" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetMonitor</a>()
+        {
+            <b>return</b> <a href="#1c5de6a15f188624" class="i field">_scaleMonitor</a>.<span class="i">Value</span>;
+        }
+ 
+        <span class="c">// We get a new instance each time Start() is called.</span>
+        <span class="c">// We&#39;ll get a listener per partition - so they can potentialy run in parallel even on a single machine.</span>
+        <b>internal class</b> <a id="4df41e357bd412ed" href="../R/4df41e357bd412ed.html" target="n" data-glyph="2,1" class="t t">EventProcessor</a> : <a href="../Processor/IEventProcessor.cs.html#599f64b59ab1cd48" class="t t">IEventProcessor</a>, <span class="i">IDisposable</span>
+        {
+            <b>private readonly</b> <span class="i">ITriggeredFunctionExecutor</span> <a id="eb9c41c5ad27ca2b" href="../R/eb9c41c5ad27ca2b.html" target="n" data-glyph="46,2" class="i field">_executor</a>;
+            <b>private readonly bool</b> <a id="0f17de6fa70bd09a" href="../R/0f17de6fa70bd09a.html" target="n" data-glyph="46,2" class="i field">_singleDispatch</a>;
+            <b>private readonly</b> <span class="i">ILogger</span> <a id="766e66e9c70bde49" href="../R/766e66e9c70bde49.html" target="n" data-glyph="46,2" class="i field">_logger</a>;
+            <b>private readonly</b> <span class="i">CancellationTokenSource</span> <a id="0e4a51153a81d92d" href="../R/0e4a51153a81d92d.html" target="n" data-glyph="46,2" class="i field">_cts</a> = <b>new</b> <span class="i">CancellationTokenSource</span>();
+            <b>private readonly int</b> <a id="5e2aadd7baa5929c" href="../R/5e2aadd7baa5929c.html" target="n" data-glyph="46,2" class="i field">_batchCheckpointFrequency</a>;
+            <b>private int</b> <a id="1b43630cb873dedd" href="../R/1b43630cb873dedd.html" target="n" data-glyph="46,2" class="i field">_batchCounter</a>;
+            <b>private bool</b> <a id="c503b9e0b6779552" href="../R/c503b9e0b6779552.html" target="n" data-glyph="46,2" class="i field">_disposed</a>;
+ 
+            <b>public</b> <a id="31f2db402a506078" href="../R/31f2db402a506078.html" target="n" data-glyph="72,2" class="t constructor">EventProcessor</a>(<a href="../Config/EventHubOptions.cs.html#9d2c8806e713ed80" class="t t">EventHubOptions</a> <span id="r10 rd" class="r10 r">options</span>, <span class="i">ITriggeredFunctionExecutor</span> <span id="r11 rd" class="r11 r">executor</span>, <span class="i">ILogger</span> <span id="r12 rd" class="r12 r">logger</span>, <b>bool</b> <span id="r13 rd" class="r13 r">singleDispatch</span>)
+            {
+                <a href="#eb9c41c5ad27ca2b" class="i field">_executor</a> = <span class="r11 r">executor</span>;
+                <a href="#0f17de6fa70bd09a" class="i field">_singleDispatch</a> = <span class="r13 r">singleDispatch</span>;
+                <a href="#5e2aadd7baa5929c" class="i field">_batchCheckpointFrequency</a> = <span class="r10 r">options</span>.<a href="../Config/EventHubOptions.cs.html#7c54aa1e6877edde" class="i property">BatchCheckpointFrequency</a>;
+                <a href="#766e66e9c70bde49" class="i field">_logger</a> = <span class="r12 r">logger</span>;
+            }
+ 
+            <b>public</b> <span class="i">Task</span> <a id="b8083dea68921e41" href="../R/b8083dea68921e41.html" target="n" data-glyph="72,2" class="i method">CloseAsync</a>(<a href="../Processor/EventProcessorHostPartition.cs.html#bf4b51e034d29994" class="t t">EventProcessorHostPartition</a> <span id="r14 rd" class="r14 r">context</span>, <a href="/Azure.Messaging.EventHubs/A.html#79a7fa1c0b5a3dbd" class="t t">ProcessingStoppedReason</a> <span id="r15 rd" class="r15 r">reason</span>)
+            {
+                <span class="c">// signal cancellation for any in progress executions</span>
+                <a href="#0e4a51153a81d92d" class="i field">_cts</a>.<span class="i">Cancel</span>();
+ 
+                <a href="#766e66e9c70bde49" class="i field">_logger</a>.<span class="i">LogDebug</span>(<a href="#15151831e8f4b69b" class="i method">GetOperationDetails</a>(<span class="r14 r">context</span>, <span class="s">$&quot;</span><span class="s">CloseAsync, </span>{<span class="r15 r">reason</span>.<span class="i">ToString</span>()}<span class="s">&quot;</span>));
+                <b>return</b> <span class="i">Task</span>.<span class="i">CompletedTask</span>;
+            }
+ 
+            <b>public</b> <span class="i">Task</span> <a id="2ddcf0810ec53572" href="../R/2ddcf0810ec53572.html" target="n" data-glyph="72,2" class="i method">OpenAsync</a>(<a href="../Processor/EventProcessorHostPartition.cs.html#bf4b51e034d29994" class="t t">EventProcessorHostPartition</a> <span id="r16 rd" class="r16 r">context</span>)
+            {
+                <a href="#766e66e9c70bde49" class="i field">_logger</a>.<span class="i">LogDebug</span>(<a href="#15151831e8f4b69b" class="i method">GetOperationDetails</a>(<span class="r16 r">context</span>, <span class="s">&quot;OpenAsync&quot;</span>));
+                <b>return</b> <span class="i">Task</span>.<span class="i">CompletedTask</span>;
+            }
+ 
+            <b>public</b> <span class="i">Task</span> <a id="38befabbb9f3730e" href="../R/38befabbb9f3730e.html" target="n" data-glyph="72,2" class="i method">ProcessErrorAsync</a>(<a href="../Processor/EventProcessorHostPartition.cs.html#bf4b51e034d29994" class="t t">EventProcessorHostPartition</a> <span id="r17 rd" class="r17 r">context</span>, <span class="i">Exception</span> <span id="r18 rd" class="r18 r">error</span>)
+            {
+                <b>string</b> <span id="r19 rd" class="r19 r">errorDetails</span> = <span class="s">$&quot;</span><span class="s">Processing error (Partition Id: &#39;</span>{<span class="r17 r">context</span>.<a href="/Azure.Messaging.EventHubs/A.html#78ef0d1266ee7e2e" class="i property">PartitionId</a>}<span class="s">&#39;, Owner: &#39;</span>{<span class="r17 r">context</span>.<a href="../Processor/EventProcessorHostPartition.cs.html#377977ea90bf7240" class="i property">Owner</a>}<span class="s">&#39;, EventHubPath: &#39;</span>{<span class="r17 r">context</span>.<a href="../Processor/EventProcessorHostPartition.cs.html#a8535440047c4a94" class="i property">EventHubPath</a>}<span class="s">&#39;).</span><span class="s">&quot;</span>;
+ 
+                <a href="../Utility.cs.html#3a2c1c5004a70947" class="t t">Utility</a>.<a href="../Utility.cs.html#509cbef73f79d565" class="i method">LogException</a>(<span class="r18 r">error</span>, <span class="r19 r">errorDetails</span>, <a href="#766e66e9c70bde49" class="i field">_logger</a>);
+ 
+                <b>return</b> <span class="i">Task</span>.<span class="i">CompletedTask</span>;
+            }
+ 
+            <b>public async</b> <span class="i">Task</span> <a id="198be69787c10624" href="../R/198be69787c10624.html" target="n" data-glyph="72,2" class="i method">ProcessEventsAsync</a>(<a href="../Processor/EventProcessorHostPartition.cs.html#bf4b51e034d29994" class="t t">EventProcessorHostPartition</a> <span id="r20 rd" class="r20 r">context</span>, <span class="i">IEnumerable</span>&lt;<a href="/Azure.Messaging.EventHubs/A.html#557aa370d1369b89" class="t t">EventData</a>&gt; <span id="r21 rd" class="r21 r">messages</span>)
+            {
+                <b>var</b> <span id="r22 rd" class="r22 r">events</span> = <span class="r21 r">messages</span>.<span class="i">ToArray</span>();
+ 
+                <a href="../Triggers/EventHubTriggerInput.cs.html#f7d7900cc2772119" class="k">var</a> <span id="r23 rd" class="r23 r">triggerInput</span> = <b>new</b> <span class="t">EventHubTriggerInput</span>
+                {
+                    <a href="../Triggers/EventHubTriggerInput.cs.html#03b1b95f13b0504b" class="i property">Events</a> = <span class="r22 r">events</span>,
+                    <a href="../Triggers/EventHubTriggerInput.cs.html#1d52adacea2b23b6" class="i property">PartitionContext</a> = <span class="r20 r">context</span>
+                };
+ 
+                <span class="i">TriggeredFunctionData</span> <span id="r24 rd" class="r24 r">input</span> = <b>null</b>;
+                <b>if</b> (<a href="#0f17de6fa70bd09a" class="i field">_singleDispatch</a>)
+                {
+                    <span class="c">// Single dispatch</span>
+                    <b>int</b> <span id="r25 rd" class="r25 r">eventCount</span> = <span class="r23 r">triggerInput</span>.<a href="../Triggers/EventHubTriggerInput.cs.html#03b1b95f13b0504b" class="i property">Events</a>.<span class="i">Length</span>;
+                    <span class="i">List</span>&lt;<span class="i">Task</span>&gt; <span id="r26 rd" class="r26 r">invocationTasks</span> = <b>new</b> <span class="i">List</span>&lt;<span class="i">Task</span>&gt;();
+                    <b>for</b> (<b>int</b> <span id="r27 rd" class="r27 r">i</span> = 0; <span class="r27 r">i</span> &lt; <span class="r25 r">eventCount</span>; <span class="r27 r">i</span>++)
+                    {
+                        <b>if</b> (<a href="#0e4a51153a81d92d" class="i field">_cts</a>.<span class="i">IsCancellationRequested</span>)
+                        {
+                            <b>break</b>;
+                        }
+ 
+                        <a href="../Triggers/EventHubTriggerInput.cs.html#f7d7900cc2772119" class="t t">EventHubTriggerInput</a> <span id="r28 rd" class="r28 r">eventHubTriggerInput</span> = <span class="r23 r">triggerInput</span>.<a href="../Triggers/EventHubTriggerInput.cs.html#6406cb91cfb63e54" class="i method">GetSingleEventTriggerInput</a>(<span class="r27 r">i</span>);
+                        <span class="r24 r">input</span> = <b>new</b> <span class="i">TriggeredFunctionData</span>
+                        {
+                            <span class="i">TriggerValue</span> = <span class="r28 r">eventHubTriggerInput</span>,
+                            <span class="i">TriggerDetails</span> = <span class="r28 r">eventHubTriggerInput</span>.<a href="../Triggers/EventHubTriggerInput.cs.html#0844cfff9cb09e02" class="i method">GetTriggerDetails</a>(<span class="r20 r">context</span>)
+                        };
+ 
+                        <span class="i">Task</span> <span id="r29 rd" class="r29 r">task</span> = <a href="#eb9c41c5ad27ca2b" class="i field">_executor</a>.<span class="i">TryExecuteAsync</span>(<span class="r24 r">input</span>, <a href="#0e4a51153a81d92d" class="i field">_cts</a>.<span class="i">Token</span>);
+                        <span class="r26 r">invocationTasks</span>.<span class="i">Add</span>(<span class="r29 r">task</span>);
+                    }
+ 
+                    <span class="c">// Drain the whole batch before taking more work</span>
+                    <b>if</b> (<span class="r26 r">invocationTasks</span>.<span class="i">Count</span> &gt; 0)
+                    {
+                        <b>await</b> <span class="i">Task</span>.<span class="i">WhenAll</span>(<span class="r26 r">invocationTasks</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    }
+                }
+                <b>else</b>
+                {
+                    <span class="c">// Batch dispatch</span>
+                    <span class="r24 r">input</span> = <b>new</b> <span class="i">TriggeredFunctionData</span>
+                    {
+                        <span class="i">TriggerValue</span> = <span class="r23 r">triggerInput</span>,
+                        <span class="i">TriggerDetails</span> = <span class="r23 r">triggerInput</span>.<a href="../Triggers/EventHubTriggerInput.cs.html#0844cfff9cb09e02" class="i method">GetTriggerDetails</a>(<span class="r20 r">context</span>)
+                    };
+ 
+                    <b>await</b> <a href="#eb9c41c5ad27ca2b" class="i field">_executor</a>.<span class="i">TryExecuteAsync</span>(<span class="r24 r">input</span>, <a href="#0e4a51153a81d92d" class="i field">_cts</a>.<span class="i">Token</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+ 
+                <span class="c">// Checkpoint if we processed any events.</span>
+                <span class="c">// Don&#39;t checkpoint if no events. This can reset the sequence counter to 0.</span>
+                <span class="c">// Note: we intentionally checkpoint the batch regardless of function</span>
+                <span class="c">// success/failure. EventHub doesn&#39;t support any sort &quot;poison event&quot; model,</span>
+                <span class="c">// so that is the responsibility of the user&#39;s function currently. E.g.</span>
+                <span class="c">// the function should have try/catch handling around all event processing</span>
+                <span class="c">// code, and capture/log/persist failed events, since they won&#39;t be retried.</span>
+                <b>if</b> (<span class="r22 r">events</span>.<span class="i">Any</span>())
+                {
+                    <b>await</b> <span class="i">CheckpointAsync</span>(<span class="r22 r">events</span>.<span class="i">Last</span>(), <span class="r20 r">context</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+            }
+ 
+            <b>private async</b> <span class="i">Task</span> <a id="96f66ffe3c1fc886" href="../R/../../0000000000.html" target="n" data-glyph="76,2" class="i method">CheckpointAsync</a>(<a href="/Azure.Messaging.EventHubs/A.html#557aa370d1369b89" class="t t">EventData</a> <span id="r30 rd" class="r30 r">checkpointEvent</span>, <a href="../Processor/EventProcessorHostPartition.cs.html#bf4b51e034d29994" class="t t">EventProcessorHostPartition</a> <span id="r31 rd" class="r31 r">context</span>)
+            {
+                <b>bool</b> <span id="r32 rd" class="r32 r">checkpointed</span> = <b>false</b>;
+                <b>if</b> (<a href="#5e2aadd7baa5929c" class="i field">_batchCheckpointFrequency</a> == 1)
+                {
+                    <b>await</b> <span class="r31 r">context</span>.<a href="../Processor/EventProcessorHostPartition.cs.html#5be3a4701dec2ea5" class="i method">CheckpointAsync</a>(<span class="r30 r">checkpointEvent</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    <span class="r32 r">checkpointed</span> = <b>true</b>;
+                }
+                <b>else</b>
+                {
+                    <span class="c">// only checkpoint every N batches</span>
+                    <b>if</b> (++<a href="#1b43630cb873dedd" class="i field">_batchCounter</a> &gt;= <a href="#5e2aadd7baa5929c" class="i field">_batchCheckpointFrequency</a>)
+                    {
+                        <a href="#1b43630cb873dedd" class="i field">_batchCounter</a> = 0;
+                        <b>await</b> <span class="r31 r">context</span>.<a href="../Processor/EventProcessorHostPartition.cs.html#5be3a4701dec2ea5" class="i method">CheckpointAsync</a>(<span class="r30 r">checkpointEvent</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        <span class="r32 r">checkpointed</span> = <b>true</b>;
+                    }
+                }
+                <b>if</b> (<span class="r32 r">checkpointed</span>)
+                {
+                    <a href="#766e66e9c70bde49" class="i field">_logger</a>.<span class="i">LogDebug</span>(<a href="#15151831e8f4b69b" class="i method">GetOperationDetails</a>(<span class="r31 r">context</span>, <span class="s">&quot;CheckpointAsync&quot;</span>));
+                }
+            }
+ 
+            <b>protected virtual void</b> <a id="d7e1bbdaab92f8db" href="../R/d7e1bbdaab92f8db.html" target="n" data-glyph="75,2" class="i method">Dispose</a>(<b>bool</b> <span id="r33 rd" class="r33 r">disposing</span>)
+            {
+                <b>if</b> (!<a href="#c503b9e0b6779552" class="i field">_disposed</a>)
+                {
+                    <b>if</b> (<span class="r33 r">disposing</span>)
+                    {
+                        <a href="#0e4a51153a81d92d" class="i field">_cts</a>.<span class="i">Dispose</span>();
+                    }
+ 
+                    <a href="#c503b9e0b6779552" class="i field">_disposed</a> = <b>true</b>;
+                }
+            }
+ 
+            <b>public void</b> <a id="e6dee6cff459fca4" href="../R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">Dispose</a>()
+            {
+                <a href="#d7e1bbdaab92f8db" class="i method">Dispose</a>(<b>true</b>);
+            }
+ 
+            <b>private static string</b> <a id="15151831e8f4b69b" href="../R/15151831e8f4b69b.html" target="n" data-glyph="76,2" class="i method">GetOperationDetails</a>(<a href="../Processor/EventProcessorHostPartition.cs.html#bf4b51e034d29994" class="t t">EventProcessorHostPartition</a> <span id="r34 rd" class="r34 r">context</span>, <b>string</b> <span id="r35 rd" class="r35 r">operation</span>)
+            {
+                <span class="i">StringWriter</span> <span id="r36 rd" class="r36 r">sw</span> = <b>new</b> <span class="i">StringWriter</span>();
+                <b>using</b> (<span class="i">JsonTextWriter</span> <span id="r37 rd" class="r37 r">writer</span> = <b>new</b> <span class="i">JsonTextWriter</span>(<span class="r36 r">sw</span>) { <span class="i">Formatting</span> = <span class="i">Formatting</span>.<span class="i">None</span> })
+                {
+                    <span class="r37 r">writer</span>.<span class="i">WriteStartObject</span>();
+                    <a href="#51fd729cea01fa73" class="i method">WritePropertyIfNotNull</a>(<span class="r37 r">writer</span>, <span class="s">&quot;operation&quot;</span>, <span class="r35 r">operation</span>);
+                    <span class="r37 r">writer</span>.<span class="i">WritePropertyName</span>(<span class="s">&quot;partitionContext&quot;</span>);
+                    <span class="r37 r">writer</span>.<span class="i">WriteStartObject</span>();
+                    <a href="#51fd729cea01fa73" class="i method">WritePropertyIfNotNull</a>(<span class="r37 r">writer</span>, <span class="s">&quot;partitionId&quot;</span>, <span class="r34 r">context</span>.<a href="/Azure.Messaging.EventHubs/A.html#78ef0d1266ee7e2e" class="i property">PartitionId</a>);
+                    <a href="#51fd729cea01fa73" class="i method">WritePropertyIfNotNull</a>(<span class="r37 r">writer</span>, <span class="s">&quot;owner&quot;</span>, <span class="r34 r">context</span>.<a href="../Processor/EventProcessorHostPartition.cs.html#377977ea90bf7240" class="i property">Owner</a>);
+                    <a href="#51fd729cea01fa73" class="i method">WritePropertyIfNotNull</a>(<span class="r37 r">writer</span>, <span class="s">&quot;eventHubPath&quot;</span>, <span class="r34 r">context</span>.<a href="../Processor/EventProcessorHostPartition.cs.html#a8535440047c4a94" class="i property">EventHubPath</a>);
+                    <span class="r37 r">writer</span>.<span class="i">WriteEndObject</span>();
+ 
+                    <span class="c">// Log partition checkpoint info</span>
+                    <b>if</b> (<span class="r34 r">context</span>.<a href="../Processor/EventProcessorHostPartition.cs.html#8fb5d02871991d66" class="i property">Checkpoint</a> != <b>null</b>)
+                    {
+                        <span class="c">// leave the property name as lease for backcompat with T1</span>
+                        <span class="r37 r">writer</span>.<span class="i">WritePropertyName</span>(<span class="s">&quot;lease&quot;</span>);
+                        <span class="r37 r">writer</span>.<span class="i">WriteStartObject</span>();
+                        <span class="i">WritePropertyIfNotNull</span>(<span class="r37 r">writer</span>, <span class="s">&quot;offset&quot;</span>, <span class="r34 r">context</span>.<a href="../Processor/EventProcessorHostPartition.cs.html#8fb5d02871991d66" class="i property">Checkpoint</a>.<span class="i">Value</span>.<span class="i">Offset</span>.<span class="i">ToString</span>(<span class="i">CultureInfo</span>.<span class="i">InvariantCulture</span>));
+                        <span class="i">WritePropertyIfNotNull</span>(<span class="r37 r">writer</span>, <span class="s">&quot;sequenceNumber&quot;</span>, <span class="r34 r">context</span>.<a href="../Processor/EventProcessorHostPartition.cs.html#8fb5d02871991d66" class="i property">Checkpoint</a>.<span class="i">Value</span>.<span class="i">SequenceNumber</span>.<span class="i">ToString</span>(<span class="i">CultureInfo</span>.<span class="i">InvariantCulture</span>));
+                        <span class="r37 r">writer</span>.<span class="i">WriteEndObject</span>();
+                    }
+ 
+                    <span class="c">// Log RuntimeInformation if EnableReceiverRuntimeMetric is enabled</span>
+                    <b>if</b> (<span class="r34 r">context</span>.<a href="../Processor/EventProcessorHostPartition.cs.html#0428648145d2236b" class="i property">LastEnqueuedEventProperties</a> != <b>null</b>)
+                    {
+                        <span class="r37 r">writer</span>.<span class="i">WritePropertyName</span>(<span class="s">&quot;runtimeInformation&quot;</span>);
+                        <span class="r37 r">writer</span>.<span class="i">WriteStartObject</span>();
+                        <span class="i">WritePropertyIfNotNull</span>(<span class="r37 r">writer</span>, <span class="s">&quot;lastEnqueuedOffset&quot;</span>, <span class="r34 r">context</span>.<a href="../Processor/EventProcessorHostPartition.cs.html#0428648145d2236b" class="i property">LastEnqueuedEventProperties</a>.<span class="i">Value</span>.<span class="i">Offset</span>?.<span class="i">ToString</span>(<span class="i">CultureInfo</span>.<span class="i">InvariantCulture</span>));
+                        <span class="i">WritePropertyIfNotNull</span>(<span class="r37 r">writer</span>, <span class="s">&quot;lastSequenceNumber&quot;</span>, <span class="r34 r">context</span>.<a href="../Processor/EventProcessorHostPartition.cs.html#0428648145d2236b" class="i property">LastEnqueuedEventProperties</a>.<span class="i">Value</span>.<span class="i">SequenceNumber</span>?.<span class="i">ToString</span>(<span class="i">CultureInfo</span>.<span class="i">InvariantCulture</span>));
+                        <span class="i">WritePropertyIfNotNull</span>(<span class="r37 r">writer</span>, <span class="s">&quot;lastEnqueuedTimeUtc&quot;</span>, <span class="r34 r">context</span>.<a href="../Processor/EventProcessorHostPartition.cs.html#0428648145d2236b" class="i property">LastEnqueuedEventProperties</a>.<span class="i">Value</span>.<span class="i">EnqueuedTime</span>?.<span class="i">ToString</span>(<span class="s">&quot;o&quot;</span>, <span class="i">CultureInfo</span>.<span class="i">InvariantCulture</span>));
+                        <span class="r37 r">writer</span>.<span class="i">WriteEndObject</span>();
+                    }
+                    <span class="r37 r">writer</span>.<span class="i">WriteEndObject</span>();
+                }
+                <b>return</b> <span class="r36 r">sw</span>.<span class="i">ToString</span>();
+            }
+ 
+            <b>private static void</b> <a id="51fd729cea01fa73" href="../R/51fd729cea01fa73.html" target="n" data-glyph="76,2" class="i method">WritePropertyIfNotNull</a>(<span class="i">JsonTextWriter</span> <span id="r38 rd" class="r38 r">writer</span>, <b>string</b> <span id="r39 rd" class="r39 r">propertyName</span>, <b>string</b> <span id="r40 rd" class="r40 r">propertyValue</span>)
+            {
+                <b>if</b> (<span class="r40 r">propertyValue</span> != <b>null</b>)
+                {
+                    <span class="r38 r">writer</span>.<span class="i">WritePropertyName</span>(<span class="r39 r">propertyName</span>);
+                    <span class="r38 r">writer</span>.<span class="i">WriteValue</span>(<span class="r40 r">propertyValue</span>);
+                }
+            }
+        }
+    }
+}</pre></td></tr></table></div></body></html>

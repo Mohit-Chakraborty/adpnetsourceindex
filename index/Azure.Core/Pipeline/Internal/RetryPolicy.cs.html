@@ -1,0 +1,225 @@
+﻿<!DOCTYPE html>
+<html><head><title>RetryPolicy.cs</title><link rel="stylesheet" href="../../../styles.css"><script src="../../../scripts.js"></script></head>
+<body class="cB" onload="i(216);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Core/Pipeline/Internal/RetryPolicy.cs" target="_top">Pipeline\Internal\RetryPolicy.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Core" target="_top">..\..\core\Azure.Core\src\Azure.Core.csproj</a> (Azure.Core)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Runtime</span>.<span class="i n">ExceptionServices</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Diagnostics</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>
+{
+    <b>internal class</b> <a id="86fb8e441b4d995d" href="../../R/86fb8e441b4d995d.html" target="n" data-glyph="2,0" class="t t">RetryPolicy</a> : <a href="../HttpPipelinePolicy.cs.html#afce2b8855e35f1f" class="t t">HttpPipelinePolicy</a>
+    {
+        <b>private readonly</b> <a href="../../RetryMode.cs.html#1ef0eec63e4fb071" class="t t">RetryMode</a> <a id="5da9c74c11956aae" href="../../R/5da9c74c11956aae.html" target="n" data-glyph="46,1" class="i field">_mode</a>;
+        <b>private readonly</b> <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="19dbd591ceff47f9" href="../../R/19dbd591ceff47f9.html" target="n" data-glyph="46,1" class="i field">_delay</a>;
+        <b>private readonly</b> <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="595531f8bce64488" href="../../R/595531f8bce64488.html" target="n" data-glyph="46,1" class="i field">_maxDelay</a>;
+        <b>private readonly int</b> <a id="2e7be992565e03ef" href="../../R/2e7be992565e03ef.html" target="n" data-glyph="46,1" class="i field">_maxRetries</a>;
+ 
+        <b>private readonly</b> <a href="@1@netstandard/A.html#bb77e610694e64ca" class="t t">Random</a> <a id="917b26214e3332ad" href="../../R/917b26214e3332ad.html" target="n" data-glyph="46,1" class="i field">_random</a> = <b>new</b> <a href="ThreadSafeRandom.cs.html#fcdb1acd91620494" class="t constructor">ThreadSafeRandom</a>();
+ 
+        <b>public</b> <a id="f17008c0457c4405" href="../../R/f17008c0457c4405.html" target="n" data-glyph="72,1" class="t constructor">RetryPolicy</a>(<a href="../../RetryMode.cs.html#1ef0eec63e4fb071" class="t t">RetryMode</a> <span id="r0 rd" class="r0 r">mode</span>, <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r1 rd" class="r1 r">delay</span>, <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r2 rd" class="r2 r">maxDelay</span>, <b>int</b> <span id="r3 rd" class="r3 r">maxRetries</span>)
+        {
+            <a href="#5da9c74c11956aae" class="i field">_mode</a> = <span class="r0 r">mode</span>;
+            <a href="#19dbd591ceff47f9" class="i field">_delay</a> = <span class="r1 r">delay</span>;
+            <a href="#595531f8bce64488" class="i field">_maxDelay</a> = <span class="r2 r">maxDelay</span>;
+            <a href="#2e7be992565e03ef" class="i field">_maxRetries</a> = <span class="r3 r">maxRetries</span>;
+        }
+ 
+        <b>private const string</b> <a id="fec025c734dd1e68" href="../../R/fec025c734dd1e68.html" target="n" data-glyph="10,1" class="i field">RetryAfterHeaderName</a> = <span class="s">&quot;Retry-After&quot;</span>;
+        <b>private const string</b> <a id="09e78fa9640b43f9" href="../../R/09e78fa9640b43f9.html" target="n" data-glyph="10,1" class="i field">RetryAfterMsHeaderName</a> = <span class="s">&quot;retry-after-ms&quot;</span>;
+        <b>private const string</b> <a id="f11faecfd19d3059" href="../../R/f11faecfd19d3059.html" target="n" data-glyph="10,1" class="i field">XRetryAfterMsHeaderName</a> = <span class="s">&quot;x-ms-retry-after-ms&quot;</span>;
+ 
+        <b>public override void</b> <a id="5f9c0b80977b89ac" href="../../R/5f9c0b80977b89ac.html" target="n" data-glyph="72,1" class="i method">Process</a>(<a href="../../HttpMessage.cs.html#0d3a69186ac45549" class="t t">HttpMessage</a> <span id="r4 rd" class="r4 r">message</span>, <span class="t t">ReadOnlyMemory</span>&lt;<a href="../HttpPipelinePolicy.cs.html#afce2b8855e35f1f" class="t t">HttpPipelinePolicy</a>&gt; <span id="r5 rd" class="r5 r">pipeline</span>)
+        {
+            <a href="#5525604c18ff3caf" class="i method">ProcessAsync</a>(<span class="r4 r">message</span>, <span class="r5 r">pipeline</span>, <b>false</b>).<a href="../../Shared/TaskExtensions.cs.html#0c5100eb7549725f" class="i method">EnsureCompleted</a>();
+        }
+ 
+        <b>public override</b> <span class="t t">ValueTask</span> <a id="bdc51365a06468d4" href="../../R/bdc51365a06468d4.html" target="n" data-glyph="72,1" class="i method">ProcessAsync</a>(<a href="../../HttpMessage.cs.html#0d3a69186ac45549" class="t t">HttpMessage</a> <span id="r6 rd" class="r6 r">message</span>, <span class="t t">ReadOnlyMemory</span>&lt;<a href="../HttpPipelinePolicy.cs.html#afce2b8855e35f1f" class="t t">HttpPipelinePolicy</a>&gt; <span id="r7 rd" class="r7 r">pipeline</span>)
+        {
+            <b>return</b> <a href="#5525604c18ff3caf" class="i method">ProcessAsync</a>(<span class="r6 r">message</span>, <span class="r7 r">pipeline</span>, <b>true</b>);
+        }
+ 
+        <b>private async</b> <span class="t t">ValueTask</span> <a id="5525604c18ff3caf" href="../../R/5525604c18ff3caf.html" target="n" data-glyph="76,1" class="i method">ProcessAsync</a>(<a href="../../HttpMessage.cs.html#0d3a69186ac45549" class="t t">HttpMessage</a> <span id="r8 rd" class="r8 r">message</span>, <span class="t t">ReadOnlyMemory</span>&lt;<a href="../HttpPipelinePolicy.cs.html#afce2b8855e35f1f" class="t t">HttpPipelinePolicy</a>&gt; <span id="r9 rd" class="r9 r">pipeline</span>, <b>bool</b> <span id="r10 rd" class="r10 r">async</span>)
+        {
+            <b>int</b> <span id="r11 rd" class="r11 r">attempt</span> = 0;
+            <a href="@1@netstandard/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt;? <span id="r12 rd" class="r12 r">exceptions</span> = <b>null</b>;
+            <b>while</b> (<b>true</b>)
+            {
+                <a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a>? <span id="r13 rd" class="r13 r">lastException</span> = <b>null</b>;
+                <a href="@1@netstandard/A.html#e566178cce890c36" class="k">var</a> <span id="r14 rd" class="r14 r">before</span> = <a href="@1@netstandard/A.html#ceb0ba9cc88de82e" class="t t">Stopwatch</a>.<a href="@1@netstandard/A.html#69c6c3137e12dab4" class="i method">GetTimestamp</a>();
+                <b>try</b>
+                {
+                    <b>if</b> (<span class="r10 r">async</span>)
+                    {
+                        <b>await</b> <a href="../HttpPipelinePolicy.cs.html#7c63499783985c7e" class="i method">ProcessNextAsync</a>(<span class="r8 r">message</span>, <span class="r9 r">pipeline</span>).<span class="i method">ConfigureAwait</span>(<b>false</b>);
+                    }
+                    <b>else</b>
+                    {
+                        <a href="../HttpPipelinePolicy.cs.html#ed2e35356f769a1b" class="i method">ProcessNext</a>(<span class="r8 r">message</span>, <span class="r9 r">pipeline</span>);
+                    }
+                }
+                <b>catch</b> (<a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r15 rd" class="r15 r">ex</span>)
+                {
+                    <b>if</b> (<span class="r12 r">exceptions</span> == <b>null</b>)
+                    {
+                        <span class="r12 r">exceptions</span> = <b>new</b> <a href="@1@netstandard/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt;();
+                    }
+ 
+                    <span class="r12 r">exceptions</span>.<a href="@1@netstandard/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r15 r">ex</span>);
+ 
+                    <span class="r13 r">lastException</span> = <span class="r15 r">ex</span>;
+                }
+ 
+                <a href="@1@netstandard/A.html#e566178cce890c36" class="k">var</a> <span id="r16 rd" class="r16 r">after</span> = <a href="@1@netstandard/A.html#ceb0ba9cc88de82e" class="t t">Stopwatch</a>.<a href="@1@netstandard/A.html#69c6c3137e12dab4" class="i method">GetTimestamp</a>();
+                <b>double</b> <span id="r17 rd" class="r17 r">elapsed</span> = (<span class="r16 r">after</span> - <span class="r14 r">before</span>) / (<b>double</b>)<a href="@1@netstandard/A.html#ceb0ba9cc88de82e" class="t t">Stopwatch</a>.<a href="@1@netstandard/A.html#886996f7146ffe4b" class="i field">Frequency</a>;
+ 
+                <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r18 rd" class="r18 r">delay</span>;
+ 
+                <span class="r11 r">attempt</span>++;
+ 
+                <a href="@1@netstandard/A.html#f1b135ff6c380b37" class="k">var</a> <span id="r19 rd" class="r19 r">shouldRetry</span> = <span class="r11 r">attempt</span> &lt;= <a href="#2e7be992565e03ef" class="i field">_maxRetries</a>;
+ 
+                <b>if</b> (<span class="r13 r">lastException</span> != <b>null</b>)
+                {
+                    <b>if</b> (<span class="r19 r">shouldRetry</span> &amp;&amp; <span class="r8 r">message</span>.<a href="../../HttpMessage.cs.html#e098f6f0a9341072" class="i property">ResponseClassifier</a>.<a href="../../ResponseClassifier.cs.html#3a7dbf7836106e93" class="i method">IsRetriable</a>(<span class="r8 r">message</span>, <span class="r13 r">lastException</span>))
+                    {
+                        <a href="#b8931e70e7a0fa0e" class="i method">GetDelay</a>(<span class="r11 r">attempt</span>, <b>out</b> <span class="r18 r">delay</span>);
+                    }
+                    <b>else</b>
+                    {
+                        <span class="c">// Rethrow a singular exception</span>
+                        <b>if</b> (<span class="r12 r">exceptions</span>!.<a href="@1@netstandard/A.html#78a69d857716bc68" class="i property">Count</a> == 1)
+                        {
+                            <a href="@1@netstandard/A.html#1443447025759846" class="t t">ExceptionDispatchInfo</a>.<a href="@1@netstandard/A.html#139923899a417d5a" class="i method">Capture</a>(<span class="r13 r">lastException</span>).<a href="@1@netstandard/A.html#fc3b312e2d0ab87a" class="i method">Throw</a>();
+                        }
+ 
+                        <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#4dbda9e082b19a1b" class="t constructor">AggregateException</a>(<span class="s">$&quot;</span><span class="s">Retry failed after </span>{<span class="r11 r">attempt</span>}<span class="s"> tries.</span><span class="s">&quot;</span>, <span class="r12 r">exceptions</span>);
+                    }
+                }
+                <b>else</b> <b>if</b> (<span class="r8 r">message</span>.<a href="../../HttpMessage.cs.html#e098f6f0a9341072" class="i property">ResponseClassifier</a>.<a href="../../ResponseClassifier.cs.html#4e59b113d4e05ee4" class="i method">IsErrorResponse</a>(<span class="r8 r">message</span>))
+                {
+                    <b>if</b> (<span class="r19 r">shouldRetry</span> &amp;&amp; <span class="r8 r">message</span>.<a href="../../HttpMessage.cs.html#e098f6f0a9341072" class="i property">ResponseClassifier</a>.<a href="../../ResponseClassifier.cs.html#fafc101046621fc7" class="i method">IsRetriableResponse</a>(<span class="r8 r">message</span>))
+                    {
+                        <a href="#b5b508102421347f" class="i method">GetDelay</a>(<span class="r8 r">message</span>, <span class="r11 r">attempt</span>, <b>out</b> <span class="r18 r">delay</span>);
+                    }
+                    <b>else</b>
+                    {
+                        <b>return</b>;
+                    }
+                }
+                <b>else</b>
+                {
+                    <b>return</b>;
+                }
+ 
+                <b>if</b> (<span class="r18 r">delay</span> &gt; <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@1@netstandard/A.html#225346b4cd3a8300" class="i field">Zero</a>)
+                {
+                    <b>if</b> (<span class="r10 r">async</span>)
+                    {
+                        <b>await</b> <a href="#2ea0eecb1b1ab4a8" class="i method">WaitAsync</a>(<span class="r18 r">delay</span>, <span class="r8 r">message</span>.<a href="../../HttpMessage.cs.html#2ab6b786b7d8daa8" class="i property">CancellationToken</a>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+                    }
+                    <b>else</b>
+                    {
+                        <a href="#93e7da37ecf4c802" class="i method">Wait</a>(<span class="r18 r">delay</span>, <span class="r8 r">message</span>.<a href="../../HttpMessage.cs.html#2ab6b786b7d8daa8" class="i property">CancellationToken</a>);
+                    }
+                }
+ 
+                <b>if</b> (<span class="r8 r">message</span>.<a href="../../HttpMessage.cs.html#8549cd408116ea5c" class="i property">HasResponse</a>)
+                {
+                    <span class="c">// Dispose the content stream to free up a connection if the request has any</span>
+                    <span class="r8 r">message</span>.<a href="../../HttpMessage.cs.html#0bc18a223263c879" class="i property">Response</a>.<a href="../../Response.cs.html#e05b388d35abae58" class="i property">ContentStream</a>?.<a href="@1@netstandard/A.html#f1b4285950a82354" class="i method">Dispose</a>();
+                }
+ 
+                <a href="../../Diagnostics/AzureCoreEventSource.cs.html#01d1d54631cb1734" class="t t">AzureCoreEventSource</a>.<a href="../../Diagnostics/AzureCoreEventSource.cs.html#38a38c5956efb2e8" class="i property">Singleton</a>.<a href="../../Diagnostics/AzureCoreEventSource.cs.html#45ce8895e44593f7" class="i method">RequestRetrying</a>(<span class="r8 r">message</span>.<a href="../../HttpMessage.cs.html#34fe7bc5cf4f67d5" class="i property">Request</a>.<a href="../../Request.cs.html#b180337469e3b6af" class="i property">ClientRequestId</a>, <span class="r11 r">attempt</span>, <span class="r17 r">elapsed</span>);
+            }
+        }
+ 
+        <b>internal virtual async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="2ea0eecb1b1ab4a8" href="../../R/2ea0eecb1b1ab4a8.html" target="n" data-glyph="74,1" class="i method">WaitAsync</a>(<a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r20 rd" class="r20 r">time</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r21 rd" class="r21 r">cancellationToken</span>)
+        {
+            <b>await</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@1@netstandard/A.html#b070ae859dd3f7b7" class="i method">Delay</a>(<span class="r20 r">time</span>, <span class="r21 r">cancellationToken</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+        }
+ 
+        <b>internal virtual void</b> <a id="93e7da37ecf4c802" href="../../R/93e7da37ecf4c802.html" target="n" data-glyph="74,1" class="i method">Wait</a>(<a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r22 rd" class="r22 r">time</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r23 rd" class="r23 r">cancellationToken</span>)
+        {
+            <span class="r23 r">cancellationToken</span>.<a href="@1@netstandard/A.html#2d85116bf4acf347" class="i property">WaitHandle</a>.<a href="@1@netstandard/A.html#338dcea05d182d3c" class="i method">WaitOne</a>(<span class="r22 r">time</span>);
+        }
+ 
+        <b>protected virtual</b> <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="fae0b41cc88455fc" href="../../R/fae0b41cc88455fc.html" target="n" data-glyph="75,1" class="i method">GetServerDelay</a>(<a href="../../HttpMessage.cs.html#0d3a69186ac45549" class="t t">HttpMessage</a> <span id="r24 rd" class="r24 r">message</span>)
+        {
+            <b>if</b> (<span class="r24 r">message</span>.<a href="../../HttpMessage.cs.html#0bc18a223263c879" class="i property">Response</a> == <b>null</b>)
+            {
+                <b>return</b> <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@1@netstandard/A.html#225346b4cd3a8300" class="i field">Zero</a>;
+            }
+ 
+            <b>if</b> (<span class="r24 r">message</span>.<a href="../../HttpMessage.cs.html#0bc18a223263c879" class="i property">Response</a>.<a href="../../Response.cs.html#e349f8a08ab2e681" class="i method">TryGetHeader</a>(<a href="#09e78fa9640b43f9" class="i field">RetryAfterMsHeaderName</a>, <b>out</b> <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r25 rd" class="r25 r">retryAfterValue</span>) ||
+                <span class="r24 r">message</span>.<a href="../../HttpMessage.cs.html#0bc18a223263c879" class="i property">Response</a>.<a href="../../Response.cs.html#e349f8a08ab2e681" class="i method">TryGetHeader</a>(<a href="#f11faecfd19d3059" class="i field">XRetryAfterMsHeaderName</a>, <b>out</b> <span class="r25 r">retryAfterValue</span>))
+            {
+                <b>if</b> (<b>int</b>.<a href="@1@netstandard/A.html#325507e509229dbc" class="i method">TryParse</a>(<span class="r25 r">retryAfterValue</span>, <b>out</b> <a href="@1@netstandard/A.html#225942ed7b7a3252" class="k">var</a> <span id="r26 rd" class="r26 r">delaySeconds</span>))
+                {
+                    <b>return</b> <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@1@netstandard/A.html#668d91d771bce54b" class="i method">FromMilliseconds</a>(<span class="r26 r">delaySeconds</span>);
+                }
+            }
+ 
+            <b>if</b> (<span class="r24 r">message</span>.<a href="../../HttpMessage.cs.html#0bc18a223263c879" class="i property">Response</a>.<a href="../../Response.cs.html#e349f8a08ab2e681" class="i method">TryGetHeader</a>(<a href="#fec025c734dd1e68" class="i field">RetryAfterHeaderName</a>, <b>out</b> <span class="r25 r">retryAfterValue</span>))
+            {
+                <b>if</b> (<b>int</b>.<a href="@1@netstandard/A.html#325507e509229dbc" class="i method">TryParse</a>(<span class="r25 r">retryAfterValue</span>, <b>out</b> <a href="@1@netstandard/A.html#225942ed7b7a3252" class="k">var</a> <span id="r27 rd" class="r27 r">delaySeconds</span>))
+                {
+                    <b>return</b> <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@1@netstandard/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(<span class="r27 r">delaySeconds</span>);
+                }
+                <b>if</b> (<a href="@1@netstandard/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@1@netstandard/A.html#11146db40afa6ed7" class="i method">TryParse</a>(<span class="r25 r">retryAfterValue</span>, <b>out</b> <a href="@1@netstandard/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a> <span id="r28 rd" class="r28 r">delayTime</span>))
+                {
+                    <b>return</b> <span class="r28 r">delayTime</span> - <a href="@1@netstandard/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@1@netstandard/A.html#c6573f48ac6bd630" class="i property">Now</a>;
+                }
+            }
+ 
+            <b>return</b> <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@1@netstandard/A.html#225346b4cd3a8300" class="i field">Zero</a>;
+        }
+ 
+        <b>private void</b> <a id="b5b508102421347f" href="../../R/b5b508102421347f.html" target="n" data-glyph="76,1" class="i method">GetDelay</a>(<a href="../../HttpMessage.cs.html#0d3a69186ac45549" class="t t">HttpMessage</a> <span id="r29 rd" class="r29 r">message</span>, <b>int</b> <span id="r30 rd" class="r30 r">attempted</span>, <b>out</b> <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r31 rd" class="r31 r">delay</span>)
+        {
+            <span class="r31 r">delay</span> = <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@1@netstandard/A.html#225346b4cd3a8300" class="i field">Zero</a>;
+ 
+            <b>switch</b> (<a href="#5da9c74c11956aae" class="i field">_mode</a>)
+            {
+                <b>case</b> <a href="../../RetryMode.cs.html#1ef0eec63e4fb071" class="t t">RetryMode</a>.<a href="../../RetryMode.cs.html#26b300aa44222ba2" class="i field">Fixed</a>:
+                    <span class="r31 r">delay</span> = <a href="#19dbd591ceff47f9" class="i field">_delay</a>;
+                    <b>break</b>;
+                <b>case</b> <a href="../../RetryMode.cs.html#1ef0eec63e4fb071" class="t t">RetryMode</a>.<a href="../../RetryMode.cs.html#5582691dd6765e68" class="i field">Exponential</a>:
+                    <span class="r31 r">delay</span> = <a href="#258bb7b6485b3a04" class="i method">CalculateExponentialDelay</a>(<span class="r30 r">attempted</span>);
+                    <b>break</b>;
+            }
+ 
+            <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r32 rd" class="r32 r">serverDelay</span> = <a href="#fae0b41cc88455fc" class="i method">GetServerDelay</a>(<span class="r29 r">message</span>);
+            <b>if</b> (<span class="r32 r">serverDelay</span> &gt; <span class="r31 r">delay</span>)
+            {
+                <span class="r31 r">delay</span> = <span class="r32 r">serverDelay</span>;
+            }
+        }
+ 
+        <b>private void</b> <a id="b8931e70e7a0fa0e" href="../../R/b8931e70e7a0fa0e.html" target="n" data-glyph="76,1" class="i method">GetDelay</a>(<b>int</b> <span id="r33 rd" class="r33 r">attempted</span>, <b>out</b> <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r34 rd" class="r34 r">delay</span>)
+        {
+            <span class="r34 r">delay</span> = <a href="#258bb7b6485b3a04" class="i method">CalculateExponentialDelay</a>(<span class="r33 r">attempted</span>);
+        }
+ 
+        <b>private</b> <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="258bb7b6485b3a04" href="../../R/258bb7b6485b3a04.html" target="n" data-glyph="76,1" class="i method">CalculateExponentialDelay</a>(<b>int</b> <span id="r35 rd" class="r35 r">attempted</span>)
+        {
+            <b>return</b> <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@1@netstandard/A.html#668d91d771bce54b" class="i method">FromMilliseconds</a>(
+                <a href="@1@netstandard/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@1@netstandard/A.html#e248b38c0156e9dd" class="i method">Min</a>(
+                    (1 &lt;&lt; (<span class="r35 r">attempted</span> - 1)) * <a href="#917b26214e3332ad" class="i field">_random</a>.<a href="@1@netstandard/A.html#ddd1e9e09c70bab5" class="i method">Next</a>((<b>int</b>)(<a href="#19dbd591ceff47f9" class="i field">_delay</a>.<a href="@1@netstandard/A.html#0001a4a9e0a9b848" class="i property">TotalMilliseconds</a> * 0.8), (<b>int</b>)(<a href="#19dbd591ceff47f9" class="i field">_delay</a>.<a href="@1@netstandard/A.html#0001a4a9e0a9b848" class="i property">TotalMilliseconds</a> * 1.2)),
+                    <a href="#595531f8bce64488" class="i field">_maxDelay</a>.<a href="@1@netstandard/A.html#0001a4a9e0a9b848" class="i property">TotalMilliseconds</a>));
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

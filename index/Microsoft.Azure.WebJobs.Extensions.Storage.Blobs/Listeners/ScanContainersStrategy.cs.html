@@ -1,0 +1,212 @@
+﻿<!DOCTYPE html>
+<html><head><title>ScanContainersStrategy.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(203);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs/Listeners/ScanContainersStrategy.cs" target="_top">Listeners\ScanContainersStrategy.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs" target="_top">Microsoft.Azure.WebJobs.Extensions.Storage.Blobs\src\Microsoft.Azure.WebJobs.Extensions.Storage.Blobs.csproj</a> (Microsoft.Azure.WebJobs.Extensions.Storage.Blobs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Concurrent</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Linq</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>.<span class="i n">Models</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>.<span class="i n">Specialized</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Common</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Common</span>.<span class="i n">Listeners</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Common</span>.<span class="i n">Timers</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Executors</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>.<span class="i n">Listeners</span>
+{
+    <b>internal sealed class</b> <a id="2318dd651d148005" href="../R/2318dd651d148005.html" target="n" data-glyph="2,0" class="t t">ScanContainersStrategy</a> : <a href="IBlobListenerStrategy.cs.html#528416e145265466" class="t t">IBlobListenerStrategy</a>
+    {
+        <b>private static readonly</b> <span class="i">TimeSpan</span> <a id="3f7c57a832e32e3c" href="../R/3f7c57a832e32e3c.html" target="n" data-glyph="46,1" class="i field">TwoSeconds</a> = <span class="i">TimeSpan</span>.<span class="i">FromSeconds</span>(2);
+ 
+        <b>private readonly</b> <span class="i">IDictionary</span>&lt;<a href="/Azure.Storage.Blobs/A.html#6bb2c165ee95c7d4" class="t t">BlobContainerClient</a>, <span class="i">ICollection</span>&lt;<a href="../Shared/Listeners/ITriggerExecutor.cs.html#7371353e2f184692" class="t t">ITriggerExecutor</a>&lt;<a href="BlobTriggerExecutorContext.cs.html#082c94806db01159" class="t t">BlobTriggerExecutorContext</a>&gt;&gt;&gt; <a id="a7bee328d6a603df" href="../R/a7bee328d6a603df.html" target="n" data-glyph="46,1" class="i field">_registrations</a>;
+        <b>private readonly</b> <span class="i">IDictionary</span>&lt;<a href="/Azure.Storage.Blobs/A.html#6bb2c165ee95c7d4" class="t t">BlobContainerClient</a>, <span class="i">DateTime</span>&gt; <a id="ce178c1bece09d05" href="../R/ce178c1bece09d05.html" target="n" data-glyph="46,1" class="i field">_lastModifiedTimestamps</a>;
+        <b>private readonly</b> <span class="i">ConcurrentQueue</span>&lt;<a href="../BlobWithContainer.cs.html#062f07c49edbf857" class="t t">BlobWithContainer</a>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt;&gt; <a id="cf51bac0e1e93c53" href="../R/cf51bac0e1e93c53.html" target="n" data-glyph="46,1" class="i field">_blobWrittenNotifications</a>;
+ 
+        <b>public</b> <a id="f8fcceb3df657ae4" href="../R/f8fcceb3df657ae4.html" target="n" data-glyph="72,1" class="t constructor">ScanContainersStrategy</a>()
+        {
+            <a href="#a7bee328d6a603df" class="i field">_registrations</a> = <b>new</b> <span class="i">Dictionary</span>&lt;<a href="/Azure.Storage.Blobs/A.html#6bb2c165ee95c7d4" class="t t">BlobContainerClient</a>, <span class="i">ICollection</span>&lt;<a href="../Shared/Listeners/ITriggerExecutor.cs.html#7371353e2f184692" class="t t">ITriggerExecutor</a>&lt;<a href="BlobTriggerExecutorContext.cs.html#082c94806db01159" class="t t">BlobTriggerExecutorContext</a>&gt;&gt;&gt;(
+                <b>new</b> <span class="t">CloudBlobContainerComparer</span>());
+            <a href="#ce178c1bece09d05" class="i field">_lastModifiedTimestamps</a> = <b>new</b> <span class="i">Dictionary</span>&lt;<a href="/Azure.Storage.Blobs/A.html#6bb2c165ee95c7d4" class="t t">BlobContainerClient</a>, <span class="i">DateTime</span>&gt;(
+                <b>new</b> <span class="t">CloudBlobContainerComparer</span>());
+            <a href="#cf51bac0e1e93c53" class="i field">_blobWrittenNotifications</a> = <b>new</b> <span class="i">ConcurrentQueue</span>&lt;<a href="../BlobWithContainer.cs.html#062f07c49edbf857" class="t t">BlobWithContainer</a>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt;&gt;();
+        }
+ 
+        <b>public void</b> <a id="f1ad20fc547d8846" href="../R/f1ad20fc547d8846.html" target="n" data-glyph="72,1" class="i method">Notify</a>(<a href="../BlobWithContainer.cs.html#062f07c49edbf857" class="t t">BlobWithContainer</a>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt; <span id="r0 rd" class="r0 r">blobWritten</span>)
+        {
+            <a href="#cf51bac0e1e93c53" class="i field">_blobWrittenNotifications</a>.<span class="i">Enqueue</span>(<span class="r0 r">blobWritten</span>);
+        }
+ 
+        <b>public</b> <span class="i">Task</span> <a id="3e9668b54059306c" href="../R/3e9668b54059306c.html" target="n" data-glyph="72,1" class="i method">RegisterAsync</a>(<a href="/Azure.Storage.Blobs/A.html#5c3c4fe54cdb5868" class="t t">BlobServiceClient</a> <span id="r1 rd" class="r1 r">blobServiceClient</span>, <a href="/Azure.Storage.Blobs/A.html#6bb2c165ee95c7d4" class="t t">BlobContainerClient</a> <span id="r2 rd" class="r2 r">container</span>, <a href="../Shared/Listeners/ITriggerExecutor.cs.html#7371353e2f184692" class="t t">ITriggerExecutor</a>&lt;<a href="BlobTriggerExecutorContext.cs.html#082c94806db01159" class="t t">BlobTriggerExecutorContext</a>&gt; <span id="r3 rd" class="r3 r">triggerExecutor</span>,
+            <span class="i">CancellationToken</span> <span id="r4 rd" class="r4 r">cancellationToken</span>)
+        {
+            <span class="c">// Register and Execute are not concurrency-safe.</span>
+            <span class="c">// Avoiding calling Register while Execute is running is the caller&#39;s responsibility.</span>
+            <span class="i">ICollection</span>&lt;<a href="../Shared/Listeners/ITriggerExecutor.cs.html#7371353e2f184692" class="t t">ITriggerExecutor</a>&lt;<a href="BlobTriggerExecutorContext.cs.html#082c94806db01159" class="t t">BlobTriggerExecutorContext</a>&gt;&gt; <span id="r5 rd" class="r5 r">containerRegistrations</span>;
+ 
+            <b>if</b> (<a href="#a7bee328d6a603df" class="i field">_registrations</a>.<span class="i">ContainsKey</span>(<span class="r2 r">container</span>))
+            {
+                <span class="r5 r">containerRegistrations</span> = <a href="#a7bee328d6a603df" class="i field">_registrations</a>[<span class="r2 r">container</span>];
+            }
+            <b>else</b>
+            {
+                <span class="r5 r">containerRegistrations</span> = <b>new</b> <span class="i">List</span>&lt;<a href="../Shared/Listeners/ITriggerExecutor.cs.html#7371353e2f184692" class="t t">ITriggerExecutor</a>&lt;<a href="BlobTriggerExecutorContext.cs.html#082c94806db01159" class="t t">BlobTriggerExecutorContext</a>&gt;&gt;();
+                <a href="#a7bee328d6a603df" class="i field">_registrations</a>.<span class="i">Add</span>(<span class="r2 r">container</span>, <span class="r5 r">containerRegistrations</span>);
+            }
+ 
+            <span class="r5 r">containerRegistrations</span>.<span class="i">Add</span>(<span class="r3 r">triggerExecutor</span>);
+ 
+            <b>if</b> (!<a href="#ce178c1bece09d05" class="i field">_lastModifiedTimestamps</a>.<span class="i">ContainsKey</span>(<span class="r2 r">container</span>))
+            {
+                <a href="#ce178c1bece09d05" class="i field">_lastModifiedTimestamps</a>.<span class="i">Add</span>(<span class="r2 r">container</span>, <span class="i">DateTime</span>.<span class="i">MinValue</span>);
+            }
+ 
+            <b>return</b> <span class="i">Task</span>.<span class="i">FromResult</span>(0);
+        }
+ 
+        <b>public async</b> <span class="i">Task</span>&lt;<a href="../Shared/Timers/TaskSeriesCommandResult.cs.html#82bfc030f4f50a55" class="t t">TaskSeriesCommandResult</a>&gt; <a id="9897cdd599ca35df" href="../R/9897cdd599ca35df.html" target="n" data-glyph="72,1" class="i method">ExecuteAsync</a>(<span class="i">CancellationToken</span> <span id="r6 rd" class="r6 r">cancellationToken</span>)
+        {
+            <span class="i">List</span>&lt;<a href="../BlobWithContainer.cs.html#062f07c49edbf857" class="t t">BlobWithContainer</a>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt;&gt; <span id="r7 rd" class="r7 r">failedNotifications</span> = <b>new</b> <span class="i">List</span>&lt;<a href="../BlobWithContainer.cs.html#062f07c49edbf857" class="t t">BlobWithContainer</a>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt;&gt;();
+ 
+            <span class="c">// Drain the background queue of blob written notifications.</span>
+            <b>while</b> (<b>true</b>)
+            {
+                <span class="r6 r">cancellationToken</span>.<span class="i">ThrowIfCancellationRequested</span>();
+ 
+                <b>if</b> (!<a href="#cf51bac0e1e93c53" class="i field">_blobWrittenNotifications</a>.<span class="i">TryDequeue</span>(<b>out</b> <b>var</b> <span id="r8 rd" class="r8 r">blob</span>))
+                {
+                    <b>break</b>;
+                }
+ 
+                <b>await</b> <span class="i">NotifyRegistrationsAsync</span>(<span class="r8 r">blob</span>, <span class="r7 r">failedNotifications</span>, <span class="r6 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+ 
+            <b>foreach</b> (<a href="/Azure.Storage.Blobs/A.html#6bb2c165ee95c7d4" class="t t">BlobContainerClient</a> <span id="r9 rd" class="r9 r">container</span> <b>in</b> <a href="#a7bee328d6a603df" class="i field">_registrations</a>.<span class="i">Keys</span>)
+            {
+                <span class="r6 r">cancellationToken</span>.<span class="i">ThrowIfCancellationRequested</span>();
+                <span class="i">DateTime</span> <span id="r10 rd" class="r10 r">lastScanTimestamp</span> = <a href="#ce178c1bece09d05" class="i field">_lastModifiedTimestamps</a>[<span class="r9 r">container</span>];
+                <span class="i">Tuple</span>&lt;<span class="i">IEnumerable</span>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt;, <span class="i">DateTime</span>&gt; <span id="r11 rd" class="r11 r">newBlobsResult</span> = <b>await</b> <a href="#441e0e54ede2596f" class="i method">PollNewBlobsAsync</a>(<span class="r9 r">container</span>,
+                    <span class="r10 r">lastScanTimestamp</span>, <span class="r6 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <span class="i">IEnumerable</span>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt; <span id="r12 rd" class="r12 r">newBlobs</span> = <span class="r11 r">newBlobsResult</span>.<span class="i">Item1</span>;
+                <a href="#ce178c1bece09d05" class="i field">_lastModifiedTimestamps</a>[<span class="r9 r">container</span>] = <span class="r11 r">newBlobsResult</span>.<span class="i">Item2</span>;
+ 
+                <b>foreach</b> (<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a> <span id="r13 rd" class="r13 r">newBlob</span> <b>in</b> <span class="r12 r">newBlobs</span>)
+                {
+                    <span class="r6 r">cancellationToken</span>.<span class="i">ThrowIfCancellationRequested</span>();
+                    <b>await</b> <span class="i">NotifyRegistrationsAsync</span>(<b>new</b> <a href="../BlobWithContainer.cs.html#84304c8c474d3771" class="t constructor">BlobWithContainer</a>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt;(<span class="r9 r">container</span>, <span class="r13 r">newBlob</span>), <span class="r7 r">failedNotifications</span>, <span class="r6 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+            }
+ 
+            <span class="c">// Re-add any failed notifications for the next iteration.</span>
+            <b>foreach</b> (<a href="../BlobWithContainer.cs.html#062f07c49edbf857" class="t t">BlobWithContainer</a>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt; <span id="r14 rd" class="r14 r">failedNotification</span> <b>in</b> <span class="r7 r">failedNotifications</span>)
+            {
+                <a href="#cf51bac0e1e93c53" class="i field">_blobWrittenNotifications</a>.<span class="i">Enqueue</span>(<span class="r14 r">failedNotification</span>);
+            }
+ 
+            <span class="c">// Run subsequent iterations at 2 second intervals.</span>
+            <b>return</b> <b>new</b> <span class="t">TaskSeriesCommandResult</span>(<span class="i">wait</span>: <span class="i">Task</span>.<span class="i">Delay</span>(<a href="#3f7c57a832e32e3c" class="i field">TwoSeconds</a>, <span class="i">CancellationToken</span>.<span class="i">None</span>));
+        }
+ 
+        <b>public void</b> <a id="01653b9e78dd52e2" href="../R/01653b9e78dd52e2.html" target="n" data-glyph="72,1" class="i method">Cancel</a>()
+        {
+        }
+ 
+        <b>public void</b> <a id="7757c5de30dcf39a" href="../R/7757c5de30dcf39a.html" target="n" data-glyph="72,1" class="i method">Start</a>()
+        {
+        }
+ 
+        <b>public void</b> <a id="c34426b75b1dbc4f" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Dispose</a>()
+        {
+        }
+ 
+        <b>private async</b> <span class="i">Task</span> <a id="4adc0e051bf950b3" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">NotifyRegistrationsAsync</a>(<a href="../BlobWithContainer.cs.html#062f07c49edbf857" class="t t">BlobWithContainer</a>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt; <span id="r15 rd" class="r15 r">blob</span>, <span class="i">ICollection</span>&lt;<a href="../BlobWithContainer.cs.html#062f07c49edbf857" class="t t">BlobWithContainer</a>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt;&gt; <span id="r16 rd" class="r16 r">failedNotifications</span>,
+            <span class="i">CancellationToken</span> <span id="r17 rd" class="r17 r">cancellationToken</span>)
+        {
+            <span class="c">// Blob written notifications are host-wide, so filter out things that aren&#39;t in the container list.</span>
+            <b>if</b> (!<a href="#a7bee328d6a603df" class="i field">_registrations</a>.<span class="i">ContainsKey</span>(<span class="r15 r">blob</span>.<a href="../BlobWithContainer.cs.html#d4310a0855722634" class="i property">BlobContainerClient</a>))
+            {
+                <b>return</b>;
+            }
+ 
+            <b>foreach</b> (<a href="../Shared/Listeners/ITriggerExecutor.cs.html#7371353e2f184692" class="t t">ITriggerExecutor</a>&lt;<a href="BlobTriggerExecutorContext.cs.html#082c94806db01159" class="t t">BlobTriggerExecutorContext</a>&gt; <span id="r18 rd" class="r18 r">registration</span> <b>in</b> <a href="#a7bee328d6a603df" class="i field">_registrations</a>[<span class="r15 r">blob</span>.<a href="../BlobWithContainer.cs.html#d4310a0855722634" class="i property">BlobContainerClient</a>])
+            {
+                <span class="r17 r">cancellationToken</span>.<span class="i">ThrowIfCancellationRequested</span>();
+ 
+                <a href="BlobTriggerExecutorContext.cs.html#082c94806db01159" class="t t">BlobTriggerExecutorContext</a> <span id="r19 rd" class="r19 r">context</span> = <b>new</b> <span class="t">BlobTriggerExecutorContext</span>
+                {
+                    <a href="BlobTriggerExecutorContext.cs.html#77ab4d235fdc4693" class="i property">Blob</a> = <span class="r15 r">blob</span>,
+                    <a href="BlobTriggerExecutorContext.cs.html#900f32443c7a41c2" class="i property">PollId</a> = <b>null</b>,
+                    <a href="BlobTriggerExecutorContext.cs.html#09678fddb71cf595" class="i property">TriggerSource</a> = <a href="BlobTriggerScanSource.cs.html#b885eb1843a6758f" class="t t">BlobTriggerScanSource</a>.<a href="BlobTriggerScanSource.cs.html#8273f3045f6d806e" class="i field">ContainerScan</a>
+                };
+ 
+                <span class="i">FunctionResult</span> <span id="r20 rd" class="r20 r">result</span> = <b>await</b> <span class="r18 r">registration</span>.<a href="../Shared/Listeners/ITriggerExecutor.cs.html#7022f6d9e9487c01" class="i method">ExecuteAsync</a>(<span class="r19 r">context</span>, <span class="r17 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <b>if</b> (!<span class="r20 r">result</span>.<span class="i">Succeeded</span>)
+                {
+                    <span class="c">// If notification failed, try again on the next iteration.</span>
+                    <span class="r16 r">failedNotifications</span>.<span class="i">Add</span>(<span class="r15 r">blob</span>);
+                }
+            }
+        }
+ 
+        <b>public static async</b> <span class="i">Task</span>&lt;<span class="i">Tuple</span>&lt;<span class="i">IEnumerable</span>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt;, <span class="i">DateTime</span>&gt;&gt; <a id="441e0e54ede2596f" href="../R/441e0e54ede2596f.html" target="n" data-glyph="72,1" class="i method">PollNewBlobsAsync</a>(
+            <a href="/Azure.Storage.Blobs/A.html#6bb2c165ee95c7d4" class="t t">BlobContainerClient</a> <span id="r21 rd" class="r21 r">container</span>, <span class="i">DateTime</span> <span id="r22 rd" class="r22 r">previousTimestamp</span>, <span class="i">CancellationToken</span> <span id="r23 rd" class="r23 r">cancellationToken</span>)
+        {
+            <span class="i">DateTime</span> <span id="r24 rd" class="r24 r">updatedTimestamp</span> = <span class="r22 r">previousTimestamp</span>;
+ 
+            <span class="i">IAsyncEnumerable</span>&lt;<a href="/Azure.Storage.Blobs/A.html#8029f8268c3df23c" class="t t">BlobItem</a>&gt; <span id="r25 rd" class="r25 r">currentBlobs</span>;
+ 
+            <b>try</b>
+            {
+                <span class="r25 r">currentBlobs</span> = <span class="r21 r">container</span>.<span class="i">GetBlobsAsync</span>(<span class="i">cancellationToken</span>: <span class="r23 r">cancellationToken</span>);
+ 
+                <span class="i">List</span>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt; <span id="r26 rd" class="r26 r">newBlobs</span> = <b>new</b> <span class="i">List</span>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt;();
+ 
+                <span class="c">// Type cast to IStorageBlob is safe due to useFlatBlobListing: true above.</span>
+                <b>await</b> <b>foreach</b> (<a href="/Azure.Storage.Blobs/A.html#8029f8268c3df23c" class="t t">BlobItem</a> <span id="r27 rd" class="r27 r">currentBlob</span> <b>in</b> <span class="r25 r">currentBlobs</span>.<span class="i">ConfigureAwait</span>(<b>false</b>))
+                {
+                    <span class="r23 r">cancellationToken</span>.<span class="i">ThrowIfCancellationRequested</span>();
+ 
+                    <a href="/Azure.Storage.Blobs/A.html#941af435ad7e1c11" class="k">var</a> <span id="r28 rd" class="r28 r">properties</span> = <span class="r27 r">currentBlob</span>.<a href="/Azure.Storage.Blobs/A.html#6988ec92b10f0e2d" class="i property">Properties</a>;
+                    <span class="i">DateTime</span> <span id="r29 rd" class="r29 r">lastModifiedTimestamp</span> = <span class="r28 r">properties</span>.<a href="/Azure.Storage.Blobs/A.html#435dde97a5a28281" class="i property">LastModified</a>.<span class="i">Value</span>.<span class="i">UtcDateTime</span>;
+ 
+                    <b>if</b> (<span class="r29 r">lastModifiedTimestamp</span> &gt; <span class="r24 r">updatedTimestamp</span>)
+                    {
+                        <span class="r24 r">updatedTimestamp</span> = <span class="r29 r">lastModifiedTimestamp</span>;
+                    }
+ 
+                    <b>if</b> (<span class="r29 r">lastModifiedTimestamp</span> &gt; <span class="r22 r">previousTimestamp</span>)
+                    {
+                        <span class="r26 r">newBlobs</span>.<span class="i">Add</span>(<span class="r21 r">container</span>.<span class="i">GetBlobClient</span>(<span class="r27 r">currentBlob</span>.<a href="/Azure.Storage.Blobs/A.html#1c486ee7e34147b4" class="i property">Name</a>));
+                    }
+                }
+ 
+                <b>return</b> <b>new</b> <span class="i">Tuple</span>&lt;<span class="i">IEnumerable</span>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt;, <span class="i">DateTime</span>&gt;(<span class="r26 r">newBlobs</span>, <span class="r24 r">updatedTimestamp</span>);
+            }
+            <b>catch</b> (<span class="i">RequestFailedException</span> <span id="r30 rd" class="r30 r">exception</span>)
+            {
+                <b>if</b> (<span class="r30 r">exception</span>.<a href="../Shared/RequestFailedExceptionExtensions.cs.html#4e36af4b2555233e" class="i method">IsNotFound</a>())
+                {
+                    <b>return</b> <b>new</b> <span class="i">Tuple</span>&lt;<span class="i">IEnumerable</span>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt;, <span class="i">DateTime</span>&gt;(
+                        <span class="i">Enumerable</span>.<span class="i">Empty</span>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt;(), <span class="r24 r">updatedTimestamp</span>);
+                }
+                <b>else</b>
+                {
+                    <b>throw</b>;
+                }
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

@@ -1,0 +1,165 @@
+﻿<!DOCTYPE html>
+<html><head><title>PagedEnumeratorBase.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(156);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.Batch/PagedEnumeratorBase.cs" target="_top">PagedEnumeratorBase.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.Batch" target="_top">src\Microsoft.Azure.Batch.csproj</a> (Microsoft.Azure.Batch)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+﻿<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Batch</span>.<span class="i n">Utils</span>;
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Batch</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Implementents sync and async enumerator based on async calls to server.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal abstract class</b> <a id="80bb90f0752114df" href="R/80bb90f0752114df.html" target="n" data-glyph="2,0" class="t t">PagedEnumeratorBase</a>&lt;<span id="r0 rd t" class="r0 r t">EnumerationType</span>&gt; : <a href="IPagedEnumerator.cs.html#73142b51637e9ea3" class="t t">IPagedEnumerator</a>&lt;<span class="r0 r t">EnumerationType</span>&gt;, <a href="@0@mscorlib/A.html#893e8cdebffde2da" class="t t">IEnumerator</a>&lt;<span class="r0 r t">EnumerationType</span>&gt;
+    {
+        <b>private readonly</b> <a href="IPagedEnumerator.cs.html#73142b51637e9ea3" class="t t">IPagedEnumerator</a>&lt;<span class="r0 r t">EnumerationType</span>&gt; <a id="987e6208c36872ec" href="R/987e6208c36872ec.html" target="n" data-glyph="46,1" class="i field">_implInstance</a>; <span class="c">// simplifies complexities around explicit declarations</span>
+ 
+        <span class="c">// index into current batch</span>
+        <b>internal int</b> <a id="977aa15fea10a706" href="R/977aa15fea10a706.html" target="n" data-glyph="44,1" class="i field">_currentIndex</a>;
+ 
+        <span class="c">// current batch of objects returned by last call</span>
+        <b>internal object</b>[] <a id="257a88058063da2e" href="R/257a88058063da2e.html" target="n" data-glyph="44,1" class="i field">_currentBatch</a>;
+ 
+        <span class="c">// manages the skip token</span>
+        <b>private</b> <a href="#efd92efadf468bda" class="t t">SkipTokenHandler</a> <a id="94f6d07dc299c4d5" href="R/94f6d07dc299c4d5.html" target="n" data-glyph="46,1" class="i field">_skipHandler</a>;
+ 
+<span class="k preprocess">#</span><span class="k preprocess">region</span> // constructors
+ 
+        <b>internal</b> <a id="7b41d924d1fc5bf1" href="R/../../0000000000.html" target="n" data-glyph="74,1" class="t constructor">PagedEnumeratorBase</a>()
+        {
+            <a href="#987e6208c36872ec" class="i field">_implInstance</a> = <a href="#80bb90f0752114df" class="k">this</a>;
+ 
+            <span class="c">// sets up state variables to trigger first call</span>
+            <a href="#80bb90f0752114df" class="k">this</a>.<a href="#f58ae08d86b42fb4" class="i method">Reset</a>();
+        }
+ 
+<span class="k preprocess">#</span><span class="k preprocess">endregion</span> <span class="c">// constructors</span>
+ 
+<span class="k preprocess">#</span><span class="k preprocess">region</span> // abstract methods that must be implemented by inheriting class
+ 
+        <span class="c">// for IPagedEnumerator&lt;T&gt; and IEnumerator&lt;T&gt;</span>
+        <b>public abstract</b> <span class="r0 r t">EnumerationType</span> <a id="7f3f4b67e9417da5" href="R/7f3f4b67e9417da5.html" target="n" data-glyph="102,1" class="i property">Current</a>  { <b>get</b>;}
+ 
+        <b>protected abstract</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>.<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="c7d59075a42bcb6e" href="R/c7d59075a42bcb6e.html" target="n" data-glyph="75,1" class="i method">GetNextBatchFromServerAsync</a>(<a href="#efd92efadf468bda" class="t t">SkipTokenHandler</a> <span id="r1 rd" class="r1 r">skipHandler</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r2 rd" class="r2 r">cancellationToken</span>); <span class="c">// fetch another batch of objects from the server</span>
+ 
+ 
+<span class="k preprocess">#</span><span class="k preprocess">endregion</span> <span class="c">// abstract methods</span>
+ 
+        <b>object</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<a href="@0@mscorlib/A.html#6624f38cb955bfe0" class="t t">IEnumerator</a>.<a href="@0@mscorlib/A.html#3f12a86aa5b0da2b" class="i property">Current</a> <span class="c">// for IEnumerator</span>
+        {
+            <b>get</b>
+            {
+                <b>object</b> <span id="r3 rd" class="r3 r">cur</span> = <a href="#987e6208c36872ec" class="i field">_implInstance</a>.<a href="IPagedEnumerator.cs.html#911125a470bf033a" class="i property">Current</a>;
+ 
+                <b>return</b> <span class="r3 r">cur</span>;
+            }
+        }
+ 
+        <b>public bool</b> <a id="9d7f596dbe782086" href="R/9d7f596dbe782086.html" target="n" data-glyph="72,1" class="i method">MoveNext</a>()  <span class="c">// for IEnumerator and IEnumerator&lt;T&gt;</span>
+        {
+            <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>bool</b>&gt; <span id="r4 rd" class="r4 r">asyncTask</span> = <a href="#8dd0ebaed6cbd864" class="i method">MoveNextAsync</a>();
+            <b>bool</b> <span id="r5 rd" class="r5 r">result</span> = <span class="r4 r">asyncTask</span>.<a href="UtilitiesInternal.cs.html#9622688606f2ac11" class="i method">WaitAndUnaggregateException</a>();
+ 
+            <b>return</b> <span class="r5 r">result</span>;
+        }
+ 
+        <b>public async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>bool</b>&gt; <a id="8dd0ebaed6cbd864" href="R/8dd0ebaed6cbd864.html" target="n" data-glyph="72,1" class="i method">MoveNextAsync</a>(<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r6 rd" class="r6 r">cancellationToken</span> = <b>default</b>(<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>))
+        {
+            <b>try</b>
+            {
+                <span class="c">// move to next item in current batch</span>
+                ++<a href="#977aa15fea10a706" class="i field">_currentIndex</a>;
+ 
+                <span class="c">// if the index fits in the current batch,  return true</span>
+                <b>if</b> ((<b>null</b> != <a href="#257a88058063da2e" class="i field">_currentBatch</a>) &amp;&amp; (<a href="#977aa15fea10a706" class="i field">_currentIndex</a> &lt; <a href="#257a88058063da2e" class="i field">_currentBatch</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>)) <span class="c">// we have results in memory, just advance index</span>
+                {
+                    <b>return</b> <b>true</b>;
+                }
+ 
+                <span class="c">// if we are out of data then return false</span>
+                <b>if</b> (<a href="#94f6d07dc299c4d5" class="i field">_skipHandler</a>.<a href="#bc37f03bf7061053" class="i property">AtLeastOneCallMade</a> &amp;&amp; !<a href="#94f6d07dc299c4d5" class="i field">_skipHandler</a>.<a href="#ba7f9d8279243a84" class="i property">ThereIsMoreData</a>)
+                {
+                    <b>return</b> <b>false</b>;
+                }
+ 
+                <span class="c">// at this point we need to call for more data</span>
+                <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>.<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <span id="r7 rd" class="r7 r">asyncTask</span> = <a href="#80bb90f0752114df" class="k">this</a>.<a href="#c7d59075a42bcb6e" class="i method">GetNextBatchFromServerAsync</a>(<a href="#94f6d07dc299c4d5" class="i field">_skipHandler</a>, <span class="r6 r">cancellationToken</span>);
+ 
+                <span class="c">// wait for it to complete</span>
+                <b>await</b> <span class="r7 r">asyncTask</span>.<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<span class="r8 r">continueOnCapturedContext</span>: <b>false</b>);
+ 
+                <span class="c">// if we have new data in cache, serve it up</span>
+                <b>if</b> ((<b>null</b> != <a href="#257a88058063da2e" class="i field">_currentBatch</a>) &amp;&amp; (<a href="#257a88058063da2e" class="i field">_currentBatch</a>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a> &gt; 0))
+                {
+                    <a href="#977aa15fea10a706" class="i field">_currentIndex</a> = 0;
+ 
+                    <b>return</b> <b>true</b>;
+                }
+            }
+            <b>catch</b>
+            {
+                <b>throw</b>; <span class="c">// set breakpoint here</span>
+            }
+ 
+            <b>return</b> <b>false</b>;
+        }
+ 
+        <b>public void</b> <a id="f58ae08d86b42fb4" href="R/f58ae08d86b42fb4.html" target="n" data-glyph="72,1" class="i method">Reset</a>()
+        {
+            <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <span id="r9 rd" class="r9 r">asyncTask</span> = <a href="#901f8d7a7a388454" class="i method">ResetAsync</a>();
+            <span class="r9 r">asyncTask</span>.<a href="UtilitiesInternal.cs.html#a326273479c6ea11" class="i method">WaitAndUnaggregateException</a>();
+        }
+ 
+        <b>public</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="901f8d7a7a388454" href="R/901f8d7a7a388454.html" target="n" data-glyph="72,1" class="i method">ResetAsync</a>(<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r10 rd" class="r10 r">cancellationToken</span> = <b>default</b>(<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>))
+        {
+            <a href="#94f6d07dc299c4d5" class="i field">_skipHandler</a> = <b>new</b> <a href="#efd92efadf468bda" class="t constructor">SkipTokenHandler</a>();
+            <a href="#977aa15fea10a706" class="i field">_currentIndex</a> = -1;
+            <a href="#257a88058063da2e" class="i field">_currentBatch</a> = <b>null</b>;
+            <b>return</b> <a href="Utils/Async.cs.html#1ae3735697e08874" class="t t">Async</a>.<a href="Utils/Async.cs.html#9dc6aca7985a9f72" class="i field">CompletedTask</a>;
+        }
+ 
+        <span class="c">// IDisposable</span>
+        <b>public void</b> <a id="50067c2ecca4b68d" href="R/50067c2ecca4b68d.html" target="n" data-glyph="72,1" class="i method">Dispose</a>()
+        {
+        }
+    }
+ 
+    <b>internal class</b> <a id="efd92efadf468bda" href="R/efd92efadf468bda.html" target="n" data-glyph="2,0" class="t t"><span id="ba6d416a5d5d1a55">SkipTokenHandler</span></a>
+    {
+        <b>private string</b> <a id="35b87dfbdcd1c02c" href="R/35b87dfbdcd1c02c.html" target="n" data-glyph="46,1" class="i field">_skipToken</a>;
+        <b>private bool</b> <a id="d545310ae8fca10b" href="R/d545310ae8fca10b.html" target="n" data-glyph="46,1" class="i field">_hasBeenCalled</a>;
+ 
+        <b>public bool</b> <a id="bc37f03bf7061053" href="R/bc37f03bf7061053.html" target="n" data-glyph="102,1" class="i property">AtLeastOneCallMade</a> { <b>get</b> { <b>return</b> <a href="#d545310ae8fca10b" class="i field">_hasBeenCalled</a>; } <b>set</b> { <a href="#d545310ae8fca10b" class="i field">_hasBeenCalled</a> = <b>value</b>; } }
+ 
+        <b>public string</b> <a id="b489f85d813a92c8" href="R/b489f85d813a92c8.html" target="n" data-glyph="102,1" class="i property">SkipToken</a>
+        {
+            <b>get</b>
+            {
+                <b>return</b> <a href="#35b87dfbdcd1c02c" class="i field">_skipToken</a>;
+            }
+ 
+            <b>set</b>
+            {
+                <a href="#35b87dfbdcd1c02c" class="i field">_skipToken</a> = <b>value</b>;
+                <a href="#d545310ae8fca10b" class="i field">_hasBeenCalled</a> = <b>true</b>;
+            }
+        }
+ 
+        <b>public bool</b> <a id="ba7f9d8279243a84" href="R/ba7f9d8279243a84.html" target="n" data-glyph="102,1" class="i property">ThereIsMoreData</a> { <b>get</b> { <b>return</b> !<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<a href="#35b87dfbdcd1c02c" class="i field">_skipToken</a>); } }
+    }
+}
+</pre></td></tr></table></div></body></html>

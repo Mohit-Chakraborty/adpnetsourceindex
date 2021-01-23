@@ -1,0 +1,203 @@
+﻿<!DOCTYPE html>
+<html><head><title>EncryptedMessageSerializerTests.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(194);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Storage.Queues.Tests/EncryptedMessageSerializerTests.cs" target="_top">EncryptedMessageSerializerTests.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Storage.Queues.Tests" target="_top">Azure.Storage.Queues\tests\Azure.Storage.Queues.Tests.csproj</a> (Azure.Storage.Queues.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Security</span>.<span class="i n">Cryptography</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Cryptography</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Cryptography</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Cryptography</span>.<span class="i n">Models</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Queues</span>.<span class="i n">Specialized</span>.<span class="i n">Models</span>;
+<b>using</b> <span class="i n">Moq</span>;
+<b>using</b> <span class="i n">NUnit</span>.<span class="i n">Framework</span>;
+<b>using static</b> <span class="i n">Moq</span>.<span class="t t">It</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Queues</span>.<span class="i n">Test</span>
+{
+    <b>public class</b> <a id="0726d4484a856327" href="R/../../0000000000.html" target="n" data-glyph="0,0" class="t t"><span id="b158a5537ddab351">EncryptedMessageSerializerTests</span></a> <span class="c">// doesn&#39;t inherit our test base because there are no network tests</span>
+    {
+        <b>private const string</b> <a id="8eff58059079a621" href="R/8eff58059079a621.html" target="n" data-glyph="10,1" class="i field">TestMessage</a> = <span class="s">&quot;This can technically be a valid encrypted message.&quot;</span>;
+        <b>private const string</b> <a id="fe46920a37c379a0" href="R/fe46920a37c379a0.html" target="n" data-glyph="10,1" class="i field">KeyWrapAlgorithm</a> = <span class="s">&quot;my_key_wrap_algorithm&quot;</span>;
+ 
+        <b>private</b> <span class="t t">Mock</span>&lt;<a href="/Azure.Core/A.html#5222d81440258fca" class="t t">IKeyEncryptionKey</a>&gt; <a id="9bd59776ab51d285" href="R/9bd59776ab51d285.html" target="n" data-glyph="76,1" class="i method">GetIKeyEncryptionKey</a>(<b>byte</b>[] <span id="r0 rd" class="r0 r">userKeyBytes</span> = <b>default</b>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r1 rd" class="r1 r">keyId</span> = <b>default</b>)
+        {
+            <b>if</b> (<span class="r0 r">userKeyBytes</span> == <b>default</b>)
+            {
+                <b>const int</b> <span id="r2 rd" class="r2 r">keySizeBits</span> = 256;
+                <b>var</b> <span id="r3 rd" class="r3 r">bytes</span> = <b>new</b> <b>byte</b>[<span class="r2 r">keySizeBits</span> &gt;&gt; 3];
+                <b>new</b> <a href="@0@mscorlib/A.html#8186166d61ad1fc0" class="t constructor">RNGCryptoServiceProvider</a>().<a href="@0@mscorlib/A.html#9ec39b46fdc081c7" class="i method">GetBytes</a>(<span class="r3 r">bytes</span>);
+                <span class="r0 r">userKeyBytes</span> = <span class="r3 r">bytes</span>;
+            }
+            <span class="r1 r">keyId</span> ??= <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#a6547a472def7796" class="i method">ToString</a>();
+ 
+            <b>var</b> <span id="r4 rd" class="r4 r">keyMock</span> = <b>new</b> <span class="t constructor">Mock</span>&lt;<a href="/Azure.Core/A.html#5222d81440258fca" class="t t">IKeyEncryptionKey</a>&gt;(<span class="t t">MockBehavior</span>.<span class="i field">Strict</span>);
+            <span class="r4 r">keyMock</span>.<span class="i method">SetupGet</span>(<span id="r5 rd" class="r5 r">k</span> =&gt; <span class="r5 r">k</span>.<a href="/Azure.Core/A.html#c5fb23d1bd9fb749" class="i property">KeyId</a>).<span class="i method">Returns</span>(<span class="r1 r">keyId</span>);
+            <span class="r4 r">keyMock</span>.<span class="i method">Setup</span>(<span id="r6 rd" class="r6 r">k</span> =&gt; <span class="r6 r">k</span>.<a href="/Azure.Core/A.html#c496925a9dca8d85" class="i method">WrapKey</a>(<a href="#fe46920a37c379a0" class="i field">KeyWrapAlgorithm</a>, <span class="i method">IsNotNull</span>&lt;<span class="t t">ReadOnlyMemory</span>&lt;<b>byte</b>&gt;&gt;(), <span class="i method">IsAny</span>&lt;<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>&gt;()))
+                .<span class="i method">Returns</span>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <span class="t t">ReadOnlyMemory</span>&lt;<b>byte</b>&gt;, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>&gt;((<span id="r7 rd" class="r7 r">algorithm</span>, <span id="r8 rd" class="r8 r">key</span>, <span id="r9 rd" class="r9 r">cancellationToken</span>) =&gt; <a href="#1e0d15d94ad45f29" class="i method">Xor</a>(<span class="r0 r">userKeyBytes</span>, <span class="r8 r">key</span>.<span class="i method">ToArray</span>()));
+            <span class="r4 r">keyMock</span>.<span class="i method">Setup</span>(<span id="r10 rd" class="r10 r">k</span> =&gt; <span class="r10 r">k</span>.<a href="/Azure.Core/A.html#3c3e0aedcbc6cf4e" class="i method">UnwrapKey</a>(<a href="#fe46920a37c379a0" class="i field">KeyWrapAlgorithm</a>, <span class="i method">IsNotNull</span>&lt;<span class="t t">ReadOnlyMemory</span>&lt;<b>byte</b>&gt;&gt;(), <span class="i method">IsAny</span>&lt;<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>&gt;()))
+                .<span class="i method">Returns</span>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <span class="t t">ReadOnlyMemory</span>&lt;<b>byte</b>&gt;, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>&gt;((<span id="r11 rd" class="r11 r">algorithm</span>, <span id="r12 rd" class="r12 r">wrappedKey</span>, <span id="r13 rd" class="r13 r">cancellationToken</span>) =&gt; <a href="#1e0d15d94ad45f29" class="i method">Xor</a>(<span class="r0 r">userKeyBytes</span>, <span class="r0 r">userKeyBytes</span>.<a href="@0@System.Core/A.html#783a052330e7d48d" class="i method">ToArray</a>()));
+ 
+            <b>return</b> <span class="r4 r">keyMock</span>;
+        }
+        <b>private static byte</b>[] <a id="1e0d15d94ad45f29" href="R/1e0d15d94ad45f29.html" target="n" data-glyph="76,1" class="i method">Xor</a>(<b>byte</b>[] <span id="r14 rd" class="r14 r">a</span>, <b>byte</b>[] <span id="r15 rd" class="r15 r">b</span>)
+        {
+            <b>if</b> (<span class="r14 r">a</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a> != <span class="r15 r">b</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">&quot;Keys must be the same length for this mock implementation.&quot;</span>);
+            }
+ 
+            <a href="@0@mscorlib/A.html#19ad3f494f0dc7f6" class="k">var</a> <span id="r16 rd" class="r16 r">aBits</span> = <b>new</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<a href="@0@mscorlib/A.html#25926fd1fb434385" class="t constructor">BitArray</a>(<span class="r14 r">a</span>);
+            <a href="@0@mscorlib/A.html#19ad3f494f0dc7f6" class="k">var</a> <span id="r17 rd" class="r17 r">bBits</span> = <b>new</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<a href="@0@mscorlib/A.html#25926fd1fb434385" class="t constructor">BitArray</a>(<span class="r15 r">b</span>);
+ 
+            <b>var</b> <span id="r18 rd" class="r18 r">result</span> = <b>new</b> <b>byte</b>[<span class="r14 r">a</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>];
+            <span class="r16 r">aBits</span>.<a href="@0@mscorlib/A.html#8f90ef1b4d628432" class="i method">Xor</a>(<span class="r17 r">bBits</span>).<a href="@0@mscorlib/A.html#722d832f620f9a3e" class="i method">CopyTo</a>(<span class="r18 r">result</span>, 0);
+ 
+            <b>return</b> <span class="r18 r">result</span>;
+        }
+ 
+        [<span class="t constructor">Test</span>]
+        <b>public void</b> <a id="d06489b8cb50bcd0" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">SerializeEncryptedMessage</a>()
+        {
+            <a href="/System.ValueTuple/A.html#0d3bf0818d69cf43" class="k">var</a> <span id="r19 rd" class="r19 r">result</span> = <b>new</b> <a href="/Azure.Storage.Queues/A.html#f340beaf8393f75e" class="t constructor">ClientSideEncryptor</a>(<b>new</b> <a href="/Azure.Storage.Common/A.html#1c6ce9ac8f3c3876" class="t constructor">ClientSideEncryptionOptions</a>(<a href="/Azure.Storage.Common/A.html#0d1c57da6ccbaadf" class="t t">ClientSideEncryptionVersion</a>.<a href="/Azure.Storage.Common/A.html#a8cbfad136df5289" class="i field">V1_0</a>)
+            {
+                <a href="/Azure.Storage.Common/A.html#8ba8aaf8d55a5ebd" class="i property">KeyEncryptionKey</a> = <a href="#9bd59776ab51d285" class="i method">GetIKeyEncryptionKey</a>().<span class="i property">Object</span>,
+                <a href="/Azure.Storage.Common/A.html#ad8d1f45516009f5" class="i property">KeyWrapAlgorithm</a> = <a href="#fe46920a37c379a0" class="i field">KeyWrapAlgorithm</a>
+            }).<a href="/Azure.Storage.Queues/A.html#55baa6839191b9b3" class="i method">BufferedEncryptInternal</a>(
+                <b>new</b> <a href="@0@mscorlib/A.html#f92fa270fda9a82b" class="t constructor">MemoryStream</a>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<a href="#8eff58059079a621" class="i field">TestMessage</a>)),
+                <span class="r20 r">async</span>: <b>false</b>,
+                <b>default</b>).<a href="/Azure.Storage.Queues/A.html#c5b047e3cbfab399" class="i method">EnsureCompleted</a>();
+            <a href="/Azure.Storage.Queues/A.html#c3d39529580a2b31" class="k">var</a> <span id="r21 rd" class="r21 r">encryptedMessage</span> = <b>new</b> <a href="/Azure.Storage.Queues/A.html#c3d39529580a2b31" class="t constructor">EncryptedMessage</a>()
+            {
+                <a href="/Azure.Storage.Queues/A.html#83ee7361f288101e" class="i property">EncryptedMessageText</a> = <a href="@0@mscorlib/A.html#fc990bd1275d43d6" class="t t">Convert</a>.<a href="@0@mscorlib/A.html#f9e5bd7b69c5f334" class="i method">ToBase64String</a>(<span class="r19 r">result</span>.<a href="/System.ValueTuple/A.html#6927d74a7d5f9b2d" class="i field">ciphertext</a>),
+                <a href="/Azure.Storage.Queues/A.html#052d75b6da9788d7" class="i property">EncryptionData</a> = <span class="r19 r">result</span>.<a href="/System.ValueTuple/A.html#1a73cf1f75a72a2c" class="i field">encryptionData</a>
+            };
+ 
+            <b>var</b> <span id="r22 rd" class="r22 r">serializedMessage</span> = <a href="/Azure.Storage.Queues/A.html#623258d5c91c3dc6" class="t t">EncryptedMessageSerializer</a>.<a href="/Azure.Storage.Queues/A.html#14ccb6b3a9a4fef5" class="i method">Serialize</a>(<span class="r21 r">encryptedMessage</span>);
+ 
+            <span class="c">// success = don&#39;t throw. test values in another test with deserialization (can&#39;t control serialization order)</span>
+        }
+ 
+        [<span class="t constructor">Test</span>]
+        <b>public void</b> <a id="62e339ad34a82b29" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">DeserializeEncryptedMessage</a>()
+        {
+            <a href="/System.ValueTuple/A.html#0d3bf0818d69cf43" class="k">var</a> <span id="r23 rd" class="r23 r">result</span> = <b>new</b> <a href="/Azure.Storage.Queues/A.html#f340beaf8393f75e" class="t constructor">ClientSideEncryptor</a>(<b>new</b> <a href="/Azure.Storage.Common/A.html#1c6ce9ac8f3c3876" class="t constructor">ClientSideEncryptionOptions</a>(<a href="/Azure.Storage.Common/A.html#0d1c57da6ccbaadf" class="t t">ClientSideEncryptionVersion</a>.<a href="/Azure.Storage.Common/A.html#a8cbfad136df5289" class="i field">V1_0</a>)
+            {
+                <a href="/Azure.Storage.Common/A.html#8ba8aaf8d55a5ebd" class="i property">KeyEncryptionKey</a> = <a href="#9bd59776ab51d285" class="i method">GetIKeyEncryptionKey</a>().<span class="i property">Object</span>,
+                <a href="/Azure.Storage.Common/A.html#ad8d1f45516009f5" class="i property">KeyWrapAlgorithm</a> = <a href="#fe46920a37c379a0" class="i field">KeyWrapAlgorithm</a>
+            }).<a href="/Azure.Storage.Queues/A.html#55baa6839191b9b3" class="i method">BufferedEncryptInternal</a>(
+                <b>new</b> <a href="@0@mscorlib/A.html#f92fa270fda9a82b" class="t constructor">MemoryStream</a>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<a href="#8eff58059079a621" class="i field">TestMessage</a>)),
+                <span class="r20 r">async</span>: <b>false</b>,
+                <b>default</b>).<a href="/Azure.Storage.Queues/A.html#c5b047e3cbfab399" class="i method">EnsureCompleted</a>();
+            <a href="/Azure.Storage.Queues/A.html#c3d39529580a2b31" class="k">var</a> <span id="r24 rd" class="r24 r">encryptedMessage</span> = <b>new</b> <a href="/Azure.Storage.Queues/A.html#c3d39529580a2b31" class="t constructor">EncryptedMessage</a>()
+            {
+                <a href="/Azure.Storage.Queues/A.html#83ee7361f288101e" class="i property">EncryptedMessageText</a> = <a href="@0@mscorlib/A.html#fc990bd1275d43d6" class="t t">Convert</a>.<a href="@0@mscorlib/A.html#f9e5bd7b69c5f334" class="i method">ToBase64String</a>(<span class="r23 r">result</span>.<a href="/System.ValueTuple/A.html#6927d74a7d5f9b2d" class="i field">ciphertext</a>),
+                <a href="/Azure.Storage.Queues/A.html#052d75b6da9788d7" class="i property">EncryptionData</a> = <span class="r23 r">result</span>.<a href="/System.ValueTuple/A.html#1a73cf1f75a72a2c" class="i field">encryptionData</a>
+            };
+            <b>var</b> <span id="r25 rd" class="r25 r">serializedMessage</span> = <a href="/Azure.Storage.Queues/A.html#623258d5c91c3dc6" class="t t">EncryptedMessageSerializer</a>.<a href="/Azure.Storage.Queues/A.html#14ccb6b3a9a4fef5" class="i method">Serialize</a>(<span class="r24 r">encryptedMessage</span>);
+ 
+            <a href="/Azure.Storage.Queues/A.html#c3d39529580a2b31" class="k">var</a> <span id="r26 rd" class="r26 r">parsedEncryptedMessage</span> = <a href="/Azure.Storage.Queues/A.html#623258d5c91c3dc6" class="t t">EncryptedMessageSerializer</a>.<a href="/Azure.Storage.Queues/A.html#cf8ab151dd874426" class="i method">Deserialize</a>(<span class="r25 r">serializedMessage</span>);
+ 
+            <span class="t t">Assert</span>.<span class="i method">IsTrue</span>(<a href="#df9204612c5b77f2" class="i method">AreEqual</a>(<span class="r24 r">encryptedMessage</span>, <span class="r26 r">parsedEncryptedMessage</span>));
+        }
+ 
+        [<span class="t constructor">Test</span>]
+        <b>public void</b> <a id="28ff1ffb18a91068" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">TryDeserializeEncryptedMessage</a>()
+        {
+            <a href="/System.ValueTuple/A.html#0d3bf0818d69cf43" class="k">var</a> <span id="r27 rd" class="r27 r">result</span> = <b>new</b> <a href="/Azure.Storage.Queues/A.html#f340beaf8393f75e" class="t constructor">ClientSideEncryptor</a>(<b>new</b> <a href="/Azure.Storage.Common/A.html#1c6ce9ac8f3c3876" class="t constructor">ClientSideEncryptionOptions</a>(<a href="/Azure.Storage.Common/A.html#0d1c57da6ccbaadf" class="t t">ClientSideEncryptionVersion</a>.<a href="/Azure.Storage.Common/A.html#a8cbfad136df5289" class="i field">V1_0</a>)
+            {
+                <a href="/Azure.Storage.Common/A.html#8ba8aaf8d55a5ebd" class="i property">KeyEncryptionKey</a> = <a href="#9bd59776ab51d285" class="i method">GetIKeyEncryptionKey</a>().<span class="i property">Object</span>,
+                <a href="/Azure.Storage.Common/A.html#ad8d1f45516009f5" class="i property">KeyWrapAlgorithm</a> = <a href="#fe46920a37c379a0" class="i field">KeyWrapAlgorithm</a>
+            }).<a href="/Azure.Storage.Queues/A.html#55baa6839191b9b3" class="i method">BufferedEncryptInternal</a>(
+                <b>new</b> <a href="@0@mscorlib/A.html#f92fa270fda9a82b" class="t constructor">MemoryStream</a>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<a href="#8eff58059079a621" class="i field">TestMessage</a>)),
+                <span class="r20 r">async</span>: <b>false</b>,
+                <b>default</b>).<a href="/Azure.Storage.Queues/A.html#c5b047e3cbfab399" class="i method">EnsureCompleted</a>();
+            <a href="/Azure.Storage.Queues/A.html#c3d39529580a2b31" class="k">var</a> <span id="r28 rd" class="r28 r">encryptedMessage</span> = <b>new</b> <a href="/Azure.Storage.Queues/A.html#c3d39529580a2b31" class="t constructor">EncryptedMessage</a>()
+            {
+                <a href="/Azure.Storage.Queues/A.html#83ee7361f288101e" class="i property">EncryptedMessageText</a> = <a href="@0@mscorlib/A.html#fc990bd1275d43d6" class="t t">Convert</a>.<a href="@0@mscorlib/A.html#f9e5bd7b69c5f334" class="i method">ToBase64String</a>(<span class="r27 r">result</span>.<a href="/System.ValueTuple/A.html#6927d74a7d5f9b2d" class="i field">ciphertext</a>),
+                <a href="/Azure.Storage.Queues/A.html#052d75b6da9788d7" class="i property">EncryptionData</a> = <span class="r27 r">result</span>.<a href="/System.ValueTuple/A.html#1a73cf1f75a72a2c" class="i field">encryptionData</a>
+            };
+            <b>var</b> <span id="r29 rd" class="r29 r">serializedMessage</span> = <a href="/Azure.Storage.Queues/A.html#623258d5c91c3dc6" class="t t">EncryptedMessageSerializer</a>.<a href="/Azure.Storage.Queues/A.html#14ccb6b3a9a4fef5" class="i method">Serialize</a>(<span class="r28 r">encryptedMessage</span>);
+ 
+            <b>bool</b> <span id="r30 rd" class="r30 r">tryResult</span> = <a href="/Azure.Storage.Queues/A.html#623258d5c91c3dc6" class="t t">EncryptedMessageSerializer</a>.<a href="/Azure.Storage.Queues/A.html#b5b16fac6cced032" class="i method">TryDeserialize</a>(<span class="r29 r">serializedMessage</span>, <b>out</b> <a href="/Azure.Storage.Queues/A.html#c3d39529580a2b31" class="k">var</a> <span id="r31 rd" class="r31 r">parsedEncryptedMessage</span>);
+ 
+            <span class="t t">Assert</span>.<span class="i method">AreEqual</span>(<b>true</b>, <span class="r30 r">tryResult</span>);
+            <span class="t t">Assert</span>.<span class="i method">IsTrue</span>(<a href="#df9204612c5b77f2" class="i method">AreEqual</a>(<span class="r28 r">encryptedMessage</span>, <span class="r31 r">parsedEncryptedMessage</span>));
+        }
+ 
+        [<span class="t constructor">TestCase</span>(<span class="s">&quot;&quot;</span>)]
+        [<span class="t constructor">TestCase</span>(<span class="s">&quot;\&quot;aa\&quot;&quot;</span>)] <span class="c">// real world example</span>
+        [<span class="t constructor">TestCase</span>(<span class="s">&quot;{\&quot;key1\&quot;:\&quot;value1\&quot;,\&quot;key2\&quot;:\&quot;value2\&quot;}&quot;</span>)] <span class="c">// more typical json object, but not the actual schema we&#39;re looking for</span>
+        [<span class="t constructor">TestCase</span>(<span class="s">&quot;{\&quot;EncryptedMessageContents\&quot;:\&quot;value1\&quot;,\&quot;key2\&quot;:\&quot;value2\&quot;}&quot;</span>)] <span class="c">// one required piece but not the other</span>
+        [<span class="t constructor">TestCase</span>(<span class="s">&quot;{\&quot;EncryptionData\&quot;:{},\&quot;key2\&quot;:\&quot;value2\&quot;}&quot;</span>)] <span class="c">// one required piece but not the other</span>
+        [<span class="t constructor">TestCase</span>(<span class="s">&quot;this is not even valid json&quot;</span>)]
+        [<span class="t constructor">TestCase</span>(<span class="s">&quot;ᛁᚳ᛫ᛗᚨᚷ᛫ᚷᛚᚨᛋ᛫ᛖᚩᛏᚪᚾ᛫ᚩᚾᛞ᛫ᚻᛁᛏ᛫ᚾᛖ᛫ᚻᛖᚪᚱᛗᛁᚪᚧ᛫ᛗᛖ&quot;</span>)]
+        <b>public void</b> <a id="77587da36385472f" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">TryDeserializeGracefulOnBadInput</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r32 rd" class="r32 r">input</span>)
+        {
+            <b>bool</b> <span id="r33 rd" class="r33 r">tryResult</span> = <a href="/Azure.Storage.Queues/A.html#623258d5c91c3dc6" class="t t">EncryptedMessageSerializer</a>.<a href="/Azure.Storage.Queues/A.html#b5b16fac6cced032" class="i method">TryDeserialize</a>(<b>new</b> <span class="t constructor">BinaryData</span>(<span class="r32 r">input</span>), <b>out</b> <a href="/Azure.Storage.Queues/A.html#c3d39529580a2b31" class="k">var</a> <span id="r34 rd" class="r34 r">parsedEncryptedMessage</span>);
+ 
+            <span class="t t">Assert</span>.<span class="i method">AreEqual</span>(<b>false</b>, <span class="r33 r">tryResult</span>);
+            <span class="t t">Assert</span>.<span class="i method">IsNull</span>(<span class="r34 r">parsedEncryptedMessage</span>?.<a href="/Azure.Storage.Queues/A.html#83ee7361f288101e" class="i property">EncryptedMessageText</a>);
+            <span class="t t">Assert</span>.<span class="i method">IsNull</span>(<span class="r34 r">parsedEncryptedMessage</span>?.<a href="/Azure.Storage.Queues/A.html#052d75b6da9788d7" class="i property">EncryptionData</a>);
+            <span class="t t">Assert</span>.<span class="i method">IsNull</span>(<span class="r34 r">parsedEncryptedMessage</span>);
+        }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> ModelComparison
+        <b>private static bool</b> <a id="df9204612c5b77f2" href="R/df9204612c5b77f2.html" target="n" data-glyph="76,1" class="i method">AreEqual</a>(<a href="/Azure.Storage.Queues/A.html#c3d39529580a2b31" class="t t">EncryptedMessage</a> <span id="r35 rd" class="r35 r">left</span>, <a href="/Azure.Storage.Queues/A.html#c3d39529580a2b31" class="t t">EncryptedMessage</a> <span id="r36 rd" class="r36 r">right</span>)
+            =&gt; <span class="r35 r">left</span>.<a href="/Azure.Storage.Queues/A.html#83ee7361f288101e" class="i property">EncryptedMessageText</a>.<a href="@0@mscorlib/A.html#b98069ccbe2d3960" class="i method">Equals</a>(<span class="r36 r">right</span>.<a href="/Azure.Storage.Queues/A.html#83ee7361f288101e" class="i property">EncryptedMessageText</a>, <a href="@0@mscorlib/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@0@mscorlib/A.html#eb6ce9ac0dbf4269" class="i field">InvariantCulture</a>)
+            &amp;&amp; <a href="#1bfa5b7bebf9084c" class="i method">AreEqual</a>(<span class="r35 r">left</span>.<a href="/Azure.Storage.Queues/A.html#052d75b6da9788d7" class="i property">EncryptionData</a>, <span class="r36 r">right</span>.<a href="/Azure.Storage.Queues/A.html#052d75b6da9788d7" class="i property">EncryptionData</a>);
+ 
+        <b>private static bool</b> <a id="1bfa5b7bebf9084c" href="R/1bfa5b7bebf9084c.html" target="n" data-glyph="76,1" class="i method">AreEqual</a>(<a href="/Azure.Storage.Queues/A.html#108eb54fb53af893" class="t t">EncryptionData</a> <span id="r37 rd" class="r37 r">left</span>, <a href="/Azure.Storage.Queues/A.html#108eb54fb53af893" class="t t">EncryptionData</a> <span id="r38 rd" class="r38 r">right</span>)
+            =&gt; <span class="r37 r">left</span>.<a href="/Azure.Storage.Queues/A.html#f705a78ee5694de2" class="i property">EncryptionMode</a>.<a href="@0@mscorlib/A.html#b98069ccbe2d3960" class="i method">Equals</a>(<span class="r38 r">right</span>.<a href="/Azure.Storage.Queues/A.html#f705a78ee5694de2" class="i property">EncryptionMode</a>, <a href="@0@mscorlib/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@0@mscorlib/A.html#eb6ce9ac0dbf4269" class="i field">InvariantCulture</a>)
+            &amp;&amp; <a href="#40f1a636df89e542" class="i method">AreEqual</a>(<span class="r37 r">left</span>.<a href="/Azure.Storage.Queues/A.html#1a7f17dea3a2bdd4" class="i property">WrappedContentKey</a>, <span class="r38 r">right</span>.<a href="/Azure.Storage.Queues/A.html#1a7f17dea3a2bdd4" class="i property">WrappedContentKey</a>)
+            &amp;&amp; <a href="#875f7e388ba8b8fa" class="i method">AreEqual</a>(<span class="r37 r">left</span>.<a href="/Azure.Storage.Queues/A.html#a25f7e0a2245267c" class="i property">EncryptionAgent</a>, <span class="r38 r">right</span>.<a href="/Azure.Storage.Queues/A.html#a25f7e0a2245267c" class="i property">EncryptionAgent</a>)
+            &amp;&amp; <span class="r37 r">left</span>.<a href="/Azure.Storage.Queues/A.html#33bcef258a5e7065" class="i property">ContentEncryptionIV</a>.<a href="@0@System.Core/A.html#9bdd6ef7ba6a5615" class="i method">SequenceEqual</a>(<span class="r38 r">right</span>.<a href="/Azure.Storage.Queues/A.html#33bcef258a5e7065" class="i property">ContentEncryptionIV</a>)
+            &amp;&amp; <a href="#a73793d1e25bc989" class="i method">AreEqual</a>(<span class="r37 r">left</span>.<a href="/Azure.Storage.Queues/A.html#8205f3de42e6f13e" class="i property">KeyWrappingMetadata</a>, <span class="r38 r">right</span>.<a href="/Azure.Storage.Queues/A.html#8205f3de42e6f13e" class="i property">KeyWrappingMetadata</a>);
+ 
+        <b>private static bool</b> <a id="40f1a636df89e542" href="R/40f1a636df89e542.html" target="n" data-glyph="76,1" class="i method">AreEqual</a>(<a href="/Azure.Storage.Queues/A.html#c87d4d0d11422714" class="t t">KeyEnvelope</a> <span id="r39 rd" class="r39 r">left</span>, <a href="/Azure.Storage.Queues/A.html#c87d4d0d11422714" class="t t">KeyEnvelope</a> <span id="r40 rd" class="r40 r">right</span>)
+            =&gt; <span class="r39 r">left</span>.<a href="/Azure.Storage.Queues/A.html#debda462f934ec06" class="i property">KeyId</a>.<a href="@0@mscorlib/A.html#b98069ccbe2d3960" class="i method">Equals</a>(<span class="r40 r">right</span>.<a href="/Azure.Storage.Queues/A.html#debda462f934ec06" class="i property">KeyId</a>, <a href="@0@mscorlib/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@0@mscorlib/A.html#eb6ce9ac0dbf4269" class="i field">InvariantCulture</a>)
+            &amp;&amp; <span class="r39 r">left</span>.<a href="/Azure.Storage.Queues/A.html#2b74194f75c15f9d" class="i property">EncryptedKey</a>.<a href="@0@System.Core/A.html#9bdd6ef7ba6a5615" class="i method">SequenceEqual</a>(<span class="r40 r">right</span>.<a href="/Azure.Storage.Queues/A.html#2b74194f75c15f9d" class="i property">EncryptedKey</a>)
+            &amp;&amp; <span class="r39 r">left</span>.<a href="/Azure.Storage.Queues/A.html#c5045f355d9477ae" class="i property">Algorithm</a>.<a href="@0@mscorlib/A.html#b98069ccbe2d3960" class="i method">Equals</a>(<span class="r40 r">right</span>.<a href="/Azure.Storage.Queues/A.html#c5045f355d9477ae" class="i property">Algorithm</a>, <a href="@0@mscorlib/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@0@mscorlib/A.html#eb6ce9ac0dbf4269" class="i field">InvariantCulture</a>);
+ 
+        <b>private static bool</b> <a id="875f7e388ba8b8fa" href="R/875f7e388ba8b8fa.html" target="n" data-glyph="76,1" class="i method">AreEqual</a>(<a href="/Azure.Storage.Queues/A.html#f8d4ee021dab8c83" class="t t">EncryptionAgent</a> <span id="r41 rd" class="r41 r">left</span>, <a href="/Azure.Storage.Queues/A.html#f8d4ee021dab8c83" class="t t">EncryptionAgent</a> <span id="r42 rd" class="r42 r">right</span>)
+            =&gt; <span class="r41 r">left</span>.<a href="/Azure.Storage.Queues/A.html#991ea664ccb458a4" class="i property">EncryptionAlgorithm</a>.<a href="/Azure.Storage.Queues/A.html#69c43da06a9c1dce" class="i method">Equals</a>(<span class="r42 r">right</span>.<a href="/Azure.Storage.Queues/A.html#991ea664ccb458a4" class="i property">EncryptionAlgorithm</a>)
+            &amp;&amp; <span class="r41 r">left</span>.<a href="/Azure.Storage.Queues/A.html#617a47550e979446" class="i property">EncryptionVersion</a>.<a href="@0@mscorlib/A.html#e601813436d91afd" class="i method">Equals</a>(<span class="r42 r">right</span>.<a href="/Azure.Storage.Queues/A.html#617a47550e979446" class="i property">EncryptionVersion</a>);
+ 
+        <b>private static bool</b> <a id="a73793d1e25bc989" href="R/a73793d1e25bc989.html" target="n" data-glyph="76,1" class="i method">AreEqual</a>(<a href="@0@mscorlib/A.html#20343df0c96b629b" class="t t">IDictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <span id="r43 rd" class="r43 r">left</span>, <a href="@0@mscorlib/A.html#20343df0c96b629b" class="t t">IDictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <span id="r44 rd" class="r44 r">right</span>)
+        {
+            <b>if</b> (<span class="r43 r">left</span>.<a href="@0@mscorlib/A.html#3d6c21c4e9bd5f63" class="i property">Count</a> != <span class="r44 r">right</span>.<a href="@0@mscorlib/A.html#3d6c21c4e9bd5f63" class="i property">Count</a>)
+            {
+                <b>return</b> <b>false</b>;
+            }
+            <b>foreach</b> (<a href="@0@mscorlib/A.html#8585965bb176a426" class="t t">KeyValuePair</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <span id="r45 rd" class="r45 r">leftPair</span> <b>in</b> <span class="r43 r">left</span>)
+            {
+                <b>if</b> (!<span class="r44 r">right</span>.<a href="@0@mscorlib/A.html#6b9f9049901aacea" class="i method">TryGetValue</a>(<span class="r45 r">leftPair</span>.<a href="@0@mscorlib/A.html#f9d1c04feb1af032" class="i property">Key</a>, <b>out string</b> <span id="r46 rd" class="r46 r">rightValue</span>))
+                {
+                    <b>return</b> <b>false</b>;
+                }
+                <b>if</b> (!<span class="r45 r">leftPair</span>.<a href="@0@mscorlib/A.html#38c0e86cc4b30170" class="i property">Value</a>.<a href="@0@mscorlib/A.html#b98069ccbe2d3960" class="i method">Equals</a>(<span class="r46 r">rightValue</span>, <a href="@0@mscorlib/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@0@mscorlib/A.html#eb6ce9ac0dbf4269" class="i field">InvariantCulture</a>))
+                {
+                    <b>return</b> <b>false</b>;
+                }
+            }
+ 
+            <b>return</b> <b>true</b>;
+        }
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span>
+    }
+}
+</pre></td></tr></table></div></body></html>

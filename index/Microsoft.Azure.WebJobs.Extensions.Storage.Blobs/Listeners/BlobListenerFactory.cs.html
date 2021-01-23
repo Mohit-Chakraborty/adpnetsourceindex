@@ -1,0 +1,187 @@
+﻿<!DOCTYPE html>
+<html><head><title>BlobListenerFactory.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(178);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs/Listeners/BlobListenerFactory.cs" target="_top">Listeners\BlobListenerFactory.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs" target="_top">Microsoft.Azure.WebJobs.Extensions.Storage.Blobs\src\Microsoft.Azure.WebJobs.Extensions.Storage.Blobs.csproj</a> (Microsoft.Azure.WebJobs.Extensions.Storage.Blobs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Queues</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Common</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Common</span>.<span class="i n">Listeners</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Executors</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Listeners</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Protocols</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i">Timers</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Logging</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>.<span class="i n">Listeners</span>
+{
+    <b>internal class</b> <a id="f9bca7d77aa10371" href="../R/f9bca7d77aa10371.html" target="n" data-glyph="2,0" class="t t">BlobListenerFactory</a> : <span class="i">IListenerFactory</span>
+    {
+        <b>private const string</b> <a id="1b8c659b15275531" href="../R/1b8c659b15275531.html" target="n" data-glyph="10,1" class="i field">SingletonBlobListenerScopeId</a> = <span class="s">&quot;WebJobs.Internal.Blobs&quot;</span>;
+        <b>private readonly</b> <span class="i">IHostIdProvider</span> <a id="05e91bbe97894f72" href="../R/05e91bbe97894f72.html" target="n" data-glyph="46,1" class="i field">_hostIdProvider</a>;
+        <b>private readonly</b> <a href="../Config/BlobsOptions.cs.html#b67bb939c196dcb2" class="t t">BlobsOptions</a> <a id="dbd12a79bf7a698d" href="../R/dbd12a79bf7a698d.html" target="n" data-glyph="46,1" class="i field">_blobsOptions</a>;
+        <b>private readonly</b> <span class="i">IWebJobsExceptionHandler</span> <a id="29abffda2cb361e7" href="../R/29abffda2cb361e7.html" target="n" data-glyph="46,1" class="i field">_exceptionHandler</a>;
+        <b>private readonly</b> <a href="../Shared/IContextSetter.cs.html#4cf2b06a61e7e749" class="t t">IContextSetter</a>&lt;<a href="../IBlobWrittenWatcher.cs.html#79f2f00bd03cfb0b" class="t t">IBlobWrittenWatcher</a>&gt; <a id="d242b3473820fe82" href="../R/d242b3473820fe82.html" target="n" data-glyph="46,1" class="i field">_blobWrittenWatcherSetter</a>;
+        <b>private readonly</b> <a href="BlobTriggerQueueWriterFactory.cs.html#10fda42b58e20a4d" class="t t">BlobTriggerQueueWriterFactory</a> <a id="bfd323dca383f34e" href="../R/bfd323dca383f34e.html" target="n" data-glyph="46,1" class="i field">_blobTriggerQueueWriterFactory</a>;
+        <b>private readonly</b> <a href="../Shared/Listeners/ISharedContextProvider.cs.html#5bba651de68ad913" class="t t">ISharedContextProvider</a> <a id="97bd21ba672c072c" href="../R/97bd21ba672c072c.html" target="n" data-glyph="46,1" class="i field">_sharedContextProvider</a>;
+        <b>private readonly</b> <span class="i">FunctionDescriptor</span> <a id="57dbc55ee9fd47c0" href="../R/57dbc55ee9fd47c0.html" target="n" data-glyph="46,1" class="i field">_functionDescriptor</a>;
+        <b>private readonly</b> <span class="i">ILoggerFactory</span> <a id="dd4aeffc85516f19" href="../R/dd4aeffc85516f19.html" target="n" data-glyph="46,1" class="i field">_loggerFactory</a>;
+        <b>private readonly</b> <a href="/Azure.Storage.Blobs/A.html#5c3c4fe54cdb5868" class="t t">BlobServiceClient</a> <a id="53d41a64d100f14f" href="../R/53d41a64d100f14f.html" target="n" data-glyph="46,1" class="i field">_hostBlobServiceClient</a>;
+        <b>private readonly</b> <a href="/Azure.Storage.Queues/A.html#ef0f353b721b0444" class="t t">QueueServiceClient</a> <a id="73a21b3d824fda77" href="../R/73a21b3d824fda77.html" target="n" data-glyph="46,1" class="i field">_hostQueueServiceClient</a>;
+        <b>private readonly</b> <a href="/Azure.Storage.Blobs/A.html#5c3c4fe54cdb5868" class="t t">BlobServiceClient</a> <a id="eeea61fc72f8f2d0" href="../R/eeea61fc72f8f2d0.html" target="n" data-glyph="46,1" class="i field">_dataBlobServiceClient</a>;
+        <b>private readonly</b> <a href="/Azure.Storage.Queues/A.html#ef0f353b721b0444" class="t t">QueueServiceClient</a> <a id="34cba96f7025614d" href="../R/34cba96f7025614d.html" target="n" data-glyph="46,1" class="i field">_dataQueueServiceClient</a>;
+        <b>private readonly</b> <a href="/Azure.Storage.Blobs/A.html#6bb2c165ee95c7d4" class="t t">BlobContainerClient</a> <a id="83bbbd7a2f5d4f7c" href="../R/83bbbd7a2f5d4f7c.html" target="n" data-glyph="46,1" class="i field">_container</a>;
+        <b>private readonly</b> <a href="../IBlobPathSource.cs.html#fb74667cb17e1efd" class="t t">IBlobPathSource</a> <a id="abf2e8ed63a2ee9e" href="../R/abf2e8ed63a2ee9e.html" target="n" data-glyph="46,1" class="i field">_input</a>;
+        <b>private readonly</b> <a href="../BlobTriggerSource.cs.html#f5021f2685114f63" class="t t">BlobTriggerSource</a> <a id="af66c1ccb163ad05" href="../R/af66c1ccb163ad05.html" target="n" data-glyph="46,1" class="i field">_blobTriggerSource</a>;
+        <b>private readonly</b> <span class="i">ITriggeredFunctionExecutor</span> <a id="aac43217e4282b56" href="../R/aac43217e4282b56.html" target="n" data-glyph="46,1" class="i field">_executor</a>;
+        <b>private readonly</b> <span class="i">IHostSingletonManager</span> <a id="1e8830cfec9d16c7" href="../R/1e8830cfec9d16c7.html" target="n" data-glyph="46,1" class="i field">_singletonManager</a>;
+ 
+        <b>public</b> <a id="c65d703871708a37" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">BlobListenerFactory</a>(<span class="i">IHostIdProvider</span> <span id="r0 rd" class="r0 r">hostIdProvider</span>,
+            <a href="../Config/BlobsOptions.cs.html#b67bb939c196dcb2" class="t t">BlobsOptions</a> <span id="r1 rd" class="r1 r">blobsOptions</span>,
+            <span class="i">IWebJobsExceptionHandler</span> <span id="r2 rd" class="r2 r">exceptionHandler</span>,
+            <a href="../Shared/IContextSetter.cs.html#4cf2b06a61e7e749" class="t t">IContextSetter</a>&lt;<a href="../IBlobWrittenWatcher.cs.html#79f2f00bd03cfb0b" class="t t">IBlobWrittenWatcher</a>&gt; <span id="r3 rd" class="r3 r">blobWrittenWatcherSetter</span>,
+            <a href="BlobTriggerQueueWriterFactory.cs.html#10fda42b58e20a4d" class="t t">BlobTriggerQueueWriterFactory</a> <span id="r4 rd" class="r4 r">blobTriggerQueueWriterFactory</span>,
+            <a href="../Shared/Listeners/ISharedContextProvider.cs.html#5bba651de68ad913" class="t t">ISharedContextProvider</a> <span id="r5 rd" class="r5 r">sharedContextProvider</span>,
+            <span class="i">ILoggerFactory</span> <span id="r6 rd" class="r6 r">loggerFactory</span>,
+            <span class="i">FunctionDescriptor</span> <span id="r7 rd" class="r7 r">functionDescriptor</span>,
+            <a href="/Azure.Storage.Blobs/A.html#5c3c4fe54cdb5868" class="t t">BlobServiceClient</a> <span id="r8 rd" class="r8 r">hostBlobServiceClient</span>,
+            <a href="/Azure.Storage.Queues/A.html#ef0f353b721b0444" class="t t">QueueServiceClient</a> <span id="r9 rd" class="r9 r">hostQueueServiceClient</span>,
+            <a href="/Azure.Storage.Blobs/A.html#5c3c4fe54cdb5868" class="t t">BlobServiceClient</a> <span id="r10 rd" class="r10 r">dataBlobServiceClient</span>,
+            <a href="/Azure.Storage.Queues/A.html#ef0f353b721b0444" class="t t">QueueServiceClient</a> <span id="r11 rd" class="r11 r">dataQueueServiceClient</span>,
+            <a href="/Azure.Storage.Blobs/A.html#6bb2c165ee95c7d4" class="t t">BlobContainerClient</a> <span id="r12 rd" class="r12 r">container</span>,
+            <a href="../IBlobPathSource.cs.html#fb74667cb17e1efd" class="t t">IBlobPathSource</a> <span id="r13 rd" class="r13 r">input</span>,
+            <a href="../BlobTriggerSource.cs.html#f5021f2685114f63" class="t t">BlobTriggerSource</a> <span id="r14 rd" class="r14 r">triggerKind</span>,
+            <span class="i">ITriggeredFunctionExecutor</span> <span id="r15 rd" class="r15 r">executor</span>,
+            <span class="i">IHostSingletonManager</span> <span id="r16 rd" class="r16 r">singletonManager</span>)
+        {
+            <a href="#05e91bbe97894f72" class="i field">_hostIdProvider</a> = <span class="r0 r">hostIdProvider</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r0 r">hostIdProvider</span>));
+            <a href="#bfd323dca383f34e" class="i field">_blobTriggerQueueWriterFactory</a> = <span class="r4 r">blobTriggerQueueWriterFactory</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r4 r">blobTriggerQueueWriterFactory</span>));
+            <a href="#dbd12a79bf7a698d" class="i field">_blobsOptions</a> = <span class="r1 r">blobsOptions</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r1 r">blobsOptions</span>));
+            <a href="#29abffda2cb361e7" class="i field">_exceptionHandler</a> = <span class="r2 r">exceptionHandler</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r2 r">exceptionHandler</span>));
+            <a href="#d242b3473820fe82" class="i field">_blobWrittenWatcherSetter</a> = <span class="r3 r">blobWrittenWatcherSetter</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r3 r">blobWrittenWatcherSetter</span>));
+            <a href="#97bd21ba672c072c" class="i field">_sharedContextProvider</a> = <span class="r5 r">sharedContextProvider</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r5 r">sharedContextProvider</span>));
+            <a href="#57dbc55ee9fd47c0" class="i field">_functionDescriptor</a> = <span class="r7 r">functionDescriptor</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r7 r">functionDescriptor</span>));
+            <a href="#dd4aeffc85516f19" class="i field">_loggerFactory</a> = <span class="r6 r">loggerFactory</span>;
+            <a href="#53d41a64d100f14f" class="i field">_hostBlobServiceClient</a> = <span class="r8 r">hostBlobServiceClient</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r8 r">hostBlobServiceClient</span>));
+            <a href="#73a21b3d824fda77" class="i field">_hostQueueServiceClient</a> = <span class="r9 r">hostQueueServiceClient</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r9 r">hostQueueServiceClient</span>));
+            <a href="#eeea61fc72f8f2d0" class="i field">_dataBlobServiceClient</a> = <span class="r10 r">dataBlobServiceClient</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r10 r">dataBlobServiceClient</span>));
+            <a href="#34cba96f7025614d" class="i field">_dataQueueServiceClient</a> = <span class="r11 r">dataQueueServiceClient</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r11 r">dataQueueServiceClient</span>));
+            <a href="#83bbbd7a2f5d4f7c" class="i field">_container</a> = <span class="r12 r">container</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r12 r">container</span>));
+            <a href="#abf2e8ed63a2ee9e" class="i field">_input</a> = <span class="r13 r">input</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r13 r">input</span>));
+            <a href="#af66c1ccb163ad05" class="i field">_blobTriggerSource</a> = <span class="r14 r">triggerKind</span>;
+            <a href="#aac43217e4282b56" class="i field">_executor</a> = <span class="r15 r">executor</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r15 r">executor</span>));
+            <a href="#1e8830cfec9d16c7" class="i field">_singletonManager</a> = <span class="r16 r">singletonManager</span> ?? <b>throw</b> <b>new</b> <span class="i">ArgumentNullException</span>(<b>nameof</b>(<span class="r16 r">singletonManager</span>));
+        }
+ 
+        <b>public async</b> <span class="i">Task</span>&lt;<span class="i">IListener</span>&gt; <a id="f35fc4be6c7192a1" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">CreateAsync</a>(<span class="i">CancellationToken</span> <span id="r17 rd" class="r17 r">cancellationToken</span>)
+        {
+            <span class="c">// Note that these clients are intentionally for the storage account rather than for the dashboard account.</span>
+            <span class="c">// We use the storage, not dashboard, account for the blob receipt container and blob trigger queues.</span>
+            <a href="/Azure.Storage.Blobs/A.html#5c3c4fe54cdb5868" class="k">var</a> <span id="r18 rd" class="r18 r">primaryBlobClient</span> = <a href="#53d41a64d100f14f" class="i field">_hostBlobServiceClient</a>;
+ 
+            <span class="c">// Important: We&#39;re using the storage account of the function target here, which is the account that the</span>
+            <span class="c">// function the listener is for is targeting. This is the account that will be used</span>
+            <span class="c">// to read the trigger blob.</span>
+            <a href="/Azure.Storage.Blobs/A.html#5c3c4fe54cdb5868" class="k">var</a> <span id="r19 rd" class="r19 r">targetBlobClient</span> = <a href="#eeea61fc72f8f2d0" class="i field">_dataBlobServiceClient</a>;
+            <a href="/Azure.Storage.Queues/A.html#ef0f353b721b0444" class="k">var</a> <span id="r20 rd" class="r20 r">targetQueueClient</span> = <a href="#34cba96f7025614d" class="i field">_dataQueueServiceClient</a>;
+ 
+            <a href="BlobTriggerQueueWriter.cs.html#fc0349c4a36ed1b2" class="t t">BlobTriggerQueueWriter</a> <span id="r21 rd" class="r21 r">blobTriggerQueueWriter</span> = <b>await</b> <a href="#bfd323dca383f34e" class="i field">_blobTriggerQueueWriterFactory</a>.<a href="BlobTriggerQueueWriterFactory.cs.html#6789703ad42c0c74" class="i method">CreateAsync</a>(<span class="r17 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+            <b>string</b> <span id="r22 rd" class="r22 r">hostId</span> = <b>await</b> <a href="#05e91bbe97894f72" class="i field">_hostIdProvider</a>.<span class="i">GetHostIdAsync</span>(<span class="r17 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+            <a href="SharedBlobListener.cs.html#6734f3473052fb24" class="t t">SharedBlobListener</a> <span id="r23 rd" class="r23 r">sharedBlobListener</span> = <b>null</b>;
+            <span class="c">// we do not need to create SharedBlobListener for EventGrid blob trigger</span>
+            <b>if</b> (<a href="#af66c1ccb163ad05" class="i field">_blobTriggerSource</a> == <a href="../BlobTriggerSource.cs.html#f5021f2685114f63" class="t t">BlobTriggerSource</a>.<a href="../BlobTriggerSource.cs.html#0a600fd9643f0bc6" class="i field">LogsAndContainerScan</a>)
+            {
+                <span class="r23 r">sharedBlobListener</span> = <a href="#97bd21ba672c072c" class="i field">_sharedContextProvider</a>.<a href="../Shared/Listeners/ISharedContextProvider.cs.html#0e025f0c3ce12cfb" class="i method">GetOrCreateInstance</a>&lt;<a href="SharedBlobListener.cs.html#6734f3473052fb24" class="t t">SharedBlobListener</a>&gt;(
+                    <b>new</b> <span class="t">SharedBlobListenerFactory</span>(<span class="r22 r">hostId</span>, <a href="#53d41a64d100f14f" class="i field">_hostBlobServiceClient</a>, <a href="#29abffda2cb361e7" class="i field">_exceptionHandler</a>, <a href="#d242b3473820fe82" class="i field">_blobWrittenWatcherSetter</a>, <a href="#dd4aeffc85516f19" class="i field">_loggerFactory</a>.<span class="i">CreateLogger</span>&lt;<a href="BlobListener.cs.html#f6072afdd237218d" class="t t">BlobListener</a>&gt;()));
+ 
+                <span class="c">// Register the blob container we wish to monitor with the shared blob listener.</span>
+                <b>await</b> <a href="#b91467f12e1abf9d" class="i method">RegisterWithSharedBlobListenerAsync</a>(<span class="r22 r">hostId</span>, <span class="r23 r">sharedBlobListener</span>, <span class="r18 r">primaryBlobClient</span>,
+                    <span class="r21 r">blobTriggerQueueWriter</span>, <span class="r17 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+ 
+            <span class="c">// Create a &quot;bridge&quot; listener that will monitor the blob</span>
+            <span class="c">// notification queue and dispatch to the target job function.</span>
+            <a href="SharedBlobQueueListener.cs.html#b2dbe6c23b9f1d4b" class="t t">SharedBlobQueueListener</a> <span id="r24 rd" class="r24 r">sharedBlobQueueListener</span> = <a href="#97bd21ba672c072c" class="i field">_sharedContextProvider</a>.<a href="../Shared/Listeners/ISharedContextProvider.cs.html#0e025f0c3ce12cfb" class="i method">GetOrCreateInstance</a>&lt;<a href="SharedBlobQueueListener.cs.html#b2dbe6c23b9f1d4b" class="t t">SharedBlobQueueListener</a>&gt;(
+                <b>new</b> <a href="SharedBlobQueueListenerFactory.cs.html#260fe0eaf51ba667" class="t constructor">SharedBlobQueueListenerFactory</a>(<a href="#73a21b3d824fda77" class="i field">_hostQueueServiceClient</a>, <span class="r21 r">blobTriggerQueueWriter</span>.<a href="BlobTriggerQueueWriter.cs.html#5856d5af94d463df" class="i property">SharedQueueWatcher</a>, <span class="r21 r">blobTriggerQueueWriter</span>.<a href="BlobTriggerQueueWriter.cs.html#3d793ee42145d838" class="i property">QueueClient</a>,
+                     <a href="#dbd12a79bf7a698d" class="i field">_blobsOptions</a>, <a href="#29abffda2cb361e7" class="i field">_exceptionHandler</a>, <a href="#dd4aeffc85516f19" class="i field">_loggerFactory</a>, <span class="r23 r">sharedBlobListener</span>?.<a href="SharedBlobListener.cs.html#452fd07449cbce94" class="i property">BlobWritterWatcher</a>, <a href="#57dbc55ee9fd47c0" class="i field">_functionDescriptor</a>, <a href="#af66c1ccb163ad05" class="i field">_blobTriggerSource</a>));
+            <a href="BlobListener.cs.html#f6072afdd237218d" class="k">var</a> <span id="r25 rd" class="r25 r">queueListener</span> = <b>new</b> <a href="BlobListener.cs.html#7b8c5b1e89aeaccc" class="t constructor">BlobListener</a>(<span class="r24 r">sharedBlobQueueListener</span>);
+ 
+            <span class="c">// the client to use for the poison queue</span>
+            <span class="c">// by default this should target the same storage account</span>
+            <span class="c">// as the blob container we&#39;re monitoring</span>
+            <a href="/Azure.Storage.Queues/A.html#ef0f353b721b0444" class="k">var</a> <span id="r26 rd" class="r26 r">poisonQueueClient</span> = <span class="r20 r">targetQueueClient</span>;
+ 
+            <span class="c">// Register our function with the shared blob queue listener</span>
+            <a href="#fe2628085215cace" class="i method">RegisterWithSharedBlobQueueListenerAsync</a>(<span class="r24 r">sharedBlobQueueListener</span>, <span class="r19 r">targetBlobClient</span>, <span class="r26 r">poisonQueueClient</span>);
+ 
+            <span class="c">// Check a flag in the shared context to see if we&#39;ve created the singleton</span>
+            <span class="c">// shared blob listener in this host instance.</span>
+            <span class="c">// We do not need SharedBlobListener for EventGrid blob trigger.</span>
+            <b>object</b> <span id="r27 rd" class="r27 r">singletonListenerCreated</span> = <b>false</b>;
+            <b>if</b> (<a href="#af66c1ccb163ad05" class="i field">_blobTriggerSource</a> == <a href="../BlobTriggerSource.cs.html#f5021f2685114f63" class="t t">BlobTriggerSource</a>.<a href="../BlobTriggerSource.cs.html#0a600fd9643f0bc6" class="i field">LogsAndContainerScan</a>
+                &amp;&amp; !<a href="#97bd21ba672c072c" class="i field">_sharedContextProvider</a>.<a href="../Shared/Listeners/ISharedContextProvider.cs.html#6a2d68b345ba326a" class="i method">TryGetValue</a>(<a href="#1b8c659b15275531" class="i field">SingletonBlobListenerScopeId</a>, <b>out</b> <span class="r27 r">singletonListenerCreated</span>))
+            {
+                <span class="c">// Create a singleton shared blob listener, since we only</span>
+                <span class="c">// want a single instance of the blob poll/scan logic to be running</span>
+                <span class="c">// across host instances</span>
+                <b>var</b> <span id="r28 rd" class="r28 r">singletonBlobListener</span> = <a href="#1e8830cfec9d16c7" class="i field">_singletonManager</a>.<span class="i">CreateHostSingletonListener</span>(
+                    <b>new</b> <a href="BlobListener.cs.html#7b8c5b1e89aeaccc" class="t constructor">BlobListener</a>(<span class="r23 r">sharedBlobListener</span>), <a href="#1b8c659b15275531" class="i field">SingletonBlobListenerScopeId</a>);
+                <a href="#97bd21ba672c072c" class="i field">_sharedContextProvider</a>.<a href="../Shared/Listeners/ISharedContextProvider.cs.html#ab8d8d156d405fb4" class="i method">SetValue</a>(<a href="#1b8c659b15275531" class="i field">SingletonBlobListenerScopeId</a>, <b>true</b>);
+ 
+                <b>return</b> <b>new</b> <span class="t">CompositeListener</span>(<span class="r28 r">singletonBlobListener</span>, <span class="r25 r">queueListener</span>);
+            }
+            <b>else</b>
+            {
+                <span class="c">// We&#39;ve already created the singleton blob listener</span>
+                <span class="c">// so just return our queue listener. Note that while we want the</span>
+                <span class="c">// blob scan to be singleton, the shared queue listener needs to run</span>
+                <span class="c">// on ALL instances so load can be scaled out</span>
+                <b>return</b> <span class="r25 r">queueListener</span>;
+            }
+        }
+ 
+        <b>private async</b> <span class="i">Task</span> <a id="b91467f12e1abf9d" href="../R/b91467f12e1abf9d.html" target="n" data-glyph="76,1" class="i method">RegisterWithSharedBlobListenerAsync</a>(
+            <b>string</b> <span id="r29 rd" class="r29 r">hostId</span>,
+            <a href="SharedBlobListener.cs.html#6734f3473052fb24" class="t t">SharedBlobListener</a> <span id="r30 rd" class="r30 r">sharedBlobListener</span>,
+            <a href="/Azure.Storage.Blobs/A.html#5c3c4fe54cdb5868" class="t t">BlobServiceClient</a> <span id="r31 rd" class="r31 r">blobClient</span>,
+            <a href="BlobTriggerQueueWriter.cs.html#fc0349c4a36ed1b2" class="t t">BlobTriggerQueueWriter</a> <span id="r32 rd" class="r32 r">blobTriggerQueueWriter</span>,
+            <span class="i">CancellationToken</span> <span id="r33 rd" class="r33 r">cancellationToken</span>)
+        {
+            <a href="../P/7a3540ac8598c441.html#7a3540ac8598c441" class="t t">BlobTriggerExecutor</a> <span id="r34 rd" class="r34 r">triggerExecutor</span> = <b>new</b> <span class="t">BlobTriggerExecutor</span>(<span class="r29 r">hostId</span>, <a href="#57dbc55ee9fd47c0" class="i field">_functionDescriptor</a>, <a href="#abf2e8ed63a2ee9e" class="i field">_input</a>, <b>new</b> <a href="BlobReceiptManager.cs.html#1650b802b8f6ff6b" class="t constructor">BlobReceiptManager</a>(<span class="r31 r">blobClient</span>),
+                <span class="r32 r">blobTriggerQueueWriter</span>, <a href="#dd4aeffc85516f19" class="i field">_loggerFactory</a>.<span class="i">CreateLogger</span>&lt;<a href="BlobListener.cs.html#f6072afdd237218d" class="t t">BlobListener</a>&gt;());
+ 
+            <b>await</b> <span class="r30 r">sharedBlobListener</span>.<a href="SharedBlobListener.cs.html#304b3f59ca1799e3" class="i method">RegisterAsync</a>(<span class="r31 r">blobClient</span>, <a href="#83bbbd7a2f5d4f7c" class="i field">_container</a>, <span class="r34 r">triggerExecutor</span>, <span class="r33 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+        }
+ 
+        <b>private void</b> <a id="fe2628085215cace" href="../R/fe2628085215cace.html" target="n" data-glyph="76,1" class="i method">RegisterWithSharedBlobQueueListenerAsync</a>(
+            <a href="SharedBlobQueueListener.cs.html#b2dbe6c23b9f1d4b" class="t t">SharedBlobQueueListener</a> <span id="r35 rd" class="r35 r">sharedBlobQueueListener</span>,
+            <a href="/Azure.Storage.Blobs/A.html#5c3c4fe54cdb5868" class="t t">BlobServiceClient</a> <span id="r36 rd" class="r36 r">blobClient</span>,
+            <a href="/Azure.Storage.Queues/A.html#ef0f353b721b0444" class="t t">QueueServiceClient</a> <span id="r37 rd" class="r37 r">queueClient</span>)
+        {
+            <a href="BlobQueueRegistration.cs.html#b51f1357cbf3fd83" class="t t">BlobQueueRegistration</a> <span id="r38 rd" class="r38 r">registration</span> = <b>new</b> <span class="t">BlobQueueRegistration</span>
+            {
+                <a href="BlobQueueRegistration.cs.html#4faca29dd75a28dd" class="i property">Executor</a> = <a href="#aac43217e4282b56" class="i field">_executor</a>,
+                <a href="BlobQueueRegistration.cs.html#ea4bdb5862fc5df4" class="i property">BlobServiceClient</a> = <span class="r36 r">blobClient</span>,
+                <a href="BlobQueueRegistration.cs.html#fb9ef7b630dacfc5" class="i property">QueueServiceClient</a> = <span class="r37 r">queueClient</span>
+            };
+ 
+            <span class="r35 r">sharedBlobQueueListener</span>.<span class="i">Register</span>(<a href="#57dbc55ee9fd47c0" class="i field">_functionDescriptor</a>.<span class="i">Id</span>, <span class="r38 r">registration</span>);
+            <span class="r35 r">sharedBlobQueueListener</span>.<span class="i">Register</span>(<a href="#57dbc55ee9fd47c0" class="i field">_functionDescriptor</a>.<span class="i">ShortName</span>, <span class="r38 r">registration</span>);
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

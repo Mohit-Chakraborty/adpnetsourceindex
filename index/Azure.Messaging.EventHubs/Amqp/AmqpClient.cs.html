@@ -1,0 +1,556 @@
+﻿<!DOCTYPE html>
+<html><head><title>AmqpClient.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(547);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Messaging.EventHubs/Amqp/AmqpClient.cs" target="_top">Amqp\AmqpClient.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Messaging.EventHubs" target="_top">src\Azure.Messaging.EventHubs.csproj</a> (Azure.Messaging.EventHubs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Globalization</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Runtime</span>.<span class="i">ExceptionServices</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Security</span>.<span class="i">Authentication</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Authorization</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Consumer</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Producer</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">Azure</span>.<span class="i">Amqp</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Amqp</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">   A transport client abstraction responsible for brokering operations for AMQP-based connections.</span>
+    <span class="c">///</span><span class="c">   It is intended that the public </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../EventHubConnection.cs.html#0646809725209998" class="t t">EventHubConnection</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> make use of an instance via containment</span>
+    <span class="c">///</span><span class="c">   and delegate operations to it.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Core</span>.<a href="../Core/TransportClient.cs.html#9812723e0dd3e9dc" class="t t">TransportClient</a><span class="c">&quot;</span> <span class="c">/&gt;</span>
+    <span class="c">///</span>
+    <b>internal class</b> <a id="a4c7ed578d8d178c" href="../R/a4c7ed578d8d178c.html" target="n" data-glyph="2,0" class="t t">AmqpClient</a> : <a href="../Core/TransportClient.cs.html#9812723e0dd3e9dc" class="t t">TransportClient</a>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The buffer to apply when considering refreshing; credentials that expire less than this duration will be refreshed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static</b> <span class="i">TimeSpan</span> <a id="4270b05e345864ef" href="../R/4270b05e345864ef.html" target="n" data-glyph="106,1" class="i property">CredentialRefreshBuffer</a> { <b>get</b>; } = <span class="i">TimeSpan</span>.<span class="i">FromMinutes</span>(5);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">Indicates whether or not this instance has been closed.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private volatile bool</b> <a id="6b1fc067560dcf9d" href="../R/6b1fc067560dcf9d.html" target="n" data-glyph="46,1" class="i field">_closed</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The currently active token to use for authorization with the Event Hubs service.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private</b> <span class="i">AccessToken</span> <a id="be8d7e9a0435d8c2" href="../R/be8d7e9a0435d8c2.html" target="n" data-glyph="46,1" class="i field">_accessToken</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Indicates whether or not this client has been closed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the client is closed; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override bool</b> <a id="f6e7b569931eb94a" href="../R/f6e7b569931eb94a.html" target="n" data-glyph="102,1" class="i property">IsClosed</a> =&gt; <a href="#6b1fc067560dcf9d" class="i field">_closed</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The endpoint for the Event Hubs service to which the client is associated.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override</b> <span class="i">Uri</span> <a id="08ffa09b1108338f" href="../R/08ffa09b1108338f.html" target="n" data-glyph="102,1" class="i property">ServiceEndpoint</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The name of the Event Hub to which the client is bound.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private string</b> <a id="3d51a524909309e8" href="../R/3d51a524909309e8.html" target="n" data-glyph="106,1" class="i property">EventHubName</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Gets the credential to use for authorization with the Event Hubs service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <a href="../SharedSource/Authorization/EventHubTokenCredential.cs.html#799a8f6651c6d656" class="t t">EventHubTokenCredential</a> <a id="fcbdd4c16569829a" href="../R/fcbdd4c16569829a.html" target="n" data-glyph="106,1" class="i property">Credential</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The converter to use for translating between AMQP messages and client library</span>
+        <span class="c">///</span><span class="c">   types.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <a href="AmqpMessageConverter.cs.html#4d1b857e8b567cc4" class="t t">AmqpMessageConverter</a> <a id="312fa87c14bc1021" href="../R/312fa87c14bc1021.html" target="n" data-glyph="106,1" class="i property">MessageConverter</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The AMQP connection scope responsible for managing transport constructs for this instance.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <a href="AmqpConnectionScope.cs.html#2f26dbfbbea02e07" class="t t">AmqpConnectionScope</a> <a id="330aae21e997397e" href="../R/330aae21e997397e.html" target="n" data-glyph="106,1" class="i property">ConnectionScope</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The AMQP link intended for use with management operations.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <span class="i">FaultTolerantAmqpObject</span>&lt;<span class="i">RequestResponseAmqpLink</span>&gt; <a id="e01abd246f173f66" href="../R/e01abd246f173f66.html" target="n" data-glyph="106,1" class="i property">ManagementLink</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#a4c7ed578d8d178c" class="t t">AmqpClient</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">host</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The fully qualified host name for the Event Hubs namespace.  This is likely to be similar to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">{yournamespace}.servicebus.windows.net</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">eventHubName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the specific Event Hub to connect the client to.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">credential</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The Azure managed identity credential to use for authorization.  Access controls may be specified by the Event Hubs namespace or the requested Event Hub, depending on Azure configuration.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">clientOptions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A set of options to apply when configuring the client.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   As an internal type, this class performs only basic sanity checks against its arguments.  It</span>
+        <span class="c">///</span><span class="c">   is assumed that callers are trusted and have performed deep validation.</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c">   Any parameters passed are assumed to be owned by this instance and safe to mutate or dispose;</span>
+        <span class="c">///</span><span class="c">   creation of clones or otherwise protecting the parameters is assumed to be the purview of the</span>
+        <span class="c">///</span><span class="c">   caller.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="89ff6a85c0324d8b" href="../R/89ff6a85c0324d8b.html" target="n" data-glyph="72,1" class="t constructor">AmqpClient</a>(<b>string</b> <span id="r0 rd" class="r0 r">host</span>,
+                          <b>string</b> <span id="r1 rd" class="r1 r">eventHubName</span>,
+                          <a href="../SharedSource/Authorization/EventHubTokenCredential.cs.html#799a8f6651c6d656" class="t t">EventHubTokenCredential</a> <span id="r2 rd" class="r2 r">credential</span>,
+                          <a href="../EventHubConnectionOptions.cs.html#f8df5ce6477308ff" class="t t">EventHubConnectionOptions</a> <span id="r3 rd" class="r3 r">clientOptions</span>) : <a href="#c6835a8d78574ec5" class="k">this</a>(<span class="r0 r">host</span>, <span class="r1 r">eventHubName</span>, <span class="r2 r">credential</span>, <span class="r3 r">clientOptions</span>, <b>null</b>, <b>null</b>)
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#a4c7ed578d8d178c" class="t t">AmqpClient</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">host</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The fully qualified host name for the Event Hubs namespace.  This is likely to be similar to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">{yournamespace}.servicebus.windows.net</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">eventHubName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the specific Event Hub to connect the client to.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">credential</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The Azure managed identity credential to use for authorization.  Access controls may be specified by the Event Hubs namespace or the requested Event Hub, depending on Azure configuration.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">clientOptions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A set of options to apply when configuring the client.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">connectionScope</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The optional scope to use for AMQP connection management.  If </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">, a new scope will be created.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">messageConverter</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The optional converter to use for transforming AMQP message-related types.  If </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">, a new converter will be created.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   As an internal type, this class performs only basic sanity checks against its arguments.  It</span>
+        <span class="c">///</span><span class="c">   is assumed that callers are trusted and have performed deep validation.</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c">   Any parameters passed are assumed to be owned by this instance and safe to mutate or dispose;</span>
+        <span class="c">///</span><span class="c">   creation of clones or otherwise protecting the parameters is assumed to be the purview of the</span>
+        <span class="c">///</span><span class="c">   caller.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>protected</b> <a id="c6835a8d78574ec5" href="../R/c6835a8d78574ec5.html" target="n" data-glyph="75,1" class="t constructor">AmqpClient</a>(<b>string</b> <span id="r4 rd" class="r4 r">host</span>,
+                             <b>string</b> <span id="r5 rd" class="r5 r">eventHubName</span>,
+                             <a href="../SharedSource/Authorization/EventHubTokenCredential.cs.html#799a8f6651c6d656" class="t t">EventHubTokenCredential</a> <span id="r6 rd" class="r6 r">credential</span>,
+                             <a href="../EventHubConnectionOptions.cs.html#f8df5ce6477308ff" class="t t">EventHubConnectionOptions</a> <span id="r7 rd" class="r7 r">clientOptions</span>,
+                             <a href="AmqpConnectionScope.cs.html#2f26dbfbbea02e07" class="t t">AmqpConnectionScope</a> <span id="r8 rd" class="r8 r">connectionScope</span>,
+                             <a href="AmqpMessageConverter.cs.html#4d1b857e8b567cc4" class="t t">AmqpMessageConverter</a> <span id="r9 rd" class="r9 r">messageConverter</span>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r4 r">host</span>, <b>nameof</b>(<span class="r4 r">host</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r5 r">eventHubName</span>, <b>nameof</b>(<span class="r5 r">eventHubName</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r6 r">credential</span>, <b>nameof</b>(<span class="r6 r">credential</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r7 r">clientOptions</span>, <b>nameof</b>(<span class="r7 r">clientOptions</span>));
+ 
+            <b>try</b>
+            {
+                <a href="../Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#c960e5896e4dd589" class="i property">Log</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#065200b68d03bebb" class="i method">EventHubClientCreateStart</a>(<span class="r4 r">host</span>, <span class="r5 r">eventHubName</span>);
+ 
+                <a href="#08ffa09b1108338f" class="i property">ServiceEndpoint</a> = <b>new</b> <span class="i">UriBuilder</span>
+                {
+                    <span class="i">Scheme</span> = <span class="r7 r">clientOptions</span>.<a href="../EventHubConnectionOptions.cs.html#4575d7c04a9f7d54" class="i property">TransportType</a>.<a href="../Core/TransportTypeExtensions.cs.html#67be0a4a11377c7c" class="i method">GetUriScheme</a>(),
+                    <span class="i">Host</span> = <span class="r4 r">host</span>
+                }.<span class="i">Uri</span>;
+ 
+                <a href="#3d51a524909309e8" class="i property">EventHubName</a> = <span class="r5 r">eventHubName</span>;
+                <a href="#fcbdd4c16569829a" class="i property">Credential</a> = <span class="r6 r">credential</span>;
+                <a href="#312fa87c14bc1021" class="i property">MessageConverter</a> = <span class="r9 r">messageConverter</span> ?? <b>new</b> <span class="t">AmqpMessageConverter</span>();
+                <a href="#330aae21e997397e" class="i property">ConnectionScope</a> = <span class="r8 r">connectionScope</span> ?? <b>new</b> <a href="AmqpConnectionScope.cs.html#6ca83524071b5ae5" class="t constructor">AmqpConnectionScope</a>(<a href="#08ffa09b1108338f" class="i property">ServiceEndpoint</a>, <span class="r5 r">eventHubName</span>, <span class="r6 r">credential</span>, <span class="r7 r">clientOptions</span>.<a href="../EventHubConnectionOptions.cs.html#4575d7c04a9f7d54" class="i property">TransportType</a>, <span class="r7 r">clientOptions</span>.<a href="../EventHubConnectionOptions.cs.html#3be783ff92ed18c8" class="i property">Proxy</a>);
+ 
+                <a href="#e01abd246f173f66" class="i property">ManagementLink</a> = <b>new</b> <span class="i">FaultTolerantAmqpObject</span>&lt;<span class="i">RequestResponseAmqpLink</span>&gt;(
+                    <span id="r10 rd" class="r10 r">timeout</span> =&gt; <a href="#330aae21e997397e" class="i property">ConnectionScope</a>.<span class="i">OpenManagementLinkAsync</span>(<span class="r10 r">timeout</span>, <span class="i">CancellationToken</span>.<span class="i">None</span>),
+                    <span id="r11 rd" class="r11 r">link</span> =&gt;
+                    {
+                        <span class="r11 r">link</span>.<span class="i">Session</span>?.<span class="i">SafeClose</span>();
+                        <span class="r11 r">link</span>.<span class="i">SafeClose</span>();
+                    });
+            }
+            <b>finally</b>
+            {
+                <a href="../Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#c960e5896e4dd589" class="i property">Log</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#1c4fc37052daf241" class="i method">EventHubClientCreateComplete</a>(<span class="r4 r">host</span>, <span class="r5 r">eventHubName</span>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Retrieves information about an Event Hub, including the number of partitions present</span>
+        <span class="c">///</span><span class="c">   and their identifiers.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The retry policy to use as the basis for retrieving the information.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The set of information for the Event Hub that this client is associated with.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override async</b> <span class="i">Task</span>&lt;<a href="../EventHubProperties.cs.html#6ee60bd5de616192" class="t t">EventHubProperties</a>&gt; <a id="1fab45458b3e3ba5" href="../R/1fab45458b3e3ba5.html" target="n" data-glyph="72,1" class="i method">GetPropertiesAsync</a>(<a href="../EventHubsRetryPolicy.cs.html#bc28d871ab581a88" class="t t">EventHubsRetryPolicy</a> <span id="r12 rd" class="r12 r">retryPolicy</span>,
+                                                                          <span class="i">CancellationToken</span> <span id="r13 rd" class="r13 r">cancellationToken</span>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Core/Argument.cs.html#eda8ff4d51bf8b3e" class="i method">AssertNotClosed</a>(<a href="#6b1fc067560dcf9d" class="i field">_closed</a>, <b>nameof</b>(<a href="#a4c7ed578d8d178c" class="t t">AmqpClient</a>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r12 r">retryPolicy</span>, <b>nameof</b>(<span class="r12 r">retryPolicy</span>));
+ 
+            <b>var</b> <span id="r14 rd" class="r14 r">failedAttemptCount</span> = 0;
+            <b>var</b> <span id="r15 rd" class="r15 r">retryDelay</span> = <b>default</b>(<span class="i">TimeSpan</span>?);
+ 
+            <a href="../SharedSource/Azure.Core/ValueStopwatch.cs.html#def3eda2f58459f9" class="k">var</a> <span id="r16 rd" class="r16 r">stopWatch</span> = <a href="../SharedSource/Azure.Core/ValueStopwatch.cs.html#def3eda2f58459f9" class="t t">ValueStopwatch</a>.<a href="../SharedSource/Azure.Core/ValueStopwatch.cs.html#8145f8480f2ed2ad" class="i method">StartNew</a>();
+ 
+            <b>try</b>
+            {
+                <b>var</b> <span id="r17 rd" class="r17 r">tryTimeout</span> = <span class="r12 r">retryPolicy</span>.<a href="../EventHubsRetryPolicy.cs.html#b41a96502bed0bd4" class="i method">CalculateTryTimeout</a>(0);
+ 
+                <b>while</b> (!<span class="r13 r">cancellationToken</span>.<span class="i">IsCancellationRequested</span>)
+                {
+                    <b>try</b>
+                    {
+                        <a href="../Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#c960e5896e4dd589" class="i property">Log</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#0d0ce0a6db688230" class="i method">GetPropertiesStart</a>(<a href="#3d51a524909309e8" class="i property">EventHubName</a>);
+ 
+                        <span class="c">// Create the request message and the management link.</span>
+ 
+                        <b>var</b> <span id="r18 rd" class="r18 r">token</span> = <b>await</b> <a href="#f17cc3def4e6d05b" class="i method">AcquireAccessTokenAsync</a>(<span class="r13 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        <b>using</b> <span class="i">AmqpMessage</span> <span id="r19 rd" class="r19 r">request</span> = <a href="#312fa87c14bc1021" class="i property">MessageConverter</a>.<span class="i">CreateEventHubPropertiesRequest</span>(<a href="#3d51a524909309e8" class="i property">EventHubName</a>, <span class="r18 r">token</span>);
+                        <span class="r13 r">cancellationToken</span>.<a href="../SharedSource/Core/CancellationTokenExtensions.cs.html#b1bf96f66d5d14e6" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+ 
+                        <span class="i">RequestResponseAmqpLink</span> <span id="r20 rd" class="r20 r">link</span> = <b>await</b> <a href="#e01abd246f173f66" class="i property">ManagementLink</a>.<span class="i">GetOrCreateAsync</span>(<a href="#67d270589d77feec" class="i method">UseMinimum</a>(<a href="#330aae21e997397e" class="i property">ConnectionScope</a>.<a href="AmqpConnectionScope.cs.html#6813807dc1176857" class="i property">SessionTimeout</a>, <span class="r17 r">tryTimeout</span>.<a href="../SharedSource/Core/TimeSpanExtensions.cs.html#c0dfffea8c93aa7d" class="i method">CalculateRemaining</a>(<span class="r16 r">stopWatch</span>.<a href="../SharedSource/Azure.Core/ValueStopwatch.cs.html#bfb83d9e02192eef" class="i method">GetElapsedTime</a>()))).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        <span class="r13 r">cancellationToken</span>.<a href="../SharedSource/Core/CancellationTokenExtensions.cs.html#b1bf96f66d5d14e6" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+ 
+                        <span class="c">// Send the request and wait for the response.</span>
+ 
+                        <b>using</b> <span class="i">AmqpMessage</span> <span id="r21 rd" class="r21 r">response</span> = <b>await</b> <span class="r20 r">link</span>.<span class="i">RequestAsync</span>(<span class="r19 r">request</span>, <span class="r17 r">tryTimeout</span>.<a href="../SharedSource/Core/TimeSpanExtensions.cs.html#c0dfffea8c93aa7d" class="i method">CalculateRemaining</a>(<span class="r16 r">stopWatch</span>.<a href="../SharedSource/Azure.Core/ValueStopwatch.cs.html#bfb83d9e02192eef" class="i method">GetElapsedTime</a>())).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        <span class="r13 r">cancellationToken</span>.<a href="../SharedSource/Core/CancellationTokenExtensions.cs.html#b1bf96f66d5d14e6" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+ 
+                        <span class="c">// Process the response.</span>
+ 
+                        <a href="AmqpError.cs.html#b7f1e2d6b215c815" class="t t">AmqpError</a>.<a href="AmqpError.cs.html#76064f0b7b578a40" class="i method">ThrowIfErrorResponse</a>(<span class="r21 r">response</span>, <a href="#3d51a524909309e8" class="i property">EventHubName</a>);
+                        <b>return</b> <a href="#312fa87c14bc1021" class="i property">MessageConverter</a>.<a href="AmqpMessageConverter.cs.html#ef927d73435d6dda" class="i method">CreateEventHubPropertiesFromResponse</a>(<span class="r21 r">response</span>);
+                    }
+                    <b>catch</b> (<span class="i">Exception</span> <span id="r22 rd" class="r22 r">ex</span>)
+                    {
+                        <span class="i">Exception</span> <span id="r23 rd" class="r23 r">activeEx</span> = <span class="r22 r">ex</span>.<a href="ExceptionExtensions.cs.html#ae3942782a3ed845" class="i method">TranslateServiceException</a>(<a href="#3d51a524909309e8" class="i property">EventHubName</a>);
+ 
+                        <span class="c">// Determine if there should be a retry for the next attempt; if so enforce the delay but do not quit the loop.</span>
+                        <span class="c">// Otherwise, mark the exception as active and break out of the loop.</span>
+ 
+                        ++<span class="r14 r">failedAttemptCount</span>;
+                        <span class="r15 r">retryDelay</span> = <span class="r12 r">retryPolicy</span>.<a href="../EventHubsRetryPolicy.cs.html#349133cec7633979" class="i method">CalculateRetryDelay</a>(<span class="r23 r">activeEx</span>, <span class="r14 r">failedAttemptCount</span>);
+ 
+                        <b>if</b> ((<span class="r15 r">retryDelay</span>.<span class="i">HasValue</span>) &amp;&amp; (!<a href="#330aae21e997397e" class="i property">ConnectionScope</a>.<a href="AmqpConnectionScope.cs.html#e6cc33a956d356e8" class="i property">IsDisposed</a>) &amp;&amp; (!<span class="r13 r">cancellationToken</span>.<span class="i">IsCancellationRequested</span>))
+                        {
+                            <a href="../Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#c960e5896e4dd589" class="i property">Log</a>.<span class="i">GetPropertiesError</span>(<a href="#3d51a524909309e8" class="i property">EventHubName</a>, <span class="r23 r">activeEx</span>.<span class="i">Message</span>);
+                            <b>await</b> <span class="i">Task</span>.<span class="i">Delay</span>(<span class="r15 r">retryDelay</span>.<span class="i">Value</span>, <span class="r13 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                            <span class="r17 r">tryTimeout</span> = <span class="r12 r">retryPolicy</span>.<a href="../EventHubsRetryPolicy.cs.html#b41a96502bed0bd4" class="i method">CalculateTryTimeout</a>(<span class="r14 r">failedAttemptCount</span>);
+                            <span class="r16 r">stopWatch</span> = <a href="../SharedSource/Azure.Core/ValueStopwatch.cs.html#def3eda2f58459f9" class="t t">ValueStopwatch</a>.<a href="../SharedSource/Azure.Core/ValueStopwatch.cs.html#8145f8480f2ed2ad" class="i method">StartNew</a>();
+                        }
+                        <b>else</b> <b>if</b> (<span class="r22 r">ex</span> <b>is</b> <span class="i">AmqpException</span>)
+                        {
+                            <span class="i">ExceptionDispatchInfo</span>.<span class="i">Capture</span>(<span class="r23 r">activeEx</span>).<span class="i">Throw</span>();
+                        }
+                        <b>else</b>
+                        {
+                            <b>throw</b>;
+                        }
+                    }
+                }
+ 
+                <span class="c">// If no value has been returned nor exception thrown by this point,</span>
+                <span class="c">// then cancellation has been requested.</span>
+ 
+                <b>throw</b> <b>new</b> <span class="i">TaskCanceledException</span>();
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r24 rd" class="r24 r">ex</span>)
+            {
+                <a href="../Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#c960e5896e4dd589" class="i property">Log</a>.<span class="i">GetPropertiesError</span>(<a href="#3d51a524909309e8" class="i property">EventHubName</a>, <span class="r24 r">ex</span>.<span class="i">Message</span>);
+                <b>throw</b>;
+            }
+            <b>finally</b>
+            {
+                <a href="../Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#c960e5896e4dd589" class="i property">Log</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#4b34b08f964e0e2a" class="i method">GetPropertiesComplete</a>(<a href="#3d51a524909309e8" class="i property">EventHubName</a>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Retrieves information about a specific partition for an Event Hub, including elements that describe the available</span>
+        <span class="c">///</span><span class="c">   events in the partition event stream.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r25 r">partitionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The unique identifier of a partition associated with the Event Hub.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r26 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The retry policy to use as the basis for retrieving the information.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r27 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The set of information for the requested partition under the Event Hub this client is associated with.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override async</b> <span class="i">Task</span>&lt;<a href="../PartitionProperties.cs.html#9311a292681a1af8" class="t t">PartitionProperties</a>&gt; <a id="8cc0d54bb43fa111" href="../R/8cc0d54bb43fa111.html" target="n" data-glyph="72,1" class="i method">GetPartitionPropertiesAsync</a>(<b>string</b> <span id="r25 rd" class="r25 r">partitionId</span>,
+                                                                                    <a href="../EventHubsRetryPolicy.cs.html#bc28d871ab581a88" class="t t">EventHubsRetryPolicy</a> <span id="r26 rd" class="r26 r">retryPolicy</span>,
+                                                                                    <span class="i">CancellationToken</span> <span id="r27 rd" class="r27 r">cancellationToken</span>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Core/Argument.cs.html#eda8ff4d51bf8b3e" class="i method">AssertNotClosed</a>(<a href="#6b1fc067560dcf9d" class="i field">_closed</a>, <b>nameof</b>(<a href="#a4c7ed578d8d178c" class="t t">AmqpClient</a>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r25 r">partitionId</span>, <b>nameof</b>(<span class="r25 r">partitionId</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r26 r">retryPolicy</span>, <b>nameof</b>(<span class="r26 r">retryPolicy</span>));
+ 
+            <b>var</b> <span id="r28 rd" class="r28 r">failedAttemptCount</span> = 0;
+            <b>var</b> <span id="r29 rd" class="r29 r">retryDelay</span> = <b>default</b>(<span class="i">TimeSpan</span>?);
+            <b>var</b> <span id="r30 rd" class="r30 r">token</span> = <b>default</b>(<b>string</b>);
+            <b>var</b> <span id="r31 rd" class="r31 r">link</span> = <b>default</b>(<span class="i">RequestResponseAmqpLink</span>);
+ 
+            <a href="../SharedSource/Azure.Core/ValueStopwatch.cs.html#def3eda2f58459f9" class="k">var</a> <span id="r32 rd" class="r32 r">stopWatch</span> = <a href="../SharedSource/Azure.Core/ValueStopwatch.cs.html#def3eda2f58459f9" class="t t">ValueStopwatch</a>.<a href="../SharedSource/Azure.Core/ValueStopwatch.cs.html#8145f8480f2ed2ad" class="i method">StartNew</a>();
+ 
+            <b>try</b>
+            {
+                <b>var</b> <span id="r33 rd" class="r33 r">tryTimeout</span> = <span class="r26 r">retryPolicy</span>.<a href="../EventHubsRetryPolicy.cs.html#b41a96502bed0bd4" class="i method">CalculateTryTimeout</a>(0);
+ 
+                <b>while</b> (!<span class="r27 r">cancellationToken</span>.<span class="i">IsCancellationRequested</span>)
+                {
+                    <b>try</b>
+                    {
+                        <a href="../Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#c960e5896e4dd589" class="i property">Log</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#feb62610f2aa63af" class="i method">GetPartitionPropertiesStart</a>(<a href="#3d51a524909309e8" class="i property">EventHubName</a>, <span class="r25 r">partitionId</span>);
+ 
+                        <span class="c">// Create the request message and the management link.</span>
+ 
+                        <span class="r30 r">token</span> = <b>await</b> <a href="#f17cc3def4e6d05b" class="i method">AcquireAccessTokenAsync</a>(<span class="r27 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        <b>using</b> <span class="i">AmqpMessage</span> <span id="r34 rd" class="r34 r">request</span> = <a href="#312fa87c14bc1021" class="i property">MessageConverter</a>.<a href="AmqpMessageConverter.cs.html#b486805807fcbf30" class="i method">CreatePartitionPropertiesRequest</a>(<a href="#3d51a524909309e8" class="i property">EventHubName</a>, <span class="r25 r">partitionId</span>, <span class="r30 r">token</span>);
+                        <span class="r27 r">cancellationToken</span>.<a href="../SharedSource/Core/CancellationTokenExtensions.cs.html#b1bf96f66d5d14e6" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+ 
+                        <span class="r31 r">link</span> = <b>await</b> <a href="#e01abd246f173f66" class="i property">ManagementLink</a>.<span class="i">GetOrCreateAsync</span>(<a href="#67d270589d77feec" class="i method">UseMinimum</a>(<a href="#330aae21e997397e" class="i property">ConnectionScope</a>.<a href="AmqpConnectionScope.cs.html#6813807dc1176857" class="i property">SessionTimeout</a>, <span class="r33 r">tryTimeout</span>.<a href="../SharedSource/Core/TimeSpanExtensions.cs.html#c0dfffea8c93aa7d" class="i method">CalculateRemaining</a>(<span class="r32 r">stopWatch</span>.<a href="../SharedSource/Azure.Core/ValueStopwatch.cs.html#bfb83d9e02192eef" class="i method">GetElapsedTime</a>()))).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        <span class="r27 r">cancellationToken</span>.<a href="../SharedSource/Core/CancellationTokenExtensions.cs.html#b1bf96f66d5d14e6" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+ 
+                        <span class="c">// Send the request and wait for the response.</span>
+ 
+                        <b>using</b> <span class="i">AmqpMessage</span> <span id="r35 rd" class="r35 r">response</span> = <b>await</b> <span class="r31 r">link</span>.<span class="i">RequestAsync</span>(<span class="r34 r">request</span>, <span class="r33 r">tryTimeout</span>.<a href="../SharedSource/Core/TimeSpanExtensions.cs.html#c0dfffea8c93aa7d" class="i method">CalculateRemaining</a>(<span class="r32 r">stopWatch</span>.<a href="../SharedSource/Azure.Core/ValueStopwatch.cs.html#bfb83d9e02192eef" class="i method">GetElapsedTime</a>())).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        <span class="r27 r">cancellationToken</span>.<a href="../SharedSource/Core/CancellationTokenExtensions.cs.html#b1bf96f66d5d14e6" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+ 
+                        <span class="c">// Process the response.</span>
+ 
+                        <a href="AmqpError.cs.html#b7f1e2d6b215c815" class="t t">AmqpError</a>.<a href="AmqpError.cs.html#76064f0b7b578a40" class="i method">ThrowIfErrorResponse</a>(<span class="r35 r">response</span>, <a href="#3d51a524909309e8" class="i property">EventHubName</a>);
+                        <b>return</b> <a href="#312fa87c14bc1021" class="i property">MessageConverter</a>.<a href="AmqpMessageConverter.cs.html#d2798b3d58bc2304" class="i method">CreatePartitionPropertiesFromResponse</a>(<span class="r35 r">response</span>);
+                    }
+                    <b>catch</b> (<span class="i">Exception</span> <span id="r36 rd" class="r36 r">ex</span>)
+                    {
+                        <span class="i">Exception</span> <span id="r37 rd" class="r37 r">activeEx</span> = <span class="r36 r">ex</span>.<a href="ExceptionExtensions.cs.html#ae3942782a3ed845" class="i method">TranslateServiceException</a>(<a href="#3d51a524909309e8" class="i property">EventHubName</a>);
+ 
+                        <span class="c">// Determine if there should be a retry for the next attempt; if so enforce the delay but do not quit the loop.</span>
+                        <span class="c">// Otherwise, mark the exception as active and break out of the loop.</span>
+ 
+                        ++<span class="r28 r">failedAttemptCount</span>;
+                        <span class="r29 r">retryDelay</span> = <span class="r26 r">retryPolicy</span>.<a href="../EventHubsRetryPolicy.cs.html#349133cec7633979" class="i method">CalculateRetryDelay</a>(<span class="r37 r">activeEx</span>, <span class="r28 r">failedAttemptCount</span>);
+ 
+                        <b>if</b> ((<span class="r29 r">retryDelay</span>.<span class="i">HasValue</span>) &amp;&amp; (!<a href="#330aae21e997397e" class="i property">ConnectionScope</a>.<a href="AmqpConnectionScope.cs.html#e6cc33a956d356e8" class="i property">IsDisposed</a>) &amp;&amp; (!<span class="r27 r">cancellationToken</span>.<span class="i">IsCancellationRequested</span>))
+                        {
+                            <a href="../Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#c960e5896e4dd589" class="i property">Log</a>.<span class="i">GetPartitionPropertiesError</span>(<a href="#3d51a524909309e8" class="i property">EventHubName</a>, <span class="r25 r">partitionId</span>, <span class="r37 r">activeEx</span>.<span class="i">Message</span>);
+                            <b>await</b> <span class="i">Task</span>.<span class="i">Delay</span>(<span class="r29 r">retryDelay</span>.<span class="i">Value</span>, <span class="r27 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                            <span class="r33 r">tryTimeout</span> = <span class="r26 r">retryPolicy</span>.<a href="../EventHubsRetryPolicy.cs.html#b41a96502bed0bd4" class="i method">CalculateTryTimeout</a>(<span class="r28 r">failedAttemptCount</span>);
+                            <span class="r32 r">stopWatch</span> = <a href="../SharedSource/Azure.Core/ValueStopwatch.cs.html#def3eda2f58459f9" class="t t">ValueStopwatch</a>.<a href="../SharedSource/Azure.Core/ValueStopwatch.cs.html#8145f8480f2ed2ad" class="i method">StartNew</a>();
+                        }
+                        <b>else</b> <b>if</b> (<span class="r36 r">ex</span> <b>is</b> <span class="i">AmqpException</span>)
+                        {
+                            <span class="i">ExceptionDispatchInfo</span>.<span class="i">Capture</span>(<span class="r37 r">activeEx</span>).<span class="i">Throw</span>();
+                        }
+                        <b>else</b>
+                        {
+                            <b>throw</b>;
+                        }
+                    }
+                }
+ 
+                <span class="c">// If no value has been returned nor exception thrown by this point,</span>
+                <span class="c">// then cancellation has been requested.</span>
+ 
+                <b>throw</b> <b>new</b> <span class="i">TaskCanceledException</span>();
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r38 rd" class="r38 r">ex</span>)
+            {
+                <a href="../Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#c960e5896e4dd589" class="i property">Log</a>.<span class="i">GetPartitionPropertiesError</span>(<a href="#3d51a524909309e8" class="i property">EventHubName</a>, <span class="r25 r">partitionId</span>, <span class="r38 r">ex</span>.<span class="i">Message</span>);
+                <b>throw</b>;
+            }
+            <b>finally</b>
+            {
+                <a href="../Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#c960e5896e4dd589" class="i property">Log</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#7f1a893d99865468" class="i method">GetPartitionPropertiesComplete</a>(<a href="#3d51a524909309e8" class="i property">EventHubName</a>, <span class="r25 r">partitionId</span>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Creates a producer strongly aligned with the active protocol and transport,</span>
+        <span class="c">///</span><span class="c">   responsible for publishing </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> to the Event Hub.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r39 r">partitionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The identifier of the partition to which the transport producer should be bound; if </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">, the producer is unbound.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r40 r">requestedFeatures</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The flags specifying the set of special transport features that should be opted-into.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r41 r">partitionOptions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The set of options, if any, that should be considered when initializing the producer.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r42 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The policy which governs retry behavior and try timeouts.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Core/TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> configured in the requested manner.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override</b> <a href="../Core/TransportProducer.cs.html#3e8bff2a200aca1e" class="t t">TransportProducer</a> <a id="c35969e421e92a96" href="../R/c35969e421e92a96.html" target="n" data-glyph="72,1" class="i method">CreateProducer</a>(<b>string</b> <span id="r39 rd" class="r39 r">partitionId</span>,
+                                                         <a href="../Core/TransportProducerFeatures.cs.html#012a1c2da3174f00" class="t t">TransportProducerFeatures</a> <span id="r40 rd" class="r40 r">requestedFeatures</span>,
+                                                         <a href="../Producer/PartitionPublishingOptions.cs.html#063aaefcca0dd9a1" class="t t">PartitionPublishingOptions</a> <span id="r41 rd" class="r41 r">partitionOptions</span>,
+                                                         <a href="../EventHubsRetryPolicy.cs.html#bc28d871ab581a88" class="t t">EventHubsRetryPolicy</a> <span id="r42 rd" class="r42 r">retryPolicy</span>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Core/Argument.cs.html#eda8ff4d51bf8b3e" class="i method">AssertNotClosed</a>(<a href="#6b1fc067560dcf9d" class="i field">_closed</a>, <b>nameof</b>(<a href="#a4c7ed578d8d178c" class="t t">AmqpClient</a>));
+ 
+            <b>return</b> <b>new</b> <a href="AmqpProducer.cs.html#39b9cb8ea95ec12b" class="t constructor">AmqpProducer</a>
+            (
+                <a href="#3d51a524909309e8" class="i property">EventHubName</a>,
+                <span class="r39 r">partitionId</span>,
+                <a href="#330aae21e997397e" class="i property">ConnectionScope</a>,
+                <a href="#312fa87c14bc1021" class="i property">MessageConverter</a>,
+                <span class="r42 r">retryPolicy</span>,
+                <span class="r40 r">requestedFeatures</span>,
+                <span class="r41 r">partitionOptions</span>
+            );
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Creates a consumer strongly aligned with the active protocol and transport, responsible</span>
+        <span class="c">///</span><span class="c">   for reading </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> from a specific Event Hub partition, in the context</span>
+        <span class="c">///</span><span class="c">   of a specific consumer group.</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c">   A consumer may be exclusive, which asserts ownership over the partition for the consumer</span>
+        <span class="c">///</span><span class="c">   group to ensure that only one consumer from that group is reading the from the partition.</span>
+        <span class="c">///</span><span class="c">   These exclusive consumers are sometimes referred to as &quot;Epoch Consumers.&quot;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c">   A consumer may also be non-exclusive, allowing multiple consumers from the same consumer</span>
+        <span class="c">///</span><span class="c">   group to be actively reading events from the partition.  These non-exclusive consumers are</span>
+        <span class="c">///</span><span class="c">   sometimes referred to as &quot;Non-epoch Consumers.&quot;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c">   Designating a consumer as exclusive may be specified by setting the </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r43 r">ownerLevel</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c">   When </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">, consumers are created as non-exclusive.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r44 r">consumerGroup</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the consumer group this consumer is associated with.  Events are read in the context of this group.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r45 r">partitionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The identifier of the Event Hub partition from which events will be received.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r46 r">eventPosition</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The position within the partition where the consumer should begin reading events.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r47 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The policy which governs retry behavior and try timeouts.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r48 r">trackLastEnqueuedEventProperties</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Indicates whether information on the last enqueued event on the partition is sent as events are received.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r43 r">ownerLevel</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The relative priority to associate with the link; for a non-exclusive link, this value should be </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r49 r">prefetchCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Controls the number of events received and queued locally without regard to whether an operation was requested.  If </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> a default will be used.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r50 r">prefetchSizeInBytes</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The cache size of the prefetch queue. When set, the link makes a best effort to ensure prefetched messages fit into the specified size.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Core/TransportConsumer.cs.html#265a21c281157aa2" class="t t">TransportConsumer</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> configured in the requested manner.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override</b> <a href="../Core/TransportConsumer.cs.html#265a21c281157aa2" class="t t">TransportConsumer</a> <a id="0b93d0f0fc11df17" href="../R/0b93d0f0fc11df17.html" target="n" data-glyph="72,1" class="i method">CreateConsumer</a>(<b>string</b> <span id="r44 rd" class="r44 r">consumerGroup</span>,
+                                                         <b>string</b> <span id="r45 rd" class="r45 r">partitionId</span>,
+                                                         <a href="../Consumer/EventPosition.cs.html#97742fa7b7b6b68f" class="t t">EventPosition</a> <span id="r46 rd" class="r46 r">eventPosition</span>,
+                                                         <a href="../EventHubsRetryPolicy.cs.html#bc28d871ab581a88" class="t t">EventHubsRetryPolicy</a> <span id="r47 rd" class="r47 r">retryPolicy</span>,
+                                                         <b>bool</b> <span id="r48 rd" class="r48 r">trackLastEnqueuedEventProperties</span>,
+                                                         <b>long</b>? <span id="r43 rd" class="r43 r">ownerLevel</span>,
+                                                         <b>uint</b>? <span id="r49 rd" class="r49 r">prefetchCount</span>,
+                                                         <b>long</b>? <span id="r50 rd" class="r50 r">prefetchSizeInBytes</span>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Core/Argument.cs.html#eda8ff4d51bf8b3e" class="i method">AssertNotClosed</a>(<a href="#6b1fc067560dcf9d" class="i field">_closed</a>, <b>nameof</b>(<a href="#a4c7ed578d8d178c" class="t t">AmqpClient</a>));
+ 
+            <b>return</b> <b>new</b> <a href="AmqpConsumer.cs.html#d575f5c6832bd20b" class="t constructor">AmqpConsumer</a>
+            (
+                <a href="#3d51a524909309e8" class="i property">EventHubName</a>,
+                <span class="r44 r">consumerGroup</span>,
+                <span class="r45 r">partitionId</span>,
+                <span class="r46 r">eventPosition</span>,
+                <span class="r48 r">trackLastEnqueuedEventProperties</span>,
+                <span class="r43 r">ownerLevel</span>,
+                <span class="r49 r">prefetchCount</span>,
+                <span class="r50 r">prefetchSizeInBytes</span>,
+                <a href="#330aae21e997397e" class="i property">ConnectionScope</a>,
+                <a href="#312fa87c14bc1021" class="i property">MessageConverter</a>,
+                <span class="r47 r">retryPolicy</span>
+            );
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Closes the connection to the transport client instance.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r51 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override async</b> <span class="i">Task</span> <a id="9500c11a8658d7bb" href="../R/9500c11a8658d7bb.html" target="n" data-glyph="72,1" class="i method">CloseAsync</a>(<span class="i">CancellationToken</span> <span id="r51 rd" class="r51 r">cancellationToken</span>)
+        {
+            <b>if</b> (<a href="#6b1fc067560dcf9d" class="i field">_closed</a>)
+            {
+                <b>return</b>;
+            }
+ 
+            <a href="#6b1fc067560dcf9d" class="i field">_closed</a> = <b>true</b>;
+ 
+            <b>var</b> <span id="r52 rd" class="r52 r">clientId</span> = <span class="i">GetHashCode</span>().<span class="i">ToString</span>(<span class="i">CultureInfo</span>.<span class="i">InvariantCulture</span>);
+            <b>var</b> <span id="r53 rd" class="r53 r">clientType</span> = <span class="i">GetType</span>().<span class="i">Name</span>;
+ 
+            <b>try</b>
+            {
+                <a href="../Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#c960e5896e4dd589" class="i property">Log</a>.<span class="i">ClientCloseStart</span>(<span class="r53 r">clientType</span>, <a href="#3d51a524909309e8" class="i property">EventHubName</a>, <span class="r52 r">clientId</span>);
+                <span class="r51 r">cancellationToken</span>.<a href="../SharedSource/Core/CancellationTokenExtensions.cs.html#b1bf96f66d5d14e6" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+ 
+                <b>if</b> (<a href="#e01abd246f173f66" class="i property">ManagementLink</a>?.<span class="i">TryGetOpenedObject</span>(<b>out</b> <b>var</b> <b>_</b>) == <b>true</b>)
+                {
+                    <span class="r51 r">cancellationToken</span>.<a href="../SharedSource/Core/CancellationTokenExtensions.cs.html#b1bf96f66d5d14e6" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+                    <b>await</b> <a href="#e01abd246f173f66" class="i property">ManagementLink</a>.<span class="i">CloseAsync</span>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+ 
+                <a href="#e01abd246f173f66" class="i property">ManagementLink</a>?.<span class="i">Dispose</span>();
+                <a href="#330aae21e997397e" class="i property">ConnectionScope</a>?.<a href="AmqpConnectionScope.cs.html#7d7f89ea65c8546a" class="i method">Dispose</a>();
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r54 rd" class="r54 r">ex</span>)
+            {
+                <a href="#6b1fc067560dcf9d" class="i field">_closed</a> = <b>false</b>;
+                <a href="../Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#c960e5896e4dd589" class="i property">Log</a>.<span class="i">ClientCloseError</span>(<span class="r53 r">clientType</span>, <a href="#3d51a524909309e8" class="i property">EventHubName</a>, <span class="r52 r">clientId</span>, <span class="r54 r">ex</span>.<span class="i">Message</span>);
+ 
+                <b>throw</b>;
+            }
+            <b>finally</b>
+            {
+                <a href="../Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#c960e5896e4dd589" class="i property">Log</a>.<span class="i">ClientCloseComplete</span>(<span class="r53 r">clientType</span>, <a href="#3d51a524909309e8" class="i property">EventHubName</a>, <span class="r52 r">clientId</span>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Acquires an access token for authorization with the Event Hubs service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The token to use for service authorization.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private async</b> <span class="i">Task</span>&lt;<b>string</b>&gt; <a id="f17cc3def4e6d05b" href="../R/f17cc3def4e6d05b.html" target="n" data-glyph="76,1" class="i method">AcquireAccessTokenAsync</a>(<span class="i">CancellationToken</span> <span id="r55 rd" class="r55 r">cancellationToken</span>)
+        {
+            <span class="r55 r">cancellationToken</span>.<a href="../SharedSource/Core/CancellationTokenExtensions.cs.html#b1bf96f66d5d14e6" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+ 
+            <span class="i">AccessToken</span> <span id="r56 rd" class="r56 r">activeToken</span> = <a href="#be8d7e9a0435d8c2" class="i field">_accessToken</a>;
+ 
+            <span class="c">// If there was no current token, or it is within the buffer for expiration, request a new token.</span>
+            <span class="c">// There is a benign race condition here, where there may be multiple requests in-flight for a new token.  Since</span>
+            <span class="c">// overlapping requests should be within a small window, allow the acquired token to replace the current one without</span>
+            <span class="c">// attempting to coordinate or ensure that the most recent is kept.</span>
+ 
+            <b>if</b> ((<b>string</b>.<span class="i">IsNullOrEmpty</span>(<span class="r56 r">activeToken</span>.<span class="i">Token</span>)) || (<span class="r56 r">activeToken</span>.<span class="i">ExpiresOn</span> &lt;= <span class="i">DateTimeOffset</span>.<span class="i">UtcNow</span>.<span class="i">Add</span>(<a href="#4270b05e345864ef" class="i property">CredentialRefreshBuffer</a>)))
+            {
+                <span class="r56 r">activeToken</span> = <b>await</b> <a href="#fcbdd4c16569829a" class="i property">Credential</a>.<a href="../SharedSource/Authorization/EventHubTokenCredential.cs.html#505c1d7e120e561e" class="i method">GetTokenUsingDefaultScopeAsync</a>(<span class="r55 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <b>if</b> ((<b>string</b>.<span class="i">IsNullOrEmpty</span>(<span class="r56 r">activeToken</span>.<span class="i">Token</span>)))
+                {
+                    <b>throw</b> <b>new</b> <span class="i">AuthenticationException</span>(<a href="../Resources.Designer.cs.html#0f60eafa1a3b4f36" class="t t">Resources</a>.<a href="../Resources.Designer.cs.html#fc3cb31f6265626c" class="i property">CouldNotAcquireAccessToken</a>);
+                }
+ 
+                <a href="#be8d7e9a0435d8c2" class="i field">_accessToken</a> = <span class="r56 r">activeToken</span>;
+            }
+ 
+            <b>return</b> <span class="r56 r">activeToken</span>.<span class="i">Token</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Uses the minimum value of the two specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">TimeSpan</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> instances.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r57 r">firstOption</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The first option to consider.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r58 r">secondOption</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The second option to consider.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static</b> <span class="i">TimeSpan</span> <a id="67d270589d77feec" href="../R/67d270589d77feec.html" target="n" data-glyph="76,1" class="i method">UseMinimum</a>(<span class="i">TimeSpan</span> <span id="r57 rd" class="r57 r">firstOption</span>,
+                                           <span class="i">TimeSpan</span> <span id="r58 rd" class="r58 r">secondOption</span>) =&gt; (<span class="r57 r">firstOption</span> &lt; <span class="r58 r">secondOption</span>) ? <span class="r57 r">firstOption</span> : <span class="r58 r">secondOption</span>;
+    }
+}
+</pre></td></tr></table></div></body></html>

@@ -1,0 +1,289 @@
+﻿<!DOCTYPE html>
+<html><head><title>StorageWriteStreamTests.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(280);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Storage.Common.Tests/StorageWriteStreamTests.cs" target="_top">StorageWriteStreamTests.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Storage.Common.Tests" target="_top">Azure.Storage.Common\tests\Azure.Storage.Common.Tests.csproj</a> (Azure.Storage.Common.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Buffers</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Shared</span>;
+<b>using</b> <span class="i n">Moq</span>;
+<b>using</b> <span class="i n">NUnit</span>.<span class="i n">Framework</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Tests</span>
+{
+    <b>public class</b> <a id="3f6fb6bed086c2b3" href="R/../../0000000000.html" target="n" data-glyph="0,0" class="t t"><span id="5e396e52e92ceb26">StorageWriteStreamTests</span></a>
+    {
+        <b>private static readonly string</b> <a id="7de667fea6d51390" href="R/7de667fea6d51390.html" target="n" data-glyph="46,1" class="i field">s_append</a> = <span class="s">&quot;Append&quot;</span>;
+        <b>private static readonly string</b> <a id="c9096999988eddc4" href="R/c9096999988eddc4.html" target="n" data-glyph="46,1" class="i field">s_flush</a> = <span class="s">&quot;Flush&quot;</span>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> This test uses a 1 KB buffer, and calls WriteAsync() 9 times.</span>
+        <span class="c">///</span><span class="c"> We expect 2 Append calls, 1 Flush call, and 9 writes to the buffer.</span>
+        <span class="c">///</span><span class="c"> In the current implementation, there will also be 2 writes to the buffer with count = 0.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        [<span class="t constructor">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="c9b84ecdf6945590" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">BasicTest</a>()
+        {
+            <span class="c">// Arrange</span>
+            <b>int</b> <span id="r0 rd" class="r0 r">bufferSize</span> = <a href="/Azure.Storage.Common/A.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="/Azure.Storage.Common/A.html#4240fd6a2382c38e" class="i field">KB</a>;
+            <b>int</b> <span id="r1 rd" class="r1 r">writeSize</span> = 256;
+            <b>int</b> <span id="r2 rd" class="r2 r">writeCount</span> = 9;
+ 
+            <span class="t t">Mock</span>&lt;<a href="Shared/PooledMemoryStream.cs.html#1b57485f6b2784fa" class="t t">PooledMemoryStream</a>&gt; <span id="r3 rd" class="r3 r">mockBuffer</span> = <b>new</b> <span class="t constructor">Mock</span>&lt;<a href="Shared/PooledMemoryStream.cs.html#1b57485f6b2784fa" class="t t">PooledMemoryStream</a>&gt;(<span class="t t">MockBehavior</span>.<span class="i field">Strict</span>);
+            <a href="#4184e89e192a156c" class="t t">StorageWriteStreamImplementation</a> <span id="r4 rd" class="r4 r">stream</span> = <b>new</b> <a href="#14284f6d6dfe1cd2" class="t constructor">StorageWriteStreamImplementation</a>(
+                <span class="r5 r">position</span>: 0,
+                <span class="r6 r">bufferSize</span>: <span class="r0 r">bufferSize</span>,
+                <span class="r7 r">progressHandler</span>: <b>null</b>,
+                <span class="r8 r">buffer</span>: <span class="r3 r">mockBuffer</span>.<span class="i property">Object</span>);
+ 
+            <span class="r3 r">mockBuffer</span>.<span class="i method">SetupSequence</span>(<span id="r9 rd" class="r9 r">r</span> =&gt; <span class="r9 r">r</span>.<a href="@0@mscorlib/A.html#646bf77f3c9e8556" class="i method">WriteAsync</a>(
+                <span class="t t">It</span>.<span class="i method">IsAny</span>&lt;<b>byte</b>[]&gt;(),
+                <span class="t t">It</span>.<span class="i method">IsAny</span>&lt;<b>int</b>&gt;(),
+                <span class="t t">It</span>.<span class="i method">IsAny</span>&lt;<b>int</b>&gt;(),
+                <span class="t t">It</span>.<span class="i method">IsAny</span>&lt;<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>&gt;()))
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>)
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>)
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>)
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>)
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>)
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>)
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>)
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>)
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>)
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>)
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>);
+ 
+            <span class="r3 r">mockBuffer</span>.<span class="i method">SetupSequence</span>(<span id="r10 rd" class="r10 r">r</span> =&gt; <span class="r10 r">r</span>.<a href="Shared/PooledMemoryStream.cs.html#7837e3930028e944" class="i property">Position</a>)
+                .<span class="i method">Returns</span>(0)
+                .<span class="i method">Returns</span>(256)
+                .<span class="i method">Returns</span>(512)
+                .<span class="i method">Returns</span>(768)
+                .<span class="i method">Returns</span>(1024)
+                .<span class="i method">Returns</span>(1024)
+                .<span class="i method">Returns</span>(0)
+                .<span class="i method">Returns</span>(256)
+                .<span class="i method">Returns</span>(512)
+                .<span class="i method">Returns</span>(1024)
+                .<span class="i method">Returns</span>(1024);
+ 
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<b>byte</b>[]&gt; <span id="r11 rd" class="r11 r">data</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<b>byte</b>[]&gt;();
+            <b>for</b> (<b>int</b> <span id="r12 rd" class="r12 r">i</span> = 0; <span class="r12 r">i</span> &lt; <span class="r2 r">writeCount</span>; <span class="r12 r">i</span>++)
+            {
+                <span class="r11 r">data</span>.<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<a href="#5667f5099082e78c" class="i method">GetRandomBuffer</a>(<span class="r1 r">writeSize</span>));
+            }
+ 
+            <span class="c">// Act</span>
+            <b>for</b> (<b>int</b> <span id="r13 rd" class="r13 r">i</span> = 0; <span class="r13 r">i</span> &lt; <span class="r2 r">writeCount</span>; <span class="r13 r">i</span>++)
+            {
+                <b>await</b> <span class="r4 r">stream</span>.<a href="@0@mscorlib/A.html#da66045de943643c" class="i method">WriteAsync</a>(<span class="r11 r">data</span><a href="@0@mscorlib/A.html#0c65bec4d3fac21e">[</a><span class="r13 r">i</span>], 0, <span class="r1 r">writeSize</span>);
+            }
+ 
+            <b>await</b> <span class="r4 r">stream</span>.<a href="@0@mscorlib/A.html#cee1514a2782d81a" class="i method">FlushAsync</a>();
+ 
+            <span class="c">// Assert</span>
+            <span class="t t">Assert</span>.<span class="i method">AreEqual</span>(3, <span class="r4 r">stream</span>.<a href="#78fc8ebcbe5b54ca" class="i field">ApiCalls</a>.<a href="@0@mscorlib/A.html#78a69d857716bc68" class="i property">Count</a>);
+            <span class="t t">Assert</span>.<span class="i method">AreEqual</span>(<a href="#7de667fea6d51390" class="i field">s_append</a>, <span class="r4 r">stream</span>.<a href="#78fc8ebcbe5b54ca" class="i field">ApiCalls</a>[0]);
+            <span class="t t">Assert</span>.<span class="i method">AreEqual</span>(<a href="#7de667fea6d51390" class="i field">s_append</a>, <span class="r4 r">stream</span>.<a href="#78fc8ebcbe5b54ca" class="i field">ApiCalls</a>[1]);
+            <span class="t t">Assert</span>.<span class="i method">AreEqual</span>(<a href="#c9096999988eddc4" class="i field">s_flush</a>, <span class="r4 r">stream</span>.<a href="#78fc8ebcbe5b54ca" class="i field">ApiCalls</a>[2]);
+ 
+            <span class="r3 r">mockBuffer</span>.<span class="i method">Verify</span>(<span id="r14 rd" class="r14 r">r</span> =&gt; <span class="r14 r">r</span>.<a href="Shared/PooledMemoryStream.cs.html#7837e3930028e944" class="i property">Position</a>, <span class="t t">Times</span>.<span class="i method">Exactly</span>(11));
+            <b>for</b> (<b>int</b> <span id="r15 rd" class="r15 r">i</span> = 0; <span class="r15 r">i</span> &lt; <span class="r2 r">writeCount</span>; <span class="r15 r">i</span>++)
+            {
+                <span class="r3 r">mockBuffer</span>.<span class="i method">Verify</span>(<span id="r16 rd" class="r16 r">r</span> =&gt; <span class="r16 r">r</span>.<a href="@0@mscorlib/A.html#646bf77f3c9e8556" class="i method">WriteAsync</a>(
+                    <span class="r11 r">data</span><a href="@0@mscorlib/A.html#0c65bec4d3fac21e">[</a><span class="r15 r">i</span>],
+                    0,
+                    <span class="r1 r">writeSize</span>,
+                    <b>default</b>));
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> In this test, we are using a 1 KB buffer, and doing 5 writes of 500 bytes each.</span>
+        <span class="c">///</span><span class="c"> We expect 2 Append calls, 1 Flush call, and 7 writes to the buffer.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        [<span class="t constructor">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="26c55b780dd93f76" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">NonAlignedWrites</a>()
+        {
+            <span class="c">// Arrange</span>
+            <b>int</b> <span id="r17 rd" class="r17 r">bufferSize</span> = <a href="/Azure.Storage.Common/A.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="/Azure.Storage.Common/A.html#4240fd6a2382c38e" class="i field">KB</a>;
+            <b>int</b> <span id="r18 rd" class="r18 r">writeSize</span> = 500;
+            <b>int</b> <span id="r19 rd" class="r19 r">writeCount</span> = 5;
+ 
+            <span class="t t">Mock</span>&lt;<a href="Shared/PooledMemoryStream.cs.html#1b57485f6b2784fa" class="t t">PooledMemoryStream</a>&gt; <span id="r20 rd" class="r20 r">mockBuffer</span> = <b>new</b> <span class="t constructor">Mock</span>&lt;<a href="Shared/PooledMemoryStream.cs.html#1b57485f6b2784fa" class="t t">PooledMemoryStream</a>&gt;(<span class="t t">MockBehavior</span>.<span class="i field">Strict</span>);
+            <a href="#4184e89e192a156c" class="t t">StorageWriteStreamImplementation</a> <span id="r21 rd" class="r21 r">stream</span> = <b>new</b> <a href="#14284f6d6dfe1cd2" class="t constructor">StorageWriteStreamImplementation</a>(
+                <span class="r5 r">position</span>: 0,
+                <span class="r6 r">bufferSize</span>: <span class="r17 r">bufferSize</span>,
+                <span class="r7 r">progressHandler</span>: <b>null</b>,
+                <span class="r8 r">buffer</span>: <span class="r20 r">mockBuffer</span>.<span class="i property">Object</span>);
+ 
+            <span class="r20 r">mockBuffer</span>.<span class="i method">SetupSequence</span>(<span id="r22 rd" class="r22 r">r</span> =&gt; <span class="r22 r">r</span>.<a href="@0@mscorlib/A.html#646bf77f3c9e8556" class="i method">WriteAsync</a>(
+                <span class="t t">It</span>.<span class="i method">IsAny</span>&lt;<b>byte</b>[]&gt;(),
+                <span class="t t">It</span>.<span class="i method">IsAny</span>&lt;<b>int</b>&gt;(),
+                <span class="t t">It</span>.<span class="i method">IsAny</span>&lt;<b>int</b>&gt;(),
+                <span class="t t">It</span>.<span class="i method">IsAny</span>&lt;<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>&gt;()))
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>)
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>)
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>)
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>)
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>)
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>)
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>);
+ 
+            <span class="r20 r">mockBuffer</span>.<span class="i method">SetupSequence</span>(<span id="r23 rd" class="r23 r">r</span> =&gt; <span class="r23 r">r</span>.<a href="Shared/PooledMemoryStream.cs.html#7837e3930028e944" class="i property">Position</a>)
+                .<span class="i method">Returns</span>(0)
+                .<span class="i method">Returns</span>(500)
+                .<span class="i method">Returns</span>(1000)
+                .<span class="i method">Returns</span>(1000)
+                .<span class="i method">Returns</span>(476)
+                .<span class="i method">Returns</span>(976)
+                .<span class="i method">Returns</span>(976);
+ 
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<b>byte</b>[]&gt; <span id="r24 rd" class="r24 r">data</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<b>byte</b>[]&gt;();
+            <b>for</b> (<b>int</b> <span id="r25 rd" class="r25 r">i</span> = 0; <span class="r25 r">i</span> &lt; <span class="r19 r">writeCount</span>; <span class="r25 r">i</span>++)
+            {
+                <span class="r24 r">data</span>.<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<a href="#5667f5099082e78c" class="i method">GetRandomBuffer</a>(<span class="r18 r">writeSize</span>));
+            }
+ 
+            <span class="c">// Act</span>
+            <b>for</b> (<b>int</b> <span id="r26 rd" class="r26 r">i</span> = 0; <span class="r26 r">i</span> &lt; <span class="r19 r">writeCount</span>; <span class="r26 r">i</span>++)
+            {
+                <b>await</b> <span class="r21 r">stream</span>.<a href="@0@mscorlib/A.html#da66045de943643c" class="i method">WriteAsync</a>(<span class="r24 r">data</span><a href="@0@mscorlib/A.html#0c65bec4d3fac21e">[</a><span class="r26 r">i</span>], 0, <span class="r18 r">writeSize</span>);
+            }
+            <b>await</b> <span class="r21 r">stream</span>.<a href="@0@mscorlib/A.html#cee1514a2782d81a" class="i method">FlushAsync</a>();
+ 
+            <span class="c">// Assert</span>
+            <span class="t t">Assert</span>.<span class="i method">AreEqual</span>(3, <span class="r21 r">stream</span>.<a href="#78fc8ebcbe5b54ca" class="i field">ApiCalls</a>.<a href="@0@mscorlib/A.html#78a69d857716bc68" class="i property">Count</a>);
+            <span class="t t">Assert</span>.<span class="i method">AreEqual</span>(<a href="#7de667fea6d51390" class="i field">s_append</a>, <span class="r21 r">stream</span>.<a href="#78fc8ebcbe5b54ca" class="i field">ApiCalls</a>[0]);
+            <span class="t t">Assert</span>.<span class="i method">AreEqual</span>(<a href="#7de667fea6d51390" class="i field">s_append</a>, <span class="r21 r">stream</span>.<a href="#78fc8ebcbe5b54ca" class="i field">ApiCalls</a>[1]);
+            <span class="t t">Assert</span>.<span class="i method">AreEqual</span>(<a href="#c9096999988eddc4" class="i field">s_flush</a>, <span class="r21 r">stream</span>.<a href="#78fc8ebcbe5b54ca" class="i field">ApiCalls</a>[2]);
+ 
+            <span class="r20 r">mockBuffer</span>.<span class="i method">Verify</span>(<span id="r27 rd" class="r27 r">r</span> =&gt; <span class="r27 r">r</span>.<a href="Shared/PooledMemoryStream.cs.html#7837e3930028e944" class="i property">Position</a>, <span class="t t">Times</span>.<span class="i method">Exactly</span>(7));
+ 
+            <span class="r20 r">mockBuffer</span>.<span class="i method">Verify</span>(<span id="r28 rd" class="r28 r">r</span> =&gt; <span class="r28 r">r</span>.<a href="@0@mscorlib/A.html#646bf77f3c9e8556" class="i method">WriteAsync</a>(<span class="r24 r">data</span>[0], 0, <span class="r18 r">writeSize</span>, <b>default</b>));
+            <span class="r20 r">mockBuffer</span>.<span class="i method">Verify</span>(<span id="r29 rd" class="r29 r">r</span> =&gt; <span class="r29 r">r</span>.<a href="@0@mscorlib/A.html#646bf77f3c9e8556" class="i method">WriteAsync</a>(<span class="r24 r">data</span>[1], 0, <span class="r18 r">writeSize</span>, <b>default</b>));
+            <span class="r20 r">mockBuffer</span>.<span class="i method">Verify</span>(<span id="r30 rd" class="r30 r">r</span> =&gt; <span class="r30 r">r</span>.<a href="@0@mscorlib/A.html#646bf77f3c9e8556" class="i method">WriteAsync</a>(<span class="r24 r">data</span>[2], 0, 24, <b>default</b>));
+            <span class="r20 r">mockBuffer</span>.<span class="i method">Verify</span>(<span id="r31 rd" class="r31 r">r</span> =&gt; <span class="r31 r">r</span>.<a href="@0@mscorlib/A.html#646bf77f3c9e8556" class="i method">WriteAsync</a>(<span class="r24 r">data</span>[2], 24, 476, <b>default</b>));
+            <span class="r20 r">mockBuffer</span>.<span class="i method">Verify</span>(<span id="r32 rd" class="r32 r">r</span> =&gt; <span class="r32 r">r</span>.<a href="@0@mscorlib/A.html#646bf77f3c9e8556" class="i method">WriteAsync</a>(<span class="r24 r">data</span>[3], 0, <span class="r18 r">writeSize</span>, <b>default</b>));
+            <span class="r20 r">mockBuffer</span>.<span class="i method">Verify</span>(<span id="r33 rd" class="r33 r">r</span> =&gt; <span class="r33 r">r</span>.<a href="@0@mscorlib/A.html#646bf77f3c9e8556" class="i method">WriteAsync</a>(<span class="r24 r">data</span>[4], 0, 48, <b>default</b>));
+            <span class="r20 r">mockBuffer</span>.<span class="i method">Verify</span>(<span id="r34 rd" class="r34 r">r</span> =&gt; <span class="r34 r">r</span>.<a href="@0@mscorlib/A.html#646bf77f3c9e8556" class="i method">WriteAsync</a>(<span class="r24 r">data</span>[4], 48, 452, <b>default</b>));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> In this test, we have a 1 KB buffer, and are making 2 writes of 2000 bytes.</span>
+        <span class="c">///</span><span class="c"> We expect 3 Append calls, 1 flush call, and 5 calls to buffer.Write.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        [<span class="t constructor">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="12a8bce41823530e" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">WritesLargerThanBufferNonAligned</a>()
+        {
+            <span class="c">// Arrange</span>
+            <b>int</b> <span id="r35 rd" class="r35 r">bufferSize</span> = <a href="/Azure.Storage.Common/A.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="/Azure.Storage.Common/A.html#4240fd6a2382c38e" class="i field">KB</a>;
+            <b>int</b> <span id="r36 rd" class="r36 r">writeSize</span> = 2000;
+            <b>int</b> <span id="r37 rd" class="r37 r">writeCount</span> = 2;
+ 
+            <span class="t t">Mock</span>&lt;<a href="Shared/PooledMemoryStream.cs.html#1b57485f6b2784fa" class="t t">PooledMemoryStream</a>&gt; <span id="r38 rd" class="r38 r">mockBuffer</span> = <b>new</b> <span class="t constructor">Mock</span>&lt;<a href="Shared/PooledMemoryStream.cs.html#1b57485f6b2784fa" class="t t">PooledMemoryStream</a>&gt;(<span class="t t">MockBehavior</span>.<span class="i field">Strict</span>);
+            <a href="#4184e89e192a156c" class="t t">StorageWriteStreamImplementation</a> <span id="r39 rd" class="r39 r">stream</span> = <b>new</b> <a href="#14284f6d6dfe1cd2" class="t constructor">StorageWriteStreamImplementation</a>(
+                <span class="r5 r">position</span>: 0,
+                <span class="r6 r">bufferSize</span>: <span class="r35 r">bufferSize</span>,
+                <span class="r7 r">progressHandler</span>: <b>null</b>,
+                <span class="r8 r">buffer</span>: <span class="r38 r">mockBuffer</span>.<span class="i property">Object</span>);
+ 
+            <span class="r38 r">mockBuffer</span>.<span class="i method">SetupSequence</span>(<span id="r40 rd" class="r40 r">r</span> =&gt; <span class="r40 r">r</span>.<a href="@0@mscorlib/A.html#646bf77f3c9e8556" class="i method">WriteAsync</a>(
+                <span class="t t">It</span>.<span class="i method">IsAny</span>&lt;<b>byte</b>[]&gt;(),
+                <span class="t t">It</span>.<span class="i method">IsAny</span>&lt;<b>int</b>&gt;(),
+                <span class="t t">It</span>.<span class="i method">IsAny</span>&lt;<b>int</b>&gt;(),
+                <span class="t t">It</span>.<span class="i method">IsAny</span>&lt;<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>&gt;()))
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>)
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>)
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>)
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>)
+                    .<span class="i method">Returns</span>(<a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>);
+ 
+            <span class="r38 r">mockBuffer</span>.<span class="i method">SetupSequence</span>(<span id="r41 rd" class="r41 r">r</span> =&gt; <span class="r41 r">r</span>.<a href="Shared/PooledMemoryStream.cs.html#7837e3930028e944" class="i property">Position</a>)
+                .<span class="i method">Returns</span>(0)
+                .<span class="i method">Returns</span>(0)
+                .<span class="i method">Returns</span>(976)
+                .<span class="i method">Returns</span>(976);
+ 
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<b>byte</b>[]&gt; <span id="r42 rd" class="r42 r">data</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<b>byte</b>[]&gt;();
+            <b>for</b> (<b>int</b> <span id="r43 rd" class="r43 r">i</span> = 0; <span class="r43 r">i</span> &lt; <span class="r37 r">writeCount</span>; <span class="r43 r">i</span>++)
+            {
+                <span class="r42 r">data</span>.<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<a href="#5667f5099082e78c" class="i method">GetRandomBuffer</a>(<span class="r36 r">writeSize</span>));
+            }
+ 
+            <span class="c">// Act</span>
+            <b>for</b> (<b>int</b> <span id="r44 rd" class="r44 r">i</span> = 0; <span class="r44 r">i</span> &lt; <span class="r37 r">writeCount</span>; <span class="r44 r">i</span>++)
+            {
+                <b>await</b> <span class="r39 r">stream</span>.<a href="@0@mscorlib/A.html#da66045de943643c" class="i method">WriteAsync</a>(<span class="r42 r">data</span><a href="@0@mscorlib/A.html#0c65bec4d3fac21e">[</a><span class="r44 r">i</span>], 0, <span class="r36 r">writeSize</span>);
+            }
+            <b>await</b> <span class="r39 r">stream</span>.<a href="@0@mscorlib/A.html#cee1514a2782d81a" class="i method">FlushAsync</a>();
+ 
+            <span class="c">// Assert</span>
+            <span class="t t">Assert</span>.<span class="i method">AreEqual</span>(4, <span class="r39 r">stream</span>.<a href="#78fc8ebcbe5b54ca" class="i field">ApiCalls</a>.<a href="@0@mscorlib/A.html#78a69d857716bc68" class="i property">Count</a>);
+            <span class="t t">Assert</span>.<span class="i method">AreEqual</span>(<a href="#7de667fea6d51390" class="i field">s_append</a>, <span class="r39 r">stream</span>.<a href="#78fc8ebcbe5b54ca" class="i field">ApiCalls</a>[0]);
+            <span class="t t">Assert</span>.<span class="i method">AreEqual</span>(<a href="#7de667fea6d51390" class="i field">s_append</a>, <span class="r39 r">stream</span>.<a href="#78fc8ebcbe5b54ca" class="i field">ApiCalls</a>[1]);
+            <span class="t t">Assert</span>.<span class="i method">AreEqual</span>(<a href="#7de667fea6d51390" class="i field">s_append</a>, <span class="r39 r">stream</span>.<a href="#78fc8ebcbe5b54ca" class="i field">ApiCalls</a>[2]);
+            <span class="t t">Assert</span>.<span class="i method">AreEqual</span>(<a href="#c9096999988eddc4" class="i field">s_flush</a>, <span class="r39 r">stream</span>.<a href="#78fc8ebcbe5b54ca" class="i field">ApiCalls</a>[3]);
+ 
+            <span class="r38 r">mockBuffer</span>.<span class="i method">Verify</span>(<span id="r45 rd" class="r45 r">r</span> =&gt; <span class="r45 r">r</span>.<a href="Shared/PooledMemoryStream.cs.html#7837e3930028e944" class="i property">Position</a>, <span class="t t">Times</span>.<span class="i method">Exactly</span>(4));
+ 
+            <span class="r38 r">mockBuffer</span>.<span class="i method">Verify</span>(<span id="r46 rd" class="r46 r">r</span> =&gt; <span class="r46 r">r</span>.<a href="@0@mscorlib/A.html#646bf77f3c9e8556" class="i method">WriteAsync</a>(<span class="r42 r">data</span>[0], 0, <span class="r35 r">bufferSize</span>, <b>default</b>));
+            <span class="r38 r">mockBuffer</span>.<span class="i method">Verify</span>(<span id="r47 rd" class="r47 r">r</span> =&gt; <span class="r47 r">r</span>.<a href="@0@mscorlib/A.html#646bf77f3c9e8556" class="i method">WriteAsync</a>(<span class="r42 r">data</span>[0], <span class="r35 r">bufferSize</span>, 976, <b>default</b>));
+            <span class="r38 r">mockBuffer</span>.<span class="i method">Verify</span>(<span id="r48 rd" class="r48 r">r</span> =&gt; <span class="r48 r">r</span>.<a href="@0@mscorlib/A.html#646bf77f3c9e8556" class="i method">WriteAsync</a>(<span class="r42 r">data</span>[1], 0, 48, <b>default</b>));
+            <span class="r38 r">mockBuffer</span>.<span class="i method">Verify</span>(<span id="r49 rd" class="r49 r">r</span> =&gt; <span class="r49 r">r</span>.<a href="@0@mscorlib/A.html#646bf77f3c9e8556" class="i method">WriteAsync</a>(<span class="r42 r">data</span>[1], 48, 1024, <b>default</b>));
+            <span class="r38 r">mockBuffer</span>.<span class="i method">Verify</span>(<span id="r50 rd" class="r50 r">r</span> =&gt; <span class="r50 r">r</span>.<a href="@0@mscorlib/A.html#646bf77f3c9e8556" class="i method">WriteAsync</a>(<span class="r42 r">data</span>[1], 1072, 928, <b>default</b>));
+        }
+ 
+        <b>internal class</b> <a id="4184e89e192a156c" href="R/4184e89e192a156c.html" target="n" data-glyph="2,1" class="t t">StorageWriteStreamImplementation</a> : <a href="Shared/StorageWriteStream.cs.html#2ef52d219ab72c98" class="t t">StorageWriteStream</a>
+        {
+            <b>public</b> <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="78fc8ebcbe5b54ca" href="R/78fc8ebcbe5b54ca.html" target="n" data-glyph="42,2" class="i field">ApiCalls</a>;
+            <b>public</b> <a href="Shared/PooledMemoryStream.cs.html#1b57485f6b2784fa" class="t t">PooledMemoryStream</a> <a id="a0d418bd7c097295" href="R/../../0000000000.html" target="n" data-glyph="102,2" class="i property">Buffer</a> { <b>get</b>; <b>private set</b>; }
+ 
+            <b>public</b> <a id="14284f6d6dfe1cd2" href="R/14284f6d6dfe1cd2.html" target="n" data-glyph="72,2" class="t constructor">StorageWriteStreamImplementation</a>(
+                <b>long</b> <span id="r5 rd" class="r5 r">position</span>,
+                <b>long</b> <span id="r6 rd" class="r6 r">bufferSize</span>,
+                <a href="@0@mscorlib/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<b>long</b>&gt; <span id="r7 rd" class="r7 r">progressHandler</span>,
+                <a href="Shared/PooledMemoryStream.cs.html#1b57485f6b2784fa" class="t t">PooledMemoryStream</a> <span id="r8 rd" class="r8 r">buffer</span>)
+                : <a href="Shared/StorageWriteStream.cs.html#ce3639355ce0a3e7" class="k">base</a>(<span class="r5 r">position</span>, <span class="r6 r">bufferSize</span>, <span class="r7 r">progressHandler</span>, <span class="r8 r">buffer</span>)
+            {
+                <a href="#78fc8ebcbe5b54ca" class="i field">ApiCalls</a> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;();
+            }
+ 
+            <b>protected override</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="980c11cbf32ab865" href="R/980c11cbf32ab865.html" target="n" data-glyph="75,2" class="i method">AppendInternal</a>(<b>bool</b> <span id="r51 rd" class="r51 r">async</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r52 rd" class="r52 r">cancellationToken</span>)
+            {
+                <a href="#78fc8ebcbe5b54ca" class="i field">ApiCalls</a>.<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<a href="#7de667fea6d51390" class="i field">s_append</a>);
+                <b>return</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>;
+            }
+ 
+            <b>protected override</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="0df1e58acc4d40cc" href="R/0df1e58acc4d40cc.html" target="n" data-glyph="75,2" class="i method">FlushInternal</a>(<b>bool</b> <span id="r53 rd" class="r53 r">async</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r54 rd" class="r54 r">cancellationToken</span>)
+            {
+                <a href="#78fc8ebcbe5b54ca" class="i field">ApiCalls</a>.<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<a href="#c9096999988eddc4" class="i field">s_flush</a>);
+                <b>return</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>;
+            }
+ 
+            <b>protected override void</b> <a id="1178f31458c81fc0" href="R/1178f31458c81fc0.html" target="n" data-glyph="75,2" class="i method">ValidateBufferSize</a>(<b>long</b> <span id="r55 rd" class="r55 r">bufferSize</span>)
+            {
+            }
+        }
+        <b>private static byte</b>[] <a id="5667f5099082e78c" href="R/5667f5099082e78c.html" target="n" data-glyph="76,1" class="i method">GetRandomBuffer</a>(<b>long</b> <span id="r56 rd" class="r56 r">size</span>)
+        {
+            <a href="@0@mscorlib/A.html#bb77e610694e64ca" class="t t">Random</a> <span id="r57 rd" class="r57 r">random</span> = <b>new</b> <a href="@0@mscorlib/A.html#92e3cf6e56571d5a" class="t constructor">Random</a>(<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#39a839e5e9ca1f3f" class="i property">TickCount</a>);
+            <b>var</b> <span id="r58 rd" class="r58 r">buffer</span> = <b>new</b> <b>byte</b>[<span class="r56 r">size</span>];
+            <span class="r57 r">random</span>.<a href="@0@mscorlib/A.html#04910e5e5c6c9a8b" class="i method">NextBytes</a>(<span class="r58 r">buffer</span>);
+            <b>return</b> <span class="r58 r">buffer</span>;
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

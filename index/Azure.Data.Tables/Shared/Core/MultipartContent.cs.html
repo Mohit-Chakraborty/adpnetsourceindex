@@ -1,0 +1,382 @@
+﻿<!DOCTYPE html>
+<html><head><title>MultipartContent.cs</title><link rel="stylesheet" href="../../../styles.css"><script src="../../../scripts.js"></script></head>
+<body class="cB" onload="i(373);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Data.Tables/Shared/Core/MultipartContent.cs" target="_top">Shared\Core\MultipartContent.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Data.Tables" target="_top">src\Azure.Data.Tables.csproj</a> (Azure.Data.Tables)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">IO</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Text</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+ 
+<span class="k preprocess">#</span><span class="k preprocess">nullable</span> <span class="k preprocess">disable</span>
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Core</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">  Provides a container for content encoded using multipart/form-data MIME type.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="877cbc0042fc858c" href="../../R/877cbc0042fc858c.html" target="n" data-glyph="2,0" class="t t">MultipartContent</a> : <span class="i">RequestContent</span>
+    {
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Fields
+ 
+        <b>private const string</b> <a id="6ce88062d628fc3c" href="../../R/6ce88062d628fc3c.html" target="n" data-glyph="10,1" class="i field">CrLf</a> = <span class="s">&quot;\r\n&quot;</span>;
+        <b>private const string</b> <a id="c301939dccdf0613" href="../../R/c301939dccdf0613.html" target="n" data-glyph="10,1" class="i field">ColonSP</a> = <span class="s">&quot;: &quot;</span>;
+ 
+        <b>private static readonly int</b> <a id="46b11e2d0487e097" href="../../R/46b11e2d0487e097.html" target="n" data-glyph="46,1" class="i field">s_crlfLength</a> = <a href="#164dd35626782a62" class="i method">GetEncodedLength</a>(<a href="#6ce88062d628fc3c" class="i field">CrLf</a>);
+        <b>private static readonly int</b> <a id="93ea23fe03735a94" href="../../R/93ea23fe03735a94.html" target="n" data-glyph="46,1" class="i field">s_dashDashLength</a> = <a href="#164dd35626782a62" class="i method">GetEncodedLength</a>(<span class="s">&quot;--&quot;</span>);
+        <b>private static readonly int</b> <a id="61bf709d87a0173c" href="../../R/61bf709d87a0173c.html" target="n" data-glyph="46,1" class="i field">s_colonSpaceLength</a> = <a href="#164dd35626782a62" class="i method">GetEncodedLength</a>(<a href="#c301939dccdf0613" class="i field">ColonSP</a>);
+ 
+        <b>private readonly</b> <span class="i">List</span>&lt;<a href="#f4e7086638c657d5" class="t t">MultipartRequestContent</a>&gt; <a id="924a961808bbb558" href="../../R/924a961808bbb558.html" target="n" data-glyph="46,1" class="i field">_nestedContent</a>;
+        <b>private readonly string</b> <a id="ed1895ea92a6211a" href="../../R/ed1895ea92a6211a.html" target="n" data-glyph="46,1" class="i field">_subtype</a>;
+        <b>private readonly string</b> <a id="07009e10db2ee9e7" href="../../R/07009e10db2ee9e7.html" target="n" data-glyph="46,1" class="i field">_boundary</a>;
+        <b>internal readonly</b> <span class="i">Dictionary</span>&lt;<b>string</b>, <b>string</b>&gt; <a id="aeed9da34d816942" href="../../R/aeed9da34d816942.html" target="n" data-glyph="44,1" class="i field">_headers</a>;
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span> Fields
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Construction
+ 
+        <b>public</b> <a id="657d2669ea155fdd" href="../../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">MultipartContent</a>()
+            : <a href="#ef4f7ae9992a7603" class="k">this</a>(<span class="s">&quot;mixed&quot;</span>, <a href="#48219e2b2649384d" class="i method">GetDefaultBoundary</a>())
+        { }
+ 
+        <b>public</b> <a id="c35f7e60431902e8" href="../../R/c35f7e60431902e8.html" target="n" data-glyph="72,1" class="t constructor">MultipartContent</a>(<b>string</b> <span id="r0 rd" class="r0 r">subtype</span>)
+            : <a href="#ef4f7ae9992a7603" class="k">this</a>(<span class="r0 r">subtype</span>, <a href="#48219e2b2649384d" class="i method">GetDefaultBoundary</a>())
+        { }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">  Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#877cbc0042fc858c" class="t t">MultipartContent</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">subtype</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The multipart sub type.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">boundary</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The boundary string for the multipart form data content.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="ef4f7ae9992a7603" href="../../R/ef4f7ae9992a7603.html" target="n" data-glyph="72,1" class="t constructor">MultipartContent</a>(<b>string</b> <span id="r1 rd" class="r1 r">subtype</span>, <b>string</b> <span id="r2 rd" class="r2 r">boundary</span>)
+        {
+            <a href="#9266aae090442385" class="i method">ValidateBoundary</a>(<span class="r2 r">boundary</span>);
+            <a href="#ed1895ea92a6211a" class="i field">_subtype</a> = <span class="r1 r">subtype</span>;
+ 
+            <span class="c">// see https://www.ietf.org/rfc/rfc1521.txt page 29.</span>
+            <a href="#07009e10db2ee9e7" class="i field">_boundary</a> = <span class="r2 r">boundary</span>.<span class="i">Contains</span>(<span class="s">&quot;:&quot;</span>) ? <span class="s">$&quot;</span>\&quot;{<span class="r2 r">boundary</span>}\&quot;<span class="s">&quot;</span> : <span class="r2 r">boundary</span>;
+            <a href="#aeed9da34d816942" class="i field">_headers</a> = <b>new</b> <span class="i">Dictionary</span>&lt;<b>string</b>, <b>string</b>&gt;
+            {
+                [<span class="i">HttpHeader</span>.<span class="i">Names</span>.<span class="i">ContentType</span>] = <span class="s">$&quot;</span><span class="s">multipart/</span>{<a href="#ed1895ea92a6211a" class="i field">_subtype</a>}<span class="s">; boundary=</span>{<a href="#07009e10db2ee9e7" class="i field">_boundary</a>}<span class="s">&quot;</span>
+            };
+ 
+            <a href="#924a961808bbb558" class="i field">_nestedContent</a> = <b>new</b> <span class="i">List</span>&lt;<a href="#f4e7086638c657d5" class="t t">MultipartRequestContent</a>&gt;();
+        }
+ 
+        <b>private static void</b> <a id="9266aae090442385" href="../../R/9266aae090442385.html" target="n" data-glyph="76,1" class="i method">ValidateBoundary</a>(<b>string</b> <span id="r3 rd" class="r3 r">boundary</span>)
+        {
+            <span class="c">// NameValueHeaderValue is too restrictive for boundary.</span>
+            <span class="c">// Instead validate it ourselves and then quote it.</span>
+            <a href="../Argument.cs.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Argument.cs.html#fa55a5c88c3dc11d" class="i method">AssertNotNullOrWhiteSpace</a>(<span class="r3 r">boundary</span>, <b>nameof</b>(<span class="r3 r">boundary</span>));
+ 
+            <span class="c">// RFC 2046 Section 5.1.1</span>
+            <span class="c">// boundary := 0*69&lt;bchars&gt; bcharsnospace</span>
+            <span class="c">// bchars := bcharsnospace / &quot; &quot;</span>
+            <span class="c">// bcharsnospace := DIGIT / ALPHA / &quot;&#39;&quot; / &quot;(&quot; / &quot;)&quot; / &quot;+&quot; / &quot;_&quot; / &quot;,&quot; / &quot;-&quot; / &quot;.&quot; / &quot;/&quot; / &quot;:&quot; / &quot;=&quot; / &quot;?&quot;</span>
+            <b>if</b> (<span class="r3 r">boundary</span>.<span class="i">Length</span> &gt; 70)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentOutOfRangeException</span>(<b>nameof</b>(<span class="r3 r">boundary</span>), <span class="r3 r">boundary</span>, <span class="s">$&quot;</span><span class="s">The field cannot be longer than </span>{70}<span class="s"> characters.</span><span class="s">&quot;</span>);
+            }
+            <span class="c">// Cannot end with space.</span>
+            <b>if</b> (<span class="r3 r">boundary</span>.<span class="i">EndsWith</span>(<span class="s">&quot; &quot;</span>, <span class="i">StringComparison</span>.<span class="i">InvariantCultureIgnoreCase</span>))
+            {
+                <b>throw</b> <b>new</b> <span class="i">ArgumentException</span>(<span class="s">$&quot;</span><span class="s">The format of value &#39;</span>{<span class="r3 r">boundary</span>}<span class="s">&#39; is invalid.</span><span class="s">&quot;</span>, <b>nameof</b>(<span class="r3 r">boundary</span>));
+            }
+ 
+            <b>const string</b> <span id="r4 rd" class="r4 r">AllowedMarks</span> = <span class="s">@&quot;&#39;()+_,-./:=? &quot;</span>;
+ 
+            <b>foreach</b> (<b>char</b> <span id="r5 rd" class="r5 r">ch</span> <b>in</b> <span class="r3 r">boundary</span>)
+            {
+                <b>if</b> ((<span class="s">&#39;0&#39;</span> &lt;= <span class="r5 r">ch</span> &amp;&amp; <span class="r5 r">ch</span> &lt;= <span class="s">&#39;9&#39;</span>) || <span class="c">// Digit.</span>
+                    (<span class="s">&#39;a&#39;</span> &lt;= <span class="r5 r">ch</span> &amp;&amp; <span class="r5 r">ch</span> &lt;= <span class="s">&#39;z&#39;</span>) || <span class="c">// alpha.</span>
+                    (<span class="s">&#39;A&#39;</span> &lt;= <span class="r5 r">ch</span> &amp;&amp; <span class="r5 r">ch</span> &lt;= <span class="s">&#39;Z&#39;</span>) || <span class="c">// ALPHA.</span>
+                    <span class="r4 r">AllowedMarks</span>.<span class="i">Contains</span>(<b>char</b>.<span class="i">ToString</span>(<span class="r5 r">ch</span>))) <span class="c">// Marks.</span>
+                {
+                    <span class="c">// Valid.</span>
+                }
+                <b>else</b>
+                {
+                    <b>throw</b> <b>new</b> <span class="i">ArgumentException</span>(<span class="s">$&quot;</span><span class="s">The format of value &#39;</span>{<span class="r3 r">boundary</span>}<span class="s">&#39; is invalid.</span><span class="s">&quot;</span>, <b>nameof</b>(<span class="r3 r">boundary</span>));
+                }
+            }
+        }
+ 
+        <b>private static string</b> <a id="48219e2b2649384d" href="../../R/48219e2b2649384d.html" target="n" data-glyph="76,1" class="i method">GetDefaultBoundary</a>()
+        {
+            <b>return</b> <span class="i">Guid</span>.<span class="i">NewGuid</span>().<span class="i">ToString</span>();
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">  Add content type header to the request.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">request</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The request.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public void</b> <a id="c69290e96fcd09e9" href="../../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ApplyToRequest</a>(<span class="i">Request</span> <span id="r6 rd" class="r6 r">request</span>)
+        {
+            <span class="r6 r">request</span>.<span class="i">Headers</span>.<span class="i">SetValue</span>(<span class="i">HttpHeader</span>.<span class="i">Names</span>.<span class="i">ContentType</span>, <span class="s">$&quot;</span><span class="s">multipart/</span>{<a href="#ed1895ea92a6211a" class="i field">_subtype</a>}<span class="s">; boundary=</span>{<a href="#07009e10db2ee9e7" class="i field">_boundary</a>}<span class="s">&quot;</span>);
+            <span class="r6 r">request</span>.<span class="i">Content</span> = <a href="#877cbc0042fc858c" class="k">this</a>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">  Add HTTP content to a collection of RequestContent objects that</span>
+        <span class="c">///</span><span class="c">  get serialized to multipart/form-data MIME type.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">content</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The Request content to add to the collection.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public virtual void</b> <a id="5f80c6f250030034" href="../../R/5f80c6f250030034.html" target="n" data-glyph="72,1" class="i method">Add</a>(<span class="i">RequestContent</span> <span id="r7 rd" class="r7 r">content</span>)
+        {
+            <a href="../Argument.cs.html#0198b1312554d2ed" class="t t">Argument</a>.<span class="i">AssertNotNull</span>(<span class="r7 r">content</span>, <b>nameof</b>(<span class="r7 r">content</span>));
+            <a href="#d05d0273fe58a514" class="i method">AddInternal</a>(<span class="r7 r">content</span>, <b>null</b>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">  Add HTTP content to a collection of RequestContent objects that</span>
+        <span class="c">///</span><span class="c">  get serialized to multipart/form-data MIME type.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">content</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The Request content to add to the collection.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">headers</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The headers to add to the collection.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public virtual void</b> <a id="f19c611926b47609" href="../../R/f19c611926b47609.html" target="n" data-glyph="72,1" class="i method">Add</a>(<span class="i">RequestContent</span> <span id="r8 rd" class="r8 r">content</span>, <span class="i">Dictionary</span>&lt;<b>string</b>, <b>string</b>&gt; <span id="r9 rd" class="r9 r">headers</span>)
+        {
+            <a href="../Argument.cs.html#0198b1312554d2ed" class="t t">Argument</a>.<span class="i">AssertNotNull</span>(<span class="r8 r">content</span>, <b>nameof</b>(<span class="r8 r">content</span>));
+            <a href="../Argument.cs.html#0198b1312554d2ed" class="t t">Argument</a>.<span class="i">AssertNotNull</span>(<span class="r9 r">headers</span>, <b>nameof</b>(<span class="r9 r">headers</span>));
+ 
+            <a href="#d05d0273fe58a514" class="i method">AddInternal</a>(<span class="r8 r">content</span>, <span class="r9 r">headers</span>);
+        }
+ 
+        <b>private void</b> <a id="d05d0273fe58a514" href="../../R/d05d0273fe58a514.html" target="n" data-glyph="76,1" class="i method">AddInternal</a>(<span class="i">RequestContent</span> <span id="r10 rd" class="r10 r">content</span>, <span class="i">Dictionary</span>&lt;<b>string</b>, <b>string</b>&gt; <span id="r11 rd" class="r11 r">headers</span>)
+        {
+            <b>if</b> (<span class="r11 r">headers</span> == <b>null</b>)
+            {
+                <span class="r11 r">headers</span> = <b>new</b> <span class="i">Dictionary</span>&lt;<b>string</b>, <b>string</b>&gt;();
+            }
+            <a href="#924a961808bbb558" class="i field">_nestedContent</a>.<span class="i">Add</span>(<b>new</b> <a href="#14418487c7d3ec8f" class="t constructor">MultipartRequestContent</a>(<span class="r10 r">content</span>, <span class="r11 r">headers</span>));
+        }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span> Construction
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Dispose
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">  Frees resources held by the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#877cbc0042fc858c" class="t t">MultipartContent</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> object.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public override void</b> <a id="9fe724b953434ed0" href="../../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Dispose</a>()
+        {
+            <b>foreach</b> (<a href="#f4e7086638c657d5" class="t t">MultipartRequestContent</a> <span id="r12 rd" class="r12 r">content</span> <b>in</b> <a href="#924a961808bbb558" class="i field">_nestedContent</a>)
+            {
+                <span class="r12 r">content</span>.<a href="#dc7a2c47e37c1d81" class="i field">RequestContent</a>.<span class="i">Dispose</span>();
+            }
+            <a href="#924a961808bbb558" class="i field">_nestedContent</a>.<span class="i">Clear</span>();
+        }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span> Dispose
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> Serialization
+ 
+        <span class="c">// for-each content</span>
+        <span class="c">//   write &quot;--&quot; + boundary</span>
+        <span class="c">//   for-each content header</span>
+        <span class="c">//     write header: header-value</span>
+        <span class="c">//   write content.WriteTo[Async]</span>
+        <span class="c">// write &quot;--&quot; + boundary + &quot;--&quot;</span>
+        <span class="c">// Can&#39;t be canceled directly by the user.  If the overall request is canceled</span>
+        <span class="c">// then the stream will be closed an exception thrown.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">stream</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r14 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override void</b> <a id="0400c5d0c4b97d2f" href="../../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">WriteTo</a>(<span class="i">Stream</span> <span id="r13 rd" class="r13 r">stream</span>, <span class="i">CancellationToken</span> <span id="r14 rd" class="r14 r">cancellationToken</span>)
+        {
+            <a href="../Argument.cs.html#0198b1312554d2ed" class="t t">Argument</a>.<span class="i">AssertNotNull</span>(<span class="r13 r">stream</span>, <b>nameof</b>(<span class="r13 r">stream</span>));
+ 
+            <b>try</b>
+            {
+                <span class="c">// Write start boundary.</span>
+                <span class="i">EncodeStringToStream</span>(<span class="r13 r">stream</span>, <span class="s">&quot;--&quot;</span> + <a href="#07009e10db2ee9e7" class="i field">_boundary</a> + <a href="#6ce88062d628fc3c" class="i field">CrLf</a>);
+ 
+                <span class="c">// Write each nested content.</span>
+                <b>var</b> <span id="r15 rd" class="r15 r">output</span> = <b>new</b> <span class="i">StringBuilder</span>();
+                <b>for</b> (<b>int</b> <span id="r16 rd" class="r16 r">contentIndex</span> = 0; <span class="r16 r">contentIndex</span> &lt; <a href="#924a961808bbb558" class="i field">_nestedContent</a>.<span class="i">Count</span>; <span class="r16 r">contentIndex</span>++)
+                {
+                    <span class="c">// Write divider, headers, and content.</span>
+                    <span class="i">RequestContent</span> <span id="r17 rd" class="r17 r">content</span> = <a href="#924a961808bbb558" class="i field">_nestedContent</a>[<span class="r16 r">contentIndex</span>].<span class="i">RequestContent</span>;
+                    <span class="i">Dictionary</span>&lt;<b>string</b>, <b>string</b>&gt; <span id="r18 rd" class="r18 r">headers</span> = <a href="#924a961808bbb558" class="i field">_nestedContent</a>[<span class="r16 r">contentIndex</span>].<span class="i">Headers</span>;
+                    <a href="#16b8fd99060c2034" class="i method">EncodeStringToStream</a>(<span class="r13 r">stream</span>, <a href="#47ea00b8d645b0fa" class="i method">SerializeHeadersToString</a>(<span class="r15 r">output</span>, <span class="r16 r">contentIndex</span>, <span class="r18 r">headers</span>));
+                    <span class="r17 r">content</span>.<span class="i">WriteTo</span>(<span class="r13 r">stream</span>, <span class="r14 r">cancellationToken</span>);
+                }
+ 
+                <span class="c">// Write footer boundary.</span>
+                <span class="i">EncodeStringToStream</span>(<span class="r13 r">stream</span>, <a href="#6ce88062d628fc3c" class="i field">CrLf</a> + <span class="s">&quot;--&quot;</span> + <a href="#07009e10db2ee9e7" class="i field">_boundary</a> + <span class="s">&quot;--&quot;</span> + <a href="#6ce88062d628fc3c" class="i field">CrLf</a>);
+            }
+            <b>catch</b> (<span class="i">Exception</span>)
+            {
+                <b>throw</b>;
+            }
+        }
+ 
+        <span class="c">// for-each content</span>
+        <span class="c">//   write &quot;--&quot; + boundary</span>
+        <span class="c">//   for-each content header</span>
+        <span class="c">//     write header: header-value</span>
+        <span class="c">//   write content.WriteTo[Async]</span>
+        <span class="c">// write &quot;--&quot; + boundary + &quot;--&quot;</span>
+        <span class="c">// Can&#39;t be canceled directly by the user.  If the overall request is canceled</span>
+        <span class="c">// then the stream will be closed an exception thrown.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r19 r">stream</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r20 r">cancellation</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public override</b> <span class="i">Task</span> <a id="69b8599ed47755f5" href="../../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">WriteToAsync</a>(<span class="i">Stream</span> <span id="r19 rd" class="r19 r">stream</span>, <span class="i">CancellationToken</span> <span id="r20 rd" class="r20 r">cancellation</span>) =&gt;
+            <a href="#64843c460a2f65f7" class="i method">SerializeToStreamAsync</a>(<span class="r19 r">stream</span>, <span class="r20 r">cancellation</span>);
+ 
+        <b>private async</b> <span class="i">Task</span> <a id="64843c460a2f65f7" href="../../R/64843c460a2f65f7.html" target="n" data-glyph="76,1" class="i method">SerializeToStreamAsync</a>(<span class="i">Stream</span> <span id="r21 rd" class="r21 r">stream</span>, <span class="i">CancellationToken</span> <span id="r22 rd" class="r22 r">cancellationToken</span>)
+        {
+            <a href="../Argument.cs.html#0198b1312554d2ed" class="t t">Argument</a>.<span class="i">AssertNotNull</span>(<span class="r21 r">stream</span>, <b>nameof</b>(<span class="r21 r">stream</span>));
+            <b>try</b>
+            {
+                <span class="c">// Write start boundary.</span>
+                <b>await</b> <span class="i">EncodeStringToStreamAsync</span>(<span class="r21 r">stream</span>, <span class="s">&quot;--&quot;</span> + <a href="#07009e10db2ee9e7" class="i field">_boundary</a> + <a href="#6ce88062d628fc3c" class="i field">CrLf</a>, <span class="r22 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <span class="c">// Write each nested content.</span>
+                <b>var</b> <span id="r23 rd" class="r23 r">output</span> = <b>new</b> <span class="i">StringBuilder</span>();
+                <b>for</b> (<b>int</b> <span id="r24 rd" class="r24 r">contentIndex</span> = 0; <span class="r24 r">contentIndex</span> &lt; <a href="#924a961808bbb558" class="i field">_nestedContent</a>.<span class="i">Count</span>; <span class="r24 r">contentIndex</span>++)
+                {
+                    <span class="c">// Write divider, headers, and content.</span>
+                    <span class="i">RequestContent</span> <span id="r25 rd" class="r25 r">content</span> = <a href="#924a961808bbb558" class="i field">_nestedContent</a>[<span class="r24 r">contentIndex</span>].<span class="i">RequestContent</span>;
+                    <span class="i">Dictionary</span>&lt;<b>string</b>, <b>string</b>&gt; <span id="r26 rd" class="r26 r">headers</span> = <a href="#924a961808bbb558" class="i field">_nestedContent</a>[<span class="r24 r">contentIndex</span>].<span class="i">Headers</span>;
+                    <b>await</b> <a href="#a2743cd8327a8e3d" class="i method">EncodeStringToStreamAsync</a>(<span class="r21 r">stream</span>, <a href="#47ea00b8d645b0fa" class="i method">SerializeHeadersToString</a>(<span class="r23 r">output</span>, <span class="r24 r">contentIndex</span>, <span class="r26 r">headers</span>), <span class="r22 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    <b>await</b> <span class="r25 r">content</span>.<span class="i">WriteToAsync</span>(<span class="r21 r">stream</span>, <span class="r22 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+ 
+                <span class="c">// Write footer boundary.</span>
+                <b>await</b> <span class="i">EncodeStringToStreamAsync</span>(<span class="r21 r">stream</span>, <a href="#6ce88062d628fc3c" class="i field">CrLf</a> + <span class="s">&quot;--&quot;</span> + <a href="#07009e10db2ee9e7" class="i field">_boundary</a> + <span class="s">&quot;--&quot;</span> + <a href="#6ce88062d628fc3c" class="i field">CrLf</a>, <span class="r22 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>catch</b> (<span class="i">Exception</span>)
+            {
+                <b>throw</b>;
+            }
+        }
+ 
+        <b>private string</b> <a id="47ea00b8d645b0fa" href="../../R/47ea00b8d645b0fa.html" target="n" data-glyph="76,1" class="i method">SerializeHeadersToString</a>(<span class="i">StringBuilder</span> <span id="r27 rd" class="r27 r">scratch</span>, <b>int</b> <span id="r28 rd" class="r28 r">contentIndex</span>, <span class="i">Dictionary</span>&lt;<b>string</b>, <b>string</b>&gt; <span id="r29 rd" class="r29 r">headers</span>)
+        {
+            <span class="r27 r">scratch</span>.<span class="i">Clear</span>();
+ 
+            <span class="c">// Add divider.</span>
+            <b>if</b> (<span class="r28 r">contentIndex</span> != 0) <span class="c">// Write divider for all but the first content.</span>
+            {
+                <span class="r27 r">scratch</span>.<span class="i">Append</span>(<a href="#6ce88062d628fc3c" class="i field">CrLf</a> + <span class="s">&quot;--&quot;</span>); <span class="c">// const strings</span>
+                <span class="r27 r">scratch</span>.<span class="i">Append</span>(<a href="#07009e10db2ee9e7" class="i field">_boundary</a>);
+                <span class="r27 r">scratch</span>.<span class="i">Append</span>(<a href="#6ce88062d628fc3c" class="i field">CrLf</a>);
+            }
+ 
+            <span class="c">// Add headers.</span>
+            <b>foreach</b> (<span class="i">KeyValuePair</span>&lt;<b>string</b>, <b>string</b>&gt; <span id="r30 rd" class="r30 r">header</span> <b>in</b> <span class="r29 r">headers</span>)
+            {
+                <span class="r27 r">scratch</span>.<span class="i">Append</span>(<span class="r30 r">header</span>.<span class="i">Key</span>);
+                <span class="r27 r">scratch</span>.<span class="i">Append</span>(<span class="s">&quot;: &quot;</span>);
+                <span class="r27 r">scratch</span>.<span class="i">Append</span>(<span class="r30 r">header</span>.<span class="i">Value</span>);
+                <span class="r27 r">scratch</span>.<span class="i">Append</span>(<a href="#6ce88062d628fc3c" class="i field">CrLf</a>);
+            }
+ 
+            <span class="c">// Extra CRLF to end headers (even if there are no headers).</span>
+            <span class="r27 r">scratch</span>.<span class="i">Append</span>(<a href="#6ce88062d628fc3c" class="i field">CrLf</a>);
+ 
+            <b>return</b> <span class="r27 r">scratch</span>.<span class="i">ToString</span>();
+        }
+ 
+        <b>private static void</b> <a id="16b8fd99060c2034" href="../../R/16b8fd99060c2034.html" target="n" data-glyph="76,1" class="i method">EncodeStringToStream</a>(<span class="i">Stream</span> <span id="r31 rd" class="r31 r">stream</span>, <b>string</b> <span id="r32 rd" class="r32 r">input</span>)
+        {
+            <b>byte</b>[] <span id="r33 rd" class="r33 r">buffer</span> = <span class="i">Encoding</span>.<span class="i">Default</span>.<span class="i">GetBytes</span>(<span class="r32 r">input</span>);
+            <span class="r31 r">stream</span>.<span class="i">Write</span>(<span class="r33 r">buffer</span>, 0, <span class="r33 r">buffer</span>.<span class="i">Length</span>);
+        }
+ 
+        <b>private static</b> <span class="i">Task</span> <a id="a2743cd8327a8e3d" href="../../R/a2743cd8327a8e3d.html" target="n" data-glyph="76,1" class="i method">EncodeStringToStreamAsync</a>(<span class="i">Stream</span> <span id="r34 rd" class="r34 r">stream</span>, <b>string</b> <span id="r35 rd" class="r35 r">input</span>, <span class="i">CancellationToken</span> <span id="r36 rd" class="r36 r">cancellationToken</span>)
+        {
+            <b>byte</b>[] <span id="r37 rd" class="r37 r">buffer</span> = <span class="i">Encoding</span>.<span class="i">Default</span>.<span class="i">GetBytes</span>(<span class="r35 r">input</span>);
+            <b>return</b> <span class="r34 r">stream</span>.<span class="i">WriteAsync</span>(<span class="r37 r">buffer</span>, 0, <span class="r37 r">buffer</span>.<span class="i">Length</span>, <span class="r36 r">cancellationToken</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Attempts to compute the length of the underlying content, if available.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r38 r">length</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The length of the underlying data.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public override bool</b> <a id="526aa84e05cfb7a4" href="../../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">TryComputeLength</a>(<b>out long</b> <span id="r38 rd" class="r38 r">length</span>)
+        {
+            <b>int</b> <span id="r39 rd" class="r39 r">boundaryLength</span> = <a href="#164dd35626782a62" class="i method">GetEncodedLength</a>(<a href="#07009e10db2ee9e7" class="i field">_boundary</a>);
+ 
+            <b>long</b> <span id="r40 rd" class="r40 r">currentLength</span> = 0;
+            <b>long</b> <span id="r41 rd" class="r41 r">internalBoundaryLength</span> = <a href="#46b11e2d0487e097" class="i field">s_crlfLength</a> + <a href="#93ea23fe03735a94" class="i field">s_dashDashLength</a> + <span class="r39 r">boundaryLength</span> + <a href="#46b11e2d0487e097" class="i field">s_crlfLength</a>;
+ 
+            <span class="c">// Start Boundary.</span>
+            <span class="r40 r">currentLength</span> += <a href="#93ea23fe03735a94" class="i field">s_dashDashLength</a> + <span class="r39 r">boundaryLength</span> + <a href="#46b11e2d0487e097" class="i field">s_crlfLength</a>;
+ 
+            <b>bool</b> <span id="r42 rd" class="r42 r">first</span> = <b>true</b>;
+            <b>foreach</b> (<a href="#f4e7086638c657d5" class="t t">MultipartRequestContent</a> <span id="r43 rd" class="r43 r">content</span> <b>in</b> <a href="#924a961808bbb558" class="i field">_nestedContent</a>)
+            {
+                <b>if</b> (<span class="r42 r">first</span>)
+                {
+                    <span class="r42 r">first</span> = <b>false</b>; <span class="c">// First boundary already written.</span>
+                }
+                <b>else</b>
+                {
+                    <span class="c">// Internal Boundary.</span>
+                    <span class="r40 r">currentLength</span> += <span class="r41 r">internalBoundaryLength</span>;
+                }
+ 
+                <span class="c">// Headers.</span>
+                <b>foreach</b> (<span class="i">KeyValuePair</span>&lt;<b>string</b>, <b>string</b>&gt; <span id="r44 rd" class="r44 r">headerPair</span> <b>in</b> <span class="r43 r">content</span>.<a href="#b4c1915dd2a78380" class="i field">Headers</a>)
+                {
+                    <span class="r40 r">currentLength</span> += <span class="i">GetEncodedLength</span>(<span class="r44 r">headerPair</span>.<span class="i">Key</span>) + <a href="#61bf709d87a0173c" class="i field">s_colonSpaceLength</a>;
+                    <span class="r40 r">currentLength</span> += <span class="i">GetEncodedLength</span>(<span class="r44 r">headerPair</span>.<span class="i">Value</span>);
+                    <span class="r40 r">currentLength</span> += <a href="#46b11e2d0487e097" class="i field">s_crlfLength</a>;
+                }
+ 
+                <span class="r40 r">currentLength</span> += <a href="#46b11e2d0487e097" class="i field">s_crlfLength</a>;
+ 
+                <span class="c">// Content.</span>
+                <b>if</b> (!<span class="r43 r">content</span>.<a href="#dc7a2c47e37c1d81" class="i field">RequestContent</a>.<span class="i">TryComputeLength</span>(<b>out long</b> <span id="r45 rd" class="r45 r">tempContentLength</span>))
+                {
+                    <span class="r38 r">length</span> = 0;
+                    <b>return</b> <b>false</b>;
+                }
+                <span class="r40 r">currentLength</span> += <span class="r45 r">tempContentLength</span>;
+            }
+ 
+            <span class="c">// Terminating boundary.</span>
+            <span class="r40 r">currentLength</span> += <a href="#46b11e2d0487e097" class="i field">s_crlfLength</a> + <a href="#93ea23fe03735a94" class="i field">s_dashDashLength</a> + <span class="r39 r">boundaryLength</span> + <a href="#93ea23fe03735a94" class="i field">s_dashDashLength</a> + <a href="#46b11e2d0487e097" class="i field">s_crlfLength</a>;
+ 
+            <span class="r38 r">length</span> = <span class="r40 r">currentLength</span>;
+            <b>return</b> <b>true</b>;
+        }
+ 
+        <b>private static int</b> <a id="164dd35626782a62" href="../../R/164dd35626782a62.html" target="n" data-glyph="76,1" class="i method">GetEncodedLength</a>(<b>string</b> <span id="r46 rd" class="r46 r">input</span>)
+        {
+            <b>return</b> <span class="i">Encoding</span>.<span class="i">Default</span>.<span class="i">GetByteCount</span>(<span class="r46 r">input</span>);
+        }
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span> Serialization
+ 
+        <b>private class</b> <a id="f4e7086638c657d5" href="../../R/f4e7086638c657d5.html" target="n" data-glyph="4,1" class="t t">MultipartRequestContent</a>
+        {
+            <b>public readonly</b> <span class="i">RequestContent</span> <a id="dc7a2c47e37c1d81" href="../../R/dc7a2c47e37c1d81.html" target="n" data-glyph="42,2" class="i field">RequestContent</a>;
+            <b>public</b> <span class="i">Dictionary</span>&lt;<b>string</b>, <b>string</b>&gt; <a id="b4c1915dd2a78380" href="../../R/b4c1915dd2a78380.html" target="n" data-glyph="42,2" class="i field">Headers</a>;
+ 
+            <b>public</b> <a id="14418487c7d3ec8f" href="../../R/14418487c7d3ec8f.html" target="n" data-glyph="72,2" class="t constructor">MultipartRequestContent</a>(<span class="i">RequestContent</span> <span id="r47 rd" class="r47 r">content</span>, <span class="i">Dictionary</span>&lt;<b>string</b>, <b>string</b>&gt; <span id="r48 rd" class="r48 r">headers</span>)
+            {
+                <a href="#dc7a2c47e37c1d81" class="i field">RequestContent</a> = <span class="r47 r">content</span>;
+                <a href="#b4c1915dd2a78380" class="i field">Headers</a> = <span class="r48 r">headers</span>;
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

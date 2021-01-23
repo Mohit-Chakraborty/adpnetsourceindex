@@ -1,0 +1,185 @@
+﻿<!DOCTYPE html>
+<html><head><title>AmqpMessageBatch.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(176);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Messaging.ServiceBus/Amqp/AmqpMessageBatch.cs" target="_top">Amqp\AmqpMessageBatch.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Messaging.ServiceBus" target="_top">src\Azure.Messaging.ServiceBus.csproj</a> (Azure.Messaging.ServiceBus)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Globalization</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Linq</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">Azure</span>.<span class="i">Amqp</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>.<span class="i n">Amqp</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">   A set of messages with known size constraints, based on messages to be sent</span>
+    <span class="c">///</span><span class="c">   using an AMQP-based transport.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <b>internal class</b> <a id="cc1945ea1ff8b7cf" href="../R/cc1945ea1ff8b7cf.html" target="n" data-glyph="2,0" class="t t">AmqpMessageBatch</a> : <a href="../Core/TransportMessageBatch.cs.html#3b59283f63988656" class="t t">TransportMessageBatch</a>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The amount of bytes to reserve as overhead for a small message.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const byte</b> <a id="720dcc679ffc6454" href="../R/720dcc679ffc6454.html" target="n" data-glyph="10,1" class="i field">OverheadBytesSmallMessage</a> = 5;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The amount of bytes to reserve as overhead for a large message.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const byte</b> <a id="568bc2b7ff3a1dee" href="../R/568bc2b7ff3a1dee.html" target="n" data-glyph="10,1" class="i field">OverheadBytesLargeMessage</a> = 8;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The maximum number of bytes that a message may be to be considered small.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const byte</b> <a id="a484af634387aeef" href="../R/a484af634387aeef.html" target="n" data-glyph="10,1" class="i field">MaximumBytesSmallMessage</a> = 255;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The size of the batch, in bytes, to reserve for the AMQP message overhead.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly long</b> <a id="9901079802dde33c" href="../R/9901079802dde33c.html" target="n" data-glyph="46,1" class="i field">_reservedSize</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">A flag that indicates whether or not the instance has been disposed.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private bool</b> <a id="ef52b4799a228c49" href="../R/ef52b4799a228c49.html" target="n" data-glyph="46,1" class="i field">_disposed</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The size of the batch, in bytes, as it will be sent via the AMQP transport.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private long</b> <a id="0fe120d6ecb8e9bf" href="../R/0fe120d6ecb8e9bf.html" target="n" data-glyph="46,1" class="i field">_sizeBytes</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The maximum size allowed for the batch, in bytes.  This includes the messages in the batch as</span>
+        <span class="c">///</span><span class="c">   well as any overhead for the batch itself when sent to the Queue/Topic.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override long</b> <a id="9852229ea7b13935" href="../R/9852229ea7b13935.html" target="n" data-glyph="102,1" class="i property">MaxSizeInBytes</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The size of the batch, in bytes, as it will be sent to the Queue/Topic</span>
+        <span class="c">///</span><span class="c">   service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override long</b> <a id="3e6da8e89a7429dd" href="../R/3e6da8e89a7429dd.html" target="n" data-glyph="102,1" class="i property">SizeInBytes</a> =&gt; <a href="#0fe120d6ecb8e9bf" class="i field">_sizeBytes</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The count of messages contained in the batch.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override int</b> <a id="7bcee2fd23536684" href="../R/7bcee2fd23536684.html" target="n" data-glyph="102,1" class="i property">Count</a> =&gt; <a href="#29097869210799ba" class="i property">BatchMessages</a>.<span class="i">Count</span>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The set of options to apply to the batch.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <a href="../Sender/CreateMessageBatchOptions.cs.html#8481199c5c5cc750" class="t t">CreateMessageBatchOptions</a> <a id="4104b22a17a9a91d" href="../R/4104b22a17a9a91d.html" target="n" data-glyph="106,1" class="i property">Options</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The set of messages that have been added to the batch.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <span class="i">List</span>&lt;<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>&gt; <a id="29097869210799ba" href="../R/29097869210799ba.html" target="n" data-glyph="106,1" class="i property">BatchMessages</a> { <b>get</b>; } = <b>new</b> <span class="i">List</span>&lt;<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>&gt;();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#cc1945ea1ff8b7cf" class="t t">AmqpMessageBatch</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">options</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The set of options to apply to the batch.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="ec599dec643b7207" href="../R/ec599dec643b7207.html" target="n" data-glyph="72,1" class="t constructor">AmqpMessageBatch</a>(<a href="../Sender/CreateMessageBatchOptions.cs.html#8481199c5c5cc750" class="t t">CreateMessageBatchOptions</a> <span id="r0 rd" class="r0 r">options</span>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r0 r">options</span>, <b>nameof</b>(<span class="r0 r">options</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<span class="i">AssertNotNull</span>(<span class="r0 r">options</span>.<a href="../Sender/CreateMessageBatchOptions.cs.html#a8cfb37e14ad5d01" class="i property">MaxSizeInBytes</a>, <b>nameof</b>(<span class="r0 r">options</span>.<a href="../Sender/CreateMessageBatchOptions.cs.html#a8cfb37e14ad5d01" class="i property">MaxSizeInBytes</a>));
+ 
+            <a href="#4104b22a17a9a91d" class="i property">Options</a> = <span class="r0 r">options</span>;
+            <a href="#9852229ea7b13935" class="i property">MaxSizeInBytes</a> = <span class="r0 r">options</span>.<a href="../Sender/CreateMessageBatchOptions.cs.html#a8cfb37e14ad5d01" class="i property">MaxSizeInBytes</a>.<span class="i">Value</span>;
+ 
+            <span class="c">// Initialize the size by reserving space for the batch envelope.</span>
+ 
+            <b>using</b> <span class="i">AmqpMessage</span> <span id="r1 rd" class="r1 r">envelope</span> = <a href="AmqpMessageConverter.cs.html#d35eb062fa121f63" class="t t">AmqpMessageConverter</a>.<span class="i">BatchSBMessagesAsAmqpMessage</span>(<span class="i">Enumerable</span>.<span class="i">Empty</span>&lt;<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>&gt;());
+            <a href="#9901079802dde33c" class="i field">_reservedSize</a> = <span class="r1 r">envelope</span>.<span class="i">SerializedMessageSize</span>;
+            <a href="#0fe120d6ecb8e9bf" class="i field">_sizeBytes</a> = <a href="#9901079802dde33c" class="i field">_reservedSize</a>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Attempts to add a message to the batch, ensuring that the size</span>
+        <span class="c">///</span><span class="c">   of the batch does not exceed its maximum.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">message</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The message to attempt to add to the batch.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the message was added; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override bool</b> <a id="931b0a7109e6a3c5" href="../R/931b0a7109e6a3c5.html" target="n" data-glyph="72,1" class="i method">TryAddMessage</a>(<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a> <span id="r2 rd" class="r2 r">message</span>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r2 r">message</span>, <b>nameof</b>(<span class="r2 r">message</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../Core/Argument.cs.html#ad31cdc7051f5f26" class="i method">AssertNotDisposed</a>(<a href="#ef52b4799a228c49" class="i field">_disposed</a>, <b>nameof</b>(<a href="../Sender/ServiceBusMessageBatch.cs.html#31077058165fc40f" class="t t">ServiceBusMessageBatch</a>));
+ 
+            <span class="i">AmqpMessage</span> <span id="r3 rd" class="r3 r">amqpMessage</span> = <a href="AmqpMessageConverter.cs.html#d35eb062fa121f63" class="t t">AmqpMessageConverter</a>.<a href="AmqpMessageConverter.cs.html#2afa7aac5425265c" class="i method">SBMessageToAmqpMessage</a>(<span class="r2 r">message</span>);
+ 
+            <b>try</b>
+            {
+                <span class="c">// Calculate the size for the message, based on the AMQP message size and accounting for a</span>
+                <span class="c">// bit of reserved overhead size.</span>
+ 
+                <b>var</b> <span id="r4 rd" class="r4 r">size</span> = <a href="#0fe120d6ecb8e9bf" class="i field">_sizeBytes</a>
+                    + <span class="r3 r">amqpMessage</span>.<span class="i">SerializedMessageSize</span>
+                    + (<span class="r3 r">amqpMessage</span>.<span class="i">SerializedMessageSize</span> &lt;= <a href="#a484af634387aeef" class="i field">MaximumBytesSmallMessage</a>
+                        ? <a href="#720dcc679ffc6454" class="i field">OverheadBytesSmallMessage</a>
+                        : <a href="#568bc2b7ff3a1dee" class="i field">OverheadBytesLargeMessage</a>);
+ 
+                <b>if</b> (<span class="r4 r">size</span> &gt; <a href="#9852229ea7b13935" class="i property">MaxSizeInBytes</a>)
+                {
+                    <b>return</b> <b>false</b>;
+                }
+ 
+                <a href="#0fe120d6ecb8e9bf" class="i field">_sizeBytes</a> = <span class="r4 r">size</span>;
+                <a href="#29097869210799ba" class="i property">BatchMessages</a>.<span class="i">Add</span>(<span class="r2 r">message</span>);
+ 
+            <b>return</b> <b>true</b>;
+            }
+            <b>finally</b>
+            {
+                <span class="r3 r">amqpMessage</span>?.<span class="i">Dispose</span>();
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Clears the batch, removing all messages and resetting the</span>
+        <span class="c">///</span><span class="c">   available size.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override void</b> <a id="fedad1030e583277" href="../R/fedad1030e583277.html" target="n" data-glyph="72,1" class="i method">Clear</a>()
+        {
+            <a href="#29097869210799ba" class="i property">BatchMessages</a>.<span class="i">Clear</span>();
+            <a href="#0fe120d6ecb8e9bf" class="i field">_sizeBytes</a> = <a href="#9901079802dde33c" class="i field">_reservedSize</a>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Represents the batch as an enumerable set of transport-specific</span>
+        <span class="c">///</span><span class="c">   representations of a message.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r t">T</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The transport-specific message representation being requested.</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The set of messages as an enumerable of the requested type.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override</b> <span class="i">IEnumerable</span>&lt;<span class="r5 r t">T</span>&gt; <a id="4661cfc0ddafa124" href="../R/4661cfc0ddafa124.html" target="n" data-glyph="72,1" class="i method">AsEnumerable</a>&lt;<span id="r5 rd t" class="r5 r t">T</span>&gt;()
+        {
+            <b>if</b> (<b>typeof</b>(<span class="r5 r t">T</span>) != <b>typeof</b>(<a href="../Primitives/ServiceBusMessage.cs.html#55f40903fe7b78d8" class="t t">ServiceBusMessage</a>))
+            {
+                <b>throw</b> <b>new</b> <span class="i">FormatException</span>(<b>string</b>.<span class="i">Format</span>(<span class="i">CultureInfo</span>.<span class="i">CurrentCulture</span>, <a href="../Resources.Designer.cs.html#7e6b2ac45384f6a8" class="t t">Resources</a>.<a href="../Resources.Designer.cs.html#b5ec8b9e8d5a401f" class="i property">UnsupportedTransportEventType</a>, <b>typeof</b>(<span class="r5 r t">T</span>).<span class="i">Name</span>));
+            }
+ 
+            <b>return</b> (<span class="i">IEnumerable</span>&lt;<span class="r5 r t">T</span>&gt;)<a href="#29097869210799ba" class="i property">BatchMessages</a>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Performs the task needed to clean up resources used by the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#cc1945ea1ff8b7cf" class="t t">AmqpMessageBatch</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override void</b> <a id="b814c2fe7484eb28" href="../R/b814c2fe7484eb28.html" target="n" data-glyph="72,1" class="i method">Dispose</a>()
+        {
+            <a href="#ef52b4799a228c49" class="i field">_disposed</a> = <b>true</b>;
+            <a href="#fedad1030e583277" class="i method">Clear</a>();
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

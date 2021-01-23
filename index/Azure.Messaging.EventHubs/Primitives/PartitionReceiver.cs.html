@@ -1,0 +1,567 @@
+﻿<!DOCTYPE html>
+<html><head><title>PartitionReceiver.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(558);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Messaging.EventHubs/Primitives/PartitionReceiver.cs" target="_top">Primitives\PartitionReceiver.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Messaging.EventHubs" target="_top">src\Azure.Messaging.EventHubs.csproj</a> (Azure.Messaging.EventHubs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">ComponentModel</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Globalization</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Runtime</span>.<span class="i">ExceptionServices</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Consumer</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Diagnostics</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Primitives</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">   Allows reading events from a specific partition of an Event Hub, and in the context</span>
+    <span class="c">///</span><span class="c">   of a specific consumer group, to be read with a greater level of control over</span>
+    <span class="c">///</span><span class="c">   communication with the Event Hubs service than is offered by other event consumers.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">   </span><span class="c">&lt;</span><span class="c">para</span><span class="c">&gt;</span><span class="c">It is recommended that the </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">EventProcessorClient</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> or </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Consumer/EventHubConsumerClient.cs.html#f3134c5ddad42173" class="t t">EventHubConsumerClient</a><span class="c">&quot;</span> <span class="c">/&gt;</span>
+    <span class="c">///</span><span class="c">   be used for reading and processing events for the majority of scenarios.  The partition receiver is</span>
+    <span class="c">///</span><span class="c">   intended to enable scenarios with special needs which require more direct control.</span><span class="c">&lt;/</span><span class="c">para</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c">   </span><span class="c">&lt;</span><span class="c">para</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#17449f50e2d1c37e" class="t t">PartitionReceiver</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> is safe to cache and use for the lifetime of an application, and that is best practice when the application</span>
+    <span class="c">///</span><span class="c">   reads events regularly or semi-regularly.  The receiver holds responsibility for efficient resource management, working to keep resource usage low during</span>
+    <span class="c">///</span><span class="c">   periods of inactivity and manage health during periods of higher use.  Calling either the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#8d3e9c56a235174f" class="i method">CloseAsync</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> or </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#50f0029424300883" class="i method">DisposeAsync</a><span class="c">&quot;</span> <span class="c">/&gt;</span>
+    <span class="c">///</span><span class="c">   method as the application is shutting down will ensure that network resources and other unmanaged objects are properly cleaned up.</span><span class="c">&lt;/</span><span class="c">para</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">href</span><span class="c">=</span><span class="c">&quot;</span><span class="c">https://www.nuget.org/packages/Azure.Messaging.EventHubs.Processor</span><span class="c">&quot;</span> <span class="c">/&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Consumer/EventHubConsumerClient.cs.html#f3134c5ddad42173" class="t t">EventHubConsumerClient</a>.<a href="../Consumer/EventHubConsumerClient.cs.html#ef001af2fbc41986" class="i method">ReadEventsFromPartitionAsync</a>(<b>string</b>, <a href="../Consumer/EventPosition.cs.html#97742fa7b7b6b68f" class="t t">EventPosition</a>, <span class="i">CancellationToken</span>)<span class="c">&quot;</span><span class="c">/&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Consumer/EventHubConsumerClient.cs.html#f3134c5ddad42173" class="t t">EventHubConsumerClient</a>.<a href="../Consumer/EventHubConsumerClient.cs.html#ed7c7b2bede5a3d1" class="i method">ReadEventsFromPartitionAsync</a>(<b>string</b>, <a href="../Consumer/EventPosition.cs.html#97742fa7b7b6b68f" class="t t">EventPosition</a>, <a href="../Consumer/ReadEventOptions.cs.html#897fd8591f87ab3a" class="t t">ReadEventOptions</a>, <span class="i">CancellationToken</span>)<span class="c">&quot;</span><span class="c">/&gt;</span>
+    <span class="c">///</span>
+    <b>public class</b> <a id="17449f50e2d1c37e" href="../R/17449f50e2d1c37e.html" target="n" data-glyph="0,0" class="t t">PartitionReceiver</a> : <span class="i">IAsyncDisposable</span>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">Indicates whether or not this instance has been closed.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private volatile bool</b> <a id="e0e989eeb5d1fac7" href="../R/e0e989eeb5d1fac7.html" target="n" data-glyph="46,1" class="i field">_closed</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The fully qualified Event Hubs namespace that the client is associated with.  This is likely</span>
+        <span class="c">///</span><span class="c">   to be similar to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">{yournamespace}.servicebus.windows.net</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public string</b> <a id="468a05b7c7dc9af6" href="../R/468a05b7c7dc9af6.html" target="n" data-glyph="102,1" class="i property">FullyQualifiedNamespace</a> =&gt; <a href="#57060c67c6623a6f" class="i property">Connection</a>.<a href="../EventHubConnection.cs.html#42574858f23f2a35" class="i property">FullyQualifiedNamespace</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The name of the Event Hub that the client is connected to, specific to the</span>
+        <span class="c">///</span><span class="c">   Event Hubs namespace that contains it.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public string</b> <a id="abf757a679c19db3" href="../R/abf757a679c19db3.html" target="n" data-glyph="102,1" class="i property">EventHubName</a> =&gt; <a href="#57060c67c6623a6f" class="i property">Connection</a>.<a href="../EventHubConnection.cs.html#9d66313561b8598d" class="i property">EventHubName</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The name of the consumer group that this client is associated with.  Events will be read</span>
+        <span class="c">///</span><span class="c">   only in the context of this group.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public string</b> <a id="d75c0e7e54077165" href="../R/d75c0e7e54077165.html" target="n" data-glyph="102,1" class="i property">ConsumerGroup</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The identifier of the Event Hub partition that this client is associated with.  Events will be read</span>
+        <span class="c">///</span><span class="c">   only from this partition.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public string</b> <a id="1a4f14788b5efd59" href="../R/1a4f14788b5efd59.html" target="n" data-glyph="102,1" class="i property">PartitionId</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The position within the partition where the client begins reading events.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a href="../Consumer/EventPosition.cs.html#97742fa7b7b6b68f" class="t t">EventPosition</a> <a id="e2cf9173eb93e61d" href="../R/e2cf9173eb93e61d.html" target="n" data-glyph="102,1" class="i property">InitialPosition</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Indicates whether or not this </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#17449f50e2d1c37e" class="t t">PartitionReceiver</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> has been closed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the client is closed; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public bool</b> <a id="b20fe4db7ccde397" href="../R/b20fe4db7ccde397.html" target="n" data-glyph="102,1" class="i property">IsClosed</a>
+        {
+            <b>get</b> =&gt; <a href="#e0e989eeb5d1fac7" class="i field">_closed</a>;
+            <b>protected set</b> =&gt; <a href="#e0e989eeb5d1fac7" class="i field">_closed</a> = <b>value</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The instance of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> which can be mocked for testing.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal</b> <a href="../Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a> <a id="33e3e2b10a207dc0" href="../R/33e3e2b10a207dc0.html" target="n" data-glyph="104,1" class="i property">Logger</a> { <b>get</b>; <b>set</b>; } = <a href="../Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#c960e5896e4dd589" class="i property">Log</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Indicates whether the client has ownership of the associated </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../EventHubConnection.cs.html#0646809725209998" class="t t">EventHubConnection</a><span class="c">&quot;</span> <span class="c">/&gt;</span>
+        <span class="c">///</span><span class="c">   and should take responsibility for managing its lifespan.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private bool</b> <a id="6c7382a507190219" href="../R/6c7382a507190219.html" target="n" data-glyph="106,1" class="i property">OwnsConnection</a> { <b>get</b>; } = <b>true</b>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The default maximum amount of time to wait to build up the requested message count for the batch.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <span class="i">TimeSpan</span>? <a id="e724531f1e9ee90b" href="../R/e724531f1e9ee90b.html" target="n" data-glyph="106,1" class="i property">DefaultMaximumWaitTime</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The policy to use for determining retry behavior for when an operation fails.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <a href="../EventHubsRetryPolicy.cs.html#bc28d871ab581a88" class="t t">EventHubsRetryPolicy</a> <a id="e585f5c8661bea46" href="../R/e585f5c8661bea46.html" target="n" data-glyph="106,1" class="i property">RetryPolicy</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The active connection to the Azure Event Hubs service, enabling client communications for metadata</span>
+        <span class="c">///</span><span class="c">   about the associated Event Hub and access to transport-aware consumers.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <a href="../EventHubConnection.cs.html#0646809725209998" class="t t">EventHubConnection</a> <a id="57060c67c6623a6f" href="../R/57060c67c6623a6f.html" target="n" data-glyph="106,1" class="i property">Connection</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The transport consumer that is used for operations performed against</span>
+        <span class="c">///</span><span class="c">   the Event Hubs service.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <a href="../Core/TransportConsumer.cs.html#265a21c281157aa2" class="t t">TransportConsumer</a> <a id="59dd0aa145bc754c" href="../R/59dd0aa145bc754c.html" target="n" data-glyph="106,1" class="i property">InnerConsumer</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#17449f50e2d1c37e" class="t t">PartitionReceiver</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">consumerGroup</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the consumer group this client is associated with.  Events are read in the context of this group.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">partitionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The identifier of the Event Hub partition from which events will be received.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">eventPosition</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The position within the partition where the client should begin reading events.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">connectionString</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The connection string to use for connecting to the Event Hubs namespace; it is expected that the Event Hub name and the shared key properties are contained in this connection string.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">options</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A set of options to apply when configuring the client.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   If the connection string is copied from the Event Hubs namespace, it will likely not contain the name of the desired Event Hub,</span>
+        <span class="c">///</span><span class="c">   which is needed.  In this case, the name can be added manually by adding &quot;;EntityPath=[[ EVENT HUB NAME ]]&quot; to the end of the</span>
+        <span class="c">///</span><span class="c">   connection string.  For example, &quot;;EntityPath=telemetry-hub&quot;.</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c">   If you have defined a shared access policy directly on the Event Hub itself, then copying the connection string from that</span>
+        <span class="c">///</span><span class="c">   Event Hub will result in a connection string that contains the name.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">href</span><span class="c">=</span><span class="c">&quot;</span><span class="c">https://docs.microsoft.com/en-us/azure/event-hubs/event-hubs-get-connection-string</span><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="6d4ccc5dfa1d444a" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">PartitionReceiver</a>(<b>string</b> <span id="r0 rd" class="r0 r">consumerGroup</span>,
+                                 <b>string</b> <span id="r1 rd" class="r1 r">partitionId</span>,
+                                 <a href="../Consumer/EventPosition.cs.html#97742fa7b7b6b68f" class="t t">EventPosition</a> <span id="r2 rd" class="r2 r">eventPosition</span>,
+                                 <b>string</b> <span id="r3 rd" class="r3 r">connectionString</span>,
+                                 <a href="PartitionReceiverOptions.cs.html#5a0bc77ffeff8995" class="t t">PartitionReceiverOptions</a> <span id="r4 rd" class="r4 r">options</span> = <b>default</b>) : <a href="#57a56430391963fd" class="k">this</a>(<span class="r0 r">consumerGroup</span>, <span class="r1 r">partitionId</span>, <span class="r2 r">eventPosition</span>, <span class="r3 r">connectionString</span>, <b>null</b>, <span class="r4 r">options</span>)
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#17449f50e2d1c37e" class="t t">PartitionReceiver</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">consumerGroup</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the consumer group this client is associated with.  Events are read in the context of this group.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">partitionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The identifier of the Event Hub partition from which events will be received.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">eventPosition</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The position within the partition where the client should begin reading events.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">connectionString</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The connection string to use for connecting to the Event Hubs namespace; it is expected that the shared key properties are contained in this connection string, but not the Event Hub name.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">eventHubName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the specific Event Hub to associate the client with.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r10 r">options</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A set of options to apply when configuring the client.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   If the connection string is copied from the Event Hub itself, it will contain the name of the desired Event Hub,</span>
+        <span class="c">///</span><span class="c">   and can be used directly without passing the </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">eventHubName</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.  The name of the Event Hub should be</span>
+        <span class="c">///</span><span class="c">   passed only once, either as part of the connection string or separately.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">href</span><span class="c">=</span><span class="c">&quot;</span><span class="c">https://docs.microsoft.com/en-us/azure/event-hubs/event-hubs-get-connection-string</span><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="57a56430391963fd" href="../R/57a56430391963fd.html" target="n" data-glyph="72,1" class="t constructor">PartitionReceiver</a>(<b>string</b> <span id="r5 rd" class="r5 r">consumerGroup</span>,
+                                 <b>string</b> <span id="r6 rd" class="r6 r">partitionId</span>,
+                                 <a href="../Consumer/EventPosition.cs.html#97742fa7b7b6b68f" class="t t">EventPosition</a> <span id="r7 rd" class="r7 r">eventPosition</span>,
+                                 <b>string</b> <span id="r8 rd" class="r8 r">connectionString</span>,
+                                 <b>string</b> <span id="r9 rd" class="r9 r">eventHubName</span>,
+                                 <a href="PartitionReceiverOptions.cs.html#5a0bc77ffeff8995" class="t t">PartitionReceiverOptions</a> <span id="r10 rd" class="r10 r">options</span> = <b>default</b>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r5 r">consumerGroup</span>, <b>nameof</b>(<span class="r5 r">consumerGroup</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r6 r">partitionId</span>, <b>nameof</b>(<span class="r6 r">partitionId</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r8 r">connectionString</span>, <b>nameof</b>(<span class="r8 r">connectionString</span>));
+ 
+            <span class="r10 r">options</span> = <span class="r10 r">options</span>?.<a href="PartitionReceiverOptions.cs.html#716158476f8bc824" class="i method">Clone</a>() ?? <b>new</b> <span class="t">PartitionReceiverOptions</span>();
+ 
+            <a href="#57060c67c6623a6f" class="i property">Connection</a> = <b>new</b> <a href="../EventHubConnection.cs.html#298a945ee13156f2" class="t constructor">EventHubConnection</a>(<span class="r8 r">connectionString</span>, <span class="r9 r">eventHubName</span>, <span class="r10 r">options</span>.<a href="PartitionReceiverOptions.cs.html#82669ba38bbf30c9" class="i property">ConnectionOptions</a>);
+            <a href="#d75c0e7e54077165" class="i property">ConsumerGroup</a> = <span class="r5 r">consumerGroup</span>;
+            <a href="#1a4f14788b5efd59" class="i property">PartitionId</a> = <span class="r6 r">partitionId</span>;
+            <a href="#e2cf9173eb93e61d" class="i property">InitialPosition</a> = <span class="r7 r">eventPosition</span>;
+            <a href="#e724531f1e9ee90b" class="i property">DefaultMaximumWaitTime</a> = <span class="r10 r">options</span>.<a href="PartitionReceiverOptions.cs.html#b3ae1a5b0a261870" class="i property">DefaultMaximumReceiveWaitTime</a>;
+            <a href="#e585f5c8661bea46" class="i property">RetryPolicy</a> = <span class="r10 r">options</span>.<a href="PartitionReceiverOptions.cs.html#65754e4486cab981" class="i property">RetryOptions</a>.<a href="../SharedSource/Core/EventHubsRetryOptionsExtensions.cs.html#f1a0f56e5cda073f" class="i method">ToRetryPolicy</a>();
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA2214</span> <span class="c">// Do not call overridable methods in constructors. This internal method is virtual for testing purposes.</span>
+            <a href="#59dd0aa145bc754c" class="i property">InnerConsumer</a> = <a href="#45d415d9ed34bcb4" class="i method">CreateTransportConsumer</a>(<span class="r5 r">consumerGroup</span>, <span class="r6 r">partitionId</span>, <span class="r7 r">eventPosition</span>, <a href="#e585f5c8661bea46" class="i property">RetryPolicy</a>, <span class="r10 r">options</span>);
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">CA2214</span> <span class="c">// Do not call overridable methods in constructors.</span>
+ 
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#17449f50e2d1c37e" class="t t">PartitionReceiver</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r11 r">consumerGroup</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the consumer group this client is associated with.  Events are read in the context of this group.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">partitionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The identifier of the Event Hub partition from which events will be received.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">eventPosition</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The position within the partition where the client should begin reading events.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r14 r">fullyQualifiedNamespace</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The fully qualified Event Hubs namespace to connect to.  This is likely to be similar to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">{yournamespace}.servicebus.windows.net</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">eventHubName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the specific Event Hub to associate the client with.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r16 r">credential</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The Event Hubs shared key credential to use for authorization.  Access controls may be specified by the Event Hubs namespace or the requested Event Hub, depending on Azure configuration.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r17 r">options</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A set of options to apply when configuring the client.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal</b> <a id="ec141c61af3a2946" href="../R/../../0000000000.html" target="n" data-glyph="74,1" class="t constructor">PartitionReceiver</a>(<b>string</b> <span id="r11 rd" class="r11 r">consumerGroup</span>,
+                                   <b>string</b> <span id="r12 rd" class="r12 r">partitionId</span>,
+                                   <a href="../Consumer/EventPosition.cs.html#97742fa7b7b6b68f" class="t t">EventPosition</a> <span id="r13 rd" class="r13 r">eventPosition</span>,
+                                   <b>string</b> <span id="r14 rd" class="r14 r">fullyQualifiedNamespace</span>,
+                                   <b>string</b> <span id="r15 rd" class="r15 r">eventHubName</span>,
+                                   <a href="../Authorization/EventHubsSharedAccessKeyCredential.cs.html#fedd60277cbbbc1c" class="t t">EventHubsSharedAccessKeyCredential</a> <span id="r16 rd" class="r16 r">credential</span>,
+                                   <a href="PartitionReceiverOptions.cs.html#5a0bc77ffeff8995" class="t t">PartitionReceiverOptions</a> <span id="r17 rd" class="r17 r">options</span> = <b>default</b>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r11 r">consumerGroup</span>, <b>nameof</b>(<span class="r11 r">consumerGroup</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r12 r">partitionId</span>, <b>nameof</b>(<span class="r12 r">partitionId</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Core/Argument.cs.html#4b3e3f504d747537" class="i method">AssertWellFormedEventHubsNamespace</a>(<span class="r14 r">fullyQualifiedNamespace</span>, <b>nameof</b>(<span class="r14 r">fullyQualifiedNamespace</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r15 r">eventHubName</span>, <b>nameof</b>(<span class="r15 r">eventHubName</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r16 r">credential</span>, <b>nameof</b>(<span class="r16 r">credential</span>));
+ 
+            <span class="r17 r">options</span> = <span class="r17 r">options</span>?.<a href="PartitionReceiverOptions.cs.html#716158476f8bc824" class="i method">Clone</a>() ?? <b>new</b> <span class="t">PartitionReceiverOptions</span>();
+ 
+            <a href="#57060c67c6623a6f" class="i property">Connection</a> = <b>new</b> <a href="../EventHubConnection.cs.html#99fd244d7decbc90" class="t constructor">EventHubConnection</a>(<span class="r14 r">fullyQualifiedNamespace</span>, <span class="r15 r">eventHubName</span>, <span class="r16 r">credential</span>, <span class="r17 r">options</span>.<a href="PartitionReceiverOptions.cs.html#82669ba38bbf30c9" class="i property">ConnectionOptions</a>);
+            <a href="#d75c0e7e54077165" class="i property">ConsumerGroup</a> = <span class="r11 r">consumerGroup</span>;
+            <a href="#1a4f14788b5efd59" class="i property">PartitionId</a> = <span class="r12 r">partitionId</span>;
+            <a href="#e2cf9173eb93e61d" class="i property">InitialPosition</a> = <span class="r13 r">eventPosition</span>;
+            <a href="#e724531f1e9ee90b" class="i property">DefaultMaximumWaitTime</a> = <span class="r17 r">options</span>.<a href="PartitionReceiverOptions.cs.html#b3ae1a5b0a261870" class="i property">DefaultMaximumReceiveWaitTime</a>;
+            <a href="#e585f5c8661bea46" class="i property">RetryPolicy</a> = <span class="r17 r">options</span>.<a href="PartitionReceiverOptions.cs.html#65754e4486cab981" class="i property">RetryOptions</a>.<a href="../SharedSource/Core/EventHubsRetryOptionsExtensions.cs.html#f1a0f56e5cda073f" class="i method">ToRetryPolicy</a>();
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA2214</span> <span class="c">// Do not call overridable methods in constructors. This internal method is virtual for testing purposes.</span>
+            <a href="#59dd0aa145bc754c" class="i property">InnerConsumer</a> = <a href="#45d415d9ed34bcb4" class="i method">CreateTransportConsumer</a>(<span class="r11 r">consumerGroup</span>, <span class="r12 r">partitionId</span>, <span class="r13 r">eventPosition</span>, <a href="#e585f5c8661bea46" class="i property">RetryPolicy</a>, <span class="r17 r">options</span>);
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">CA2214</span> <span class="c">// Do not call overridable methods in constructors.</span>
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#17449f50e2d1c37e" class="t t">PartitionReceiver</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r18 r">consumerGroup</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the consumer group this client is associated with.  Events are read in the context of this group.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r19 r">partitionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The identifier of the Event Hub partition from which events will be received.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r20 r">eventPosition</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The position within the partition where the client should begin reading events.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r21 r">fullyQualifiedNamespace</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The fully qualified Event Hubs namespace to connect to.  This is likely to be similar to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">{yournamespace}.servicebus.windows.net</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r22 r">eventHubName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the specific Event Hub to associate the client with.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r23 r">credential</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The Azure managed identity credential to use for authorization.  Access controls may be specified by the Event Hubs namespace or the requested Event Hub, depending on Azure configuration.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r24 r">options</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A set of options to apply when configuring the client.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="bfa6dfde3db2fd8d" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">PartitionReceiver</a>(<b>string</b> <span id="r18 rd" class="r18 r">consumerGroup</span>,
+                                 <b>string</b> <span id="r19 rd" class="r19 r">partitionId</span>,
+                                 <a href="../Consumer/EventPosition.cs.html#97742fa7b7b6b68f" class="t t">EventPosition</a> <span id="r20 rd" class="r20 r">eventPosition</span>,
+                                 <b>string</b> <span id="r21 rd" class="r21 r">fullyQualifiedNamespace</span>,
+                                 <b>string</b> <span id="r22 rd" class="r22 r">eventHubName</span>,
+                                 <span class="i">TokenCredential</span> <span id="r23 rd" class="r23 r">credential</span>,
+                                 <a href="PartitionReceiverOptions.cs.html#5a0bc77ffeff8995" class="t t">PartitionReceiverOptions</a> <span id="r24 rd" class="r24 r">options</span> = <b>default</b>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r18 r">consumerGroup</span>, <b>nameof</b>(<span class="r18 r">consumerGroup</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r19 r">partitionId</span>, <b>nameof</b>(<span class="r19 r">partitionId</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Core/Argument.cs.html#4b3e3f504d747537" class="i method">AssertWellFormedEventHubsNamespace</a>(<span class="r21 r">fullyQualifiedNamespace</span>, <b>nameof</b>(<span class="r21 r">fullyQualifiedNamespace</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r22 r">eventHubName</span>, <b>nameof</b>(<span class="r22 r">eventHubName</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<span class="i">AssertNotNull</span>(<span class="r23 r">credential</span>, <b>nameof</b>(<span class="r23 r">credential</span>));
+ 
+            <span class="r24 r">options</span> = <span class="r24 r">options</span>?.<a href="PartitionReceiverOptions.cs.html#716158476f8bc824" class="i method">Clone</a>() ?? <b>new</b> <span class="t">PartitionReceiverOptions</span>();
+ 
+            <a href="#57060c67c6623a6f" class="i property">Connection</a> = <b>new</b> <a href="../EventHubConnection.cs.html#ef4fd1a74911ddaa" class="t constructor">EventHubConnection</a>(<span class="r21 r">fullyQualifiedNamespace</span>, <span class="r22 r">eventHubName</span>, <span class="r23 r">credential</span>, <span class="r24 r">options</span>.<a href="PartitionReceiverOptions.cs.html#82669ba38bbf30c9" class="i property">ConnectionOptions</a>);
+            <a href="#d75c0e7e54077165" class="i property">ConsumerGroup</a> = <span class="r18 r">consumerGroup</span>;
+            <a href="#1a4f14788b5efd59" class="i property">PartitionId</a> = <span class="r19 r">partitionId</span>;
+            <a href="#e2cf9173eb93e61d" class="i property">InitialPosition</a> = <span class="r20 r">eventPosition</span>;
+            <a href="#e724531f1e9ee90b" class="i property">DefaultMaximumWaitTime</a> = <span class="r24 r">options</span>.<a href="PartitionReceiverOptions.cs.html#b3ae1a5b0a261870" class="i property">DefaultMaximumReceiveWaitTime</a>;
+            <a href="#e585f5c8661bea46" class="i property">RetryPolicy</a> = <span class="r24 r">options</span>.<a href="PartitionReceiverOptions.cs.html#65754e4486cab981" class="i property">RetryOptions</a>.<a href="../SharedSource/Core/EventHubsRetryOptionsExtensions.cs.html#f1a0f56e5cda073f" class="i method">ToRetryPolicy</a>();
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA2214</span> <span class="c">// Do not call overridable methods in constructors. This internal method is virtual for testing purposes.</span>
+            <a href="#59dd0aa145bc754c" class="i property">InnerConsumer</a> = <a href="#45d415d9ed34bcb4" class="i method">CreateTransportConsumer</a>(<span class="r18 r">consumerGroup</span>, <span class="r19 r">partitionId</span>, <span class="r20 r">eventPosition</span>, <a href="#e585f5c8661bea46" class="i property">RetryPolicy</a>, <span class="r24 r">options</span>);
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">CA2214</span> <span class="c">// Do not call overridable methods in constructors.</span>
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#17449f50e2d1c37e" class="t t">PartitionReceiver</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r25 r">consumerGroup</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the consumer group this client is associated with.  Events are read in the context of this group.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r26 r">partitionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The identifier of the Event Hub partition from which events will be received.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r27 r">eventPosition</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The position within the partition where the client should begin reading events.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r28 r">connection</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../EventHubConnection.cs.html#0646809725209998" class="t t">EventHubConnection</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> connection to use for communication with the Event Hubs service.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r29 r">options</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A set of options to apply when configuring the client.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="73de2443db3b0a24" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">PartitionReceiver</a>(<b>string</b> <span id="r25 rd" class="r25 r">consumerGroup</span>,
+                                 <b>string</b> <span id="r26 rd" class="r26 r">partitionId</span>,
+                                 <a href="../Consumer/EventPosition.cs.html#97742fa7b7b6b68f" class="t t">EventPosition</a> <span id="r27 rd" class="r27 r">eventPosition</span>,
+                                 <a href="../EventHubConnection.cs.html#0646809725209998" class="t t">EventHubConnection</a> <span id="r28 rd" class="r28 r">connection</span>,
+                                 <a href="PartitionReceiverOptions.cs.html#5a0bc77ffeff8995" class="t t">PartitionReceiverOptions</a> <span id="r29 rd" class="r29 r">options</span> = <b>default</b>)
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r25 r">consumerGroup</span>, <b>nameof</b>(<span class="r25 r">consumerGroup</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r26 r">partitionId</span>, <b>nameof</b>(<span class="r26 r">partitionId</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r28 r">connection</span>, <b>nameof</b>(<span class="r28 r">connection</span>));
+ 
+            <span class="r29 r">options</span> = <span class="r29 r">options</span>?.<a href="PartitionReceiverOptions.cs.html#716158476f8bc824" class="i method">Clone</a>() ?? <b>new</b> <span class="t">PartitionReceiverOptions</span>();
+ 
+            <a href="#6c7382a507190219" class="i property">OwnsConnection</a> = <b>false</b>;
+            <a href="#57060c67c6623a6f" class="i property">Connection</a> = <span class="r28 r">connection</span>;
+            <a href="#d75c0e7e54077165" class="i property">ConsumerGroup</a> = <span class="r25 r">consumerGroup</span>;
+            <a href="#1a4f14788b5efd59" class="i property">PartitionId</a> = <span class="r26 r">partitionId</span>;
+            <a href="#e2cf9173eb93e61d" class="i property">InitialPosition</a> = <span class="r27 r">eventPosition</span>;
+            <a href="#e724531f1e9ee90b" class="i property">DefaultMaximumWaitTime</a> = <span class="r29 r">options</span>.<a href="PartitionReceiverOptions.cs.html#b3ae1a5b0a261870" class="i property">DefaultMaximumReceiveWaitTime</a>;
+            <a href="#e585f5c8661bea46" class="i property">RetryPolicy</a> = <span class="r29 r">options</span>.<a href="PartitionReceiverOptions.cs.html#65754e4486cab981" class="i property">RetryOptions</a>.<a href="../SharedSource/Core/EventHubsRetryOptionsExtensions.cs.html#f1a0f56e5cda073f" class="i method">ToRetryPolicy</a>();
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA2214</span> <span class="c">// Do not call overridable methods in constructors. This internal method is virtual for testing purposes.</span>
+            <a href="#59dd0aa145bc754c" class="i property">InnerConsumer</a> = <a href="#45d415d9ed34bcb4" class="i method">CreateTransportConsumer</a>(<span class="r25 r">consumerGroup</span>, <span class="r26 r">partitionId</span>, <span class="r27 r">eventPosition</span>, <a href="#e585f5c8661bea46" class="i property">RetryPolicy</a>, <span class="r29 r">options</span>);
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">CA2214</span> <span class="c">// Do not call overridable methods in constructors.</span>
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#17449f50e2d1c37e" class="t t">PartitionReceiver</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>protected</b> <a id="6d37de4dd17046aa" href="../R/../../0000000000.html" target="n" data-glyph="75,1" class="t constructor">PartitionReceiver</a>()
+        {
+            <a href="#6c7382a507190219" class="i property">OwnsConnection</a> = <b>false</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Retrieves information about the partition this client is associated to, including elements that describe the</span>
+        <span class="c">///</span><span class="c">   available events in the partition event stream.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r30 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The set of information for the associated partition under the Event Hub this client is associated with.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public virtual async</b> <span class="i">Task</span>&lt;<a href="../PartitionProperties.cs.html#9311a292681a1af8" class="t t">PartitionProperties</a>&gt; <a id="8bc160f69c6216f1" href="../R/8bc160f69c6216f1.html" target="n" data-glyph="72,1" class="i method">GetPartitionPropertiesAsync</a>(<span class="i">CancellationToken</span> <span id="r30 rd" class="r30 r">cancellationToken</span> = <b>default</b>)
+        {
+            <span class="r30 r">cancellationToken</span>.<a href="../SharedSource/Core/CancellationTokenExtensions.cs.html#b1bf96f66d5d14e6" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+ 
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Core/Argument.cs.html#eda8ff4d51bf8b3e" class="i method">AssertNotClosed</a>(<a href="#b20fe4db7ccde397" class="i property">IsClosed</a>, <b>nameof</b>(<a href="#17449f50e2d1c37e" class="t t">PartitionReceiver</a>));
+            <b>return</b> <b>await</b> <a href="#57060c67c6623a6f" class="i property">Connection</a>.<a href="../EventHubConnection.cs.html#66202595647feb89" class="i method">GetPartitionPropertiesAsync</a>(<a href="#1a4f14788b5efd59" class="i property">PartitionId</a>, <a href="#e585f5c8661bea46" class="i property">RetryPolicy</a>, <span class="r30 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   A set of information about the last enqueued event of the partition associated with this receiver, observed as events</span>
+        <span class="c">///</span><span class="c">   are received from the Event Hubs service.  This is only available if the receiver was created with </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="PartitionReceiverOptions.cs.html#5a0bc77ffeff8995" class="t t">PartitionReceiverOptions</a>.<a href="PartitionReceiverOptions.cs.html#d3fc341d0ea2ffd4" class="i property">TrackLastEnqueuedEventProperties</a><span class="c">&quot;</span> <span class="c">/&gt;</span>
+        <span class="c">///</span><span class="c">   set.  Otherwise, the properties will contain default values.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The set of properties for the last event that was enqueued to the partition.  If no events were read or tracking was not set, the properties will be returned with default values.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   When information about the partition&#39;s last enqueued event is being tracked, each event received from the Event Hubs</span>
+        <span class="c">///</span><span class="c">   service will carry metadata about the partition that it otherwise would not. This results in a small amount of</span>
+        <span class="c">///</span><span class="c">   additional network bandwidth consumption that is generally a favorable trade-off when considered</span>
+        <span class="c">///</span><span class="c">   against periodically making requests for partition properties using an Event Hub client.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../EventHubsException.cs.html#fe9b3d9ffc64177d" class="t t">EventHubsException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Occurs when the Event Hubs client needed to read this information is no longer available.</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public virtual</b> <a href="../Consumer/LastEnqueuedEventProperties.cs.html#e54b900e1c5c3c73" class="t t">LastEnqueuedEventProperties</a> <a id="02fc2c7c1811fbe3" href="../R/02fc2c7c1811fbe3.html" target="n" data-glyph="72,1" class="i method">ReadLastEnqueuedEventProperties</a>()
+        {
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Core/Argument.cs.html#eda8ff4d51bf8b3e" class="i method">AssertNotClosed</a>(<a href="#59dd0aa145bc754c" class="i property">InnerConsumer</a>.<a href="../Core/TransportConsumer.cs.html#1b6d41ebcf86042e" class="i property">IsClosed</a>, <a href="../Resources.Designer.cs.html#0f60eafa1a3b4f36" class="t t">Resources</a>.<a href="../Resources.Designer.cs.html#3a7d3fdccd5b0111" class="i property">ClientNeededForThisInformationNotAvailable</a>);
+            <b>return</b> <b>new</b> <a href="../Consumer/LastEnqueuedEventProperties.cs.html#f8a657afe06228dc" class="t constructor">LastEnqueuedEventProperties</a>(<a href="#59dd0aa145bc754c" class="i property">InnerConsumer</a>.<a href="../Core/TransportConsumer.cs.html#8974ffb1d687671c" class="i property">LastReceivedEvent</a>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Receives a batch of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> from the Event Hub partition this client is associated with.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r31 r">maximumEventCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The maximum number of messages to receive in this batch.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r32 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The batch of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> from the Event Hub partition this client is associated with.  If no events are present, an empty enumerable is returned.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   When events are available in the prefetch queue, they will be used to form the batch as quickly as possible without waiting for additional events from the</span>
+        <span class="c">///</span><span class="c">   Event Hubs service to try and meet the requested </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r31 r">maximumEventCount</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.  When no events are available in prefetch, the receiver will wait up</span>
+        <span class="c">///</span><span class="c">   to the duration specified by the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../EventHubsRetryOptions.cs.html#a38af17da5dfdcd4" class="t t">EventHubsRetryOptions</a>.<a href="../EventHubsRetryOptions.cs.html#01f80bad6b3816ae" class="i property">TryTimeout</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> in the active retry policy for events to be read from the service.  Once any</span>
+        <span class="c">///</span><span class="c">   events are available, they will be used to form the batch immediately.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public virtual async</b> <span class="i">Task</span>&lt;<span class="i">IEnumerable</span>&lt;<a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a>&gt;&gt; <a id="844973cdda9ad662" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ReceiveBatchAsync</a>(<b>int</b> <span id="r31 rd" class="r31 r">maximumEventCount</span>,
+                                                                            <span class="i">CancellationToken</span> <span id="r32 rd" class="r32 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <b>await</b> <a href="#bab8f940162637a6" class="i method">ReceiveBatchInternalAsync</a>(<span class="r31 r">maximumEventCount</span>, <b>null</b>, <span class="r32 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Receives a batch of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> from the Event Hub partition this client is associated with.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r33 r">maximumEventCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The maximum number of messages to receive in this batch.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r34 r">maximumWaitTime</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The maximum amount of time to wait for events to become available, if no events can be read from the prefetch queue.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r35 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The batch of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> from the Event Hub partition this client is associated with.  If no events are present, an empty enumerable is returned.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   When events are available in the prefetch queue, they will be used to form the batch as quickly as possible without waiting for additional events from the</span>
+        <span class="c">///</span><span class="c">   Event Hubs service to try and meet the requested </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r33 r">maximumEventCount</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.  When no events are available in prefetch, the receiver will wait up</span>
+        <span class="c">///</span><span class="c">   to the </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r34 r">maximumWaitTime</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> for events to be read from the service.  Once any events are available, they will be used to form the batch immediately.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public virtual async</b> <span class="i">Task</span>&lt;<span class="i">IEnumerable</span>&lt;<a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a>&gt;&gt; <a id="71ea9172fc057dc9" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ReceiveBatchAsync</a>(<b>int</b> <span id="r33 rd" class="r33 r">maximumEventCount</span>,
+                                                                            <span class="i">TimeSpan</span> <span id="r34 rd" class="r34 r">maximumWaitTime</span>,
+                                                                            <span class="i">CancellationToken</span> <span id="r35 rd" class="r35 r">cancellationToken</span> = <b>default</b>) =&gt;
+            <b>await</b> <span class="i">ReceiveBatchInternalAsync</span>(<span class="r33 r">maximumEventCount</span>, <span class="r34 r">maximumWaitTime</span>, <span class="r35 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Closes the client.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r36 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public virtual async</b> <span class="i">Task</span> <a id="8d3e9c56a235174f" href="../R/8d3e9c56a235174f.html" target="n" data-glyph="72,1" class="i method">CloseAsync</a>(<span class="i">CancellationToken</span> <span id="r36 rd" class="r36 r">cancellationToken</span> = <b>default</b>)
+        {
+            <span class="r36 r">cancellationToken</span>.<a href="../SharedSource/Core/CancellationTokenExtensions.cs.html#b1bf96f66d5d14e6" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+ 
+            <b>if</b> (<a href="#b20fe4db7ccde397" class="i property">IsClosed</a>)
+            {
+                <b>return</b>;
+            }
+ 
+            <a href="#b20fe4db7ccde397" class="i property">IsClosed</a> = <b>true</b>;
+ 
+            <b>var</b> <span id="r37 rd" class="r37 r">clientHash</span> = <a href="#dc7eb6332590d561" class="i method">GetHashCode</a>().<span class="i">ToString</span>(<span class="i">CultureInfo</span>.<span class="i">InvariantCulture</span>);
+            <a href="#33e3e2b10a207dc0" class="i property">Logger</a>.<span class="i">ClientCloseStart</span>(<b>nameof</b>(<a href="#17449f50e2d1c37e" class="t t">PartitionReceiver</a>), <a href="#abf757a679c19db3" class="i property">EventHubName</a>, <span class="r37 r">clientHash</span>);
+ 
+            <span class="c">// Attempt to close the transport consumer.  In the event that an exception is encountered,</span>
+            <span class="c">// it should not impact the attempt to close the connection, assuming ownership.</span>
+ 
+            <b>var</b> <span id="r38 rd" class="r38 r">transportConsumerException</span> = <b>default</b>(<span class="i">Exception</span>);
+ 
+            <b>try</b>
+            {
+                <b>await</b> <a href="#59dd0aa145bc754c" class="i property">InnerConsumer</a>.<span class="i">CloseAsync</span>(<span class="i">CancellationToken</span>.<span class="i">None</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r39 rd" class="r39 r">ex</span>)
+            {
+                <a href="#33e3e2b10a207dc0" class="i property">Logger</a>.<span class="i">ClientCloseError</span>(<b>nameof</b>(<a href="#17449f50e2d1c37e" class="t t">PartitionReceiver</a>), <a href="#abf757a679c19db3" class="i property">EventHubName</a>, <span class="r37 r">clientHash</span>, <span class="r39 r">ex</span>.<span class="i">Message</span>);
+                <span class="r38 r">transportConsumerException</span> = <span class="r39 r">ex</span>;
+            }
+ 
+            <span class="c">// An exception when closing the connection supersedes one observed when closing the</span>
+            <span class="c">// transport consumer.</span>
+ 
+            <b>try</b>
+            {
+                <b>if</b> (<a href="#6c7382a507190219" class="i property">OwnsConnection</a>)
+                {
+                    <b>await</b> <a href="#57060c67c6623a6f" class="i property">Connection</a>.<span class="i">CloseAsync</span>(<span class="i">CancellationToken</span>.<span class="i">None</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r40 rd" class="r40 r">ex</span>)
+            {
+                <a href="#33e3e2b10a207dc0" class="i property">Logger</a>.<span class="i">ClientCloseError</span>(<b>nameof</b>(<a href="#17449f50e2d1c37e" class="t t">PartitionReceiver</a>), <a href="#abf757a679c19db3" class="i property">EventHubName</a>, <span class="r37 r">clientHash</span>, <span class="r40 r">ex</span>.<span class="i">Message</span>);
+                <b>throw</b>;
+            }
+            <b>finally</b>
+            {
+                <a href="#33e3e2b10a207dc0" class="i property">Logger</a>.<span class="i">ClientCloseComplete</span>(<b>nameof</b>(<a href="#17449f50e2d1c37e" class="t t">PartitionReceiver</a>), <a href="#abf757a679c19db3" class="i property">EventHubName</a>, <span class="r37 r">clientHash</span>);
+            }
+ 
+            <span class="c">// If there was an active exception pending from closing the transport</span>
+            <span class="c">// consumer, surface it now.</span>
+ 
+            <b>if</b> (<span class="r38 r">transportConsumerException</span> != <b>default</b>)
+            {
+                <span class="i">ExceptionDispatchInfo</span>.<span class="i">Capture</span>(<span class="r38 r">transportConsumerException</span>).<span class="i">Throw</span>();
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Performs the task needed to clean up resources used by the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#17449f50e2d1c37e" class="t t">PartitionReceiver</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">,</span>
+        <span class="c">///</span><span class="c">   including ensuring that the client itself has been closed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public virtual async</b> <span class="i">ValueTask</span> <a id="50f0029424300883" href="../R/50f0029424300883.html" target="n" data-glyph="72,1" class="i method">DisposeAsync</a>()
+        {
+            <b>await</b> <a href="#8d3e9c56a235174f" class="i method">CloseAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+            <span class="i">GC</span>.<span class="i">SuppressFinalize</span>(<a href="#17449f50e2d1c37e" class="k">this</a>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Determines whether the specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">System</span>.<span class="i">Object</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> is equal to this instance.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r41 r">obj</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">System</span>.<span class="i">Object</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> to compare with this instance.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">System</span>.<span class="i">Object</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> is equal to this instance; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="i">EditorBrowsable</span>(<span class="i">EditorBrowsableState</span>.<span class="i">Never</span>)]
+        <b>public override bool</b> <a id="9a45b41f7775d514" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Equals</a>(<b>object</b> <span id="r41 rd" class="r41 r">obj</span>) =&gt; <b>base</b>.<span class="i">Equals</span>(<span class="r41 r">obj</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Returns a hash code for this instance.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A hash code for this instance, suitable for use in hashing algorithms and data structures like a hash table.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="i">EditorBrowsable</span>(<span class="i">EditorBrowsableState</span>.<span class="i">Never</span>)]
+        <b>public override int</b> <a id="dc7eb6332590d561" href="../R/dc7eb6332590d561.html" target="n" data-glyph="72,1" class="i method">GetHashCode</a>() =&gt; <b>base</b>.<span class="i">GetHashCode</span>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Converts the instance to string representation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">System</span>.<span class="i">String</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> that represents this instance.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="i">EditorBrowsable</span>(<span class="i">EditorBrowsableState</span>.<span class="i">Never</span>)]
+        <b>public override string</b> <a id="87113b0d532a34bf" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ToString</a>() =&gt; <b>base</b>.<span class="i">ToString</span>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Creates an </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Core/TransportConsumer.cs.html#265a21c281157aa2" class="t t">TransportConsumer</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> to use for reading events.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r42 r">consumerGroup</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the consumer group the consumer will be associated with.  Events will be read in the context of this group.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r43 r">partitionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The identifier of the Event Hub partition from which events will be received.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r44 r">eventPosition</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The position within the partition where the consumer should begin reading events.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r45 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The policy which governs retry behavior and try timeouts.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r46 r">options</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A set of options to apply when configuring the consumer.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Core/TransportConsumer.cs.html#265a21c281157aa2" class="t t">TransportConsumer</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> configured in the requested manner.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>internal virtual</b> <a href="../Core/TransportConsumer.cs.html#265a21c281157aa2" class="t t">TransportConsumer</a> <a id="45d415d9ed34bcb4" href="../R/45d415d9ed34bcb4.html" target="n" data-glyph="74,1" class="i method">CreateTransportConsumer</a>(<b>string</b> <span id="r42 rd" class="r42 r">consumerGroup</span>,
+                                                                   <b>string</b> <span id="r43 rd" class="r43 r">partitionId</span>,
+                                                                   <a href="../Consumer/EventPosition.cs.html#97742fa7b7b6b68f" class="t t">EventPosition</a> <span id="r44 rd" class="r44 r">eventPosition</span>,
+                                                                   <a href="../EventHubsRetryPolicy.cs.html#bc28d871ab581a88" class="t t">EventHubsRetryPolicy</a> <span id="r45 rd" class="r45 r">retryPolicy</span>,
+                                                                   <a href="PartitionReceiverOptions.cs.html#5a0bc77ffeff8995" class="t t">PartitionReceiverOptions</a> <span id="r46 rd" class="r46 r">options</span>) =&gt;
+            <a href="#57060c67c6623a6f" class="i property">Connection</a>.<a href="../EventHubConnection.cs.html#8da5d70f281c7142" class="i method">CreateTransportConsumer</a>(<span class="r42 r">consumerGroup</span>, <span class="r43 r">partitionId</span>, <span class="r44 r">eventPosition</span>, <span class="r45 r">retryPolicy</span>, <span class="r46 r">options</span>.<a href="PartitionReceiverOptions.cs.html#d3fc341d0ea2ffd4" class="i property">TrackLastEnqueuedEventProperties</a>, <span class="r46 r">options</span>.<a href="PartitionReceiverOptions.cs.html#654693d8eb58ed2a" class="i property">OwnerLevel</a>, (<b>uint</b>?)<span class="r46 r">options</span>.<a href="PartitionReceiverOptions.cs.html#2309af8173935c46" class="i property">PrefetchCount</a>, <span class="r46 r">options</span>.<a href="PartitionReceiverOptions.cs.html#808d3a5f985c2beb" class="i property">PrefetchSizeInBytes</a>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Receives a batch of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> from the Event Hub partition this client is associated with.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r47 r">maximumEventCount</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The maximum number of messages to receive in this batch.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r48 r">maximumWaitTime</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The maximum amount of time to wait to build up the requested message count for the batch; if not specified, the default wait time specified by the options when the client was created will be used.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r49 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">CancellationToken</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The batch of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> from the Event Hub partition this client is associated with.  If no events are present, an empty enumerable is returned.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <span class="i">Task</span>&lt;<span class="i">IReadOnlyList</span>&lt;<a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a>&gt;&gt; <a id="bab8f940162637a6" href="../R/bab8f940162637a6.html" target="n" data-glyph="76,1" class="i method">ReceiveBatchInternalAsync</a>(<b>int</b> <span id="r47 rd" class="r47 r">maximumEventCount</span>,
+                                                                         <span class="i">TimeSpan</span>? <span id="r48 rd" class="r48 r">maximumWaitTime</span>,
+                                                                         <span class="i">CancellationToken</span> <span id="r49 rd" class="r49 r">cancellationToken</span> = <b>default</b>)
+        {
+            <span class="r49 r">cancellationToken</span>.<a href="../SharedSource/Core/CancellationTokenExtensions.cs.html#b1bf96f66d5d14e6" class="i method">ThrowIfCancellationRequested</a>&lt;<span class="i">TaskCanceledException</span>&gt;();
+            <span class="r48 r">maximumWaitTime</span> ??= <a href="#e724531f1e9ee90b" class="i property">DefaultMaximumWaitTime</a>;
+ 
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Core/Argument.cs.html#eda8ff4d51bf8b3e" class="i method">AssertNotClosed</a>(<a href="#b20fe4db7ccde397" class="i property">IsClosed</a>, <b>nameof</b>(<a href="#17449f50e2d1c37e" class="t t">PartitionReceiver</a>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<span class="i">AssertInRange</span>(<span class="r47 r">maximumEventCount</span>, 1, <b>int</b>.<span class="i">MaxValue</span>, <b>nameof</b>(<span class="r47 r">maximumEventCount</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<span class="i">AssertNotNegative</span>(<span class="r48 r">maximumWaitTime</span> ?? <span class="i">TimeSpan</span>.<span class="i">Zero</span>, <b>nameof</b>(<span class="r48 r">maximumWaitTime</span>));
+ 
+            <b>return</b> <a href="#59dd0aa145bc754c" class="i property">InnerConsumer</a>.<a href="../Core/TransportConsumer.cs.html#7a8e7538f82719de" class="i method">ReceiveAsync</a>(<span class="r47 r">maximumEventCount</span>, <span class="r48 r">maximumWaitTime</span>, <span class="r49 r">cancellationToken</span>);
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

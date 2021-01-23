@@ -1,0 +1,98 @@
+﻿<!DOCTYPE html>
+<html><head><title>MsiRetryHelper.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(89);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.Services.AppAuthentication/Helpers/MsiRetryHelper.cs" target="_top">Helpers\MsiRetryHelper.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.Services.AppAuthentication" target="_top">Azure.Services.AppAuthentication\Microsoft.Azure.Services.AppAuthentication.csproj</a> (Microsoft.Azure.Services.AppAuthentication)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>.<span class="i n">Http</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>.<span class="i n">RegularExpressions</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Services</span>.<span class="i n">AppAuthentication</span>
+{
+    <b>internal static class</b> <a id="1ae00cb41271ba3c" href="../R/1ae00cb41271ba3c.html" target="n" data-glyph="2,0" class="t t">MsiRetryHelper</a>
+    {
+        <b>internal const int</b> <a id="e035740e133f33b6" href="../R/e035740e133f33b6.html" target="n" data-glyph="8,1" class="i field">MaxRetries</a> = 5;
+        <b>internal const int</b> <a id="00e0e5a947b33153" href="../R/00e0e5a947b33153.html" target="n" data-glyph="8,1" class="i field">DeltaBackOffInSeconds</a> = 2;
+        <b>internal const string</b> <a id="1f84dcedf2cfee61" href="../R/1f84dcedf2cfee61.html" target="n" data-glyph="8,1" class="i field">RetryTimeoutError</a> = <span class="s">&quot;Reached retry timeout limit set by MsiRetryTimeout parameter in connection string.&quot;</span>;
+ 
+        <span class="c">// for unit test purposes</span>
+        <b>internal static bool</b> <a id="54719ae550375fa0" href="../R/54719ae550375fa0.html" target="n" data-glyph="44,1" class="i field">WaitBeforeRetry</a> = <b>true</b>;
+ 
+        <b>internal static bool</b> <a id="ab0eb26042615de7" href="../R/ab0eb26042615de7.html" target="n" data-glyph="221,1" class="i method">IsRetryableStatusCode</a>(<b>this</b> <span class="t t">HttpResponseMessage</span> <span id="r0 rd" class="r0 r">response</span>)
+        {
+            <span class="c">// 404 NotFound, 429 TooManyRequests, and 5XX server error status codes are retryable</span>
+            <b>return</b> <a href="@0@System/A.html#bbe3b2eb80ae5526" class="t t">Regex</a>.<a href="@0@System/A.html#ffaf97ebd1d02f3c" class="i method">IsMatch</a>(((<b>int</b>)<span class="r0 r">response</span>.<span class="i property">StatusCode</span>).<a href="@0@mscorlib/A.html#8d6f2d8bc0589463" class="i method">ToString</a>(), <span class="s">@&quot;404|429|5\d{2}&quot;</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Implements recommended retry guidance here: https://docs.microsoft.com/en-us/azure/active-directory/managed-identities-azure-resources/how-to-use-vm-token#retry-guidance</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal static async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="t t">HttpResponseMessage</span>&gt; <a id="221e713f6f2abc18" href="../R/221e713f6f2abc18.html" target="n" data-glyph="221,1" class="i method">SendAsyncWithRetry</a>(<b>this</b> <span class="t t">HttpClient</span> <span id="r1 rd" class="r1 r">httpClient</span>, <a href="@0@mscorlib/A.html#87d60abb7092d5a4" class="t t">Func</a>&lt;<span class="t t">HttpRequestMessage</span>&gt; <span id="r2 rd" class="r2 r">getRequest</span>, <b>int</b> <span id="r3 rd" class="r3 r">retryTimeoutInSeconds</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r4 rd" class="r4 r">cancellationToken</span>)
+        {
+            <b>using</b> (<a href="@0@mscorlib/A.html#130a9536ac96b392" class="k">var</a> <span id="r5 rd" class="r5 r">timeoutTokenSource</span> = <b>new</b> <a href="@0@mscorlib/A.html#0fd973cb6741d972" class="t constructor">CancellationTokenSource</a>())
+            <b>using</b> (<a href="@0@mscorlib/A.html#130a9536ac96b392" class="k">var</a> <span id="r6 rd" class="r6 r">linkedTokenSource</span> = <a href="@0@mscorlib/A.html#130a9536ac96b392" class="t t">CancellationTokenSource</a>.<a href="@0@mscorlib/A.html#03f4ba87373778ca" class="i method">CreateLinkedTokenSource</a>(<span class="r5 r">timeoutTokenSource</span>.<a href="@0@mscorlib/A.html#9e22b9c8995bf195" class="i property">Token</a>, <span class="r4 r">cancellationToken</span>))
+            {
+                <b>try</b>
+                {
+                    <span class="c">// if retry timeout is configured, configure cancellation after timeout period elapses</span>
+                    <b>if</b> (<span class="r3 r">retryTimeoutInSeconds</span> &gt; 0)
+                    {
+                        <span class="r5 r">timeoutTokenSource</span>.<a href="@0@mscorlib/A.html#70756b542df0e802" class="i method">CancelAfter</a>(<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(<span class="r3 r">retryTimeoutInSeconds</span>));
+                    }
+ 
+                    <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r7 rd" class="r7 r">attempts</span> = 0;
+                    <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r8 rd" class="r8 r">backoffTimeInSecs</span> = 0;
+                    <span class="t t">HttpResponseMessage</span> <span id="r9 rd" class="r9 r">response</span>;
+ 
+                    <b>while</b> (<b>true</b>)
+                    {
+                        <span class="r7 r">attempts</span>++;
+ 
+                        <b>try</b>
+                        {
+                            <span class="r9 r">response</span> = <b>await</b> <span class="r1 r">httpClient</span>.<span class="i method">SendAsync</span>(<span class="r2 r">getRequest</span>(), <span class="r6 r">linkedTokenSource</span>.<a href="@0@mscorlib/A.html#9e22b9c8995bf195" class="i property">Token</a>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                            <b>if</b> (<span class="r9 r">response</span>.<span class="i property">IsSuccessStatusCode</span> || !<span class="r9 r">response</span>.<a href="#ab0eb26042615de7" class="i method">IsRetryableStatusCode</a>() || <span class="r7 r">attempts</span> == <a href="#e035740e133f33b6" class="i field">MaxRetries</a>)
+                            {
+                                <b>break</b>;
+                            }
+                        }
+                        <b>catch</b> (<span class="t t">HttpRequestException</span>)
+                        {
+                            <b>if</b> (<span class="r7 r">attempts</span> == <a href="#e035740e133f33b6" class="i field">MaxRetries</a>) <b>throw</b>;
+                        }
+ 
+                        <b>if</b> (<a href="#54719ae550375fa0" class="i field">WaitBeforeRetry</a>)
+                        {
+                            <span class="c">// use recommended exponential backoff strategy, and use linked token wait handle so caller or retry timeout is still able to cancel</span>
+                            <span class="r8 r">backoffTimeInSecs</span> = <span class="r8 r">backoffTimeInSecs</span> + (<b>int</b>)<a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#95354113fadc3083" class="i method">Pow</a>(<a href="#00e0e5a947b33153" class="i field">DeltaBackOffInSeconds</a>, <span class="r7 r">attempts</span>);
+                            <span class="r6 r">linkedTokenSource</span>.<a href="@0@mscorlib/A.html#9e22b9c8995bf195" class="i property">Token</a>.<a href="@0@mscorlib/A.html#2d85116bf4acf347" class="i property">WaitHandle</a>.<a href="@0@mscorlib/A.html#338dcea05d182d3c" class="i method">WaitOne</a>(<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(<span class="r8 r">backoffTimeInSecs</span>));
+                            <span class="r6 r">linkedTokenSource</span>.<a href="@0@mscorlib/A.html#9e22b9c8995bf195" class="i property">Token</a>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+                        }
+                    }
+ 
+                    <b>return</b> <span class="r9 r">response</span>;
+                }
+                <b>catch</b> (<a href="@0@mscorlib/A.html#a0a8b79c277cf327" class="t t">OperationCanceledException</a>)
+                {
+                    <b>if</b> (<span class="r5 r">timeoutTokenSource</span>.<a href="@0@mscorlib/A.html#716cb764064ecfeb" class="i property">IsCancellationRequested</a>)
+                    {
+                        <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#eedbd59d0faf42ed" class="t constructor">TimeoutException</a>(<a href="#1f84dcedf2cfee61" class="i field">RetryTimeoutError</a>);
+                    }
+ 
+                    <b>throw</b>;
+                }
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

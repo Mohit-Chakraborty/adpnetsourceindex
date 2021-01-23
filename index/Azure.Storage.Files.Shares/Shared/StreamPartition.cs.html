@@ -1,0 +1,150 @@
+﻿<!DOCTYPE html>
+<html><head><title>StreamPartition.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(141);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Storage.Files.Shares/Shared/StreamPartition.cs" target="_top">Shared\StreamPartition.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Storage.Files.Shares" target="_top">Azure.Storage.Files.Shares\src\Azure.Storage.Files.Shares.csproj</a> (Azure.Storage.Files.Shares)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Buffers</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Runtime</span>.<span class="i n">CompilerServices</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Runtime</span>.<span class="i n">InteropServices</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>
+{
+    <b>internal sealed class</b> <a id="77d07fccd82371d2" href="../R/77d07fccd82371d2.html" target="n" data-glyph="2,0" class="t t">StreamPartition</a> : <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a>
+    {
+        <b>private</b> <a href="@1@netstandard/A.html#9147ae6f76643aae" class="t t">Action</a> <a id="7e9d207c12b7c392" href="../R/7e9d207c12b7c392.html" target="n" data-glyph="46,1" class="i field">_disposeAction</a>;
+        <b>private</b> <span class="t t">ReadOnlyMemory</span>&lt;<b>byte</b>&gt; <a id="47b5860824040967" href="../R/47b5860824040967.html" target="n" data-glyph="46,1" class="i field">_memory</a>;
+ 
+        <b>public override bool</b> <a id="08d70a0fb750b573" href="../R/08d70a0fb750b573.html" target="n" data-glyph="102,1" class="i property">CanRead</a> =&gt; <b>true</b>;
+ 
+        <b>public override bool</b> <a id="872f1ffcdf30d41c" href="../R/872f1ffcdf30d41c.html" target="n" data-glyph="102,1" class="i property">CanSeek</a> =&gt; <b>true</b>;
+ 
+        <b>public override bool</b> <a id="19b9d8ce5adf72f0" href="../R/19b9d8ce5adf72f0.html" target="n" data-glyph="102,1" class="i property">CanWrite</a> =&gt; <b>false</b>;
+ 
+        <b>public override long</b> <a id="de75a7535af4cfda" href="../R/de75a7535af4cfda.html" target="n" data-glyph="102,1" class="i property">Length</a> { <b>get</b>; }
+ 
+        <b>private long</b> <a id="67d4f4a610da5d5d" href="../R/67d4f4a610da5d5d.html" target="n" data-glyph="46,1" class="i field">_position</a>;
+ 
+        <b>public override long</b> <a id="f44ff4066f41d41c" href="../R/f44ff4066f41d41c.html" target="n" data-glyph="102,1" class="i property">Position</a> { <b>get</b> =&gt; <a href="#67d4f4a610da5d5d" class="i field">_position</a>; <b>set</b> =&gt; <a href="#67d4f4a610da5d5d" class="i field">_position</a> = <b>value</b>; }
+ 
+        <b>public long</b> <a id="85c8fdd14efc8958" href="../R/85c8fdd14efc8958.html" target="n" data-glyph="102,1" class="i property">ParentPosition</a> { <b>get</b>; }
+ 
+        <b>public</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="b3addbbb0d8bf3a0" href="../R/b3addbbb0d8bf3a0.html" target="n" data-glyph="102,1" class="i property">DisposalTask</a> { <b>get</b>; }
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">IDE0069</span>, <span class="i">CA2213</span> <span class="c">// Disposable fields should be disposed // disposed in DisposalTask</span>
+        <span class="c">//ManualResetEventSlim disposalTaskCompletionSource;</span>
+        <b>private</b> <a href="@1@netstandard/A.html#d57f52e0341a581f" class="t t">SemaphoreSlim</a> <a id="79f10acc65b5a7d9" href="../R/79f10acc65b5a7d9.html" target="n" data-glyph="46,1" class="i field">_disposalTaskCompletionSource</a>;
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">IDE0069</span>, <span class="i">CA2213</span> <span class="c">// Disposable fields should be disposed</span>
+ 
+        <b>public</b> <a id="7581d7190d8dc9c4" href="../R/7581d7190d8dc9c4.html" target="n" data-glyph="72,1" class="t constructor">StreamPartition</a>(<span class="t t">ReadOnlyMemory</span>&lt;<b>byte</b>&gt; <span id="r0 rd" class="r0 r">buffer</span>, <b>long</b> <span id="r1 rd" class="r1 r">parentPosition</span>, <b>int</b> <span id="r2 rd" class="r2 r">count</span>, <a href="@1@netstandard/A.html#9147ae6f76643aae" class="t t">Action</a> <span id="r3 rd" class="r3 r">disposeAction</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r4 rd" class="r4 r">ct</span>)
+        {
+            <a href="#47b5860824040967" class="i field">_memory</a> = <span class="r0 r">buffer</span>;
+            <a href="#85c8fdd14efc8958" class="i property">ParentPosition</a> = <span class="r1 r">parentPosition</span>;
+            <a href="#de75a7535af4cfda" class="i property">Length</a> = <span class="r2 r">count</span>;
+            <a href="#7e9d207c12b7c392" class="i field">_disposeAction</a> = <span class="r3 r">disposeAction</span>;
+            <span class="c">//this.disposalTaskCompletionSource = new ManualResetEventSlim(false);</span>
+            <a href="#79f10acc65b5a7d9" class="i field">_disposalTaskCompletionSource</a> = <b>new</b> <a href="@1@netstandard/A.html#ead13858a2ff9c7c" class="t constructor">SemaphoreSlim</a>(0);
+            <a href="#b3addbbb0d8bf3a0" class="i property">DisposalTask</a> = <a href="#51918bdc2e956094" class="i method">DisposalTaskCore</a>(<span class="r4 r">ct</span>);
+        }
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CS1998</span> <span class="c">// Async method lacks &#39;await&#39; operators and will run synchronously</span>
+        <b>private async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="51918bdc2e956094" href="../R/51918bdc2e956094.html" target="n" data-glyph="76,1" class="i method">DisposalTaskCore</a>(<a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r5 rd" class="r5 r">ct</span>)
+        {
+            <span class="c">//Console.WriteLine($&quot;Waiting for partition {this.ParentPosition}&quot;);</span>
+ 
+            <span class="c">//this.disposalTaskCompletionSource.Wait(ct);</span>
+            <b>await</b> <a href="#79f10acc65b5a7d9" class="i field">_disposalTaskCompletionSource</a>.<a href="@1@netstandard/A.html#7a679e542c73988f" class="i method">WaitAsync</a>(<span class="r5 r">ct</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <span class="c">//Console.WriteLine($&quot;Completed partition {this.ParentPosition}&quot;);</span>
+ 
+            <a href="#79f10acc65b5a7d9" class="i field">_disposalTaskCompletionSource</a>.<a href="@1@netstandard/A.html#c4ae555dae3752b1" class="i method">Dispose</a>();
+            <a href="#79f10acc65b5a7d9" class="i field">_disposalTaskCompletionSource</a> = <b>default</b>;
+        }
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">CS1998</span> <span class="c">// Async method lacks &#39;await&#39; operators and will run synchronously</span>
+ 
+        <b>protected override void</b> <a id="94c5e42e5dc2875f" href="../R/94c5e42e5dc2875f.html" target="n" data-glyph="75,1" class="i method">Dispose</a>(<b>bool</b> <span id="r6 rd" class="r6 r">disposing</span>)
+        {
+            <b>if</b> (!<a href="#e3799412ce28f6c5" class="i field">_disposedValue</a>)
+            {
+                <b>if</b> (<span class="r6 r">disposing</span>)
+                {
+                    <a href="@1@netstandard/A.html#f956b0c07e86df64" class="k">base</a>.<a href="@1@netstandard/A.html#f35c7d226df4a465" class="i method">Dispose</a>(<span class="r6 r">disposing</span>);
+                    <a href="#7e9d207c12b7c392" class="i field">_disposeAction</a>();
+                }
+ 
+                <a href="#47b5860824040967" class="i field">_memory</a> = <b>default</b>;
+                <a href="#7e9d207c12b7c392" class="i field">_disposeAction</a> = <b>default</b>;
+ 
+                <a href="#e3799412ce28f6c5" class="i field">_disposedValue</a> = <b>true</b>;
+ 
+                <span class="c">//this.disposalTaskCompletionSource.Set();</span>
+                <a href="#79f10acc65b5a7d9" class="i field">_disposalTaskCompletionSource</a>.<a href="@1@netstandard/A.html#f7527810bcfc0842" class="i method">Release</a>();
+            }
+        }
+ 
+        <b>private bool</b> <a id="e3799412ce28f6c5" href="../R/e3799412ce28f6c5.html" target="n" data-glyph="46,1" class="i field">_disposedValue</a>; <span class="c">// To detect redundant calls</span>
+ 
+        <b>public override void</b> <a id="9ec705f13b7f11d5" href="../R/9ec705f13b7f11d5.html" target="n" data-glyph="72,1" class="i method">Flush</a>()
+        {
+            <span class="c">// Flush is allowed on read-only stream</span>
+        }
+ 
+        <b>public int</b> <a id="f2fd279ba82a2de0" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Read</a>(<b>out</b> <span class="t t">ReadOnlyMemory</span>&lt;<b>byte</b>&gt; <span id="r7 rd" class="r7 r">buffer</span>, <b>int</b> <span id="r8 rd" class="r8 r">count</span>)
+        {
+            <a href="@1@netstandard/A.html#225942ed7b7a3252" class="k">var</a> <span id="r9 rd" class="r9 r">n</span> = <a href="@1@netstandard/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@1@netstandard/A.html#f441d55c88d635ad" class="i method">Min</a>(<span class="r8 r">count</span>, (<b>int</b>)(<a href="#de75a7535af4cfda" class="i property">Length</a> - <a href="#67d4f4a610da5d5d" class="i field">_position</a>));
+ 
+            <span class="r7 r">buffer</span> = <a href="#47b5860824040967" class="i field">_memory</a>.<span class="i method">Slice</span>((<b>int</b>)<a href="#67d4f4a610da5d5d" class="i field">_position</a>, <span class="r9 r">n</span>);
+ 
+            <a href="@1@netstandard/A.html#8792520ddc6dadcb" class="t t">Interlocked</a>.<a href="@1@netstandard/A.html#d07671e23295984f" class="i method">Add</a>(<b>ref</b> <a href="#67d4f4a610da5d5d" class="i field">_position</a>, <span class="r9 r">n</span>);
+ 
+            <b>return</b> <span class="r9 r">n</span>;
+        }
+ 
+        <b>public override int</b> <a id="4ec9ebb6f48ae455" href="../R/4ec9ebb6f48ae455.html" target="n" data-glyph="72,1" class="i method">Read</a>(<b>byte</b>[] <span id="r10 rd" class="r10 r">buffer</span>, <b>int</b> <span id="r11 rd" class="r11 r">offset</span>, <b>int</b> <span id="r12 rd" class="r12 r">count</span>)
+        {
+            <a href="@1@netstandard/A.html#225942ed7b7a3252" class="k">var</a> <span id="r13 rd" class="r13 r">n</span> = <a href="@1@netstandard/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@1@netstandard/A.html#f441d55c88d635ad" class="i method">Min</a>(<span class="r12 r">count</span>, (<b>int</b>)(<a href="#de75a7535af4cfda" class="i property">Length</a> - <a href="#67d4f4a610da5d5d" class="i field">_position</a>));
+ 
+            <a href="#47b5860824040967" class="i field">_memory</a>.<span class="i method">Slice</span>((<b>int</b>)<a href="#67d4f4a610da5d5d" class="i field">_position</a>, <span class="r13 r">n</span>).<span class="i method">CopyTo</span>(<b>new</b> <span class="t constructor">Memory</span>&lt;<b>byte</b>&gt;(<span class="r10 r">buffer</span>, <span class="r11 r">offset</span>, <span class="r12 r">count</span>));
+ 
+            <a href="@1@netstandard/A.html#8792520ddc6dadcb" class="t t">Interlocked</a>.<a href="@1@netstandard/A.html#d07671e23295984f" class="i method">Add</a>(<b>ref</b> <a href="#67d4f4a610da5d5d" class="i field">_position</a>, <span class="r13 r">n</span>);
+ 
+            <b>return</b> <span class="r13 r">n</span>;
+        }
+ 
+        <b>public override long</b> <a id="d61a67474cf8efcd" href="../R/d61a67474cf8efcd.html" target="n" data-glyph="72,1" class="i method">Seek</a>(<b>long</b> <span id="r14 rd" class="r14 r">offset</span>, <a href="@1@netstandard/A.html#2cc1cf6635f00a52" class="t t">SeekOrigin</a> <span id="r15 rd" class="r15 r">origin</span>)
+        {
+            <b>switch</b> (<span class="r15 r">origin</span>)
+            {
+                <b>case</b> <a href="@1@netstandard/A.html#2cc1cf6635f00a52" class="t t">SeekOrigin</a>.<a href="@1@netstandard/A.html#c29481af7c617299" class="i field">Begin</a>:
+                    <a href="@1@netstandard/A.html#8792520ddc6dadcb" class="t t">Interlocked</a>.<a href="@1@netstandard/A.html#b4eb06f8a279b2f2" class="i method">Exchange</a>(<b>ref</b> <a href="#67d4f4a610da5d5d" class="i field">_position</a>, <span class="r14 r">offset</span>);
+                    <b>break</b>;
+                <b>case</b> <a href="@1@netstandard/A.html#2cc1cf6635f00a52" class="t t">SeekOrigin</a>.<a href="@1@netstandard/A.html#efa75a72affe543f" class="i field">Current</a>:
+                    <a href="@1@netstandard/A.html#8792520ddc6dadcb" class="t t">Interlocked</a>.<a href="@1@netstandard/A.html#d07671e23295984f" class="i method">Add</a>(<b>ref</b> <a href="#67d4f4a610da5d5d" class="i field">_position</a>, <span class="r14 r">offset</span>);
+                    <b>break</b>;
+                <b>case</b> <a href="@1@netstandard/A.html#2cc1cf6635f00a52" class="t t">SeekOrigin</a>.<a href="@1@netstandard/A.html#b6e266c635b89485" class="i field">End</a>:
+                    <a href="@1@netstandard/A.html#8792520ddc6dadcb" class="t t">Interlocked</a>.<a href="@1@netstandard/A.html#b4eb06f8a279b2f2" class="i method">Exchange</a>(<b>ref</b> <a href="#67d4f4a610da5d5d" class="i field">_position</a>, <a href="#de75a7535af4cfda" class="i property">Length</a> - <span class="r14 r">offset</span>);
+                    <b>break</b>;
+            }
+ 
+            <b>return</b> <a href="#f44ff4066f41d41c" class="i property">Position</a>;
+        }
+ 
+        <b>public override void</b> <a id="dce85d882995c896" href="../R/dce85d882995c896.html" target="n" data-glyph="72,1" class="i method">SetLength</a>(<b>long</b> <span id="r16 rd" class="r16 r">value</span>) =&gt; <b>throw</b> <a href="../P/5ed86f0799b000b6.html#5ed86f0799b000b6" class="t t">Errors</a>.<a href="Errors.Clients.cs.html#308835c39e26ad77" class="i method">NotImplemented</a>();
+ 
+        <b>public override void</b> <a id="6d3bc1aba373b76e" href="../R/6d3bc1aba373b76e.html" target="n" data-glyph="72,1" class="i method">Write</a>(<b>byte</b>[] <span id="r17 rd" class="r17 r">buffer</span>, <b>int</b> <span id="r18 rd" class="r18 r">offset</span>, <b>int</b> <span id="r19 rd" class="r19 r">count</span>) =&gt; <b>throw</b> <a href="../P/5ed86f0799b000b6.html#5ed86f0799b000b6" class="t t">Errors</a>.<a href="Errors.Clients.cs.html#308835c39e26ad77" class="i method">NotImplemented</a>();
+    }
+}
+</pre></td></tr></table></div></body></html>

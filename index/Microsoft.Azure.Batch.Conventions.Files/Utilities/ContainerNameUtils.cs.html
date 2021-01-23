@@ -1,0 +1,121 @@
+﻿<!DOCTYPE html>
+<html><head><title>ContainerNameUtils.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(112);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.Batch.Conventions.Files/Utilities/ContainerNameUtils.cs" target="_top">Utilities\ContainerNameUtils.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.Batch.Conventions.Files" target="_top">src\Microsoft.Azure.Batch.Conventions.Files.csproj</a> (Microsoft.Azure.Batch.Conventions.Files)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft and contributors.  All rights reserved.</span>
+<span class="c">//</span>
+<span class="c">// Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);</span>
+<span class="c">// you may not use this file except in compliance with the License.</span>
+<span class="c">// You may obtain a copy of the License at</span>
+<span class="c">// http://www.apache.org/licenses/LICENSE-2.0</span>
+<span class="c">//</span>
+<span class="c">// Unless required by applicable law or agreed to in writing, software</span>
+<span class="c">// distributed under the License is distributed on an &quot;AS IS&quot; BASIS,</span>
+<span class="c">// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.</span>
+<span class="c">//</span>
+<span class="c">// See the License for the specific language governing permissions and</span>
+<span class="c">// limitations under the License.</span>
+ 
+﻿<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Security</span>.<span class="i n">Cryptography</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>.<span class="i n">RegularExpressions</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Batch</span>.<span class="i n">Conventions</span>.<span class="i n">Files</span>.<span class="i n">Utilities</span>
+{
+    <b>internal static class</b> <a id="1d8c75b4846b4dde" href="../R/1d8c75b4846b4dde.html" target="n" data-glyph="2,0" class="t t">ContainerNameUtils</a>
+    {
+        <b>private static readonly</b> <a href="@0@System/A.html#bbe3b2eb80ae5526" class="t t">Regex</a> <a id="f6763006755556bb" href="../R/f6763006755556bb.html" target="n" data-glyph="46,1" class="i field">PermittedContainerNamePattern</a> = <b>new</b> <a href="@0@System/A.html#71b5945bb883860b" class="t constructor">Regex</a>(<span class="s">&quot;^[a-z0-9][-a-z0-9]*$&quot;</span>);
+ 
+        <span class="c">// new instance each time because a shared instance would not be thread-safe</span>
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">FullNetFx</span>
+        <b>private static readonly</b> <a href="@0@mscorlib/A.html#87d60abb7092d5a4" class="t t">Func</a>&lt;<a href="@0@mscorlib/A.html#e7c6be1ed86f474f" class="t t">HashAlgorithm</a>&gt; <a id="abca2ceeb70d6fbf" href="../R/abca2ceeb70d6fbf.html" target="n" data-glyph="46,1" class="i field">hasher</a> = () =&gt; <b>new</b> <a href="@0@mscorlib/A.html#92ea48f050b5f804" class="t constructor">SHA1CryptoServiceProvider</a>();
+<span class="k preprocess">#</span><span class="k preprocess">else</span>
+<span class="e">        private static readonly Func&lt;HashAlgorithm&gt; hasher = () =&gt; SHA1.Create();
+</span><span class="k preprocess">#</span><span class="k preprocess">endif</span>
+        <b>private static readonly int</b> <a id="a5d854d7dd49dce7" href="../R/a5d854d7dd49dce7.html" target="n" data-glyph="46,1" class="i field">MaxJobIdLengthInMungedContainerName</a> = 15;  <span class="c">// must be &lt;= 63 - &quot;job-&quot;.Length - 1 (hyphen before hash) - length of hash string (40 for SHA1)</span>
+        <b>private static readonly char</b>[] <a id="fb4d63825e514b5b" href="../R/fb4d63825e514b5b.html" target="n" data-glyph="46,1" class="i field">ForbiddenLeadingTrailingContainerNameChars</a> = <b>new</b>[] { <span class="s">&#39;-&#39;</span> };
+        <b>private static readonly</b> <a href="@0@System/A.html#bbe3b2eb80ae5526" class="t t">Regex</a> <a id="18149444f8958665" href="../R/18149444f8958665.html" target="n" data-glyph="46,1" class="i field">InvalidContainerCharacters</a> = <b>new</b> <a href="@0@System/A.html#71b5945bb883860b" class="t constructor">Regex</a>(<span class="s">&quot;[:_-]+&quot;</span>);
+        <b>private const string</b> <a id="5a05558bfdcd99d5" href="../R/5a05558bfdcd99d5.html" target="n" data-glyph="10,1" class="i field">ContainerPrefix</a> = <span class="s">&quot;job-&quot;</span>;
+        <b>private static readonly int</b> <a id="49330c99e795bd73" href="../R/49330c99e795bd73.html" target="n" data-glyph="46,1" class="i field">MaxUsableJobIdLength</a> = 63 - <a href="#5a05558bfdcd99d5" class="i field">ContainerPrefix</a>.<a href="@0@mscorlib/A.html#e13f5829ef28aa07" class="i property">Length</a>;
+ 
+        <b>internal static string</b> <a id="5994df50a816a02b" href="../R/5994df50a816a02b.html" target="n" data-glyph="74,1" class="i method">GetSafeContainerName</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r0 rd" class="r0 r">jobId</span>)
+        {
+            <b>return</b> <a href="#5a05558bfdcd99d5" class="i field">ContainerPrefix</a> + <a href="#c9f23b0b11171749" class="i method">GetUnprefixedSafeContainerName</a>(<span class="r0 r">jobId</span>);
+        }
+ 
+        <b>private static string</b> <a id="c9f23b0b11171749" href="../R/c9f23b0b11171749.html" target="n" data-glyph="76,1" class="i method">GetUnprefixedSafeContainerName</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r1 rd" class="r1 r">jobId</span>)
+        {
+            <span class="r1 r">jobId</span> = <span class="r1 r">jobId</span>.<a href="@0@mscorlib/A.html#2d51c212cb09178e" class="i method">ToLowerInvariant</a>();  <span class="c">// it&#39;s safe to do this early as job ids cannot differ only by case, so the lower case job id is still a unique identifier</span>
+ 
+            <span class="c">// Check that job-{jobId} won&#39;t overflow the maximum container name length.</span>
+            <span class="c">// We don&#39;t need a minimum length check because the &quot;job-&quot; prefix ensures</span>
+            <span class="c">// that the actual container name will be &gt;= 3 characters.</span>
+            <b>if</b> (<span class="r1 r">jobId</span>.<a href="@0@mscorlib/A.html#e13f5829ef28aa07" class="i property">Length</a> &gt; <a href="#49330c99e795bd73" class="i field">MaxUsableJobIdLength</a>)  
+            {
+                <b>return</b> <a href="#eee90c244f758c40" class="i method">TransformToContainerName</a>(<span class="r1 r">jobId</span>);
+            }
+ 
+            <span class="c">// Check that the jobId contains only characters that are valid in a container</span>
+            <span class="c">// name, and doesn&#39;t start with a &#39;-&#39;.</span>
+            <b>if</b> (!<a href="#f6763006755556bb" class="i field">PermittedContainerNamePattern</a>.<a href="@0@System/A.html#5a9d5ededeb92966" class="i method">IsMatch</a>(<span class="r1 r">jobId</span>))
+            {
+                <b>return</b> <a href="#eee90c244f758c40" class="i method">TransformToContainerName</a>(<span class="r1 r">jobId</span>);
+            }
+ 
+            <span class="c">// Check that jobId doesn&#39;t end with a &#39;-&#39;, and doesn&#39;t contain consecutive hyphens.</span>
+            <b>if</b> (<span class="r1 r">jobId</span><a href="@0@mscorlib/A.html#8307d03426b56fe1">[</a><span class="r1 r">jobId</span>.<a href="@0@mscorlib/A.html#e13f5829ef28aa07" class="i property">Length</a> - 1] == <span class="s">&#39;-&#39;</span> || <span class="r1 r">jobId</span>.<a href="@0@mscorlib/A.html#428c5c9954dea844" class="i method">Contains</a>(<span class="s">&quot;--&quot;</span>))
+            {
+                <b>return</b> <a href="#eee90c244f758c40" class="i method">TransformToContainerName</a>(<span class="r1 r">jobId</span>);
+            }
+ 
+            <b>return</b> <span class="r1 r">jobId</span>;
+        }
+ 
+        <b>private static string</b> <a id="eee90c244f758c40" href="../R/eee90c244f758c40.html" target="n" data-glyph="76,1" class="i method">TransformToContainerName</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r2 rd" class="r2 r">str</span>)
+        {
+            <b>var</b> <span id="r3 rd" class="r3 r">hash</span> = <a href="#abca2ceeb70d6fbf" class="i field">hasher</a>().<a href="@0@mscorlib/A.html#a71a3cba2c656040" class="i method">ComputeHash</a>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<span class="r2 r">str</span>));
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r4 rd" class="r4 r">hashText</span> = <a href="#377f13de8028ff6a" class="i method">ToHex</a>(<span class="r3 r">hash</span>);
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r5 rd" class="r5 r">safeStr</span> = <a href="#33cd04d35b2de5db" class="i method">MakeSafe</a>(<span class="r2 r">str</span>);
+ 
+            <span class="r5 r">safeStr</span> = <span class="r5 r">safeStr</span>.<a href="@0@mscorlib/A.html#628f74f98ae9d848" class="i method">Trim</a>(<a href="#fb4d63825e514b5b" class="i field">ForbiddenLeadingTrailingContainerNameChars</a>);
+ 
+            <b>if</b> (<span class="r5 r">safeStr</span>.<a href="@0@mscorlib/A.html#e13f5829ef28aa07" class="i property">Length</a> &gt; <a href="#a5d854d7dd49dce7" class="i field">MaxJobIdLengthInMungedContainerName</a>)
+            {
+                <span class="r5 r">safeStr</span> = <span class="r5 r">safeStr</span>.<a href="@0@mscorlib/A.html#8124961f027d9ac9" class="i method">Substring</a>(0, <a href="#a5d854d7dd49dce7" class="i field">MaxJobIdLengthInMungedContainerName</a>)
+                                 .<a href="@0@mscorlib/A.html#628f74f98ae9d848" class="i method">Trim</a>(<a href="#fb4d63825e514b5b" class="i field">ForbiddenLeadingTrailingContainerNameChars</a>);  <span class="c">// do this again as truncation may have unleashed a trailing dash</span>
+            }
+            <b>else</b> <b>if</b> (<span class="r5 r">safeStr</span>.<a href="@0@mscorlib/A.html#e13f5829ef28aa07" class="i property">Length</a> == 0)
+            {
+                <span class="r5 r">safeStr</span> = <span class="s">&quot;job&quot;</span>;
+            }
+ 
+            <b>return</b> <span class="r5 r">safeStr</span> + <span class="s">&quot;-&quot;</span> + <span class="r4 r">hashText</span>;
+        }
+ 
+        <b>private static string</b> <a id="33cd04d35b2de5db" href="../R/33cd04d35b2de5db.html" target="n" data-glyph="76,1" class="i method">MakeSafe</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r6 rd" class="r6 r">rawString</span>)
+        {
+            <b>return</b> <a href="#18149444f8958665" class="i field">InvalidContainerCharacters</a>.<a href="@0@System/A.html#1f2acfa32796faaa" class="i method">Replace</a>(<span class="r6 r">rawString</span>, <span class="s">&quot;-&quot;</span>);
+        }
+ 
+        <b>private static string</b> <a id="377f13de8028ff6a" href="../R/377f13de8028ff6a.html" target="n" data-glyph="76,1" class="i method">ToHex</a>(<b>byte</b>[] <span id="r7 rd" class="r7 r">bytes</span>)
+        {
+            <a href="@0@mscorlib/A.html#adf60ee46ebd299f" class="k">var</a> <span id="r8 rd" class="r8 r">sb</span> = <b>new</b> <a href="@0@mscorlib/A.html#ec674e2123a44860" class="t constructor">StringBuilder</a>(<span class="r7 r">bytes</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a> * 2);
+            <b>foreach</b> (<a href="@0@mscorlib/A.html#3933aebb80415ce0" class="k">var</a> <span id="r9 rd" class="r9 r">b</span> <b>in</b> <span class="r7 r">bytes</span>)
+            {
+                <span class="r8 r">sb</span>.<a href="@0@mscorlib/A.html#a7675b19098e0787" class="i method">AppendFormat</a>(<span class="r9 r">b</span>.<a href="@0@mscorlib/A.html#51506b5791391f8f" class="i method">ToString</a>(<span class="s">&quot;x2&quot;</span>));
+            }
+            <b>return</b> <span class="r8 r">sb</span>.<a href="@0@mscorlib/A.html#5a97da49a158a3c9" class="i method">ToString</a>();
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

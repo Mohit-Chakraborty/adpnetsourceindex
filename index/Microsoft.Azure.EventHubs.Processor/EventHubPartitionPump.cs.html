@@ -1,0 +1,219 @@
+﻿<!DOCTYPE html>
+<html><head><title>EventHubPartitionPump.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(210);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.EventHubs.Processor/EventHubPartitionPump.cs" target="_top">EventHubPartitionPump.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.EventHubs.Processor" target="_top">Microsoft.Azure.EventHubs.Processor\src\Microsoft.Azure.EventHubs.Processor.csproj</a> (Microsoft.Azure.EventHubs.Processor)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft. All rights reserved.</span>
+<span class="c">// Licensed under the MIT license. See LICENSE file in the project root for full license information.</span>
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">EventHubs</span>.<span class="i n">Processor</span>
+{
+    <b>using</b> <span class="i">System</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+    <b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+ 
+    <b>class</b> <a id="54f8340fda1e93f5" href="R/54f8340fda1e93f5.html" target="n" data-glyph="2,0" class="t t">EventHubPartitionPump</a> : <a href="PartitionPump.cs.html#c03f39c3c57216f2" class="t t">PartitionPump</a>
+    {
+        <a href="/Microsoft.Azure.EventHubs/A.html#ef11bbb905992f88" class="t t">EventHubClient</a> <a id="f0045895e120abfe" href="R/f0045895e120abfe.html" target="n" data-glyph="46,1" class="i field">eventHubClient</a>;
+        <a href="/Microsoft.Azure.EventHubs/A.html#c6301acd46b0811a" class="t t">PartitionReceiver</a> <a id="a6c1d77d229453ba" href="R/a6c1d77d229453ba.html" target="n" data-glyph="46,1" class="i field">partitionReceiver</a>;
+        <a href="#dd6a1fd4a2827c7e" class="t t">PartitionReceiveHandler</a> <a id="6366f902704c5cbe" href="R/6366f902704c5cbe.html" target="n" data-glyph="46,1" class="i field">partitionReceiveHandler</a>;
+ 
+        <b>public</b> <a id="b3b9164c9aee6bdc" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">EventHubPartitionPump</a>(<a href="EventProcessorHost.cs.html#ec134749c5d2bd58" class="t t">EventProcessorHost</a> <span id="r0 rd" class="r0 r">host</span>, <a href="Lease.cs.html#6a215b3b2a51b99b" class="t t">Lease</a> <span id="r1 rd" class="r1 r">lease</span>)
+            : <a href="PartitionPump.cs.html#9572df6f3fdd2f1f" class="k">base</a>(<span class="r0 r">host</span>, <span class="r1 r">lease</span>)
+        {
+        }
+ 
+        <b>protected override async</b> <span class="i">Task</span> <a id="08938cd5ee615459" href="R/08938cd5ee615459.html" target="n" data-glyph="75,1" class="i method">OnOpenAsync</a>()
+        {
+            <b>bool</b> <span id="r2 rd" class="r2 r">openedOK</span> = <b>false</b>;
+            <b>int</b> <span id="r3 rd" class="r3 r">retryCount</span> = 0;
+            <span class="i">Exception</span> <span id="r4 rd" class="r4 r">lastException</span> = <b>null</b>;
+            <b>do</b>
+            {
+                <b>try</b>
+                {
+                    <b>await</b> <a href="#91a8d398e5ab0c21" class="i method">OpenClientsAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    <span class="r2 r">openedOK</span> = <b>true</b>;
+                }
+                <b>catch</b> (<span class="i">Exception</span> <span id="r5 rd" class="r5 r">e</span>)
+                {
+                    <span class="r4 r">lastException</span> = <span class="r5 r">e</span>;
+                    <a href="ProcessorEventSource.cs.html#7f134639960276e9" class="t t">ProcessorEventSource</a>.<a href="ProcessorEventSource.cs.html#5ccc92f7c54c9c33" class="i property">Log</a>.<span class="i">PartitionPumpWarning</span>(
+                        <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#0a7c479e2e772173" class="i property">Host</a>.<a href="EventProcessorHost.cs.html#06948910037a7b5d" class="i property">HostName</a>, <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#6726fe2d9c1542c1" class="i property">PartitionContext</a>.<a href="PartitionContext.cs.html#e15eccbcf35c2384" class="i property">PartitionId</a>, <span class="s">&quot;Failure creating client or receiver, retrying&quot;</span>, <span class="r5 r">e</span>.<span class="i">ToString</span>());
+ 
+                    <span class="c">// Don&#39;t retry if we already lost the lease.</span>
+                    <b>if</b> (<span class="r5 r">e</span> <b>is</b> <a href="/Microsoft.Azure.EventHubs/A.html#52ecd05c9600cf6e" class="t t">ReceiverDisconnectedException</a>)
+                    {
+                        <b>break</b>;
+                    }
+ 
+                    <span class="r3 r">retryCount</span>++;
+                }
+            }
+            <b>while</b> (!<span class="r2 r">openedOK</span> &amp;&amp; (<span class="r3 r">retryCount</span> &lt; 5));
+ 
+            <b>if</b> (!<span class="r2 r">openedOK</span>)
+            {
+                <span class="c">// IEventProcessor.onOpen is called from the base PartitionPump and must have returned in order for execution to reach here, </span>
+                <span class="c">// so we can report this error to it instead of the general error handler.</span>
+                <b>await</b> <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#81bff8382b05f71c" class="i property">Processor</a>.<a href="IEventProcessor.cs.html#e5a6eca3b9bcd118" class="i method">ProcessErrorAsync</a>(<a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#6726fe2d9c1542c1" class="i property">PartitionContext</a>, <span class="r4 r">lastException</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#9191e23885eebc61" class="i property">PumpStatus</a> = <a href="PartitionPumpStatus.cs.html#7fd270c686a88b09" class="t t">PartitionPumpStatus</a>.<a href="PartitionPumpStatus.cs.html#ab97893251e734d4" class="i field">OpenFailed</a>;
+            }
+ 
+            <b>if</b> (<a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#9191e23885eebc61" class="i property">PumpStatus</a> == <a href="PartitionPumpStatus.cs.html#7fd270c686a88b09" class="t t">PartitionPumpStatus</a>.<a href="PartitionPumpStatus.cs.html#a3e2a172bb7788ce" class="i field">Opening</a>)
+            {
+                <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="#6366f902704c5cbe" class="i field">partitionReceiveHandler</a> = <b>new</b> <a href="#41504872d001e1b5" class="t constructor">PartitionReceiveHandler</a>(<a href="#54f8340fda1e93f5" class="k">this</a>);
+                <span class="c">// IEventProcessor.OnOpen is called from the base PartitionPump and must have returned in order for execution to reach here, </span>
+                <span class="c">// meaning it is safe to set the handler and start calling IEventProcessor.OnEvents.</span>
+                <span class="c">// Set the status to running before setting the client handler, so the IEventProcessor.OnEvents can never race and see status != running.</span>
+                <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#9191e23885eebc61" class="i property">PumpStatus</a> = <a href="PartitionPumpStatus.cs.html#7fd270c686a88b09" class="t t">PartitionPumpStatus</a>.<a href="PartitionPumpStatus.cs.html#ae7473de22ce4c8d" class="i field">Running</a>;
+                <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="#a6c1d77d229453ba" class="i field">partitionReceiver</a>.<span class="i">SetReceiveHandler</span>(
+                    <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="#6366f902704c5cbe" class="i field">partitionReceiveHandler</a>,
+                    <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#0a7c479e2e772173" class="i property">Host</a>.<a href="EventProcessorHost.cs.html#47e7c3f2e0e5c592" class="i property">EventProcessorOptions</a>.<a href="EventProcessorOptions.cs.html#0dce31591b9215fb" class="i property">InvokeProcessorAfterReceiveTimeout</a>);
+            }
+ 
+            <b>if</b> (<a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#9191e23885eebc61" class="i property">PumpStatus</a> == <a href="PartitionPumpStatus.cs.html#7fd270c686a88b09" class="t t">PartitionPumpStatus</a>.<a href="PartitionPumpStatus.cs.html#ab97893251e734d4" class="i field">OpenFailed</a>)
+            {
+                <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#9191e23885eebc61" class="i property">PumpStatus</a> = <a href="PartitionPumpStatus.cs.html#7fd270c686a88b09" class="t t">PartitionPumpStatus</a>.<a href="PartitionPumpStatus.cs.html#66a5abc65ddf66ce" class="i field">Closing</a>;
+                <b>await</b> <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="#09a6adeb6cb279ad" class="i method">CleanUpClientsAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#9191e23885eebc61" class="i property">PumpStatus</a> = <a href="PartitionPumpStatus.cs.html#7fd270c686a88b09" class="t t">PartitionPumpStatus</a>.<a href="PartitionPumpStatus.cs.html#90c3261bb994359d" class="i field">Closed</a>;
+            }
+        }
+ 
+        <b>async</b> <span class="i">Task</span> <a id="91a8d398e5ab0c21" href="R/91a8d398e5ab0c21.html" target="n" data-glyph="76,1" class="i method">OpenClientsAsync</a>() <span class="c">// throws EventHubsException, IOException, InterruptedException, ExecutionException</span>
+        {
+            <span class="c">// Create new clients</span>
+            <a href="/Microsoft.Azure.EventHubs/A.html#5c55f1ce5bfdf68d" class="t t">EventPosition</a> <span id="r6 rd" class="r6 r">eventPosition</span> = <b>await</b> <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#6726fe2d9c1542c1" class="i property">PartitionContext</a>.<a href="PartitionContext.cs.html#b0ca30e8873af65d" class="i method">GetInitialOffsetAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+            <b>long</b> <span id="r7 rd" class="r7 r">epoch</span> = <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#13cc653fe247e836" class="i property">Lease</a>.<a href="Lease.cs.html#342f291653b2caec" class="i property">Epoch</a>;
+            <a href="ProcessorEventSource.cs.html#7f134639960276e9" class="t t">ProcessorEventSource</a>.<a href="ProcessorEventSource.cs.html#5ccc92f7c54c9c33" class="i property">Log</a>.<a href="ProcessorEventSource.cs.html#2f4571b8501576d0" class="i method">PartitionPumpCreateClientsStart</a>(<a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#0a7c479e2e772173" class="i property">Host</a>.<a href="EventProcessorHost.cs.html#06948910037a7b5d" class="i property">HostName</a>, <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#6726fe2d9c1542c1" class="i property">PartitionContext</a>.<a href="PartitionContext.cs.html#e15eccbcf35c2384" class="i property">PartitionId</a>, <span class="r7 r">epoch</span>,
+                <span class="s">$&quot;</span><span class="s">Offset:</span>{<span class="r6 r">eventPosition</span>.<span class="i">Offset</span>}<span class="s">, SequenceNumber:</span>{<span class="r6 r">eventPosition</span>.<a href="/Microsoft.Azure.EventHubs/A.html#cb766c6ae4d91738" class="i property">SequenceNumber</a>}<span class="s">, DateTime:</span>{<span class="r6 r">eventPosition</span>.<span class="i">EnqueuedTimeUtc</span>}<span class="s">&quot;</span>);
+            <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="#f0045895e120abfe" class="i field">eventHubClient</a> = <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#0a7c479e2e772173" class="i property">Host</a>.<a href="EventProcessorHost.cs.html#33f2dd4bdaf25ec8" class="i method">CreateEventHubClient</a>();
+            <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="#f0045895e120abfe" class="i field">eventHubClient</a>.<a href="/Microsoft.Azure.EventHubs/A.html#4ebdf9955daf6a25" class="i property">WebProxy</a> = <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#0a7c479e2e772173" class="i property">Host</a>.<a href="EventProcessorHost.cs.html#47e7c3f2e0e5c592" class="i property">EventProcessorOptions</a>.<a href="EventProcessorOptions.cs.html#07c4b84bc25ab471" class="i property">WebProxy</a>;
+ 
+            <a href="/Microsoft.Azure.EventHubs/A.html#f0c29f0f48ec0eaa" class="k">var</a> <span id="r8 rd" class="r8 r">receiverOptions</span> = <b>new</b> <span class="t">ReceiverOptions</span>()
+            {
+                <span class="c">// Enable receiver metrics?</span>
+                <a href="/Microsoft.Azure.EventHubs/A.html#1f6ab35f7307a573" class="i property">EnableReceiverRuntimeMetric</a> = <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#0a7c479e2e772173" class="i property">Host</a>.<a href="EventProcessorHost.cs.html#47e7c3f2e0e5c592" class="i property">EventProcessorOptions</a>.<a href="EventProcessorOptions.cs.html#cabc74f1a81923ae" class="i property">EnableReceiverRuntimeMetric</a>,
+ 
+                <span class="c">// Use host name as the identifier for debugging purpose</span>
+                <span class="c">// Shorten host name if name is longer than max allowed lenght.</span>
+                <a href="/Microsoft.Azure.EventHubs/A.html#a855211b679fa6a5" class="i property">Identifier</a> = <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#0a7c479e2e772173" class="i property">Host</a>.<a href="EventProcessorHost.cs.html#06948910037a7b5d" class="i property">HostName</a>.<span class="i">Length</span> &gt; <span class="i">ClientConstants</span>.<span class="i">MaxReceiverIdentifierLength</span> ?
+                    <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#0a7c479e2e772173" class="i property">Host</a>.<a href="EventProcessorHost.cs.html#06948910037a7b5d" class="i property">HostName</a>.<span class="i">Substring</span>(0, <span class="i">ClientConstants</span>.<span class="i">MaxReceiverIdentifierLength</span>) : <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#0a7c479e2e772173" class="i property">Host</a>.<a href="EventProcessorHost.cs.html#06948910037a7b5d" class="i property">HostName</a>
+            };
+ 
+            <span class="c">// Create new receiver and set options</span>
+            <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="#a6c1d77d229453ba" class="i field">partitionReceiver</a> = <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="#f0045895e120abfe" class="i field">eventHubClient</a>.<span class="i">CreateEpochReceiver</span>(
+                <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#6726fe2d9c1542c1" class="i property">PartitionContext</a>.<a href="PartitionContext.cs.html#e2beaaff349ce7d7" class="i property">ConsumerGroupName</a>,
+                <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#6726fe2d9c1542c1" class="i property">PartitionContext</a>.<a href="PartitionContext.cs.html#e15eccbcf35c2384" class="i property">PartitionId</a>,
+                <span class="r6 r">eventPosition</span>,
+                <span class="r7 r">epoch</span>,
+                <span class="r8 r">receiverOptions</span>);
+ 
+            <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="#a6c1d77d229453ba" class="i field">partitionReceiver</a>.<a href="/Microsoft.Azure.EventHubs/A.html#08586c50f20673c9" class="i property">PrefetchCount</a> = <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#0a7c479e2e772173" class="i property">Host</a>.<a href="EventProcessorHost.cs.html#47e7c3f2e0e5c592" class="i property">EventProcessorOptions</a>.<a href="EventProcessorOptions.cs.html#e5b9698cf46cd50e" class="i property">PrefetchCount</a>;
+ 
+            <a href="ProcessorEventSource.cs.html#7f134639960276e9" class="t t">ProcessorEventSource</a>.<a href="ProcessorEventSource.cs.html#5ccc92f7c54c9c33" class="i property">Log</a>.<a href="ProcessorEventSource.cs.html#daa55c11264d6e7c" class="i method">PartitionPumpCreateClientsStop</a>(<a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#0a7c479e2e772173" class="i property">Host</a>.<a href="EventProcessorHost.cs.html#06948910037a7b5d" class="i property">HostName</a>, <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#6726fe2d9c1542c1" class="i property">PartitionContext</a>.<a href="PartitionContext.cs.html#e15eccbcf35c2384" class="i property">PartitionId</a>);
+        }
+ 
+        <b>async</b> <span class="i">Task</span> <a id="09a6adeb6cb279ad" href="R/09a6adeb6cb279ad.html" target="n" data-glyph="76,1" class="i method">CleanUpClientsAsync</a>() <span class="c">// swallows all exceptions</span>
+        {
+            <b>if</b> (<a href="#54f8340fda1e93f5" class="k">this</a>.<a href="#a6c1d77d229453ba" class="i field">partitionReceiver</a> != <b>null</b>)
+            {
+                <span class="c">// Taking the lock means that there is no ProcessEventsAsync call in progress.</span>
+                <span class="i">Task</span> <span id="r9 rd" class="r9 r">closeTask</span>;
+                <b>using</b> (<b>await</b> <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#96a722a4fa0944fc" class="i property">ProcessingAsyncLock</a>.<span class="i">LockAsync</span>().<span class="i">ConfigureAwait</span>(<b>false</b>))
+                {
+                    <span class="c">// Calling PartitionReceiver.CloseAsync will gracefully close the IPartitionReceiveHandler we have installed.</span>
+                    <a href="ProcessorEventSource.cs.html#7f134639960276e9" class="t t">ProcessorEventSource</a>.<a href="ProcessorEventSource.cs.html#5ccc92f7c54c9c33" class="i property">Log</a>.<a href="ProcessorEventSource.cs.html#ca7ccb44e811301f" class="i method">PartitionPumpInfo</a>(<a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#0a7c479e2e772173" class="i property">Host</a>.<a href="EventProcessorHost.cs.html#06948910037a7b5d" class="i property">HostName</a>, <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#6726fe2d9c1542c1" class="i property">PartitionContext</a>.<a href="PartitionContext.cs.html#e15eccbcf35c2384" class="i property">PartitionId</a>, <span class="s">&quot;Closing PartitionReceiver&quot;</span>);
+                    <span class="r9 r">closeTask</span> = <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="#a6c1d77d229453ba" class="i field">partitionReceiver</a>.<span class="i">CloseAsync</span>();
+                }
+ 
+                <b>await</b> <span class="r9 r">closeTask</span>.<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="#a6c1d77d229453ba" class="i field">partitionReceiver</a> = <b>null</b>;
+            }
+ 
+            <b>if</b> (<a href="#54f8340fda1e93f5" class="k">this</a>.<a href="#f0045895e120abfe" class="i field">eventHubClient</a> != <b>null</b>)
+            {
+                <a href="ProcessorEventSource.cs.html#7f134639960276e9" class="t t">ProcessorEventSource</a>.<a href="ProcessorEventSource.cs.html#5ccc92f7c54c9c33" class="i property">Log</a>.<a href="ProcessorEventSource.cs.html#ca7ccb44e811301f" class="i method">PartitionPumpInfo</a>(<a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#0a7c479e2e772173" class="i property">Host</a>.<a href="EventProcessorHost.cs.html#06948910037a7b5d" class="i property">HostName</a>, <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="PartitionPump.cs.html#6726fe2d9c1542c1" class="i property">PartitionContext</a>.<a href="PartitionContext.cs.html#e15eccbcf35c2384" class="i property">PartitionId</a>, <span class="s">&quot;Closing EventHubClient&quot;</span>);
+                <b>await</b> <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="#f0045895e120abfe" class="i field">eventHubClient</a>.<span class="i">CloseAsync</span>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <a href="#54f8340fda1e93f5" class="k">this</a>.<a href="#f0045895e120abfe" class="i field">eventHubClient</a> = <b>null</b>;
+            }
+        }
+ 
+        <b>protected override</b> <span class="i">Task</span> <a id="b41a67df05cc56ca" href="R/b41a67df05cc56ca.html" target="n" data-glyph="75,1" class="i method">OnClosingAsync</a>(<a href="CloseReason.cs.html#b558f2f6b81c2c26" class="t t">CloseReason</a> <span id="r10 rd" class="r10 r">reason</span>)
+        {
+            <span class="c">// Close the EH clients. Errors are swallowed, nothing we could do about them anyway.</span>
+            <b>return</b> <a href="#09a6adeb6cb279ad" class="i method">CleanUpClientsAsync</a>();
+        }
+ 
+        <b>class</b> <a id="dd6a1fd4a2827c7e" href="R/dd6a1fd4a2827c7e.html" target="n" data-glyph="4,1" class="t t">PartitionReceiveHandler</a> : <a href="/Microsoft.Azure.EventHubs/A.html#4376c1c4658c32ac" class="t t">IPartitionReceiveHandler</a>
+        {
+            <b>readonly</b> <a href="#54f8340fda1e93f5" class="t t">EventHubPartitionPump</a> <a id="4d95e28a85420819" href="R/4d95e28a85420819.html" target="n" data-glyph="46,2" class="i field">eventHubPartitionPump</a>;
+ 
+            <b>public</b> <a id="41504872d001e1b5" href="R/41504872d001e1b5.html" target="n" data-glyph="72,2" class="t constructor">PartitionReceiveHandler</a>(<a href="#54f8340fda1e93f5" class="t t">EventHubPartitionPump</a> <span id="r11 rd" class="r11 r">eventHubPartitionPump</span>)
+            {
+                <a href="#dd6a1fd4a2827c7e" class="k">this</a>.<a href="#4d95e28a85420819" class="i field">eventHubPartitionPump</a> = <span class="r11 r">eventHubPartitionPump</span>;
+                <a href="#dd6a1fd4a2827c7e" class="k">this</a>.<a href="#3556b4af25059f3b" class="i property">MaxBatchSize</a> = <span class="r11 r">eventHubPartitionPump</span>.<a href="PartitionPump.cs.html#0a7c479e2e772173" class="i property">Host</a>.<a href="EventProcessorHost.cs.html#47e7c3f2e0e5c592" class="i property">EventProcessorOptions</a>.<a href="EventProcessorOptions.cs.html#52d0148a03766fd4" class="i property">MaxBatchSize</a>;
+            }
+ 
+            <b>public int</b> <a id="3556b4af25059f3b" href="R/3556b4af25059f3b.html" target="n" data-glyph="102,2" class="i property">MaxBatchSize</a> { <b>get</b>; <b>set</b>; }
+ 
+            <b>public</b> <span class="i">Task</span> <a id="8b2e810ec98e1cd1" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">ProcessEventsAsync</a>(<span class="i">IEnumerable</span>&lt;<a href="/Microsoft.Azure.EventHubs/A.html#f56ed6e805f7061b" class="t t">EventData</a>&gt; <span id="r12 rd" class="r12 r">events</span>)
+            {
+                <span class="c">// This method is called on the thread that the EH client uses to run the pump.</span>
+                <span class="c">// There is one pump per EventHubClient. Since each PartitionPump creates a new EventHubClient,</span>
+                <span class="c">// using that thread to call OnEvents does no harm. Even if OnEvents is slow, the pump will</span>
+                <span class="c">// get control back each time OnEvents returns, and be able to receive a new batch of messages</span>
+                <span class="c">// with which to make the next OnEvents call. The pump gains nothing by running faster than OnEvents.</span>
+                <b>return</b> <a href="#dd6a1fd4a2827c7e" class="k">this</a>.<a href="#4d95e28a85420819" class="i field">eventHubPartitionPump</a>.<a href="PartitionPump.cs.html#0cb2272d44d2e0e4" class="i method">ProcessEventsAsync</a>(<span class="r12 r">events</span>);
+            }
+ 
+            <b>public async</b> <span class="i">Task</span> <a id="0d0dba25d99c78c4" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">ProcessErrorAsync</a>(<span class="i">Exception</span> <span id="r13 rd" class="r13 r">error</span>)
+            {
+                <b>bool</b> <span id="r14 rd" class="r14 r">faultPump</span>;
+ 
+                <b>if</b> (<span class="r13 r">error</span> == <b>null</b>)
+                {
+                    <span class="r13 r">error</span> = <b>new</b> <span class="i">Exception</span>(<span class="s">&quot;No error info supplied by EventHub client&quot;</span>);
+                }
+ 
+                <b>if</b> (<span class="r13 r">error</span> <b>is</b> <a href="/Microsoft.Azure.EventHubs/A.html#52ecd05c9600cf6e" class="t t">ReceiverDisconnectedException</a>)
+                {
+                    <span class="c">// Trace as warning since ReceiverDisconnectedException is part of lease stealing logic.</span>
+                    <a href="ProcessorEventSource.cs.html#7f134639960276e9" class="t t">ProcessorEventSource</a>.<a href="ProcessorEventSource.cs.html#5ccc92f7c54c9c33" class="i property">Log</a>.<span class="i">PartitionPumpWarning</span>(
+                        <a href="#dd6a1fd4a2827c7e" class="k">this</a>.<a href="#4d95e28a85420819" class="i field">eventHubPartitionPump</a>.<a href="PartitionPump.cs.html#0a7c479e2e772173" class="i property">Host</a>.<a href="EventProcessorHost.cs.html#06948910037a7b5d" class="i property">HostName</a>, <a href="#dd6a1fd4a2827c7e" class="k">this</a>.<a href="#4d95e28a85420819" class="i field">eventHubPartitionPump</a>.<a href="PartitionPump.cs.html#6726fe2d9c1542c1" class="i property">PartitionContext</a>.<a href="PartitionContext.cs.html#e15eccbcf35c2384" class="i property">PartitionId</a>,
+                        <span class="s">&quot;EventHub client disconnected, probably another host took the partition&quot;</span>, <span class="r13 r">error</span>.<span class="i">Message</span>);
+ 
+                    <span class="c">// Shutdown the message pump when receiver is disconnected.</span>
+                    <span class="r14 r">faultPump</span> = <b>true</b>;
+                }
+                <b>else</b>
+                {
+                    <a href="ProcessorEventSource.cs.html#7f134639960276e9" class="t t">ProcessorEventSource</a>.<a href="ProcessorEventSource.cs.html#5ccc92f7c54c9c33" class="i property">Log</a>.<span class="i">PartitionPumpError</span>(
+                        <a href="#dd6a1fd4a2827c7e" class="k">this</a>.<a href="#4d95e28a85420819" class="i field">eventHubPartitionPump</a>.<a href="PartitionPump.cs.html#0a7c479e2e772173" class="i property">Host</a>.<a href="EventProcessorHost.cs.html#06948910037a7b5d" class="i property">HostName</a>, <a href="#dd6a1fd4a2827c7e" class="k">this</a>.<a href="#4d95e28a85420819" class="i field">eventHubPartitionPump</a>.<a href="PartitionPump.cs.html#6726fe2d9c1542c1" class="i property">PartitionContext</a>.<a href="PartitionContext.cs.html#e15eccbcf35c2384" class="i property">PartitionId</a>, <span class="s">&quot;EventHub client error:&quot;</span>, <span class="r13 r">error</span>.<span class="i">ToString</span>());
+ 
+                    <span class="c">// No need to fault the pump, we expect receiver to recover on its own.</span>
+                    <span class="r14 r">faultPump</span> = <b>false</b>;
+                }
+ 
+                <b>try</b>
+                {
+                    <span class="c">// We would like to deliver all errors in the pump to error handler.</span>
+                    <b>await</b> <a href="#dd6a1fd4a2827c7e" class="k">this</a>.<a href="#4d95e28a85420819" class="i field">eventHubPartitionPump</a>.<a href="PartitionPump.cs.html#6d482a08b00edcc8" class="i method">ProcessErrorAsync</a>(<span class="r13 r">error</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+                <b>finally</b>
+                {
+                    <span class="c">// Fault pump only when needed.</span>
+                    <b>if</b> (<span class="r14 r">faultPump</span>)
+                    {
+                        <a href="#dd6a1fd4a2827c7e" class="k">this</a>.<a href="#4d95e28a85420819" class="i field">eventHubPartitionPump</a>.<a href="PartitionPump.cs.html#9191e23885eebc61" class="i property">PumpStatus</a> = <a href="PartitionPumpStatus.cs.html#7fd270c686a88b09" class="t t">PartitionPumpStatus</a>.<a href="PartitionPumpStatus.cs.html#976a71d898d61b69" class="i field">Errored</a>;
+                    }
+                }
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

@@ -1,0 +1,328 @@
+﻿<!DOCTYPE html>
+<html><head><title>UserTokenProvider.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(319);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Rest.ClientRuntime.Azure.Authentication/UserTokenProvider.cs" target="_top">UserTokenProvider.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Rest.ClientRuntime.Azure.Authentication" target="_top">..\..\Az.Authentication\Microsoft.Rest.ClientRuntime.Azure.Authentication.csproj</a> (Microsoft.Rest.ClientRuntime.Azure.Authentication)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<span class="c">//#if FullNetFx</span>
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Rest</span>.<span class="i n">Azure</span>.<span class="i n">Authentication</span>
+{
+    <b>using</b> <span class="i n">System</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Globalization</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>.<span class="i n">Http</span>.<span class="i n">Headers</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+    <b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i">IdentityModel</span>.<span class="i">Clients</span>.<span class="i">ActiveDirectory</span>;
+    <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Rest</span>.<span class="i n">ClientRuntime</span>.<span class="i n">Azure</span>.<span class="i n">Authentication</span>.<span class="i n">Properties</span>;
+ 
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Provides tokens for Azure Active Directory Microsoft Id and Organization Id users.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>public</b> <a href="P/cb0d0f76e7fdd151.html" target="s" class="k">partial</a> <b>class</b> <a id="cb0d0f76e7fdd151" href="R/cb0d0f76e7fdd151.html" target="n" data-glyph="0,0" class="t t">UserTokenProvider</a> : <span class="i">ITokenProvider</span>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Uri parameters used in the credential prompt.  Allows recalling previous</span>
+        <span class="c">///</span><span class="c"> logins in the login dialog.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private string</b> <a id="d0249f39afd2398e" href="R/d0249f39afd2398e.html" target="n" data-glyph="46,1" class="i field">_tokenAudience</a>;
+        <b>private</b> <span class="i">AuthenticationContext</span> <a id="4114f63815aeedb2" href="R/4114f63815aeedb2.html" target="n" data-glyph="46,1" class="i field">_authenticationContext</a>;
+        <b>private string</b> <a id="736d9b1348369105" href="R/736d9b1348369105.html" target="n" data-glyph="46,1" class="i field">_clientId</a>;
+        <b>private</b> <span class="i">UserIdentifier</span> <a id="cce90689c1288df9" href="R/cce90689c1288df9.html" target="n" data-glyph="46,1" class="i field">_userid</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The id of the active directory common tenant.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public const string</b> <a id="def988d3037c2ace" href="R/def988d3037c2ace.html" target="n" data-glyph="6,1" class="i field">CommonTenantId</a> = <span class="s">&quot;common&quot;</span>;
+ 
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Create a token provider which can provide user tokens in the given context.  The user must have previously authenticated in the given context.</span>
+        <span class="c">///</span><span class="c"> Tokens are retrieved from the token cache.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">context</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The active directory authentication context to use for retrieving tokens.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">clientId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The active directory client Id to match when retrieving tokens.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">tokenAudience</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The audience to match when retrieving tokens.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">userId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The user id to match when retrieving tokens.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="6041261a57687ba3" href="R/6041261a57687ba3.html" target="n" data-glyph="72,1" class="t constructor">UserTokenProvider</a>(<span class="i">AuthenticationContext</span> <span id="r0 rd" class="r0 r">context</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r1 rd" class="r1 r">clientId</span>, <a href="@0@System/A.html#991565dd25f47c90" class="t t">Uri</a> <span id="r2 rd" class="r2 r">tokenAudience</span>,
+            <span class="i">UserIdentifier</span> <span id="r3 rd" class="r3 r">userId</span>)
+        {
+            <b>if</b> (<span class="r0 r">context</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>(<span class="s">&quot;context&quot;</span>);
+            }
+            <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>(<span class="r1 r">clientId</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>(<span class="s">&quot;clientId&quot;</span>);
+            }
+            <b>if</b> (<span class="r2 r">tokenAudience</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>(<span class="s">&quot;tokenAudience&quot;</span>);
+            }
+            <b>if</b> (<span class="r3 r">userId</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#8314938388254d5a" class="t constructor">ArgumentNullException</a>(<span class="s">&quot;userId&quot;</span>);
+            }
+ 
+            <a href="P/cb0d0f76e7fdd151.html#cb0d0f76e7fdd151" class="k">this</a>.<a href="#4114f63815aeedb2" class="i field">_authenticationContext</a> = <span class="r0 r">context</span>;
+            <a href="P/cb0d0f76e7fdd151.html#cb0d0f76e7fdd151" class="k">this</a>.<a href="#736d9b1348369105" class="i field">_clientId</a> = <span class="r1 r">clientId</span>;
+            <a href="P/cb0d0f76e7fdd151.html#cb0d0f76e7fdd151" class="k">this</a>.<a href="#d0249f39afd2398e" class="i field">_tokenAudience</a> = <span class="r2 r">tokenAudience</span>.<a href="@0@System/A.html#ab70d31e484fbe3e" class="i property">OriginalString</a>;
+            <a href="P/cb0d0f76e7fdd151.html#cb0d0f76e7fdd151" class="k">this</a>.<a href="#cce90689c1288df9" class="i field">_userid</a> = <span class="r3 r">userId</span>;
+        }
+ 
+ 
+        <span class="k preprocess">#</span><span class="k preprocess">region</span> .NET 461
+        <span class="c">// please remove this preprocessor #if whenever ADAL will go public with the new library</span>
+<span class="k preprocess">#</span><span class="k preprocess">if</span> !<span class="i">net452</span>
+<span class="e">        /// &lt;summary&gt;
+        /// Log in to azure active directory using device code authentication.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;clientId&quot;&gt;The active directory client id for this application.&lt;/param&gt;
+        /// &lt;param name=&quot;deviceCodeHandler&quot;&gt;User provided callback to display device code request. if returns false no token will be acquired.&lt;/param&gt;
+        /// &lt;returns&gt;A ServiceClientCredentials object that can be used to authenticate http requests using the given credentials.&lt;/returns&gt;
+        public static async Task&lt;ServiceClientCredentials&gt; LoginByDeviceCodeAsync(
+            string clientId,
+            Func&lt;DeviceCodeResult, bool&gt; deviceCodeHandler)
+        {
+            return await LoginByDeviceCodeAsync(clientId, CommonTenantId, ActiveDirectoryServiceSettings.Azure, TokenCache.DefaultShared, deviceCodeHandler).ConfigureAwait(false);
+        }
+ 
+        /// &lt;summary&gt;
+        /// Log in to azure active directory using device code authentication.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;clientId&quot;&gt;The active directory client id for this application.&lt;/param&gt;
+        /// &lt;param name=&quot;domain&quot;&gt;The active directory domain or tenant id to authenticate with.&lt;/param&gt;
+        /// &lt;param name=&quot;deviceCodeHandler&quot;&gt;User provided callback to display device code request. if returns false no token will be acquired.&lt;/param&gt;
+        /// &lt;returns&gt;A ServiceClientCredentials object that can be used to authenticate http requests using the given credentials.&lt;/returns&gt;
+        public static async Task&lt;ServiceClientCredentials&gt; LoginByDeviceCodeAsync(
+            string clientId,
+            string domain,
+            Func&lt;DeviceCodeResult, bool&gt; deviceCodeHandler)
+        {
+            return await LoginByDeviceCodeAsync(clientId, domain, ActiveDirectoryServiceSettings.Azure, TokenCache.DefaultShared, deviceCodeHandler).ConfigureAwait(false);
+        }
+ 
+        /// &lt;summary&gt;
+        /// Log in to azure active directory using device code authentication.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;clientId&quot;&gt;The active directory client id for this application.&lt;/param&gt;
+        /// &lt;param name=&quot;domain&quot;&gt;The active directory domain or tenant id to authenticate with.&lt;/param&gt;
+        /// &lt;param name=&quot;cache&quot;&gt;The token cache to target during authentication.&lt;/param&gt;
+        /// &lt;param name=&quot;deviceCodeHandler&quot;&gt;User provided callback to display device code request. if returns false no token will be acquired.&lt;/param&gt;
+        /// &lt;returns&gt;A ServiceClientCredentials object that can be used to authenticate http requests using the given credentials.&lt;/returns&gt;
+        public static async Task&lt;ServiceClientCredentials&gt; LoginByDeviceCodeAsync(
+            string clientId,
+            string domain,
+            TokenCache cache,
+            Func&lt;DeviceCodeResult, bool&gt; deviceCodeHandler)
+        {
+            return await LoginByDeviceCodeAsync(clientId, domain, ActiveDirectoryServiceSettings.Azure, cache, deviceCodeHandler).ConfigureAwait(false);
+        }
+ 
+        /// &lt;summary&gt;
+        /// Log in to azure active directory using device code authentication.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;clientId&quot;&gt;The active directory client id for this application.&lt;/param&gt;
+        /// &lt;param name=&quot;domain&quot;&gt;The active directory domain or tenant id to authenticate with.&lt;/param&gt;
+        /// &lt;param name=&quot;serviceSettings&quot;&gt;The active directory service details, including authentication endpoints and the intended token audience.&lt;/param&gt;
+        /// &lt;param name=&quot;deviceCodeHandler&quot;&gt;User provided callback to display device code request. if returns false no token will be acquired.&lt;/param&gt;
+        /// &lt;returns&gt;A ServiceClientCredentials object that can be used to authenticate http requests using the given credentials.&lt;/returns&gt;
+        public static async Task&lt;ServiceClientCredentials&gt; LoginByDeviceCodeAsync(
+            string clientId,
+            string domain,
+            ActiveDirectoryServiceSettings serviceSettings,
+            Func&lt;DeviceCodeResult, bool&gt; deviceCodeHandler)
+        {
+            return await LoginByDeviceCodeAsync(clientId, domain, serviceSettings, TokenCache.DefaultShared, deviceCodeHandler).ConfigureAwait(false);
+        }
+ 
+        /// &lt;summary&gt;
+        /// Log in to azure active directory using device code authentication.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;clientId&quot;&gt;The active directory client id for this application.&lt;/param&gt;
+        /// &lt;param name=&quot;domain&quot;&gt;The active directory domain or tenant id to authenticate with.&lt;/param&gt;
+        /// &lt;param name=&quot;serviceSettings&quot;&gt;The active directory service details, including authentication endpoints and the intended token audience.&lt;/param&gt;
+        /// &lt;param name=&quot;cache&quot;&gt;The token cache to target during authentication.&lt;/param&gt;
+        /// &lt;param name=&quot;deviceCodeHandler&quot;&gt;User provided callback to display device code request. if returns false no token will be acquired.&lt;/param&gt;
+        /// &lt;returns&gt;A ServiceClientCredentials object that can be used to authenticate http requests using the given credentials.&lt;/returns&gt;
+        public static async Task&lt;ServiceClientCredentials&gt; LoginByDeviceCodeAsync(
+            string clientId,
+            string domain,
+            ActiveDirectoryServiceSettings serviceSettings,
+            TokenCache cache,
+            Func&lt;DeviceCodeResult, bool&gt; deviceCodeHandler)
+        {
+            if(deviceCodeHandler == null)
+            {
+                throw new ArgumentException(&quot;deviceCodeHandler&quot;);
+            }
+ 
+            var authenticationContext = GetAuthenticationContext(domain, serviceSettings, cache);
+ 
+            try
+            {
+                DeviceCodeResult codeResult = await authenticationContext.AcquireDeviceCodeAsync(
+                                                                                serviceSettings.TokenAudience.OriginalString,
+                                                                                clientId)
+                                                                         .ConfigureAwait(false);
+ 
+                if (deviceCodeHandler(codeResult))
+                {
+                    AuthenticationResult authenticationResult = await authenticationContext.AcquireTokenByDeviceCodeAsync(codeResult)
+                                                                                           .ConfigureAwait(false);
+ 
+                    return new TokenCredentials(
+                        new UserTokenProvider(
+                            authenticationContext,
+                            clientId,
+                            serviceSettings.TokenAudience,
+                            new UserIdentifier(authenticationResult.UserInfo.DisplayableId, UserIdentifierType.RequiredDisplayableId)),
+                        authenticationResult.TenantId,
+                        authenticationResult.UserInfo == null ? null : authenticationResult.UserInfo.DisplayableId);
+                }
+ 
+                return null;
+            }
+            catch (AdalException ex)
+            {
+                throw new AuthenticationException(Resources.ErrorAcquiringToken, ex);
+            }
+            catch (FormatException ex)
+            {
+                throw new AuthenticationException(Resources.ErrorAcquiringToken, ex);
+            }
+        }
+</span><span class="k preprocess">#</span><span class="k preprocess">endif</span>
+        <span class="k preprocess">#</span><span class="k preprocess">endregion</span> .NET 46
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Create service client credentials using information cached from a previous login to azure resource manager using the default token cache.</span>
+        <span class="c">///</span><span class="c"> Parameters are used to match existing tokens.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">clientId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The clientId to match when retrieving authentication tokens.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">domain</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The active directory domain or tenant id to match when retrieving authentication tokens.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">username</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The account username to match when retrieving authentication tokens.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A ServiceClientCredentials object that can be used to authenticate http requests using the retrieved credentials. If no</span>
+        <span class="c">///</span><span class="c"> credentials can be retrieved, an authentication exception is thrown.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public static async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="i">ServiceClientCredentials</span>&gt; <a id="09508be20cadaf3e" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">CreateCredentialsFromCache</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r4 rd" class="r4 r">clientId</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r5 rd" class="r5 r">domain</span>,
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r6 rd" class="r6 r">username</span>)
+        {
+            <b>return</b> <b>await</b> <span class="i">CreateCredentialsFromCache</span>(<span class="r4 r">clientId</span>, <span class="r5 r">domain</span>, <span class="r6 r">username</span>, <a href="ActiveDirectoryServiceSettings.cs.html#7188eccbd94bc74e" class="t t">ActiveDirectoryServiceSettings</a>.<a href="ActiveDirectoryServiceSettings.cs.html#4685c2cd30fdc2ec" class="i property">Azure</a>, <span class="i">TokenCache</span>.<span class="i">DefaultShared</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Create service client credentials using information cached from a previous login to azure resource manager. Parameters are used to match</span>
+        <span class="c">///</span><span class="c"> existing tokens.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">clientId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The clientId to match when retrieving authentication tokens.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">domain</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The active directory domain or tenant id to match when retrieving authentication tokens.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">username</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The account username to match when retrieving authentication tokens.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r10 r">cache</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The token cache to target when retrieving tokens.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A ServiceClientCredentials object that can be used to authenticate http requests using the retrieved credentials. If no</span>
+        <span class="c">///</span><span class="c"> credentials can be retrieved, an authentication exception is thrown.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public static async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="i">ServiceClientCredentials</span>&gt; <a id="64c58bda4bdd6baf" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">CreateCredentialsFromCache</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r7 rd" class="r7 r">clientId</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r8 rd" class="r8 r">domain</span>,
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r9 rd" class="r9 r">username</span>, <span class="i">TokenCache</span> <span id="r10 rd" class="r10 r">cache</span>)
+        {
+            <b>return</b> <b>await</b> <a href="#d48c7f35fbbb3900" class="i method">CreateCredentialsFromCache</a>(<span class="r7 r">clientId</span>, <span class="r8 r">domain</span>, <span class="r9 r">username</span>, <a href="ActiveDirectoryServiceSettings.cs.html#7188eccbd94bc74e" class="t t">ActiveDirectoryServiceSettings</a>.<a href="ActiveDirectoryServiceSettings.cs.html#4685c2cd30fdc2ec" class="i property">Azure</a>, <span class="r10 r">cache</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Create service client credentials using information cached from a previous login in the default token cache. Parameters are used to match</span>
+        <span class="c">///</span><span class="c"> existing tokens.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r11 r">clientId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The clientId to match when retrieving authentication tokens.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">domain</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The active directory domain or tenant id to match when retrieving authentication tokens.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">username</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The account username to match when retrieving authentication tokens.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r14 r">serviceSettings</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The active directory service settings, including token authority and audience to match when retrieving tokens.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A ServiceClientCredentials object that can be used to authenticate http requests using the retrieved credentials. If no</span>
+        <span class="c">///</span><span class="c"> credentials can be retrieved, an authentication exception is thrown.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public static async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="i">ServiceClientCredentials</span>&gt; <a id="1e1bc6572d9fbd47" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">CreateCredentialsFromCache</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r11 rd" class="r11 r">clientId</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r12 rd" class="r12 r">domain</span>,
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r13 rd" class="r13 r">username</span>, <a href="ActiveDirectoryServiceSettings.cs.html#7188eccbd94bc74e" class="t t">ActiveDirectoryServiceSettings</a> <span id="r14 rd" class="r14 r">serviceSettings</span>)
+        {
+            <b>return</b> <b>await</b> <span class="i">CreateCredentialsFromCache</span>(<span class="r11 r">clientId</span>, <span class="r12 r">domain</span>, <span class="r13 r">username</span>, <span class="r14 r">serviceSettings</span>, <span class="i">TokenCache</span>.<span class="i">DefaultShared</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Create service client credentials using information cached from a previous login. Parameters are used to match existing tokens.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">clientId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The clientId to match when retrieving authentication tokens.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r16 r">domain</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The active directory domain or tenant id to match when retrieving authentication tokens.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r17 r">username</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The account username to match when retrieving authentication tokens.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r18 r">serviceSettings</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The active directory service settings, including token authority and audience to match when retrieving tokens.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r19 r">cache</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The token cache to target when retrieving tokens.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A ServiceClientCredentials object that can be used to authenticate http requests using the retrieved credentials. If no</span>
+        <span class="c">///</span><span class="c"> credentials can be retrieved, an authentication exception is thrown.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public static async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="i">ServiceClientCredentials</span>&gt; <a id="d48c7f35fbbb3900" href="R/d48c7f35fbbb3900.html" target="n" data-glyph="72,1" class="i method">CreateCredentialsFromCache</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r15 rd" class="r15 r">clientId</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r16 rd" class="r16 r">domain</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r17 rd" class="r17 r">username</span>,
+            <a href="ActiveDirectoryServiceSettings.cs.html#7188eccbd94bc74e" class="t t">ActiveDirectoryServiceSettings</a> <span id="r18 rd" class="r18 r">serviceSettings</span>, <span class="i">TokenCache</span> <span id="r19 rd" class="r19 r">cache</span>)
+        {
+            <b>var</b> <span id="r20 rd" class="r20 r">userId</span> = <b>new</b> <span class="i">UserIdentifier</span>(<span class="r17 r">username</span>, <span class="i">UserIdentifierType</span>.<span class="i">RequiredDisplayableId</span>);
+            <b>var</b> <span id="r21 rd" class="r21 r">authenticationContext</span> = <a href="#a4197288629155c2" class="i method">GetAuthenticationContext</a>(<span class="r16 r">domain</span>, <span class="r18 r">serviceSettings</span>, <span class="r19 r">cache</span>);
+            <b>try</b>
+            {
+                <b>var</b> <span id="r22 rd" class="r22 r">authResult</span> = <b>await</b> <span class="r21 r">authenticationContext</span>.<span class="i">AcquireTokenSilentAsync</span>(<span class="r18 r">serviceSettings</span>.<a href="ActiveDirectoryServiceSettings.cs.html#2eb04738ad480f1c" class="i property">TokenAudience</a>.<a href="@0@System/A.html#ab70d31e484fbe3e" class="i property">OriginalString</a>,
+                      <span class="r15 r">clientId</span>, <span class="r20 r">userId</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <b>return</b>
+                    <b>new</b> <span class="i">TokenCredentials</span>(
+                        <b>new</b> <a href="#6041261a57687ba3" class="t constructor">UserTokenProvider</a>(<span class="r21 r">authenticationContext</span>, <span class="r15 r">clientId</span>,<span class="r18 r">serviceSettings</span>.<a href="ActiveDirectoryServiceSettings.cs.html#2eb04738ad480f1c" class="i property">TokenAudience</a>, <span class="r20 r">userId</span>),
+                        <span class="r22 r">authResult</span>.<span class="i">TenantId</span>,
+                        <span class="r22 r">authResult</span>.<span class="i">UserInfo</span> == <b>null</b> ? <b>null</b> : <span class="r22 r">authResult</span>.<span class="i">UserInfo</span>.<span class="i">DisplayableId</span>);
+            }
+            <b>catch</b> (<span class="i">AdalException</span> <span id="r23 rd" class="r23 r">ex</span>)
+            {
+                <b>throw</b> <b>new</b> <a href="AuthenticationException.cs.html#31026e8b9de03222" class="t constructor">AuthenticationException</a>(<a href="Properties/Resources.Designer.cs.html#3bfd8a515be1d94f" class="t t">Resources</a>.<a href="Properties/Resources.Designer.cs.html#483d4e163a3daabf" class="i property">ErrorAcquiringToken</a>, <span class="r23 r">ex</span>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets an access token from the token cache or from AD authentication endpoint.  Will attempt to</span>
+        <span class="c">///</span><span class="c"> refresh the access token if it has expired.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public virtual async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="t t">AuthenticationHeaderValue</span>&gt; <a id="73bd0d847f00158f" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetAuthenticationHeaderAsync</a>(<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r24 rd" class="r24 r">cancellationToken</span>)
+        {
+            <span class="r24 r">cancellationToken</span>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+            <b>try</b>
+            {
+                <span class="i">AuthenticationResult</span> <span id="r25 rd" class="r25 r">result</span> = <b>await</b> <a href="P/cb0d0f76e7fdd151.html#cb0d0f76e7fdd151" class="k">this</a>.<a href="#4114f63815aeedb2" class="i field">_authenticationContext</a>.<span class="i">AcquireTokenSilentAsync</span>(<a href="P/cb0d0f76e7fdd151.html#cb0d0f76e7fdd151" class="k">this</a>.<a href="#d0249f39afd2398e" class="i field">_tokenAudience</a>,
+                    <a href="P/cb0d0f76e7fdd151.html#cb0d0f76e7fdd151" class="k">this</a>.<a href="#736d9b1348369105" class="i field">_clientId</a>, <a href="P/cb0d0f76e7fdd151.html#cb0d0f76e7fdd151" class="k">this</a>.<a href="#cce90689c1288df9" class="i field">_userid</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <b>return</b> <b>new</b> <span class="t">AuthenticationHeaderValue</span>(<span class="r25 r">result</span>.<span class="i">AccessTokenType</span>, <span class="r25 r">result</span>.<span class="i">AccessToken</span>);
+            }
+ 
+            <span class="c">//catch (AdalServiceException serviceException)</span>
+            <span class="c">//{</span>
+            <span class="c">//    if (ex.ErrorCode == &quot;temporarily_unavailable&quot;)</span>
+            <span class="c">//    {</span>
+            <span class="c">//        RetryConditionHeaderValue retry = serviceException.Headers.RetryAfter;</span>
+            <span class="c">//        if (retry.Delta.HasValue)</span>
+            <span class="c">//        {</span>
+            <span class="c">//            delay = retry.Delta;</span>
+            <span class="c">//        }</span>
+            <span class="c">//        else if (retry.Date.HasValue)</span>
+            <span class="c">//        {</span>
+            <span class="c">//            delay = retry.Date.Value.Offset;</span>
+            <span class="c">//        }</span>
+            <span class="c">//    }</span>
+            <span class="c">//}</span>
+            <b>catch</b> (<span class="i">AdalException</span> <span id="r26 rd" class="r26 r">authenticationException</span>)
+            {
+                <b>throw</b> <b>new</b> <a href="AuthenticationException.cs.html#31026e8b9de03222" class="t constructor">AuthenticationException</a>(<a href="Properties/Resources.Designer.cs.html#3bfd8a515be1d94f" class="t t">Resources</a>.<a href="Properties/Resources.Designer.cs.html#f091f82cc3d8a031" class="i property">ErrorRenewingToken</a>, <span class="r26 r">authenticationException</span>);
+            }
+        }
+ 
+        <b>private static</b> <span class="i">AuthenticationContext</span> <a id="a4197288629155c2" href="R/a4197288629155c2.html" target="n" data-glyph="76,1" class="i method">GetAuthenticationContext</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r27 rd" class="r27 r">domain</span>, <a href="ActiveDirectoryServiceSettings.cs.html#7188eccbd94bc74e" class="t t">ActiveDirectoryServiceSettings</a> <span id="r28 rd" class="r28 r">serviceSettings</span>, <span class="i">TokenCache</span> <span id="r29 rd" class="r29 r">cache</span>)
+        {
+            <b>var</b> <span id="r30 rd" class="r30 r">context</span> = (<span class="r29 r">cache</span> == <b>null</b>
+                ? <b>new</b> <span class="i">AuthenticationContext</span>(<span class="r28 r">serviceSettings</span>.<a href="ActiveDirectoryServiceSettings.cs.html#12633e9a7200038c" class="i property">AuthenticationEndpoint</a> + <span class="r27 r">domain</span>,
+                    <span class="r28 r">serviceSettings</span>.<a href="ActiveDirectoryServiceSettings.cs.html#7a0a1ca2a2fb9068" class="i property">ValidateAuthority</a>)
+                : <b>new</b> <span class="i">AuthenticationContext</span>(<span class="r28 r">serviceSettings</span>.<a href="ActiveDirectoryServiceSettings.cs.html#12633e9a7200038c" class="i property">AuthenticationEndpoint</a> + <span class="r27 r">domain</span>,
+                    <span class="r28 r">serviceSettings</span>.<a href="ActiveDirectoryServiceSettings.cs.html#7a0a1ca2a2fb9068" class="i property">ValidateAuthority</a>, <span class="r29 r">cache</span>));
+            <b>return</b> <span class="r30 r">context</span>;
+        }
+    }
+}
+<span class="c">//#endif</span>
+</pre></td></tr></table></div></body></html>
