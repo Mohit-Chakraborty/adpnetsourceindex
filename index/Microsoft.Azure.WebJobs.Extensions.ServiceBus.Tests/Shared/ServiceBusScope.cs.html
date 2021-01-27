@@ -1,0 +1,643 @@
+﻿<!DOCTYPE html>
+<html><head><title>ServiceBusScope.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(634);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.ServiceBus.Tests/Shared/ServiceBusScope.cs" target="_top">Shared\ServiceBusScope.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.ServiceBus.Tests" target="_top">Microsoft.Azure.WebJobs.Extensions.ServiceBus.Tests.csproj</a> (Microsoft.Azure.WebJobs.Extensions.ServiceBus.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>.<span class="i n">Http</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>.<span class="i n">Sockets</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Runtime</span>.<span class="i n">CompilerServices</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Security</span>.<span class="i n">Authentication</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">Management</span>.<span class="i">ResourceManager</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">Management</span>.<span class="i">ResourceManager</span>.<span class="i">Models</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">Management</span>.<span class="i">ServiceBus</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">Management</span>.<span class="i">ServiceBus</span>.<span class="i">Models</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">IdentityModel</span>.<span class="i">Clients</span>.<span class="i">ActiveDirectory</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">Rest</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i">Rest</span>.<span class="i">Azure</span>;
+<b>using</b> <span class="i">Polly</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>.<span class="i n">Tests</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">  Provides access to dynamically created instances of Service Bus resources which exists only in the context</span>
+    <span class="c">///</span><span class="c">  of their scope.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <b>public static class</b> <a id="3a95bd1267fd2730" href="../R/3a95bd1267fd2730.html" target="n" data-glyph="0,0" class="t t">ServiceBusScope</a>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The maximum number of attempts to retry a management operation.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const int</b> <a id="2937de4c7a8cd8c6" href="../R/2937de4c7a8cd8c6.html" target="n" data-glyph="10,1" class="i field">RetryMaximumAttempts</a> = 20;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The number of seconds to use as the basis for backing off on retry attempts.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const double</b> <a id="44b41f87cbed1265" href="../R/44b41f87cbed1265.html" target="n" data-glyph="10,1" class="i field">RetryExponentialBackoffSeconds</a> = 3.0;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The number of seconds to use as the basis for applying jitter to retry backoff calculations.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const double</b> <a id="c1a4127aac16faed" href="../R/c1a4127aac16faed.html" target="n" data-glyph="10,1" class="i field">RetryBaseJitterSeconds</a> = 60.0;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The buffer to apply when considering refreshing; credentials that expire less than this duration will be refreshed.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static readonly</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="a961150d5457d2ae" href="../R/a961150d5457d2ae.html" target="n" data-glyph="46,1" class="i field">CredentialRefreshBuffer</a> = <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#ae74be5264df78d8" class="i method">FromMinutes</a>(5);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The random number generator to use for each requesting thread.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static readonly</b> <a href="@0@mscorlib/A.html#42021806b924c5cd" class="t t">ThreadLocal</a>&lt;<a href="@0@mscorlib/A.html#bb77e610694e64ca" class="t t">Random</a>&gt; <a id="2e57fb4fd52e0caa" href="../R/2e57fb4fd52e0caa.html" target="n" data-glyph="46,1" class="i field">RandomNumberGenerator</a> = <b>new</b> <a href="@0@mscorlib/A.html#28dd4e60dd02f687" class="t constructor">ThreadLocal</a>&lt;<a href="@0@mscorlib/A.html#bb77e610694e64ca" class="t t">Random</a>&gt;(() =&gt; <b>new</b> <a href="@0@mscorlib/A.html#92e3cf6e56571d5a" class="t constructor">Random</a>(<a href="@0@mscorlib/A.html#8792520ddc6dadcb" class="t t">Interlocked</a>.<a href="@0@mscorlib/A.html#09bb1e21afd76cf2" class="i method">Increment</a>(<b>ref</b> <a href="#b0f2065b23bd7a1a" class="i field">s_randomSeed</a>)), <b>false</b>);
+ 
+        <span class="c">///</span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The URI for the location of the resource manager for the active cloud environment.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static readonly</b> <a href="@0@System/A.html#991565dd25f47c90" class="t t">Uri</a> <a id="41ee7b690943e4d7" href="../R/41ee7b690943e4d7.html" target="n" data-glyph="46,1" class="i field">ResourceManagerUri</a> = <b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="ServiceBusTestEnvironment.cs.html#3848fcdd8324f026" class="i property">ResourceManagerUrl</a>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The seed to use for random number generation.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static int</b> <a id="b0f2065b23bd7a1a" href="../R/b0f2065b23bd7a1a.html" target="n" data-glyph="46,1" class="i field">s_randomSeed</a> = <a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#39a839e5e9ca1f3f" class="i property">TickCount</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The token credential to be used with the  Service Bus management client.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static</b> <a href="#a985b6a3462789ad" class="t t">ManagementToken</a> <a id="f39fa22d137293a4" href="../R/f39fa22d137293a4.html" target="n" data-glyph="46,1" class="i field">s_managementToken</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Performs the tasks needed to create a new  Service Bus namespace within a resource group, intended to be used as</span>
+        <span class="c">///</span><span class="c">   an ephemeral container for the queue and topic instances used in a given test run.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The key attributes for identifying and accessing a dynamically created  Service Bus namespace.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public static async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#392f090c26e664b9" class="t t">NamespaceProperties</a>&gt; <a id="df1c678a27c79a3f" href="../R/df1c678a27c79a3f.html" target="n" data-glyph="72,1" class="i method">CreateNamespaceAsync</a>()
+        {
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r0 rd" class="r0 r">azureSubscription</span> = <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="/Azure.Core.TestFramework/A.html#ebe6d0d5a300171a" class="i property">SubscriptionId</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r1 rd" class="r1 r">resourceGroup</span> = <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="/Azure.Core.TestFramework/A.html#9214229ef40d58c2" class="i property">ResourceGroup</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r2 rd" class="r2 r">token</span> = <b>await</b> <a href="#05747547105a0cac" class="i method">AquireManagementTokenAsync</a>().<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <a id="a2df1a0c0ea0bb52" href="../R/a2df1a0c0ea0bb52.html" target="n" data-glyph="76,2" class="i method">CreateName</a>() =&gt; <span class="s">$&quot;</span><span class="s">net-servicebus-</span>{ <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#8015cb30da6ca742" class="i method">ToString</a>(<span class="s">&quot;D&quot;</span>).<a href="@0@mscorlib/A.html#8124961f027d9ac9" class="i method">Substring</a>(0, 30) }<span class="s">&quot;</span>;
+ 
+            <b>using</b> (<b>var</b> <span id="r3 rd" class="r3 r">client</span> = <b>new</b> <span class="i">ServiceBusManagementClient</span>(<a href="#41ee7b690943e4d7" class="i field">ResourceManagerUri</a>, <b>new</b> <span class="i">TokenCredentials</span>(<span class="r2 r">token</span>)) { <span class="i">SubscriptionId</span> = <span class="r0 r">azureSubscription</span> })
+            {
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r4 rd" class="r4 r">location</span> = <b>await</b> <a href="#0e2a8c5a65ce0a43" class="i method">QueryResourceGroupLocationAsync</a>(<span class="r2 r">token</span>, <span class="r1 r">resourceGroup</span>, <span class="r0 r">azureSubscription</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                <b>var</b> <span id="r5 rd" class="r5 r">serviceBusNamspace</span> = <b>new</b> <span class="i">SBNamespace</span>(<span class="i">sku</span>: <b>new</b> <span class="i">SBSku</span>(<span class="i">SkuName</span>.<span class="i">Standard</span>, <span class="i">SkuTier</span>.<span class="i">Standard</span>), <span class="i">tags</span>: <a href="#57f50b6941ab174b" class="i method">GenerateTags</a>(), <span class="i">location</span>: <span class="r4 r">location</span>);
+                <span class="r5 r">serviceBusNamspace</span> = <b>await</b> <a href="#d8034794bf401d8b" class="i method">CreateRetryPolicy</a>&lt;<span class="i">SBNamespace</span>&gt;().<span class="i">ExecuteAsync</span>(() =&gt; <span class="r3 r">client</span>.<span class="i">Namespaces</span>.<span class="i">CreateOrUpdateAsync</span>(<span class="r1 r">resourceGroup</span>, <a href="#a2df1a0c0ea0bb52" class="i method">CreateName</a>(), <span class="r5 r">serviceBusNamspace</span>)).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <b>var</b> <span id="r6 rd" class="r6 r">accessKey</span> = <b>await</b> <a href="#d8034794bf401d8b" class="i method">CreateRetryPolicy</a>&lt;<span class="i">AccessKeys</span>&gt;().<span class="i">ExecuteAsync</span>(() =&gt; <span class="r3 r">client</span>.<span class="i">Namespaces</span>.<span class="i">ListKeysAsync</span>(<span class="r1 r">resourceGroup</span>, <span class="r5 r">serviceBusNamspace</span>.<span class="i">Name</span>, <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#31aafd0c6959f73d" class="i field">ServiceBusDefaultSharedAccessKey</a>)).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <b>return</b> <b>new</b> <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<span class="t">NamespaceProperties</span>(<span class="r5 r">serviceBusNamspace</span>.<span class="i">Name</span>, <span class="r6 r">accessKey</span>.<span class="i">PrimaryConnectionString</span>, <span class="i">shouldRemoveAtCompletion</span>: <b>true</b>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Performs the tasks needed to remove an ephemeral Service Bus namespace used as a container for queue and topic instances</span>
+        <span class="c">///</span><span class="c">   for a specific test run.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">namespaceName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the namespace to delete.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public static async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="278adc7ce3208398" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">DeleteNamespaceAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r7 rd" class="r7 r">namespaceName</span>)
+        {
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r8 rd" class="r8 r">azureSubscription</span> = <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="/Azure.Core.TestFramework/A.html#ebe6d0d5a300171a" class="i property">SubscriptionId</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r9 rd" class="r9 r">resourceGroup</span> = <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="/Azure.Core.TestFramework/A.html#9214229ef40d58c2" class="i property">ResourceGroup</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r10 rd" class="r10 r">token</span> = <b>await</b> <a href="#05747547105a0cac" class="i method">AquireManagementTokenAsync</a>().<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <b>using</b> (<b>var</b> <span id="r11 rd" class="r11 r">client</span> = <b>new</b> <span class="i">ServiceBusManagementClient</span>(<a href="#41ee7b690943e4d7" class="i field">ResourceManagerUri</a>, <b>new</b> <span class="i">TokenCredentials</span>(<span class="r10 r">token</span>)) { <span class="i">SubscriptionId</span> = <span class="r8 r">azureSubscription</span> })
+            {
+                <b>await</b> <a href="#5667397fe78a54ec" class="i method">CreateRetryPolicy</a>().<span class="i">ExecuteAsync</span>(() =&gt; <span class="r11 r">client</span>.<span class="i">Namespaces</span>.<span class="i">DeleteAsync</span>(<span class="r9 r">resourceGroup</span>, <span class="r7 r">namespaceName</span>)).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Creates a Service Bus scope associated with a queue instance, intended to be used in the context</span>
+        <span class="c">///</span><span class="c">   of a single test and disposed when the test has completed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">enablePartitioning</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">When </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">, partitioning will be enabled on the queue that is created.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">enableSession</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">When </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">, a session will be enabled on the queue that is created.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r14 r">forceQueueCreation</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">When </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">, forces creation of a new queue even if an environmental override was specified to use an existing one.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">caller</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the calling method; this is intended to be populated by the runtime.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The requested Service Bus </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#cb23d8e697e11027" class="t t">QueueScope</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   If an environmental override was set to use an existing Service Bus queue resource and the </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r14 r">forceQueueCreation</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> flag</span>
+        <span class="c">///</span><span class="c">   was not set, the existing queue will be assumed with no validation.  In this case the </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">enablePartitioning</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> and</span>
+        <span class="c">///</span><span class="c">   </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">enableSession</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> parameters are also ignored.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public static async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="#cb23d8e697e11027" class="t t">QueueScope</a>&gt; <a id="74d134fd85276dff" href="../R/74d134fd85276dff.html" target="n" data-glyph="72,1" class="i method">CreateWithQueue</a>(<b>bool</b> <span id="r12 rd" class="r12 r">enablePartitioning</span>,
+                                                             <b>bool</b> <span id="r13 rd" class="r13 r">enableSession</span>,
+                                                             <b>bool</b> <span id="r14 rd" class="r14 r">forceQueueCreation</span> = <b>false</b>,
+                                                             <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>? <span id="r16 rd" class="r16 r">lockDuration</span> = <b>default</b>,
+                                                             <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r17 rd" class="r17 r">overrideNamespace</span> = <b>default</b>,
+                                                             [<a href="@0@mscorlib/A.html#3b59f8cb5102fd8b" class="t constructor">CallerMemberName</a>] <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r15 rd" class="r15 r">caller</span> = <span class="s">&quot;&quot;</span>)
+        {
+            <span class="c">// If there was an override and the force flag is not set for creation, then build a scope</span>
+            <span class="c">// for the specified queue.</span>
+ 
+            <b>if</b> ((!<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="ServiceBusTestEnvironment.cs.html#dcc8432546f91d16" class="i property">OverrideQueueName</a>)) &amp;&amp; (!<span class="r14 r">forceQueueCreation</span>))
+            {
+                <b>return</b> <b>new</b> <a href="#cefa900cedde4cee" class="t constructor">QueueScope</a>(<a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="ServiceBusTestEnvironment.cs.html#e8d5b31c8f7d7685" class="i property">ServiceBusNamespace</a>, <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="ServiceBusTestEnvironment.cs.html#dcc8432546f91d16" class="i property">OverrideQueueName</a>, <b>false</b>);
+            }
+ 
+            <span class="c">// Create a new queue specific to the scope being created.</span>
+ 
+            <span class="r15 r">caller</span> = (<span class="r15 r">caller</span>.<a href="@0@mscorlib/A.html#e13f5829ef28aa07" class="i property">Length</a> &lt; 16) ? <span class="r15 r">caller</span> : <span class="r15 r">caller</span>.<a href="@0@mscorlib/A.html#8124961f027d9ac9" class="i method">Substring</a>(0, 15);
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r18 rd" class="r18 r">azureSubscription</span> = <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="/Azure.Core.TestFramework/A.html#ebe6d0d5a300171a" class="i property">SubscriptionId</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r19 rd" class="r19 r">resourceGroup</span> = <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="/Azure.Core.TestFramework/A.html#9214229ef40d58c2" class="i property">ResourceGroup</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r20 rd" class="r20 r">serviceBusNamespace</span> = <span class="r17 r">overrideNamespace</span> ?? <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="ServiceBusTestEnvironment.cs.html#e8d5b31c8f7d7685" class="i property">ServiceBusNamespace</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r21 rd" class="r21 r">token</span> = <b>await</b> <a href="#05747547105a0cac" class="i method">AquireManagementTokenAsync</a>().<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <a id="a2df1a0c0ea0bb52" href="../R/a2df1a0c0ea0bb52.html" target="n" data-glyph="76,2" class="i method">CreateName</a>() =&gt; <span class="s">$&quot;</span>{ <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#8015cb30da6ca742" class="i method">ToString</a>(<span class="s">&quot;D&quot;</span>).<a href="@0@mscorlib/A.html#8124961f027d9ac9" class="i method">Substring</a>(0, 13) }<span class="s">-</span>{ <span class="r15 r">caller</span> }<span class="s">&quot;</span>;
+ 
+            <b>using</b> (<b>var</b> <span id="r22 rd" class="r22 r">client</span> = <b>new</b> <span class="i">ServiceBusManagementClient</span>(<a href="#41ee7b690943e4d7" class="i field">ResourceManagerUri</a>, <b>new</b> <span class="i">TokenCredentials</span>(<span class="r21 r">token</span>)) { <span class="i">SubscriptionId</span> = <span class="r18 r">azureSubscription</span> })
+            {
+                <b>var</b> <span id="r23 rd" class="r23 r">queueParameters</span> = <b>new</b> <span class="i">SBQueue</span>(<span class="i">enablePartitioning</span>: <span class="r12 r">enablePartitioning</span>, <span class="i">requiresSession</span>: <span class="r13 r">enableSession</span>, <span class="i">maxSizeInMegabytes</span>: 1024, <span class="i">lockDuration</span>: <span class="r16 r">lockDuration</span>);
+                <b>var</b> <span id="r24 rd" class="r24 r">queue</span> = <b>await</b> <a href="#d8034794bf401d8b" class="i method">CreateRetryPolicy</a>&lt;<span class="i">SBQueue</span>&gt;().<span class="i">ExecuteAsync</span>(() =&gt; <span class="r22 r">client</span>.<span class="i">Queues</span>.<span class="i">CreateOrUpdateAsync</span>(<span class="r19 r">resourceGroup</span>, <span class="r20 r">serviceBusNamespace</span>, <a href="#a2df1a0c0ea0bb52" class="i method">CreateName</a>(), <span class="r23 r">queueParameters</span>)).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <b>return</b> <b>new</b> <span class="t">QueueScope</span>(<span class="r20 r">serviceBusNamespace</span>, <span class="r24 r">queue</span>.<span class="i">Name</span>, <b>true</b>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Creates a Service Bus scope associated with a topic instance, intended to be used in the context</span>
+        <span class="c">///</span><span class="c">   of a single test and disposed when the test has completed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r25 r">enablePartitioning</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">When </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">, partitioning will be enabled on the topic that is created.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r26 r">enableSession</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">When </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">, a session will be enabled on the topic that is created.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r27 r">topicSubscriptions</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The set of subscriptions to create for the topic.  If </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">, a default subscription will be assumed.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r28 r">forceTopicCreation</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">When </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">, forces creation of a new topic even if an environmental override was specified to use an existing one.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r29 r">caller</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the calling method; this is intended to be populated by the runtime.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The requested Service Bus </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#be91e5c3b49fdb4c" class="t t">TopicScope</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   If an environmental override was set to use an existing Service Bus queue resource and the </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r28 r">forceTopicCreation</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> flag</span>
+        <span class="c">///</span><span class="c">   was not set, the existing queue will be assumed with no validation.  In this case the </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r25 r">enablePartitioning</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">,</span>
+        <span class="c">///</span><span class="c">   </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r26 r">enableSession</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">, and </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r27 r">topicSubscriptions</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> parameters are also ignored.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public static async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="#be91e5c3b49fdb4c" class="t t">TopicScope</a>&gt; <a id="fae1617721508112" href="../R/fae1617721508112.html" target="n" data-glyph="72,1" class="i method">CreateWithTopic</a>(<b>bool</b> <span id="r25 rd" class="r25 r">enablePartitioning</span>,
+                                                             <b>bool</b> <span id="r26 rd" class="r26 r">enableSession</span>,
+                                                             <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <span id="r27 rd" class="r27 r">topicSubscriptions</span> = <b>null</b>,
+                                                             <b>bool</b> <span id="r28 rd" class="r28 r">forceTopicCreation</span> = <b>false</b>,
+                                                             [<a href="@0@mscorlib/A.html#3b59f8cb5102fd8b" class="t constructor">CallerMemberName</a>] <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r29 rd" class="r29 r">caller</span> = <span class="s">&quot;&quot;</span>)
+        {
+            <span class="r29 r">caller</span> = (<span class="r29 r">caller</span>.<a href="@0@mscorlib/A.html#e13f5829ef28aa07" class="i property">Length</a> &lt; 16) ? <span class="r29 r">caller</span> : <span class="r29 r">caller</span>.<a href="@0@mscorlib/A.html#8124961f027d9ac9" class="i method">Substring</a>(0, 15);
+            <span class="r27 r">topicSubscriptions</span> ??= <b>new</b>[] { <span class="s">&quot;default-subscription&quot;</span> };
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r30 rd" class="r30 r">azureSubscription</span> = <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="/Azure.Core.TestFramework/A.html#ebe6d0d5a300171a" class="i property">SubscriptionId</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r31 rd" class="r31 r">resourceGroup</span> = <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="/Azure.Core.TestFramework/A.html#9214229ef40d58c2" class="i property">ResourceGroup</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r32 rd" class="r32 r">serviceBusNamespace</span> = <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="ServiceBusTestEnvironment.cs.html#e8d5b31c8f7d7685" class="i property">ServiceBusNamespace</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r33 rd" class="r33 r">token</span> = <b>await</b> <a href="#05747547105a0cac" class="i method">AquireManagementTokenAsync</a>().<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <b>using</b> (<b>var</b> <span id="r34 rd" class="r34 r">client</span> = <b>new</b> <span class="i">ServiceBusManagementClient</span>(<a href="#41ee7b690943e4d7" class="i field">ResourceManagerUri</a>, <b>new</b> <span class="i">TokenCredentials</span>(<span class="r33 r">token</span>)) { <span class="i">SubscriptionId</span> = <span class="r30 r">azureSubscription</span> })
+            {
+                <span class="c">// If there was an override and the force flag is not set for creation, then build a scope for the</span>
+                <span class="c">// specified topic.  Query the topic resource to build the list of its subscriptions for the scope.</span>
+ 
+                <b>if</b> ((!<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="ServiceBusTestEnvironment.cs.html#1ad1083870d1e077" class="i property">OverrideTopicName</a>)) &amp;&amp; (!<span class="r28 r">forceTopicCreation</span>))
+                {
+                    <b>var</b> <span id="r35 rd" class="r35 r">subscriptionPage</span> = <b>await</b> <a href="#d8034794bf401d8b" class="i method">CreateRetryPolicy</a>&lt;<span class="i">IPage</span>&lt;<span class="i">SBSubscription</span>&gt;&gt;().<span class="i">ExecuteAsync</span>(() =&gt; <span class="r34 r">client</span>.<span class="i">Subscriptions</span>.<span class="i">ListByTopicAsync</span>(<span class="r31 r">resourceGroup</span>, <span class="r32 r">serviceBusNamespace</span>, <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="ServiceBusTestEnvironment.cs.html#1ad1083870d1e077" class="i property">OverrideTopicName</a>)).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                    <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r36 rd" class="r36 r">existingSubscriptions</span> = <b>new</b> <span class="t">List</span>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="r35 r">subscriptionPage</span>.<span class="i">Select</span>(<span id="r37 rd" class="r37 r">item</span> =&gt; <span class="r37 r">item</span>.<span class="i">Name</span>));
+ 
+                    <b>while</b> (!<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<span class="i">IsNullOrEmpty</span>(<span class="r35 r">subscriptionPage</span>.<span class="i">NextPageLink</span>))
+                    {
+                        <span class="r35 r">subscriptionPage</span> = <b>await</b> <a href="#d8034794bf401d8b" class="i method">CreateRetryPolicy</a>&lt;<span class="i">IPage</span>&lt;<span class="i">SBSubscription</span>&gt;&gt;().<span class="i">ExecuteAsync</span>(() =&gt; <span class="r34 r">client</span>.<span class="i">Subscriptions</span>.<span class="i">ListByTopicAsync</span>(<span class="r31 r">resourceGroup</span>, <span class="r32 r">serviceBusNamespace</span>, <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="ServiceBusTestEnvironment.cs.html#1ad1083870d1e077" class="i property">OverrideTopicName</a>)).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                        <span class="r36 r">existingSubscriptions</span>.<span class="i">AddRange</span>(<span class="r35 r">subscriptionPage</span>.<span class="i">Select</span>(<span id="r38 rd" class="r38 r">item</span> =&gt; <span class="r38 r">item</span>.<span class="i">Name</span>));
+                    }
+ 
+                    <b>return</b> <b>new</b> <a href="#28e58ad743bab0ff" class="t constructor">TopicScope</a>(<a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="ServiceBusTestEnvironment.cs.html#e8d5b31c8f7d7685" class="i property">ServiceBusNamespace</a>, <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="ServiceBusTestEnvironment.cs.html#1ad1083870d1e077" class="i property">OverrideTopicName</a>, <span class="r36 r">existingSubscriptions</span>, <b>false</b>);
+                }
+ 
+                <span class="c">// Create a new topic specific for the scope being created.</span>
+ 
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <a id="a2df1a0c0ea0bb52" href="../R/a2df1a0c0ea0bb52.html" target="n" data-glyph="76,2" class="i method">CreateName</a>() =&gt; <span class="s">$&quot;</span>{ <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#8015cb30da6ca742" class="i method">ToString</a>(<span class="s">&quot;D&quot;</span>).<a href="@0@mscorlib/A.html#8124961f027d9ac9" class="i method">Substring</a>(0, 13) }<span class="s">-</span>{ <span class="r29 r">caller</span> }<span class="s">&quot;</span>;
+ 
+                <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="k">var</a> <span id="r39 rd" class="r39 r">duplicateDetection</span> = <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#ae74be5264df78d8" class="i method">FromMinutes</a>(10);
+                <b>var</b> <span id="r40 rd" class="r40 r">topicParameters</span> = <b>new</b> <span class="i">SBTopic</span>(<span class="i">enablePartitioning</span>: <span class="r25 r">enablePartitioning</span>, <span class="i">duplicateDetectionHistoryTimeWindow</span>: <span class="r39 r">duplicateDetection</span>, <span class="i">maxSizeInMegabytes</span>: 1024);
+                <b>var</b> <span id="r41 rd" class="r41 r">topic</span> = <b>await</b> <a href="#d8034794bf401d8b" class="i method">CreateRetryPolicy</a>&lt;<span class="i">SBTopic</span>&gt;().<span class="i">ExecuteAsync</span>(() =&gt; <span class="r34 r">client</span>.<span class="i">Topics</span>.<span class="i">CreateOrUpdateAsync</span>(<span class="r31 r">resourceGroup</span>, <span class="r32 r">serviceBusNamespace</span>, <a href="#a2df1a0c0ea0bb52" class="i method">CreateName</a>(), <span class="r40 r">topicParameters</span>)).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <b>var</b> <span id="r42 rd" class="r42 r">subscriptionParams</span> = <b>new</b> <span class="i">SBSubscription</span>(<span class="i">requiresSession</span>: <span class="r26 r">enableSession</span>, <span class="i">duplicateDetectionHistoryTimeWindow</span>: <span class="r39 r">duplicateDetection</span>, <span class="i">maxDeliveryCount</span>: 10);
+ 
+                <b>var</b> <span id="r43 rd" class="r43 r">activeSubscriptions</span> = <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<span class="i">WhenAll</span>
+                (
+                    <span class="r27 r">topicSubscriptions</span>.<span class="i">Select</span>(<span id="r44 rd" class="r44 r">subscriptionName</span> =&gt;
+                        <a href="#d8034794bf401d8b" class="i method">CreateRetryPolicy</a>&lt;<span class="i">SBSubscription</span>&gt;().<span class="i">ExecuteAsync</span>(() =&gt; <span class="r34 r">client</span>.<span class="i">Subscriptions</span>.<span class="i">CreateOrUpdateAsync</span>(<span class="r31 r">resourceGroup</span>, <span class="r32 r">serviceBusNamespace</span>, <span class="r41 r">topic</span>.<span class="i">Name</span>, <span class="r44 r">subscriptionName</span>, <span class="r42 r">subscriptionParams</span>)))
+ 
+                ).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <b>return</b> <b>new</b> <span class="t">TopicScope</span>(<span class="r32 r">serviceBusNamespace</span>, <span class="r41 r">topic</span>.<span class="i">Name</span>, <span class="r43 r">activeSubscriptions</span>.<span class="i">Select</span>(<span id="r45 rd" class="r45 r">item</span> =&gt; <span class="r45 r">item</span>.<span class="i">Name</span>).<span class="i">ToList</span>(), <b>true</b>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Queries the location for the requested Azure Resource Group.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r46 r">accessToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The access token to use for the query request.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r47 r">resourceGroupName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the resource group to query the location of.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r48 r">subscriptionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The identifier of the Azure subscription in which the resource group resides.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The location code for the requested </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r47 r">resourceGroupName</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="0e2a8c5a65ce0a43" href="../R/0e2a8c5a65ce0a43.html" target="n" data-glyph="76,1" class="i method">QueryResourceGroupLocationAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r46 rd" class="r46 r">accessToken</span>,
+                                                                          <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r47 rd" class="r47 r">resourceGroupName</span>,
+                                                                          <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r48 rd" class="r48 r">subscriptionId</span>)
+        {
+            <b>using</b> <b>var</b> <span id="r49 rd" class="r49 r">client</span> = <b>new</b> <span class="i">ResourceManagementClient</span>(<a href="#41ee7b690943e4d7" class="i field">ResourceManagerUri</a>, <b>new</b> <span class="i">TokenCredentials</span>(<span class="r46 r">accessToken</span>)) { <span class="i">SubscriptionId</span> = <span class="r48 r">subscriptionId</span> };
+            {
+                <span class="i">ResourceGroup</span> <span id="r50 rd" class="r50 r">resourceGroup</span> = <b>await</b> <a href="#d8034794bf401d8b" class="i method">CreateRetryPolicy</a>&lt;<span class="i">ResourceGroup</span>&gt;().<span class="i">ExecuteAsync</span>(() =&gt; <span class="r49 r">client</span>.<span class="i">ResourceGroups</span>.<span class="i">GetAsync</span>(<span class="r47 r">resourceGroupName</span>));
+                <b>return</b> <span class="r50 r">resourceGroup</span>.<span class="i">Location</span>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Acquires a JWT token for use with the  Service Bus management client.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The token to use for management operations against the  Service Bus Live test namespace.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="05747547105a0cac" href="../R/05747547105a0cac.html" target="n" data-glyph="76,1" class="i method">AquireManagementTokenAsync</a>()
+        {
+            <a href="#a985b6a3462789ad" class="k">var</a> <span id="r51 rd" class="r51 r">token</span> = <a href="#f39fa22d137293a4" class="i field">s_managementToken</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r52 rd" class="r52 r">authority</span> = <b>new</b> <a href="@0@System/A.html#67d3260816440b78" class="t constructor">Uri</a>(<b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="ServiceBusTestEnvironment.cs.html#6301861bdac8d48d" class="i property">AuthorityHostUrl</a>), <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="/Azure.Core.TestFramework/A.html#ab050f0e55126952" class="i property">TenantId</a>).<a href="@0@System/A.html#bf3caa11ab73e433" class="i method">ToString</a>();
+ 
+            <span class="c">// If there was no current token, or it is within the buffer for expiration, request a new token.</span>
+            <span class="c">// There is a benign race condition here, where there may be multiple requests in-flight for a new token.  Since</span>
+            <span class="c">// this is test infrastructure, just allow the acquired token to replace the current one without attempting to</span>
+            <span class="c">// coordinate or ensure that the most recent is kept.</span>
+ 
+            <b>if</b> ((<span class="r51 r">token</span> == <b>null</b>) || (<span class="r51 r">token</span>.<a href="#7b4f9ec431a05aa8" class="i field">ExpiresOn</a> &lt;= <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@0@mscorlib/A.html#04abe0cac293ebd0" class="i property">UtcNow</a>.<a href="@0@mscorlib/A.html#5cff8f26f5c7c095" class="i method">Add</a>(<a href="#a961150d5457d2ae" class="i field">CredentialRefreshBuffer</a>)))
+            {
+                <b>var</b> <span id="r53 rd" class="r53 r">context</span> = <b>new</b> <span class="i">AuthenticationContext</span>(<span class="r52 r">authority</span>);
+                <b>var</b> <span id="r54 rd" class="r54 r">credential</span> = <b>new</b> <span class="i">ClientCredential</span>(<a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="/Azure.Core.TestFramework/A.html#50081c441f6f88a4" class="i property">ClientId</a>, <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="/Azure.Core.TestFramework/A.html#e314809ba7ea5ea8" class="i property">ClientSecret</a>);
+                <b>var</b> <span id="r55 rd" class="r55 r">result</span> = <b>await</b> <span class="r53 r">context</span>.<span class="i">AcquireTokenAsync</span>(<a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="ServiceBusTestEnvironment.cs.html#fc7620648fbc1844" class="i property">ServiceManagementUrl</a>, <span class="r54 r">credential</span>);
+ 
+                <b>if</b> ((<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<span class="i">IsNullOrEmpty</span>(<span class="r55 r">result</span>?.<span class="i">AccessToken</span>)))
+                {
+                    <b>throw</b> <b>new</b> <a href="@0@System/A.html#6749b117ae40d22c" class="t constructor">AuthenticationException</a>(<span class="s">&quot;Unable to acquire an Active Directory token for the  Service Bus management client.&quot;</span>);
+                }
+ 
+                <span class="r51 r">token</span> = <b>new</b> <span class="t">ManagementToken</span>(<span class="r55 r">result</span>.<span class="i">AccessToken</span>, <span class="r55 r">result</span>.<span class="i">ExpiresOn</span>);
+                <a href="@0@mscorlib/A.html#8792520ddc6dadcb" class="t t">Interlocked</a>.<a href="@0@mscorlib/A.html#19d00939423c949f" class="i method">Exchange</a>(<b>ref</b> <a href="#f39fa22d137293a4" class="i field">s_managementToken</a>, <span class="r51 r">token</span>);
+            }
+ 
+            <b>return</b> <span class="r51 r">token</span>.<a href="#1ff13fb47b107d74" class="i field">Token</a>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Generates the set of common metadata tags to apply to an ephemeral cloud resource</span>
+        <span class="c">///</span><span class="c">   used for test purposes.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The set of metadata tags to apply.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static</b> <a href="@0@mscorlib/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="57f50b6941ab174b" href="../R/57f50b6941ab174b.html" target="n" data-glyph="76,1" class="i method">GenerateTags</a>() =&gt;
+            <b>new</b> <a href="@0@mscorlib/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;
+            {
+                { <span class="s">&quot;source&quot;</span>, <b>typeof</b>(<a href="#3a95bd1267fd2730" class="t t">ServiceBusScope</a>).<a href="@0@mscorlib/A.html#e87d536bd07fab01" class="i property">Assembly</a>.<a href="@0@mscorlib/A.html#1fd23b897ffa9a75" class="i method">GetName</a>().<a href="@0@mscorlib/A.html#917bceeed23fe2ae" class="i property">Name</a> },
+                { <span class="s">&quot;platform&quot;</span>, <span class="i n">System</span>.<span class="i n">Runtime</span>.<span class="i n">InteropServices</span>.<span class="t t">RuntimeInformation</span>.<span class="i property">OSDescription</span> },
+                { <span class="s">&quot;framework&quot;</span>, <span class="i n">System</span>.<span class="i n">Runtime</span>.<span class="i n">InteropServices</span>.<span class="t t">RuntimeInformation</span>.<span class="i property">FrameworkDescription</span> },
+                { <span class="s">&quot;created&quot;</span>, <span class="s">$&quot;</span>{ <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@0@mscorlib/A.html#04abe0cac293ebd0" class="i property">UtcNow</a>.<a href="@0@mscorlib/A.html#85b407cde54cb34e" class="i method">ToString</a>(<span class="s">&quot;s&quot;</span>) }<span class="s">Z</span><span class="s">&quot;</span> },
+                { <span class="s">&quot;cleanup-after&quot;</span>, <span class="s">$&quot;</span>{ <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@0@mscorlib/A.html#04abe0cac293ebd0" class="i property">UtcNow</a>.<a href="@0@mscorlib/A.html#3e8c965efd4d9021" class="i method">AddDays</a>(1).<a href="@0@mscorlib/A.html#85b407cde54cb34e" class="i method">ToString</a>(<span class="s">&quot;s&quot;</span>) }<span class="s">Z</span><span class="s">&quot;</span> }
+            };
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Creates the retry policy to apply to a management operation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r56 r t">T</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The expected type of response from the management operation.</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r57 r">maxRetryAttempts</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The maximum retry attempts to allow.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r58 r">exponentialBackoffSeconds</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The number of seconds to use as the basis for backing off on retry attempts.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r59 r">baseJitterSeconds</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">TThe number of seconds to use as the basis for applying jitter to retry backoff calculations.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The retry policy in which to execute the management operation.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static</b> <span class="i">IAsyncPolicy</span>&lt;<span class="r56 r t">T</span>&gt; <a id="d8034794bf401d8b" href="../R/d8034794bf401d8b.html" target="n" data-glyph="76,1" class="i method">CreateRetryPolicy</a>&lt;<span id="r56 rd t" class="r56 r t">T</span>&gt;(<b>int</b> <span id="r57 rd" class="r57 r">maxRetryAttempts</span> = <a href="#2937de4c7a8cd8c6" class="i field">RetryMaximumAttempts</a>,
+                                                            <b>double</b> <span id="r58 rd" class="r58 r">exponentialBackoffSeconds</span> = <a href="#44b41f87cbed1265" class="i field">RetryExponentialBackoffSeconds</a>,
+                                                            <b>double</b> <span id="r59 rd" class="r59 r">baseJitterSeconds</span> = <a href="#c1a4127aac16faed" class="i field">RetryBaseJitterSeconds</a>) =&gt;
+           <span class="i">Policy</span>&lt;<span class="r56 r t">T</span>&gt;
+               .<span class="i">Handle</span>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt;(<span id="r60 rd" class="r60 r">ex</span> =&gt; <span class="i">ShouldRetry</span>(<span class="r60 r">ex</span>))
+               .<span class="i">WaitAndRetryAsync</span>(<span class="r57 r">maxRetryAttempts</span>, <span id="r61 rd" class="r61 r">attempt</span> =&gt; <span class="i">CalculateRetryDelay</span>(<span class="r61 r">attempt</span>, <span class="r58 r">exponentialBackoffSeconds</span>, <span class="r59 r">baseJitterSeconds</span>));
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Creates the retry policy to apply to a management operation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r62 r">maxRetryAttempts</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The maximum retry attempts to allow.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r63 r">exponentialBackoffSeconds</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The number of seconds to use as the basis for backing off on retry attempts.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r64 r">baseJitterSeconds</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">TThe number of seconds to use as the basis for applying jitter to retry backoff calculations.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The retry policy in which to execute the management operation.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static</b> <span class="i">IAsyncPolicy</span> <a id="5667397fe78a54ec" href="../R/5667397fe78a54ec.html" target="n" data-glyph="76,1" class="i method">CreateRetryPolicy</a>(<b>int</b> <span id="r62 rd" class="r62 r">maxRetryAttempts</span> = <a href="#2937de4c7a8cd8c6" class="i field">RetryMaximumAttempts</a>,
+                                                      <b>double</b> <span id="r63 rd" class="r63 r">exponentialBackoffSeconds</span> = <a href="#44b41f87cbed1265" class="i field">RetryExponentialBackoffSeconds</a>,
+                                                      <b>double</b> <span id="r64 rd" class="r64 r">baseJitterSeconds</span> = <a href="#c1a4127aac16faed" class="i field">RetryBaseJitterSeconds</a>) =&gt;
+            <span class="i">Policy</span>
+                .<span class="i">Handle</span>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt;(<span id="r65 rd" class="r65 r">ex</span> =&gt; <span class="i">ShouldRetry</span>(<span class="r65 r">ex</span>))
+                .<span class="i">WaitAndRetryAsync</span>(<span class="r62 r">maxRetryAttempts</span>, <span id="r66 rd" class="r66 r">attempt</span> =&gt; <span class="i">CalculateRetryDelay</span>(<span class="r66 r">attempt</span>, <span class="r63 r">exponentialBackoffSeconds</span>, <span class="r64 r">baseJitterSeconds</span>));
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Determines whether the specified HTTP status code is considered eligible to retry</span>
+        <span class="c">///</span><span class="c">   the associated operation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r67 r">statusCode</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The status code to consider.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the status code is eligible for retries; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static bool</b> <a id="7b11059b70c44ae5" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">IsRetriableStatus</a>(<a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a> <span id="r67 rd" class="r67 r">statusCode</span>) =&gt;
+            ((<span class="r67 r">statusCode</span> == <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#ba154261719bd41b" class="i field">Unauthorized</a>)
+                || (<span class="r67 r">statusCode</span> == ((<a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>)408))
+                || (<span class="r67 r">statusCode</span> == <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#a387765e716ffb3c" class="i field">Conflict</a>)
+                || (<span class="r67 r">statusCode</span> == ((<a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>)429))
+                || (<span class="r67 r">statusCode</span> == <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#f48e04e95b08331a" class="i field">InternalServerError</a>)
+                || (<span class="r67 r">statusCode</span> == <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#8eec2c06c869e523" class="i field">ServiceUnavailable</a>)
+                || (<span class="r67 r">statusCode</span> == <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#78abb6c689d101ad" class="i field">GatewayTimeout</a>));
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Determines whether the specified exception is considered eligible to retry the associated</span>
+        <span class="c">///</span><span class="c">   operation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r68 r">ex</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The exception to consider.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the exception is eligible for retries; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static bool</b> <a id="558a76d22db6782a" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">ShouldRetry</a>(<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r68 rd" class="r68 r">ex</span>) =&gt;
+            ((<a href="#5ddbf18d51e98a30" class="i method">IsRetriableException</a>(<span class="r68 r">ex</span>)) || (<a href="#5ddbf18d51e98a30" class="i method">IsRetriableException</a>(<span class="r68 r">ex</span>?.<a href="@0@mscorlib/A.html#89c20b39fb04108b" class="i property">InnerException</a>)));
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Determines whether the type of the specified exception is considered eligible to retry</span>
+        <span class="c">///</span><span class="c">   the associated operation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r69 r">ex</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The exception to consider.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the exception type is eligible for retries; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static bool</b> <a id="5ddbf18d51e98a30" href="../R/5ddbf18d51e98a30.html" target="n" data-glyph="76,1" class="i method">IsRetriableException</a>(<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r69 rd" class="r69 r">ex</span>)
+        {
+            <b>if</b> (<span class="r69 r">ex</span> == <b>null</b>)
+            {
+                <b>return</b> <b>false</b>;
+            }
+ 
+            <b>switch</b> (<span class="r69 r">ex</span>)
+            {
+                <b>case</b> <span class="i">ErrorResponseException</span> <span id="r70 rd" class="r70 r">erEx</span>:
+                    <b>return</b> <span class="i">IsRetriableStatus</span>(<span class="r70 r">erEx</span>.<span class="i">Response</span>.<span class="i">StatusCode</span>);
+ 
+                <b>case</b> <span class="i">CloudException</span> <span id="r71 rd" class="r71 r">clEx</span>:
+                    <b>return</b> <span class="i">IsRetriableStatus</span>(<span class="r71 r">clEx</span>.<span class="i">Response</span>.<span class="i">StatusCode</span>);
+ 
+                <b>case</b> <a href="@0@mscorlib/A.html#43e40a96805cc4df" class="t t">TimeoutException</a> <b>_</b>:
+                <b>case</b> <a href="@0@mscorlib/A.html#30edb7a318d221fa" class="t t">TaskCanceledException</a> <b>_</b>:
+                <b>case</b> <a href="@0@mscorlib/A.html#a0a8b79c277cf327" class="t t">OperationCanceledException</a> <b>_</b>:
+                <b>case</b> <span class="t t">HttpRequestException</span> <b>_</b>:
+                <b>case</b> <a href="@0@System/A.html#47e37066345d8b7c" class="t t">WebException</a> <b>_</b>:
+                <b>case</b> <a href="@0@System/A.html#feed9e8ed7f20227" class="t t">SocketException</a> <b>_</b>:
+                <b>case</b> <a href="@0@mscorlib/A.html#bf546e435199e83c" class="t t">IOException</a> <b>_</b>:
+                    <b>return</b> <b>true</b>;
+ 
+                <b>default</b>:
+                    <b>return</b> <b>false</b>;
+            };
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Calculates the retry delay to use for management-related operations.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r72 r">attempt</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The current attempt number.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r73 r">exponentialBackoffSeconds</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The exponential backoff amount, in seconds.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r74 r">baseJitterSeconds</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The amount of base jitter to include, in seconds.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The interval to wait before retrying the attempted operation.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="ca9def7f5ef86cc4" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">CalculateRetryDelay</a>(<b>int</b> <span id="r72 rd" class="r72 r">attempt</span>,
+                                                    <b>double</b> <span id="r73 rd" class="r73 r">exponentialBackoffSeconds</span>,
+                                                    <b>double</b> <span id="r74 rd" class="r74 r">baseJitterSeconds</span>) =&gt;
+            <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>((<a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#95354113fadc3083" class="i method">Pow</a>(2, <span class="r72 r">attempt</span>) * <span class="r73 r">exponentialBackoffSeconds</span>) + (<a href="#2e57fb4fd52e0caa" class="i field">RandomNumberGenerator</a>.<a href="@0@mscorlib/A.html#bf5157f54273c48c" class="i property">Value</a>.<a href="@0@mscorlib/A.html#c467f2953a8d2207" class="i method">NextDouble</a>() * <span class="r74 r">baseJitterSeconds</span>));
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Provides access to dynamically created Service Bus Queue instance which exists only in the context</span>
+        <span class="c">///</span><span class="c">   of the scope; disposal removes the resource from Azure.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">IAsyncDisposable</span><span class="c">&quot;</span> <span class="c">/&gt;</span>
+        <span class="c">///</span>
+        <b>public sealed class</b> <a id="cb23d8e697e11027" href="../R/cb23d8e697e11027.html" target="n" data-glyph="0,1" class="t t">QueueScope</a> : <span class="i">IAsyncDisposable</span>
+        {
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">Serves as a sentinel flag to denote when the instance has been disposed.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <b>private bool</b> <a id="fca152733c534a47" href="../R/fca152733c534a47.html" target="n" data-glyph="46,2" class="i field">_disposed</a> = <b>false</b>;
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   The name of the Service Bus namespace associated with the queue.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>public string</b> <a id="9857f7c39d9705ca" href="../R/9857f7c39d9705ca.html" target="n" data-glyph="102,2" class="i property">NamespaceName</a> { <b>get</b>; }
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">  The name of the queue.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>public string</b> <a id="06bce05840166851" href="../R/06bce05840166851.html" target="n" data-glyph="102,2" class="i property">QueueName</a> { <b>get</b>; }
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   A flag indicating if the queue should be removed when the scope is complete.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the queue was should be removed at scope completion; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>private bool</b> <a id="6021da8839f8e861" href="../R/6021da8839f8e861.html" target="n" data-glyph="106,2" class="i property">ShouldRemoveAtScopeCompletion</a> { <b>get</b>; }
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#cb23d8e697e11027" class="t t">QueueScope</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r75 r">serviceBusNamespaceName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the Service Bus namespace to which the queue is associated.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r76 r">queueName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the queue.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r77 r">shouldRemoveAtScopeCompletion</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A flag indicating whether the queue should be removed when the scope is complete.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>public</b> <a id="cefa900cedde4cee" href="../R/cefa900cedde4cee.html" target="n" data-glyph="72,2" class="t constructor">QueueScope</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r75 rd" class="r75 r">serviceBusNamespaceName</span>,
+                              <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r76 rd" class="r76 r">queueName</span>,
+                              <b>bool</b> <span id="r77 rd" class="r77 r">shouldRemoveAtScopeCompletion</span>)
+            {
+                <a href="#9857f7c39d9705ca" class="i property">NamespaceName</a> = <span class="r75 r">serviceBusNamespaceName</span>;
+                <a href="#06bce05840166851" class="i property">QueueName</a> = <span class="r76 r">queueName</span>;
+                <a href="#6021da8839f8e861" class="i property">ShouldRemoveAtScopeCompletion</a> = <span class="r77 r">shouldRemoveAtScopeCompletion</span>;
+            }
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   Performs the tasks needed to remove the dynamically created Service Bus Queue.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>public async</b> <span class="i">ValueTask</span> <a id="8667504ac58f7838" href="../R/8667504ac58f7838.html" target="n" data-glyph="72,2" class="i method">DisposeAsync</a>()
+            {
+                <b>if</b> (!<a href="#6021da8839f8e861" class="i property">ShouldRemoveAtScopeCompletion</a>)
+                {
+                    <a href="#fca152733c534a47" class="i field">_disposed</a> = <b>true</b>;
+                }
+ 
+                <b>if</b> (<a href="#fca152733c534a47" class="i field">_disposed</a>)
+                {
+                    <b>return</b>;
+                }
+ 
+                <b>try</b>
+                {
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r78 rd" class="r78 r">azureSubscription</span> = <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="/Azure.Core.TestFramework/A.html#ebe6d0d5a300171a" class="i property">SubscriptionId</a>;
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r79 rd" class="r79 r">resourceGroup</span> = <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="/Azure.Core.TestFramework/A.html#9214229ef40d58c2" class="i property">ResourceGroup</a>;
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r80 rd" class="r80 r">token</span> = <b>await</b> <a href="#05747547105a0cac" class="i method">AquireManagementTokenAsync</a>().<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                    <b>using</b> <b>var</b> <span id="r81 rd" class="r81 r">client</span> = <b>new</b> <span class="i">ServiceBusManagementClient</span>(<a href="#41ee7b690943e4d7" class="i field">ResourceManagerUri</a>, <b>new</b> <span class="i">TokenCredentials</span>(<span class="r80 r">token</span>)) { <span class="i">SubscriptionId</span> = <span class="r78 r">azureSubscription</span> };
+                    <b>await</b> <a href="#5667397fe78a54ec" class="i method">CreateRetryPolicy</a>().<span class="i">ExecuteAsync</span>(() =&gt; <span class="r81 r">client</span>.<span class="i">Queues</span>.<span class="i">DeleteAsync</span>(<span class="r79 r">resourceGroup</span>, <a href="#9857f7c39d9705ca" class="i property">NamespaceName</a>, <a href="#06bce05840166851" class="i property">QueueName</a>)).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+                <b>catch</b>
+                {
+                    <span class="c">// This should not be considered a critical failure that results in a test failure.  Due</span>
+                    <span class="c">// to ARM being temperamental, some management operations may be rejected.  Throwing here</span>
+                    <span class="c">// does not help to ensure resource cleanup only flags the test itself as a failure.</span>
+                    <span class="c">//</span>
+                    <span class="c">// If a queue fails to be deleted, removing of the associated namespace at the end of the</span>
+                    <span class="c">// test run will also remove the orphan.</span>
+                }
+ 
+                <a href="#fca152733c534a47" class="i field">_disposed</a> = <b>true</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Provides access to dynamically created Service Bus Topic instance which exists only in the context</span>
+        <span class="c">///</span><span class="c">   of the scope; disposal removes the resource from Azure.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">IAsyncDisposable</span><span class="c">&quot;</span> <span class="c">/&gt;</span>
+        <span class="c">///</span>
+        <b>public sealed class</b> <a id="be91e5c3b49fdb4c" href="../R/be91e5c3b49fdb4c.html" target="n" data-glyph="0,1" class="t t">TopicScope</a> : <span class="i">IAsyncDisposable</span>
+        {
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">Serves as a sentinel flag to denote when the instance has been disposed.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <b>private bool</b> <a id="b42ce6ed2993399c" href="../R/b42ce6ed2993399c.html" target="n" data-glyph="46,2" class="i field">_disposed</a> = <b>false</b>;
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   The name of the Service Bus namespace associated with the queue.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>public string</b> <a id="ff57828b614c6fb6" href="../R/ff57828b614c6fb6.html" target="n" data-glyph="102,2" class="i property">NamespaceName</a> { <b>get</b>; }
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">  The name of the topic.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>public string</b> <a id="dddee30dcf06c827" href="../R/dddee30dcf06c827.html" target="n" data-glyph="102,2" class="i property">TopicName</a> { <b>get</b>; }
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   The set of names for the subscriptions associated with the topic.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>public</b> <a href="@0@mscorlib/A.html#b040fb780bdd59f4" class="t t">IReadOnlyList</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="4cb17fba9b035961" href="../R/4cb17fba9b035961.html" target="n" data-glyph="102,2" class="i property">SubscriptionNames</a> { <b>get</b>; }
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   A flag indicating if the topic should be removed when the scope is complete.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the queue was should be removed at scope completion; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>private bool</b> <a id="48e68b544a1d819a" href="../R/48e68b544a1d819a.html" target="n" data-glyph="106,2" class="i property">ShouldRemoveAtScopeCompletion</a> { <b>get</b>; }
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#be91e5c3b49fdb4c" class="t t">TopicScope</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r82 r">serviceBusNamespaceName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the Service Bus namespace to which the queue is associated.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r83 r">topicName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the topic.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r84 r">subscriptionNames</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The set of names for the subscriptions </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r85 r">shouldRemoveAtScopeCompletion</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A flag indicating whether the topic should be removed when the scope is complete.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>public</b> <a id="28e58ad743bab0ff" href="../R/28e58ad743bab0ff.html" target="n" data-glyph="72,2" class="t constructor">TopicScope</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r82 rd" class="r82 r">serviceBusNamespaceName</span>,
+                              <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r83 rd" class="r83 r">topicName</span>,
+                              <a href="@0@mscorlib/A.html#b040fb780bdd59f4" class="t t">IReadOnlyList</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <span id="r84 rd" class="r84 r">subscriptionNames</span>,
+                              <b>bool</b> <span id="r85 rd" class="r85 r">shouldRemoveAtScopeCompletion</span>)
+            {
+                <a href="#ff57828b614c6fb6" class="i property">NamespaceName</a> = <span class="r82 r">serviceBusNamespaceName</span>;
+                <a href="#dddee30dcf06c827" class="i property">TopicName</a> = <span class="r83 r">topicName</span>;
+                <a href="#4cb17fba9b035961" class="i property">SubscriptionNames</a> = <span class="r84 r">subscriptionNames</span>;
+                <a href="#48e68b544a1d819a" class="i property">ShouldRemoveAtScopeCompletion</a> = <span class="r85 r">shouldRemoveAtScopeCompletion</span>;
+            }
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   Performs the tasks needed to remove the dynamically created Service Bus Topic.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>public async</b> <span class="i">ValueTask</span> <a id="5f9fe839948f6b66" href="../R/5f9fe839948f6b66.html" target="n" data-glyph="72,2" class="i method">DisposeAsync</a>()
+            {
+                <b>if</b> (!<a href="#48e68b544a1d819a" class="i property">ShouldRemoveAtScopeCompletion</a>)
+                {
+                    <a href="#b42ce6ed2993399c" class="i field">_disposed</a> = <b>true</b>;
+                }
+ 
+                <b>if</b> (<a href="#b42ce6ed2993399c" class="i field">_disposed</a>)
+                {
+                    <b>return</b>;
+                }
+ 
+                <b>try</b>
+                {
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r86 rd" class="r86 r">azureSubscription</span> = <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="/Azure.Core.TestFramework/A.html#ebe6d0d5a300171a" class="i property">SubscriptionId</a>;
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r87 rd" class="r87 r">resourceGroup</span> = <a href="ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="/Azure.Core.TestFramework/A.html#9214229ef40d58c2" class="i property">ResourceGroup</a>;
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r88 rd" class="r88 r">token</span> = <b>await</b> <a href="#05747547105a0cac" class="i method">AquireManagementTokenAsync</a>().<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                    <b>using</b> <b>var</b> <span id="r89 rd" class="r89 r">client</span> = <b>new</b> <span class="i">ServiceBusManagementClient</span>(<a href="#41ee7b690943e4d7" class="i field">ResourceManagerUri</a>, <b>new</b> <span class="i">TokenCredentials</span>(<span class="r88 r">token</span>)) { <span class="i">SubscriptionId</span> = <span class="r86 r">azureSubscription</span> };
+                    <b>await</b> <a href="#5667397fe78a54ec" class="i method">CreateRetryPolicy</a>().<span class="i">ExecuteAsync</span>(() =&gt; <span class="r89 r">client</span>.<span class="i">Topics</span>.<span class="i">DeleteAsync</span>(<span class="r87 r">resourceGroup</span>, <a href="#ff57828b614c6fb6" class="i property">NamespaceName</a>, <a href="#dddee30dcf06c827" class="i property">TopicName</a>)).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+                <b>catch</b>
+                {
+                    <span class="c">// This should not be considered a critical failure that results in a test failure.  Due</span>
+                    <span class="c">// to ARM being temperamental, some management operations may be rejected.  Throwing here</span>
+                    <span class="c">// does not help to ensure resource cleanup only flags the test itself as a failure.</span>
+                    <span class="c">//</span>
+                    <span class="c">// If a queue fails to be deleted, removing of the associated namespace at the end of the</span>
+                    <span class="c">// test run will also remove the orphan.</span>
+                }
+ 
+                <a href="#b42ce6ed2993399c" class="i field">_disposed</a> = <b>true</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   An internal type for tracking the management access token and</span>
+        <span class="c">///</span><span class="c">   its associated expiration.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private class</b> <a id="a985b6a3462789ad" href="../R/a985b6a3462789ad.html" target="n" data-glyph="4,1" class="t t">ManagementToken</a>
+        {
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The value bearer token to use for authorization.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <b>public readonly string</b> <a id="1ff13fb47b107d74" href="../R/1ff13fb47b107d74.html" target="n" data-glyph="42,2" class="i field">Token</a>;
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The date and time, in UTC, that the token expires.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <b>public readonly</b> <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a> <a id="7b4f9ec431a05aa8" href="../R/7b4f9ec431a05aa8.html" target="n" data-glyph="42,2" class="i field">ExpiresOn</a>;
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#a985b6a3462789ad" class="t t">ManagementToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r90 r">token</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The value of the bearer token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r91 r">expiresOn</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The date and time, in UTC, that the token expires on.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>public</b> <a id="1068f1f17be2dc3c" href="../R/../../0000000000.html" target="n" data-glyph="72,2" class="t constructor">ManagementToken</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r90 rd" class="r90 r">token</span>,
+                                   <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a> <span id="r91 rd" class="r91 r">expiresOn</span>)
+            {
+                <a href="#1ff13fb47b107d74" class="i field">Token</a> = <span class="r90 r">token</span>;
+                <a href="#7b4f9ec431a05aa8" class="i field">ExpiresOn</a> = <span class="r91 r">expiresOn</span>;
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

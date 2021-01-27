@@ -1,0 +1,327 @@
+﻿<!DOCTYPE html>
+<html><head><title>ServiceBusScaleMonitor.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(318);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.ServiceBus/Listeners/ServiceBusScaleMonitor.cs" target="_top">Listeners\ServiceBusScaleMonitor.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.ServiceBus" target="_top">Microsoft.Azure.WebJobs.Extensions.ServiceBus.csproj</a> (Microsoft.Azure.WebJobs.Extensions.ServiceBus)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) .NET Foundation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Linq</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Text</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">ServiceBus</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">ServiceBus</span>.<span class="i">Core</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">ServiceBus</span>.<span class="i">Management</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i">Host</span>.<span class="i">Scale</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Logging</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Globalization</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">ServiceBus</span>.<span class="i n">Listeners</span>
+{
+    <b>internal class</b> <a id="7bf4d98a51f1fa33" href="../R/7bf4d98a51f1fa33.html" target="n" data-glyph="2,0" class="t t">ServiceBusScaleMonitor</a> : <span class="i">IScaleMonitor</span>&lt;<a href="ServiceBusTriggerMetrics.cs.html#ae85c8c87970fc84" class="t t">ServiceBusTriggerMetrics</a>&gt;
+    {
+        <b>private const string</b> <a id="0f70121445de29b9" href="../R/0f70121445de29b9.html" target="n" data-glyph="10,1" class="i field">DeadLetterQueuePath</a> = <span class="s">@&quot;/$DeadLetterQueue&quot;</span>;
+ 
+        <b>private readonly string</b> <a id="cfad921e606f0a99" href="../R/cfad921e606f0a99.html" target="n" data-glyph="46,1" class="i field">_functionId</a>;
+        <b>private readonly</b> <a href="../EntityType.cs.html#47f4c97b32ecedee" class="t t">EntityType</a> <a id="4c8c9e26360b0b10" href="../R/4c8c9e26360b0b10.html" target="n" data-glyph="46,1" class="i field">_entityType</a>;
+        <b>private readonly string</b> <a id="26ae9a801e4fe671" href="../R/26ae9a801e4fe671.html" target="n" data-glyph="46,1" class="i field">_entityPath</a>;
+        <b>private readonly string</b> <a id="2b7cc0b5fd625f28" href="../R/2b7cc0b5fd625f28.html" target="n" data-glyph="46,1" class="i field">_connectionString</a>;
+        <b>private readonly</b> <span class="i">ScaleMonitorDescriptor</span> <a id="7215e17c65bb8487" href="../R/7215e17c65bb8487.html" target="n" data-glyph="46,1" class="i field">_scaleMonitorDescriptor</a>;
+        <b>private readonly bool</b> <a id="1fd30ceaa62ae3b6" href="../R/1fd30ceaa62ae3b6.html" target="n" data-glyph="46,1" class="i field">_isListeningOnDeadLetterQueue</a>;
+        <b>private readonly</b> <span class="i">Lazy</span>&lt;<span class="i">MessageReceiver</span>&gt; <a id="d4b30511a228695b" href="../R/d4b30511a228695b.html" target="n" data-glyph="46,1" class="i field">_receiver</a>;
+        <b>private readonly</b> <span class="i">Lazy</span>&lt;<span class="i">ManagementClient</span>&gt; <a id="93bc6f46eb27e7b5" href="../R/93bc6f46eb27e7b5.html" target="n" data-glyph="46,1" class="i field">_managementClient</a>;
+        <b>private readonly</b> <span class="i">ILogger</span>&lt;<a href="#7bf4d98a51f1fa33" class="t t">ServiceBusScaleMonitor</a>&gt; <a id="c2b3c9c86562dd83" href="../R/c2b3c9c86562dd83.html" target="n" data-glyph="46,1" class="i field">_logger</a>;
+ 
+        <b>private</b> <span class="i">DateTime</span> <a id="3c1c387e944b3491" href="../R/3c1c387e944b3491.html" target="n" data-glyph="46,1" class="i field">_nextWarningTime</a>;
+ 
+        <b>public</b> <a id="fd8e6372f9e14131" href="../R/fd8e6372f9e14131.html" target="n" data-glyph="72,1" class="t constructor">ServiceBusScaleMonitor</a>(<b>string</b> <span id="r0 rd" class="r0 r">functionId</span>, <a href="../EntityType.cs.html#47f4c97b32ecedee" class="t t">EntityType</a> <span id="r1 rd" class="r1 r">entityType</span>, <b>string</b> <span id="r2 rd" class="r2 r">entityPath</span>, <b>string</b> <span id="r3 rd" class="r3 r">connectionString</span>, <span class="i">Lazy</span>&lt;<span class="i">MessageReceiver</span>&gt; <span id="r4 rd" class="r4 r">receiver</span>, <span class="i">ILoggerFactory</span> <span id="r5 rd" class="r5 r">loggerFactory</span>)
+        {
+            <a href="#cfad921e606f0a99" class="i field">_functionId</a> = <span class="r0 r">functionId</span>;
+            <a href="#4c8c9e26360b0b10" class="i field">_entityType</a> = <span class="r1 r">entityType</span>;
+            <a href="#26ae9a801e4fe671" class="i field">_entityPath</a> = <span class="r2 r">entityPath</span>;
+            <a href="#2b7cc0b5fd625f28" class="i field">_connectionString</a> = <span class="r3 r">connectionString</span>;
+            <a href="#7215e17c65bb8487" class="i field">_scaleMonitorDescriptor</a> = <b>new</b> <span class="i">ScaleMonitorDescriptor</span>(<span class="s">$&quot;</span>{<a href="#cfad921e606f0a99" class="i field">_functionId</a>}<span class="s">-ServiceBusTrigger-</span>{<a href="#26ae9a801e4fe671" class="i field">_entityPath</a>}<span class="s">&quot;</span>.<span class="i">ToLower</span>(<span class="i">CultureInfo</span>.<span class="i">InvariantCulture</span>));
+            <a href="#1fd30ceaa62ae3b6" class="i field">_isListeningOnDeadLetterQueue</a> = <span class="r2 r">entityPath</span>.<span class="i">EndsWith</span>(<a href="#0f70121445de29b9" class="i field">DeadLetterQueuePath</a>, <span class="i">StringComparison</span>.<span class="i">OrdinalIgnoreCase</span>);
+            <a href="#d4b30511a228695b" class="i field">_receiver</a> = <span class="r4 r">receiver</span>;
+            <a href="#93bc6f46eb27e7b5" class="i field">_managementClient</a> = <b>new</b> <span class="i">Lazy</span>&lt;<span class="i">ManagementClient</span>&gt;(() =&gt; <b>new</b> <span class="i">ManagementClient</span>(<a href="#2b7cc0b5fd625f28" class="i field">_connectionString</a>));
+            <a href="#c2b3c9c86562dd83" class="i field">_logger</a> = <span class="r5 r">loggerFactory</span>.<span class="i">CreateLogger</span>&lt;<a href="#7bf4d98a51f1fa33" class="t t">ServiceBusScaleMonitor</a>&gt;();
+            <a href="#3c1c387e944b3491" class="i field">_nextWarningTime</a> = <span class="i">DateTime</span>.<span class="i">UtcNow</span>;
+        }
+ 
+        <b>public</b> <span class="i">ScaleMonitorDescriptor</span> <a id="8b99a00df4f259d0" href="../R/../../0000000000.html" target="n" data-glyph="102,1" class="i property">Descriptor</a>
+        {
+            <b>get</b>
+            {
+                <b>return</b> <a href="#7215e17c65bb8487" class="i field">_scaleMonitorDescriptor</a>;
+            }
+        }
+ 
+        <b>async</b> <span class="i">Task</span>&lt;<span class="i">ScaleMetrics</span>&gt; <span class="i">IScaleMonitor</span>.<a id="1721297442ee2353" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">GetMetricsAsync</a>()
+        {
+            <b>return</b> <b>await</b> <a href="#151d1cd233bc5df5" class="i method">GetMetricsAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+        }
+ 
+        <b>public async</b> <span class="i">Task</span>&lt;<a href="ServiceBusTriggerMetrics.cs.html#ae85c8c87970fc84" class="t t">ServiceBusTriggerMetrics</a>&gt; <a id="151d1cd233bc5df5" href="../R/151d1cd233bc5df5.html" target="n" data-glyph="72,1" class="i method">GetMetricsAsync</a>()
+        {
+            <span class="i">Message</span> <span id="r6 rd" class="r6 r">message</span> = <b>null</b>;
+            <b>string</b> <span id="r7 rd" class="r7 r">entityName</span> = <a href="#4c8c9e26360b0b10" class="i field">_entityType</a> == <a href="../EntityType.cs.html#47f4c97b32ecedee" class="t t">EntityType</a>.<a href="../EntityType.cs.html#fd62c5e89d39af68" class="i field">Queue</a> ? <span class="s">&quot;queue&quot;</span> : <span class="s">&quot;topic&quot;</span>;
+ 
+            <b>try</b>
+            {
+                <span class="c">// Peek the first message in the queue without removing it from the queue</span>
+                <span class="c">// PeekAsync remembers the sequence number of the last message, so the second call returns the second message instead of the first one</span>
+                <span class="c">// Use PeekBySequenceNumberAsync with fromSequenceNumber = 0 to always get the first available message</span>
+                <span class="r6 r">message</span> = <b>await</b> <a href="#d4b30511a228695b" class="i field">_receiver</a>.<span class="i">Value</span>.<span class="i">PeekBySequenceNumberAsync</span>(0).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                <b>if</b> (<a href="#4c8c9e26360b0b10" class="i field">_entityType</a> == <a href="../EntityType.cs.html#47f4c97b32ecedee" class="t t">EntityType</a>.<a href="../EntityType.cs.html#fd62c5e89d39af68" class="i field">Queue</a>)
+                {
+                    <b>return</b> <b>await</b> <a href="#7bfb279dea1ca3f6" class="i method">GetQueueMetricsAsync</a>(<span class="r6 r">message</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+                <b>else</b>
+                {
+                    <b>return</b> <b>await</b> <a href="#41276fd69386c3a6" class="i method">GetTopicMetricsAsync</a>(<span class="r6 r">message</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                }
+            }
+            <b>catch</b> (<span class="i">MessagingEntityNotFoundException</span>)
+            {
+                <a href="#c2b3c9c86562dd83" class="i field">_logger</a>.<span class="i">LogWarning</span>(<span class="s">$&quot;</span><span class="s">ServiceBus </span>{<span class="r7 r">entityName</span>}<span class="s"> &#39;</span>{<a href="#26ae9a801e4fe671" class="i field">_entityPath</a>}<span class="s">&#39; was not found.</span><span class="s">&quot;</span>);
+            }
+            <b>catch</b> (<span class="i">UnauthorizedException</span>) <span class="c">// When manage claim is not used on Service Bus connection string</span>
+            {
+                <b>if</b> (<a href="#8a41eab2b0b46209" class="i method">TimeToLogWarning</a>())
+                {
+                    <a href="#c2b3c9c86562dd83" class="i field">_logger</a>.<span class="i">LogWarning</span>(<span class="s">$&quot;</span><span class="s">Connection string does not have Manage claim for </span>{<span class="r7 r">entityName</span>}<span class="s"> &#39;</span>{<a href="#26ae9a801e4fe671" class="i field">_entityPath</a>}<span class="s">&#39;. Failed to get </span>{<span class="r7 r">entityName</span>}<span class="s"> description to </span><span class="s">&quot;</span> +
+                        <span class="s">$&quot;</span><span class="s">derive </span>{<span class="r7 r">entityName</span>}<span class="s"> length metrics. Falling back to using first message enqueued time.</span><span class="s">&quot;</span>);
+                }
+            }
+            <b>catch</b> (<span class="i">Exception</span> <span id="r8 rd" class="r8 r">e</span>)
+            {
+                <a href="#c2b3c9c86562dd83" class="i field">_logger</a>.<span class="i">LogWarning</span>(<span class="s">$&quot;</span><span class="s">Error querying for Service Bus </span>{<span class="r7 r">entityName</span>}<span class="s"> scale status: </span>{<span class="r8 r">e</span>.<span class="i">Message</span>}<span class="s">&quot;</span>);
+            }
+ 
+            <span class="c">// Path for connection strings with no manage claim</span>
+            <b>return</b> <a href="#3902dee3312daf77" class="i method">CreateTriggerMetrics</a>(<span class="r6 r">message</span>, 0, 0, 0, <a href="#1fd30ceaa62ae3b6" class="i field">_isListeningOnDeadLetterQueue</a>);
+        }
+ 
+        <b>private async</b> <span class="i">Task</span>&lt;<a href="ServiceBusTriggerMetrics.cs.html#ae85c8c87970fc84" class="t t">ServiceBusTriggerMetrics</a>&gt; <a id="7bfb279dea1ca3f6" href="../R/7bfb279dea1ca3f6.html" target="n" data-glyph="76,1" class="i method">GetQueueMetricsAsync</a>(<span class="i">Message</span> <span id="r9 rd" class="r9 r">message</span>)
+        {
+            <span class="i">QueueRuntimeInfo</span> <span id="r10 rd" class="r10 r">queueRuntimeInfo</span>;
+            <span class="i">QueueDescription</span> <span id="r11 rd" class="r11 r">queueDescription</span>;
+            <b>long</b> <span id="r12 rd" class="r12 r">activeMessageCount</span> = 0, <span id="r13 rd" class="r13 r">deadLetterCount</span> = 0;
+            <b>int</b> <span id="r14 rd" class="r14 r">partitionCount</span> = 0;
+ 
+            <span class="r10 r">queueRuntimeInfo</span> = <b>await</b> <a href="#93bc6f46eb27e7b5" class="i field">_managementClient</a>.<span class="i">Value</span>.<span class="i">GetQueueRuntimeInfoAsync</span>(<a href="#26ae9a801e4fe671" class="i field">_entityPath</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            <span class="r12 r">activeMessageCount</span> = <span class="r10 r">queueRuntimeInfo</span>.<span class="i">MessageCountDetails</span>.<span class="i">ActiveMessageCount</span>;
+            <span class="r13 r">deadLetterCount</span> = <span class="r10 r">queueRuntimeInfo</span>.<span class="i">MessageCountDetails</span>.<span class="i">DeadLetterMessageCount</span>;
+ 
+            <span class="c">// If partitioning is turned on, then Service Bus automatically partitions queues into 16 partitions</span>
+            <span class="c">// See more information here: https://docs.microsoft.com/en-us/azure/service-bus-messaging/service-bus-partitioning#standard</span>
+            <span class="r11 r">queueDescription</span> = <b>await</b> <a href="#93bc6f46eb27e7b5" class="i field">_managementClient</a>.<span class="i">Value</span>.<span class="i">GetQueueAsync</span>(<a href="#26ae9a801e4fe671" class="i field">_entityPath</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            <span class="r14 r">partitionCount</span> = <span class="r11 r">queueDescription</span>.<span class="i">EnablePartitioning</span> ? 16 : 0;
+ 
+            <b>return</b> <a href="#3902dee3312daf77" class="i method">CreateTriggerMetrics</a>(<span class="r9 r">message</span>, <span class="r12 r">activeMessageCount</span>, <span class="r13 r">deadLetterCount</span>, <span class="r14 r">partitionCount</span>, <a href="#1fd30ceaa62ae3b6" class="i field">_isListeningOnDeadLetterQueue</a>);
+        }
+ 
+        <b>private async</b> <span class="i">Task</span>&lt;<a href="ServiceBusTriggerMetrics.cs.html#ae85c8c87970fc84" class="t t">ServiceBusTriggerMetrics</a>&gt; <a id="41276fd69386c3a6" href="../R/41276fd69386c3a6.html" target="n" data-glyph="76,1" class="i method">GetTopicMetricsAsync</a>(<span class="i">Message</span> <span id="r15 rd" class="r15 r">message</span>)
+        {
+            <span class="i">TopicDescription</span> <span id="r16 rd" class="r16 r">topicDescription</span>;
+            <span class="i">SubscriptionRuntimeInfo</span> <span id="r17 rd" class="r17 r">subscriptionRuntimeInfo</span>;
+            <b>string</b> <span id="r18 rd" class="r18 r">topicPath</span>, <span id="r19 rd" class="r19 r">subscriptionPath</span>;
+            <b>long</b> <span id="r20 rd" class="r20 r">activeMessageCount</span> = 0, <span id="r21 rd" class="r21 r">deadLetterCount</span> = 0;
+            <b>int</b> <span id="r22 rd" class="r22 r">partitionCount</span> = 0;
+ 
+            <a href="ServiceBusEntityPathHelper.cs.html#b71b135299e80f05" class="t t">ServiceBusEntityPathHelper</a>.<a href="ServiceBusEntityPathHelper.cs.html#085f00d813197223" class="i method">ParseTopicAndSubscription</a>(<a href="#26ae9a801e4fe671" class="i field">_entityPath</a>, <b>out</b> <span class="r18 r">topicPath</span>, <b>out</b> <span class="r19 r">subscriptionPath</span>);
+ 
+            <span class="r17 r">subscriptionRuntimeInfo</span> = <b>await</b> <a href="#93bc6f46eb27e7b5" class="i field">_managementClient</a>.<span class="i">Value</span>.<span class="i">GetSubscriptionRuntimeInfoAsync</span>(<span class="r18 r">topicPath</span>, <span class="r19 r">subscriptionPath</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            <span class="r20 r">activeMessageCount</span> = <span class="r17 r">subscriptionRuntimeInfo</span>.<span class="i">MessageCountDetails</span>.<span class="i">ActiveMessageCount</span>;
+            <span class="r21 r">deadLetterCount</span> = <span class="r17 r">subscriptionRuntimeInfo</span>.<span class="i">MessageCountDetails</span>.<span class="i">DeadLetterMessageCount</span>;
+ 
+            <span class="c">// If partitioning is turned on, then Service Bus automatically partitions queues into 16 partitions</span>
+            <span class="c">// See more information here: https://docs.microsoft.com/en-us/azure/service-bus-messaging/service-bus-partitioning#standard</span>
+            <span class="r16 r">topicDescription</span> = <b>await</b> <a href="#93bc6f46eb27e7b5" class="i field">_managementClient</a>.<span class="i">Value</span>.<span class="i">GetTopicAsync</span>(<span class="r18 r">topicPath</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            <span class="r22 r">partitionCount</span> = <span class="r16 r">topicDescription</span>.<span class="i">EnablePartitioning</span> ? 16 : 0;
+ 
+            <b>return</b> <a href="#3902dee3312daf77" class="i method">CreateTriggerMetrics</a>(<span class="r15 r">message</span>, <span class="r20 r">activeMessageCount</span>, <span class="r21 r">deadLetterCount</span>, <span class="r22 r">partitionCount</span>, <a href="#1fd30ceaa62ae3b6" class="i field">_isListeningOnDeadLetterQueue</a>);
+        }
+ 
+        <b>internal static</b> <a href="ServiceBusTriggerMetrics.cs.html#ae85c8c87970fc84" class="t t">ServiceBusTriggerMetrics</a> <a id="3902dee3312daf77" href="../R/3902dee3312daf77.html" target="n" data-glyph="74,1" class="i method">CreateTriggerMetrics</a>(<span class="i">Message</span> <span id="r23 rd" class="r23 r">message</span>, <b>long</b> <span id="r24 rd" class="r24 r">activeMessageCount</span>, <b>long</b> <span id="r25 rd" class="r25 r">deadLetterCount</span>, <b>int</b> <span id="r26 rd" class="r26 r">partitionCount</span>, <b>bool</b> <span id="r27 rd" class="r27 r">isListeningOnDeadLetterQueue</span>)
+        {
+            <b>long</b> <span id="r28 rd" class="r28 r">totalNewMessageCount</span> = 0;
+            <span class="i">TimeSpan</span> <span id="r29 rd" class="r29 r">queueTime</span> = <span class="i">TimeSpan</span>.<span class="i">Zero</span>;
+ 
+            <b>if</b> (<span class="r23 r">message</span> != <b>null</b>)
+            {
+                <span class="r29 r">queueTime</span> = <span class="i">DateTime</span>.<span class="i">UtcNow</span>.<span class="i">Subtract</span>(<span class="r23 r">message</span>.<span class="i">SystemProperties</span>.<span class="i">EnqueuedTimeUtc</span>);
+                <span class="r28 r">totalNewMessageCount</span> = 1; <span class="c">// There&#39;s at least one if message != null. Default for connection string with no manage claim</span>
+            }
+ 
+            <b>if</b> ((!<span class="r27 r">isListeningOnDeadLetterQueue</span> &amp;&amp; <span class="r24 r">activeMessageCount</span> &gt; 0) || (<span class="r27 r">isListeningOnDeadLetterQueue</span> &amp;&amp; <span class="r25 r">deadLetterCount</span> &gt; 0))
+            {
+                <span class="r28 r">totalNewMessageCount</span> = <span class="r27 r">isListeningOnDeadLetterQueue</span> ? <span class="r25 r">deadLetterCount</span> : <span class="r24 r">activeMessageCount</span>;
+            }
+ 
+            <b>return</b> <b>new</b> <span class="t">ServiceBusTriggerMetrics</span>
+            {
+                <a href="ServiceBusTriggerMetrics.cs.html#8bb9fc640b1ce715" class="i property">MessageCount</a> = <span class="r28 r">totalNewMessageCount</span>,
+                <a href="ServiceBusTriggerMetrics.cs.html#736dee213feb1f57" class="i property">PartitionCount</a> = <span class="r26 r">partitionCount</span>,
+                <a href="ServiceBusTriggerMetrics.cs.html#00d3bfbaad7dbef8" class="i property">QueueTime</a> = <span class="r29 r">queueTime</span>
+            };
+        }
+ 
+        <span class="i">ScaleStatus</span> <span class="i">IScaleMonitor</span>.<a id="f005863164065016" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">GetScaleStatus</a>(<span class="i">ScaleStatusContext</span> <span id="r30 rd" class="r30 r">context</span>)
+        {
+            <b>return</b> <span class="i">GetScaleStatusCore</span>(<span class="r30 r">context</span>.<span class="i">WorkerCount</span>, <span class="r30 r">context</span>.<span class="i">Metrics</span>?.<span class="i">Cast</span>&lt;<a href="ServiceBusTriggerMetrics.cs.html#ae85c8c87970fc84" class="t t">ServiceBusTriggerMetrics</a>&gt;().<span class="i">ToArray</span>());
+        }
+ 
+        <b>public</b> <span class="i">ScaleStatus</span> <a id="9f9c25929459b0cc" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetScaleStatus</a>(<span class="i">ScaleStatusContext</span>&lt;<a href="ServiceBusTriggerMetrics.cs.html#ae85c8c87970fc84" class="t t">ServiceBusTriggerMetrics</a>&gt; <span id="r31 rd" class="r31 r">context</span>)
+        {
+            <b>return</b> <span class="i">GetScaleStatusCore</span>(<span class="r31 r">context</span>.<span class="i">WorkerCount</span>, <span class="r31 r">context</span>.<span class="i">Metrics</span>?.<span class="i">ToArray</span>());
+        }
+ 
+        <b>private</b> <span class="i">ScaleStatus</span> <a id="194fbf340364a8f4" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">GetScaleStatusCore</a>(<b>int</b> <span id="r32 rd" class="r32 r">workerCount</span>, <a href="ServiceBusTriggerMetrics.cs.html#ae85c8c87970fc84" class="t t">ServiceBusTriggerMetrics</a>[] <span id="r33 rd" class="r33 r">metrics</span>)
+        {
+            <span class="i">ScaleStatus</span> <span id="r34 rd" class="r34 r">status</span> = <b>new</b> <span class="i">ScaleStatus</span>
+            {
+                <span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">None</span>
+            };
+ 
+            <b>const int</b> <span id="r35 rd" class="r35 r">NumberOfSamplesToConsider</span> = 5;
+ 
+            <span class="c">// Unable to determine the correct vote with no metrics.</span>
+            <b>if</b> (<span class="r33 r">metrics</span> == <b>null</b> || <span class="r33 r">metrics</span>.<span class="i">Length</span> == 0)
+            {
+                <b>return</b> <span class="r34 r">status</span>;
+            }
+ 
+            <span class="c">// We shouldn&#39;t assign more workers than there are partitions</span>
+            <span class="c">// This check is first, because it is independent of load or number of samples.</span>
+            <b>int</b> <span id="r36 rd" class="r36 r">partitionCount</span> = <span class="r33 r">metrics</span>.<span class="i">Last</span>().<span class="i">PartitionCount</span>;
+            <b>if</b> (<span class="r36 r">partitionCount</span> &gt; 0 &amp;&amp; <span class="r36 r">partitionCount</span> &lt; <span class="r32 r">workerCount</span>)
+            {
+                <span class="r34 r">status</span>.<span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">ScaleIn</span>;
+                <a href="#c2b3c9c86562dd83" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">WorkerCount (</span>{<span class="r32 r">workerCount</span>}<span class="s">) &gt; PartitionCount (</span>{<span class="r36 r">partitionCount</span>}<span class="s">).</span><span class="s">&quot;</span>);
+                <a href="#c2b3c9c86562dd83" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Number of instances (</span>{<span class="r32 r">workerCount</span>}<span class="s">) is too high relative to number </span><span class="s">&quot;</span> +
+                                       <span class="s">$&quot;</span><span class="s">of partitions for Service Bus entity (</span>{<a href="#26ae9a801e4fe671" class="i field">_entityPath</a>}<span class="s">, </span>{<span class="r36 r">partitionCount</span>}<span class="s">).</span><span class="s">&quot;</span>);
+                <b>return</b> <span class="r34 r">status</span>;
+            }
+ 
+            <span class="c">// At least 5 samples are required to make a scale decision for the rest of the checks.</span>
+            <b>if</b> (<span class="r33 r">metrics</span>.<span class="i">Length</span> &lt; <span class="r35 r">NumberOfSamplesToConsider</span>)
+            {
+                <b>return</b> <span class="r34 r">status</span>;
+            }
+ 
+            <span class="c">// Maintain a minimum ratio of 1 worker per 1,000 messages.</span>
+            <b>long</b> <span id="r37 rd" class="r37 r">latestMessageCount</span> = <span class="r33 r">metrics</span>.<span class="i">Last</span>().<span class="i">MessageCount</span>;
+            <b>if</b> (<span class="r37 r">latestMessageCount</span> &gt; <span class="r32 r">workerCount</span> * 1000)
+            {
+                <span class="r34 r">status</span>.<span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">ScaleOut</span>;
+                <a href="#c2b3c9c86562dd83" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">MessageCount (</span>{<span class="r37 r">latestMessageCount</span>}<span class="s">) &gt; WorkerCount (</span>{<span class="r32 r">workerCount</span>}<span class="s">) * 1,000.</span><span class="s">&quot;</span>);
+                <a href="#c2b3c9c86562dd83" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Message count for Service Bus Entity (</span>{<a href="#26ae9a801e4fe671" class="i field">_entityPath</a>}<span class="s">, </span>{<span class="r37 r">latestMessageCount</span>}<span class="s">) </span><span class="s">&quot;</span> +
+                                       <span class="s">$&quot;</span><span class="s">is too high relative to the number of instances (</span>{<span class="r32 r">workerCount</span>}<span class="s">).</span><span class="s">&quot;</span>);
+                <b>return</b> <span class="r34 r">status</span>;
+            }
+ 
+            <span class="c">// Check to see if the queue/topic has been empty for a while. Only if all metrics samples are empty do we scale down.</span>
+            <b>bool</b> <span id="r38 rd" class="r38 r">isIdle</span> = <span class="r33 r">metrics</span>.<span class="i">All</span>(<span id="r39 rd" class="r39 r">m</span> =&gt; <span class="r39 r">m</span>.<span class="i">MessageCount</span> == 0);
+            <b>if</b> (<span class="r38 r">isIdle</span>)
+            {
+                <span class="r34 r">status</span>.<span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">ScaleIn</span>;
+                <a href="#c2b3c9c86562dd83" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">&#39;</span>{<a href="#26ae9a801e4fe671" class="i field">_entityPath</a>}<span class="s">&#39; is idle.</span><span class="s">&quot;</span>);
+                <b>return</b> <span class="r34 r">status</span>;
+            }
+ 
+            <span class="c">// Samples are in chronological order. Check for a continuous increase in message count.</span>
+            <span class="c">// If detected, this results in an automatic scale out for the site container.</span>
+            <b>if</b> (<span class="r33 r">metrics</span>[0].<a href="ServiceBusTriggerMetrics.cs.html#8bb9fc640b1ce715" class="i property">MessageCount</a> &gt; 0)
+            {
+                <b>bool</b> <span id="r40 rd" class="r40 r">messageCountIncreasing</span> =
+                <span class="i">IsTrueForLastN</span>(
+                    <span class="r33 r">metrics</span>,
+                    <span class="r35 r">NumberOfSamplesToConsider</span>,
+                    (<span id="r41 rd" class="r41 r">prev</span>, <span id="r42 rd" class="r42 r">next</span>) =&gt; <span class="r41 r">prev</span>.<span class="i">MessageCount</span> &lt; <span class="r42 r">next</span>.<span class="i">MessageCount</span>) &amp;&amp; <span class="r33 r">metrics</span>[0].<a href="ServiceBusTriggerMetrics.cs.html#8bb9fc640b1ce715" class="i property">MessageCount</a> &gt; 0;
+                <b>if</b> (<span class="r40 r">messageCountIncreasing</span>)
+                {
+                    <span class="r34 r">status</span>.<span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">ScaleOut</span>;
+                    <a href="#c2b3c9c86562dd83" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Message count is increasing for &#39;</span>{<a href="#26ae9a801e4fe671" class="i field">_entityPath</a>}<span class="s">&#39;.</span><span class="s">&quot;</span>);
+                    <b>return</b> <span class="r34 r">status</span>;
+                }
+            }
+ 
+            <b>if</b> (<span class="r33 r">metrics</span>[0].<a href="ServiceBusTriggerMetrics.cs.html#00d3bfbaad7dbef8" class="i property">QueueTime</a> &gt; <span class="i">TimeSpan</span>.<span class="i">Zero</span> &amp;&amp; <span class="r33 r">metrics</span>[0].<a href="ServiceBusTriggerMetrics.cs.html#00d3bfbaad7dbef8" class="i property">QueueTime</a> &lt; <span class="r33 r">metrics</span>[<span class="r35 r">NumberOfSamplesToConsider</span> - 1].<a href="ServiceBusTriggerMetrics.cs.html#00d3bfbaad7dbef8" class="i property">QueueTime</a>)
+            {
+                <b>bool</b> <span id="r43 rd" class="r43 r">queueTimeIncreasing</span> =
+                    <span class="i">IsTrueForLastN</span>(
+                        <span class="r33 r">metrics</span>,
+                        <span class="r35 r">NumberOfSamplesToConsider</span>,
+                        (<span id="r44 rd" class="r44 r">prev</span>, <span id="r45 rd" class="r45 r">next</span>) =&gt; <span class="r44 r">prev</span>.<span class="i">QueueTime</span> &lt;= <span class="r45 r">next</span>.<span class="i">QueueTime</span>);
+                <b>if</b> (<span class="r43 r">queueTimeIncreasing</span>)
+                {
+                    <span class="r34 r">status</span>.<span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">ScaleOut</span>;
+                    <a href="#c2b3c9c86562dd83" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Queue time is increasing for &#39;</span>{<a href="#26ae9a801e4fe671" class="i field">_entityPath</a>}<span class="s">&#39;.</span><span class="s">&quot;</span>);
+                    <b>return</b> <span class="r34 r">status</span>;
+                }
+            }
+ 
+            <b>bool</b> <span id="r46 rd" class="r46 r">messageCountDecreasing</span> =
+                <span class="i">IsTrueForLastN</span>(
+                    <span class="r33 r">metrics</span>,
+                    <span class="r35 r">NumberOfSamplesToConsider</span>,
+                    (<span id="r47 rd" class="r47 r">prev</span>, <span id="r48 rd" class="r48 r">next</span>) =&gt; <span class="r47 r">prev</span>.<span class="i">MessageCount</span> &gt; <span class="r48 r">next</span>.<span class="i">MessageCount</span>);
+            <b>if</b> (<span class="r46 r">messageCountDecreasing</span>)
+            {
+                <span class="r34 r">status</span>.<span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">ScaleIn</span>;
+                <a href="#c2b3c9c86562dd83" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Message count is decreasing for &#39;</span>{<a href="#26ae9a801e4fe671" class="i field">_entityPath</a>}<span class="s">&#39;.</span><span class="s">&quot;</span>);
+                <b>return</b> <span class="r34 r">status</span>;
+            }
+ 
+            <b>bool</b> <span id="r49 rd" class="r49 r">queueTimeDecreasing</span> = <span class="i">IsTrueForLastN</span>(
+                <span class="r33 r">metrics</span>,
+                <span class="r35 r">NumberOfSamplesToConsider</span>,
+                (<span id="r50 rd" class="r50 r">prev</span>, <span id="r51 rd" class="r51 r">next</span>) =&gt; <span class="r50 r">prev</span>.<span class="i">QueueTime</span> &gt; <span class="r51 r">next</span>.<span class="i">QueueTime</span>);
+            <b>if</b> (<span class="r49 r">queueTimeDecreasing</span>)
+            {
+                <span class="r34 r">status</span>.<span class="i">Vote</span> = <span class="i">ScaleVote</span>.<span class="i">ScaleIn</span>;
+                <a href="#c2b3c9c86562dd83" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Queue time is decreasing for &#39;</span>{<a href="#26ae9a801e4fe671" class="i field">_entityPath</a>}<span class="s">&#39;.</span><span class="s">&quot;</span>);
+                <b>return</b> <span class="r34 r">status</span>;
+            }
+ 
+            <a href="#c2b3c9c86562dd83" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Service Bus entity &#39;</span>{<a href="#26ae9a801e4fe671" class="i field">_entityPath</a>}<span class="s">&#39; is steady.</span><span class="s">&quot;</span>);
+ 
+            <b>return</b> <span class="r34 r">status</span>;
+        }
+ 
+        <b>private bool</b> <a id="8a41eab2b0b46209" href="../R/8a41eab2b0b46209.html" target="n" data-glyph="76,1" class="i method">TimeToLogWarning</a>()
+        {
+            <span class="i">DateTime</span> <span id="r52 rd" class="r52 r">currentTime</span> = <span class="i">DateTime</span>.<span class="i">UtcNow</span>;
+            <b>bool</b> <span id="r53 rd" class="r53 r">timeToLog</span> = <span class="r52 r">currentTime</span> &gt;= <a href="#3c1c387e944b3491" class="i field">_nextWarningTime</a>;
+            <b>if</b> (<span class="r53 r">timeToLog</span>)
+            {
+                <a href="#3c1c387e944b3491" class="i field">_nextWarningTime</a> = <span class="r52 r">currentTime</span>.<span class="i">AddHours</span>(1);
+            }
+            <b>return</b> <span class="r53 r">timeToLog</span>;
+        }
+ 
+        <b>private static bool</b> <a id="3770bf71113228f4" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="i method">IsTrueForLastN</a>(<span class="i">IList</span>&lt;<a href="ServiceBusTriggerMetrics.cs.html#ae85c8c87970fc84" class="t t">ServiceBusTriggerMetrics</a>&gt; <span id="r54 rd" class="r54 r">samples</span>, <b>int</b> <span id="r55 rd" class="r55 r">count</span>, <span class="i">Func</span>&lt;<a href="ServiceBusTriggerMetrics.cs.html#ae85c8c87970fc84" class="t t">ServiceBusTriggerMetrics</a>, <a href="ServiceBusTriggerMetrics.cs.html#ae85c8c87970fc84" class="t t">ServiceBusTriggerMetrics</a>, <b>bool</b>&gt; <span id="r56 rd" class="r56 r">predicate</span>)
+        {
+            <span class="c">// Walks through the list from left to right starting at len(samples) - count.</span>
+            <b>for</b> (<b>int</b> <span id="r57 rd" class="r57 r">i</span> = <span class="r54 r">samples</span>.<span class="i">Count</span> - <span class="r55 r">count</span>; <span class="r57 r">i</span> &lt; <span class="r54 r">samples</span>.<span class="i">Count</span> - 1; <span class="r57 r">i</span>++)
+            {
+                <b>if</b> (!<span class="r56 r">predicate</span>(<span class="r54 r">samples</span>[<span class="r57 r">i</span>], <span class="r54 r">samples</span>[<span class="r57 r">i</span> + 1]))
+                {
+                    <b>return</b> <b>false</b>;
+                }
+            }
+ 
+            <b>return</b> <b>true</b>;
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

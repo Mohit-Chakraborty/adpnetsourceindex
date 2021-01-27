@@ -1,0 +1,848 @@
+﻿<!DOCTYPE html>
+<html><head><title>ServiceBusEndToEndTests.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(839);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.ServiceBus.Tests/ServiceBusEndToEndTests.cs" target="_top">ServiceBusEndToEndTests.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.ServiceBus.Tests" target="_top">Microsoft.Azure.WebJobs.Extensions.ServiceBus.Tests.csproj</a> (Microsoft.Azure.WebJobs.Extensions.ServiceBus.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Reflection</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>.<span class="i n">RegularExpressions</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">ServiceBus</span>.<span class="i n">Tests</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">ServiceBus</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">ServiceBus</span>.<span class="i">Core</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i n">TestCommon</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">ServiceBus</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">DependencyInjection</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i n">Hosting</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Logging</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Options</span>;
+<b>using</b> <span class="i">NUnit</span>.<span class="i">Framework</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i n">EndToEndTests</span>
+{
+    <b>public class</b> <a id="69feafed93d49cae" href="R/../../0000000000.html" target="n" data-glyph="0,0" class="t t">ServiceBusEndToEndTests</a> : <a href="WebJobsServiceBusTestBase.cs.html#f7c3a706d928fe62" class="t t">WebJobsServiceBusTestBase</a>
+    {
+        <b>private const string</b> <a id="4bc7ab87fb2c7b6d" href="R/4bc7ab87fb2c7b6d.html" target="n" data-glyph="10,1" class="i field">TriggerDetailsMessageStart</a> = <span class="s">&quot;Trigger Details:&quot;</span>;
+        <b>private const string</b> <a id="63e70c7e63f172b1" href="R/63e70c7e63f172b1.html" target="n" data-glyph="10,1" class="i field">DrainingQueueMessageBody</a> = <span class="s">&quot;queue-message-draining-no-sessions-1&quot;</span>;
+        <b>private const string</b> <a id="3531f4489b46e1cb" href="R/3531f4489b46e1cb.html" target="n" data-glyph="10,1" class="i field">DrainingTopicMessageBody</a> = <span class="s">&quot;topic-message-draining-no-sessions-1&quot;</span>;
+ 
+        <b>private static</b> <a href="@0@mscorlib/A.html#29b8a907100112ba" class="t t">EventWaitHandle</a> <a id="42d466eeef7a40ea" href="R/42d466eeef7a40ea.html" target="n" data-glyph="46,1" class="i field">_topicSubscriptionCalled1</a>;
+        <b>private static</b> <a href="@0@mscorlib/A.html#29b8a907100112ba" class="t t">EventWaitHandle</a> <a id="97ecc74fa5ecf0e6" href="R/97ecc74fa5ecf0e6.html" target="n" data-glyph="46,1" class="i field">_topicSubscriptionCalled2</a>;
+        <b>private static</b> <a href="@0@mscorlib/A.html#29b8a907100112ba" class="t t">EventWaitHandle</a> <a id="5198e76414a76292" href="R/5198e76414a76292.html" target="n" data-glyph="46,1" class="i field">_eventWait</a>;
+        <b>private static</b> <a href="@0@mscorlib/A.html#29b8a907100112ba" class="t t">EventWaitHandle</a> <a id="c2e2e85cdc6f8514" href="R/c2e2e85cdc6f8514.html" target="n" data-glyph="46,1" class="i field">_drainValidationPreDelay</a>;
+        <b>private static</b> <a href="@0@mscorlib/A.html#29b8a907100112ba" class="t t">EventWaitHandle</a> <a id="204ee57ef24cd349" href="R/204ee57ef24cd349.html" target="n" data-glyph="46,1" class="i field">_drainValidationPostDelay</a>;
+ 
+        <span class="c">// These two variables will be checked at the end of the test</span>
+        <b>private static string</b> <a id="9465d041e4e0b00c" href="R/9465d041e4e0b00c.html" target="n" data-glyph="46,1" class="i field">_resultMessage1</a>;
+        <b>private static string</b> <a id="93d06a8820a9e85e" href="R/93d06a8820a9e85e.html" target="n" data-glyph="46,1" class="i field">_resultMessage2</a>;
+ 
+        <b>public</b> <a id="2db4caa67f0e449f" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">ServiceBusEndToEndTests</a>() : <a href="WebJobsServiceBusTestBase.cs.html#3ddc2f0d7039f695" class="k">base</a>(<span class="r0 r">isSession</span>: <b>false</b>)
+        {
+            <a href="#5198e76414a76292" class="i field">_eventWait</a> = <b>new</b> <a href="@0@mscorlib/A.html#3f1e8fec681dd775" class="t constructor">ManualResetEvent</a>(<span class="r1 r">initialState</span>: <b>false</b>);
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="3a604510a293024d" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ServiceBusEndToEnd</a>()
+        {
+            <b>var</b> (<span id="r2 rd" class="r2 r">jobHost</span>, <span id="r3 rd" class="r3 r">host</span>) = <a href="WebJobsServiceBusTestBase.cs.html#0dd1828f855b7cb4" class="i method">BuildHost</a>&lt;<a href="#46f3f53bd30b1cbc" class="t t">ServiceBusTestJobs</a>&gt;(<span class="r4 r">startHost</span>: <b>false</b>);
+            <b>using</b> (<span class="r2 r">jobHost</span>)
+            {
+                <b>await</b> <a href="#3a9e930fc6d986a8" class="i method">ServiceBusEndToEndInternal</a>&lt;<a href="#46f3f53bd30b1cbc" class="t t">ServiceBusTestJobs</a>&gt;(<span class="r3 r">host</span>);
+            }
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="c19c57924b5515e6" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ServiceBusBinderTest</a>()
+        {
+            <b>var</b> (<span id="r5 rd" class="r5 r">jobHost</span>, <span id="r6 rd" class="r6 r">host</span>) = <a href="WebJobsServiceBusTestBase.cs.html#0dd1828f855b7cb4" class="i method">BuildHost</a>&lt;<a href="#f3e509bc60d12174" class="t t">BinderTestJobs</a>&gt;();
+            <b>using</b> (<span class="r5 r">jobHost</span>)
+            {
+                <b>int</b> <span id="r7 rd" class="r7 r">numMessages</span> = 10;
+                <a href="#dfe3b8f435c41279" class="k">var</a> <span id="r8 rd" class="r8 r">args</span> = <b>new</b> { <a href="#817dfcab70486d5b" class="i property">message</a> = <span class="s">&quot;Test Message&quot;</span>, <a href="#fc00d05d8610c46f" class="i property">numMessages</a> = <span class="r7 r">numMessages</span> };
+                <b>await</b> <span class="r5 r">jobHost</span>.<span class="i">CallAsync</span>(<b>nameof</b>(<a href="#f3e509bc60d12174" class="t t">BinderTestJobs</a>.<span class="i">ServiceBusBinderTest</span>), <span class="r8 r">args</span>);
+                <b>await</b> <span class="r5 r">jobHost</span>.<span class="i">CallAsync</span>(<b>nameof</b>(<a href="#f3e509bc60d12174" class="t t">BinderTestJobs</a>.<span class="i">ServiceBusBinderTest</span>), <span class="r8 r">args</span>);
+                <b>await</b> <span class="r5 r">jobHost</span>.<span class="i">CallAsync</span>(<b>nameof</b>(<a href="#f3e509bc60d12174" class="t t">BinderTestJobs</a>.<span class="i">ServiceBusBinderTest</span>), <span class="r8 r">args</span>);
+ 
+                <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r9 rd" class="r9 r">count</span> = <b>await</b> <a href="#a6e874a14e0e4e0c" class="i method">CleanUpEntity</a>(<a href="WebJobsServiceBusTestBase.cs.html#adec697d8ff43b45" class="i field">_firstQueueScope</a>.<a href="Shared/ServiceBusScope.cs.html#06bce05840166851" class="i property">QueueName</a>);
+ 
+                <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r7 r">numMessages</span> * 3, <span class="r9 r">count</span>);
+            }
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="3132ba798bf6acec" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">CustomMessageProcessorTest</a>()
+        {
+            <b>var</b> (<span id="r10 rd" class="r10 r">jobHost</span>, <span id="r11 rd" class="r11 r">host</span>) = <a href="WebJobsServiceBusTestBase.cs.html#0dd1828f855b7cb4" class="i method">BuildHost</a>&lt;<a href="#46f3f53bd30b1cbc" class="t t">ServiceBusTestJobs</a>&gt;(<span id="r12 rd" class="r12 r">host</span> =&gt;
+                <span class="r12 r">host</span>.<span class="i">ConfigureServices</span>(<span id="r13 rd" class="r13 r">services</span> =&gt;
+                {
+                    <span class="r13 r">services</span>.<span class="i">AddSingleton</span>&lt;<a href="/Microsoft.Azure.WebJobs.Extensions.ServiceBus/A.html#e26cb17dea33eeab" class="t t">MessagingProvider</a>, <a href="#099630f8c4b0b082" class="t t">CustomMessagingProvider</a>&gt;();
+                }),
+                <span class="r4 r">startHost</span>: <b>false</b>);
+ 
+            <b>using</b> (<span class="r10 r">jobHost</span>)
+            {
+                <a href="Shared/TestLoggerProvider.cs.html#a6799d174c5eddf1" class="k">var</a> <span id="r14 rd" class="r14 r">loggerProvider</span> = <span class="r11 r">host</span>.<a href="Shared/TestHelpers.cs.html#0ab18659f7fedf5f" class="i method">GetTestLoggerProvider</a>();
+ 
+                <b>await</b> <a href="#3a9e930fc6d986a8" class="i method">ServiceBusEndToEndInternal</a>&lt;<a href="#46f3f53bd30b1cbc" class="t t">ServiceBusTestJobs</a>&gt;(<span class="r15 r">host</span>: <span class="r11 r">host</span>);
+ 
+                <span class="c">// in addition to verifying that our custom processor was called, we&#39;re also</span>
+                <span class="c">// verifying here that extensions can log</span>
+                <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="Shared/LogMessage.cs.html#3f045fc13e8fb8ec" class="t t">LogMessage</a>&gt; <span id="r16 rd" class="r16 r">messages</span> = <span class="r14 r">loggerProvider</span>.<a href="Shared/TestLoggerProvider.cs.html#e50bbc71e52e4c35" class="i method">GetAllLogMessages</a>().<a href="@0@System.Core/A.html#e73922753675387a" class="i method">Where</a>(<span id="r17 rd" class="r17 r">m</span> =&gt; <span class="r17 r">m</span>.<a href="Shared/LogMessage.cs.html#f13e97909da05e21" class="i property">Category</a> == <a href="#099630f8c4b0b082" class="t t">CustomMessagingProvider</a>.<a href="#59645f6d556ee9f9" class="i field">CustomMessagingCategory</a>);
+                <span class="i">Assert</span>.<span class="i">AreEqual</span>(4, <span class="r16 r">messages</span>.<a href="@0@System.Core/A.html#d35db0dea6ae310a" class="i method">Count</a>(<span id="r18 rd" class="r18 r">p</span> =&gt; <span class="r18 r">p</span>.<a href="Shared/LogMessage.cs.html#1c033875804a2aec" class="i property">FormattedMessage</a>.<a href="@0@mscorlib/A.html#428c5c9954dea844" class="i method">Contains</a>(<span class="s">&quot;Custom processor Begin called!&quot;</span>)));
+                <span class="i">Assert</span>.<span class="i">AreEqual</span>(4, <span class="r16 r">messages</span>.<a href="@0@System.Core/A.html#d35db0dea6ae310a" class="i method">Count</a>(<span id="r19 rd" class="r19 r">p</span> =&gt; <span class="r19 r">p</span>.<a href="Shared/LogMessage.cs.html#1c033875804a2aec" class="i property">FormattedMessage</a>.<a href="@0@mscorlib/A.html#428c5c9954dea844" class="i method">Contains</a>(<span class="s">&quot;Custom processor End called!&quot;</span>)));
+            }
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="0a62049e0ed1ac8d" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">MultipleAccountTest</a>()
+        {
+            <b>var</b> (<span id="r20 rd" class="r20 r">jobHost</span>, <span id="r21 rd" class="r21 r">host</span>) = <a href="WebJobsServiceBusTestBase.cs.html#0dd1828f855b7cb4" class="i method">BuildHost</a>&lt;<a href="#46f3f53bd30b1cbc" class="t t">ServiceBusTestJobs</a>&gt;(<span id="r22 rd" class="r22 r">host</span> =&gt;
+                <span class="r22 r">host</span>.<span class="i">ConfigureServices</span>(<span id="r23 rd" class="r23 r">services</span> =&gt;
+                {
+                    <span class="r23 r">services</span>.<span class="i">AddSingleton</span>&lt;<a href="/Microsoft.Azure.WebJobs.Extensions.ServiceBus/A.html#e26cb17dea33eeab" class="t t">MessagingProvider</a>, <a href="#099630f8c4b0b082" class="t t">CustomMessagingProvider</a>&gt;();
+                }));
+            <b>using</b> (<span class="r20 r">jobHost</span>)
+            {
+                <b>await</b> <a href="WebJobsServiceBusTestBase.cs.html#8bc20013dfd5d82a" class="i method">WriteQueueMessage</a>(
+                    <span class="s">&quot;Test&quot;</span>,
+                    <span class="r24 r">connectionString</span>: <a href="Shared/ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="Shared/ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="Shared/ServiceBusTestEnvironment.cs.html#a706d021b349035a" class="i property">ServiceBusSecondaryNamespaceConnectionString</a>,
+                    <span class="r25 r">queueName</span>: <a href="WebJobsServiceBusTestBase.cs.html#0c1381f9dccadee9" class="i field">_secondaryNamespaceQueueScope</a>.<a href="Shared/ServiceBusScope.cs.html#06bce05840166851" class="i property">QueueName</a>);
+ 
+                <a href="#42d466eeef7a40ea" class="i field">_topicSubscriptionCalled1</a> = <b>new</b> <a href="@0@mscorlib/A.html#3f1e8fec681dd775" class="t constructor">ManualResetEvent</a>(<span class="r1 r">initialState</span>: <b>false</b>);
+                <a href="#97ecc74fa5ecf0e6" class="i field">_topicSubscriptionCalled2</a> = <b>new</b> <a href="@0@mscorlib/A.html#3f1e8fec681dd775" class="t constructor">ManualResetEvent</a>(<span class="r1 r">initialState</span>: <b>false</b>);
+ 
+                <a href="#42d466eeef7a40ea" class="i field">_topicSubscriptionCalled1</a>.<a href="@0@mscorlib/A.html#4b231a1c8efbe5a7" class="i method">WaitOne</a>(<a href="WebJobsServiceBusTestBase.cs.html#33660cc50fd13556" class="i field">SBTimeoutMills</a>);
+                <a href="#97ecc74fa5ecf0e6" class="i field">_topicSubscriptionCalled2</a>.<a href="@0@mscorlib/A.html#4b231a1c8efbe5a7" class="i method">WaitOne</a>(<a href="WebJobsServiceBusTestBase.cs.html#33660cc50fd13556" class="i field">SBTimeoutMills</a>);
+ 
+                <span class="c">// ensure all logs have had a chance to flush</span>
+                <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#34b191a243434f6a" class="i method">Delay</a>(3000);
+            }
+ 
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;Test-topic-1&quot;</span>, <a href="#9465d041e4e0b00c" class="i field">_resultMessage1</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;Test-topic-2&quot;</span>, <a href="#93d06a8820a9e85e" class="i field">_resultMessage2</a>);
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="8c3a3e503fbf997a" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">TestBatch_String</a>()
+        {
+            <b>await</b> <a href="#765372773bd7fcd8" class="i method">TestMultiple</a>&lt;<a href="#537c8e4332ce0e9c" class="t t">ServiceBusMultipleMessagesTestJob_BindToStringArray</a>&gt;();
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="1f208c759722a61d" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">TestBatch_Messages</a>()
+        {
+            <b>await</b> <a href="#765372773bd7fcd8" class="i method">TestMultiple</a>&lt;<a href="#3751e9acffaca05a" class="t t">ServiceBusMultipleMessagesTestJob_BindToMessageArray</a>&gt;();
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="946eb5f57049b9d3" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">TestBatch_JsonPoco</a>()
+        {
+            <b>await</b> <a href="#765372773bd7fcd8" class="i method">TestMultiple</a>&lt;<a href="#3ffadf1447d41fd7" class="t t">ServiceBusMultipleMessagesTestJob_BindToPocoArray</a>&gt;();
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="1d55f7199b204bb8" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">TestBatch_DataContractPoco</a>()
+        {
+            <b>await</b> <a href="#765372773bd7fcd8" class="i method">TestMultiple</a>&lt;<a href="#3ffadf1447d41fd7" class="t t">ServiceBusMultipleMessagesTestJob_BindToPocoArray</a>&gt;(<b>true</b>);
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="ef35c5c10bea96ec" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">BindToPoco</a>()
+        {
+            <b>var</b> (<span id="r26 rd" class="r26 r">jobHost</span>, <span id="r27 rd" class="r27 r">host</span>) = <a href="WebJobsServiceBusTestBase.cs.html#0dd1828f855b7cb4" class="i method">BuildHost</a>&lt;<a href="#970ca18fffe34eda" class="t t">ServiceBusArgumentBindingJob</a>&gt;();
+            <b>using</b> (<span class="r26 r">jobHost</span>)
+            {
+                <b>await</b> <a href="WebJobsServiceBusTestBase.cs.html#8bc20013dfd5d82a" class="i method">WriteQueueMessage</a>(<span class="s">&quot;{ Name: &#39;foo&#39;, Value: &#39;bar&#39; }&quot;</span>);
+ 
+                <b>bool</b> <span id="r28 rd" class="r28 r">result</span> = <a href="#5198e76414a76292" class="i field">_eventWait</a>.<a href="@0@mscorlib/A.html#4b231a1c8efbe5a7" class="i method">WaitOne</a>(<a href="WebJobsServiceBusTestBase.cs.html#33660cc50fd13556" class="i field">SBTimeoutMills</a>);
+                <span class="i">Assert</span>.<span class="i">True</span>(<span class="r28 r">result</span>);
+ 
+                <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r29 rd" class="r29 r">logs</span> = <span class="r27 r">host</span>.<a href="Shared/TestHelpers.cs.html#0ab18659f7fedf5f" class="i method">GetTestLoggerProvider</a>().<a href="Shared/TestLoggerProvider.cs.html#e50bbc71e52e4c35" class="i method">GetAllLogMessages</a>().<a href="@0@System.Core/A.html#5c652c53e80df013" class="i method">Select</a>(<span id="r30 rd" class="r30 r">p</span> =&gt; <span class="r30 r">p</span>.<a href="Shared/LogMessage.cs.html#1c033875804a2aec" class="i property">FormattedMessage</a>).<a href="@0@System.Core/A.html#e276d6892241255b" class="i method">ToList</a>();
+                <span class="i">Assert</span>.<span class="i">Contains</span>(<span class="s">&quot;PocoValues(foo,bar)&quot;</span>, <span class="r29 r">logs</span>);
+            }
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="142db4a29249b0d0" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">BindToString</a>()
+        {
+            <b>var</b> (<span id="r31 rd" class="r31 r">jobHost</span>, <span id="r32 rd" class="r32 r">host</span>) = <a href="WebJobsServiceBusTestBase.cs.html#0dd1828f855b7cb4" class="i method">BuildHost</a>&lt;<a href="#970ca18fffe34eda" class="t t">ServiceBusArgumentBindingJob</a>&gt;();
+            <b>using</b> (<span class="r31 r">jobHost</span>)
+            {
+                <a href="@0@mscorlib/A.html#382d90b1fa682bac" class="k">var</a> <span id="r33 rd" class="r33 r">method</span> = <b>typeof</b>(<a href="#970ca18fffe34eda" class="t t">ServiceBusArgumentBindingJob</a>).<a href="@0@mscorlib/A.html#f24e0c9fd5441fd5" class="i method">GetMethod</a>(<b>nameof</b>(<a href="#970ca18fffe34eda" class="t t">ServiceBusArgumentBindingJob</a>.<span class="i">BindToString</span>), <a href="@0@mscorlib/A.html#4795caf3b483702d" class="t t">BindingFlags</a>.<a href="@0@mscorlib/A.html#d1fa47f9abe3c16a" class="i field">Static</a> | <a href="@0@mscorlib/A.html#4795caf3b483702d" class="t t">BindingFlags</a>.<a href="@0@mscorlib/A.html#ef2ef39bdfa059df" class="i field">Public</a>);
+                <b>await</b> <span class="r31 r">jobHost</span>.<span class="i">CallAsync</span>(<span class="r33 r">method</span>, <b>new</b> { <a href="#f87ef7e7ef3633b7" class="i property">input</a> = <span class="s">&quot;foobar&quot;</span> });
+ 
+                <b>bool</b> <span id="r34 rd" class="r34 r">result</span> = <a href="#5198e76414a76292" class="i field">_eventWait</a>.<a href="@0@mscorlib/A.html#4b231a1c8efbe5a7" class="i method">WaitOne</a>(<a href="WebJobsServiceBusTestBase.cs.html#33660cc50fd13556" class="i field">SBTimeoutMills</a>);
+                <span class="i">Assert</span>.<span class="i">True</span>(<span class="r34 r">result</span>);
+ 
+                <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r35 rd" class="r35 r">logs</span> = <span class="r32 r">host</span>.<a href="Shared/TestHelpers.cs.html#0ab18659f7fedf5f" class="i method">GetTestLoggerProvider</a>().<a href="Shared/TestLoggerProvider.cs.html#e50bbc71e52e4c35" class="i method">GetAllLogMessages</a>().<a href="@0@System.Core/A.html#5c652c53e80df013" class="i method">Select</a>(<span id="r36 rd" class="r36 r">p</span> =&gt; <span class="r36 r">p</span>.<a href="Shared/LogMessage.cs.html#1c033875804a2aec" class="i property">FormattedMessage</a>).<a href="@0@System.Core/A.html#e276d6892241255b" class="i method">ToList</a>();
+                <span class="i">Assert</span>.<span class="i">Contains</span>(<span class="s">&quot;Input(foobar)&quot;</span>, <span class="r35 r">logs</span>);
+            }
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="74ee97ba4d07a2a9" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">MessageDrainingQueue</a>()
+        {
+            <b>await</b> <a href="#857cc8c93437adc5" class="i method">TestSingleDrainMode</a>&lt;<a href="#d8ee25eed5dd4561" class="t t">DrainModeTestJobQueue</a>&gt;(<b>true</b>);
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="883256bc5df57d46" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">MessageDrainingTopic</a>()
+        {
+            <b>await</b> <a href="#857cc8c93437adc5" class="i method">TestSingleDrainMode</a>&lt;<a href="#5829c0a0531b9628" class="t t">DrainModeTestJobTopic</a>&gt;(<b>false</b>);
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="38d2b64455ae4377" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">MessageDrainingQueueBatch</a>()
+        {
+            <b>await</b> <a href="#48a24643f22b665c" class="i method">TestMultipleDrainMode</a>&lt;<a href="#9bd991c2fa8362ce" class="t t">DrainModeTestJobQueueBatch</a>&gt;(<b>true</b>);
+        }
+ 
+        [<span class="i">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="45bc13a822a4ea78" href="R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">MessageDrainingTopicBatch</a>()
+        {
+            <b>await</b> <a href="#48a24643f22b665c" class="i method">TestMultipleDrainMode</a>&lt;<a href="#c6b2b4b154a4b12e" class="t t">DrainModeTestJobTopicBatch</a>&gt;(<b>false</b>);
+        }
+ 
+        <span class="c">/*
+         * Helper functions
+         */</span>
+ 
+        <b>private async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="857cc8c93437adc5" href="R/857cc8c93437adc5.html" target="n" data-glyph="76,1" class="i method">TestSingleDrainMode</a>&lt;<span id="r37 rd t" class="r37 r t">T</span>&gt;(<b>bool</b> <span id="r38 rd" class="r38 r">sendToQueue</span>)
+        {
+            <b>var</b> (<span id="r39 rd" class="r39 r">jobHost</span>, <span id="r40 rd" class="r40 r">host</span>) = <a href="WebJobsServiceBusTestBase.cs.html#0dd1828f855b7cb4" class="i method">BuildHost</a>&lt;<span class="r37 r t">T</span>&gt;(<a href="#84af2d126db81b94" class="i method">BuildDrainHost</a>&lt;<span class="r37 r t">T</span>&gt;());
+ 
+            <b>using</b> (<span class="r39 r">jobHost</span>)
+            {
+                <a href="#c2e2e85cdc6f8514" class="i field">_drainValidationPreDelay</a> = <b>new</b> <a href="@0@mscorlib/A.html#3f1e8fec681dd775" class="t constructor">ManualResetEvent</a>(<span class="r1 r">initialState</span>: <b>false</b>);
+                <a href="#204ee57ef24cd349" class="i field">_drainValidationPostDelay</a> = <b>new</b> <a href="@0@mscorlib/A.html#3f1e8fec681dd775" class="t constructor">ManualResetEvent</a>(<span class="r1 r">initialState</span>: <b>false</b>);
+ 
+                <b>if</b> (<span class="r38 r">sendToQueue</span>)
+                {
+                    <b>await</b> <a href="WebJobsServiceBusTestBase.cs.html#8bc20013dfd5d82a" class="i method">WriteQueueMessage</a>(<a href="#63e70c7e63f172b1" class="i field">DrainingQueueMessageBody</a>);
+                }
+                <b>else</b>
+                {
+                    <b>await</b> <a href="WebJobsServiceBusTestBase.cs.html#b2ef64c2d3036c5a" class="i method">WriteTopicMessage</a>(<a href="#3531f4489b46e1cb" class="i field">DrainingTopicMessageBody</a>);
+                }
+ 
+                <span class="c">// Wait to ensure function invocatoin has started before draining messages</span>
+                <span class="i">Assert</span>.<span class="i">True</span>(<a href="#c2e2e85cdc6f8514" class="i field">_drainValidationPreDelay</a>.<a href="@0@mscorlib/A.html#4b231a1c8efbe5a7" class="i method">WaitOne</a>(<a href="WebJobsServiceBusTestBase.cs.html#33660cc50fd13556" class="i field">SBTimeoutMills</a>));
+ 
+                <span class="c">// Start draining in-flight messages</span>
+                <b>var</b> <span id="r41 rd" class="r41 r">drainModeManager</span> = <span class="r40 r">host</span>.<span class="i">Services</span>.<span class="i">GetService</span>&lt;<span class="i">IDrainModeManager</span>&gt;();
+                <b>await</b> <span class="r41 r">drainModeManager</span>.<span class="i">EnableDrainModeAsync</span>(<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>);
+ 
+                <span class="c">// Validate that function execution was allowed to complete</span>
+                <span class="i">Assert</span>.<span class="i">True</span>(<a href="#204ee57ef24cd349" class="i field">_drainValidationPostDelay</a>.<a href="@0@mscorlib/A.html#4b231a1c8efbe5a7" class="i method">WaitOne</a>(<a href="WebJobsServiceBusTestBase.cs.html#8408a37785204ac8" class="i field">DrainWaitTimeoutMills</a> + <a href="WebJobsServiceBusTestBase.cs.html#33660cc50fd13556" class="i field">SBTimeoutMills</a>));
+            }
+        }
+ 
+        <b>private static</b> <a href="@0@mscorlib/A.html#486d58da4553e12d" class="t t">Action</a>&lt;<span class="i">IHostBuilder</span>&gt; <a id="84af2d126db81b94" href="R/84af2d126db81b94.html" target="n" data-glyph="76,1" class="i method">BuildDrainHost</a>&lt;<span id="r42 rd t" class="r42 r t">T</span>&gt;()
+        {
+            <b>return</b> <span id="r43 rd" class="r43 r">builder</span> =&gt;
+                <span class="r43 r">builder</span>.<span class="i">ConfigureDefaultTestHost</span>&lt;<span class="r42 r t">T</span>&gt;(<span id="r44 rd" class="r44 r">b</span> =&gt;
+                    <span class="r44 r">b</span>.<span class="i">AddServiceBus</span>(<span id="r45 rd" class="r45 r">sbOptions</span> =&gt;
+                    {
+                        <span class="c">// We want to ensure messages can be completed in the function code before signaling success to the test</span>
+                        <span class="r45 r">sbOptions</span>.<span class="i">MessageHandlerOptions</span>.<span class="i">AutoComplete</span> = <b>false</b>;
+                        <span class="r45 r">sbOptions</span>.<span class="i">BatchOptions</span>.<span class="i">AutoComplete</span> = <b>false</b>;
+                        <span class="r45 r">sbOptions</span>.<span class="i">MessageHandlerOptions</span>.<span class="i">MaxAutoRenewDuration</span> = <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#ae74be5264df78d8" class="i method">FromMinutes</a>(<a href="WebJobsServiceBusTestBase.cs.html#9d2fdd5aadf211ba" class="i field">MaxAutoRenewDurationMin</a>);
+                        <span class="r45 r">sbOptions</span>.<span class="i">MessageHandlerOptions</span>.<span class="i">MaxConcurrentCalls</span> = 1;
+                    }));
+        }
+ 
+        <b>private async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="765372773bd7fcd8" href="R/765372773bd7fcd8.html" target="n" data-glyph="76,1" class="i method">TestMultiple</a>&lt;<span id="r46 rd t" class="r46 r t">T</span>&gt;(<b>bool</b> <span id="r47 rd" class="r47 r">isXml</span> = <b>false</b>)
+        {
+            <b>var</b> (<span id="r48 rd" class="r48 r">jobHost</span>, <b>_</b>) = <a href="WebJobsServiceBusTestBase.cs.html#0dd1828f855b7cb4" class="i method">BuildHost</a>&lt;<span class="r46 r t">T</span>&gt;();
+            <b>using</b> (<span class="r48 r">jobHost</span>)
+            {
+                <b>if</b> (<span class="r47 r">isXml</span>)
+                {
+                    <b>await</b> <a href="WebJobsServiceBusTestBase.cs.html#098fe6826ddb5bc9" class="i method">WriteQueueMessage</a>(<b>new</b> <a href="#45c0a40901cf15bc" class="t constructor">TestPoco</a>() { <a href="#2a347da37bb294ad" class="i property">Name</a> = <span class="s">&quot;Test1&quot;</span>, <a href="#6c51bcdf0122d18e" class="i property">Value</a> = <span class="s">&quot;Value&quot;</span> });
+                    <b>await</b> <a href="WebJobsServiceBusTestBase.cs.html#098fe6826ddb5bc9" class="i method">WriteQueueMessage</a>(<b>new</b> <a href="#45c0a40901cf15bc" class="t constructor">TestPoco</a>() { <a href="#2a347da37bb294ad" class="i property">Name</a> = <span class="s">&quot;Test2&quot;</span>, <a href="#6c51bcdf0122d18e" class="i property">Value</a> = <span class="s">&quot;Value&quot;</span> });
+                }
+                <b>else</b>
+                {
+                    <b>await</b> <a href="WebJobsServiceBusTestBase.cs.html#8bc20013dfd5d82a" class="i method">WriteQueueMessage</a>(<span class="s">&quot;{&#39;Name&#39;: &#39;Test1&#39;, &#39;Value&#39;: &#39;Value&#39;}&quot;</span>);
+                    <b>await</b> <a href="WebJobsServiceBusTestBase.cs.html#8bc20013dfd5d82a" class="i method">WriteQueueMessage</a>(<span class="s">&quot;{&#39;Name&#39;: &#39;Test2&#39;, &#39;Value&#39;: &#39;Value&#39;}&quot;</span>);
+                }
+ 
+                <a href="#42d466eeef7a40ea" class="i field">_topicSubscriptionCalled1</a> = <b>new</b> <a href="@0@mscorlib/A.html#3f1e8fec681dd775" class="t constructor">ManualResetEvent</a>(<span class="r1 r">initialState</span>: <b>false</b>);
+ 
+                <b>bool</b> <span id="r49 rd" class="r49 r">result</span> = <a href="#42d466eeef7a40ea" class="i field">_topicSubscriptionCalled1</a>.<a href="@0@mscorlib/A.html#4b231a1c8efbe5a7" class="i method">WaitOne</a>(<a href="WebJobsServiceBusTestBase.cs.html#33660cc50fd13556" class="i field">SBTimeoutMills</a>);
+                <span class="i">Assert</span>.<span class="i">True</span>(<span class="r49 r">result</span>);
+ 
+                <span class="c">// ensure message are completed</span>
+                <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#34b191a243434f6a" class="i method">Delay</a>(2000);
+            }
+        }
+ 
+        <b>private async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="48a24643f22b665c" href="R/48a24643f22b665c.html" target="n" data-glyph="76,1" class="i method">TestMultipleDrainMode</a>&lt;<span id="r50 rd t" class="r50 r t">T</span>&gt;(<b>bool</b> <span id="r51 rd" class="r51 r">sendToQueue</span>)
+        {
+            <b>var</b> (<span id="r52 rd" class="r52 r">jobHost</span>, <span id="r53 rd" class="r53 r">host</span>) = <a href="WebJobsServiceBusTestBase.cs.html#0dd1828f855b7cb4" class="i method">BuildHost</a>&lt;<span class="r50 r t">T</span>&gt;(<a href="#84af2d126db81b94" class="i method">BuildDrainHost</a>&lt;<span class="r50 r t">T</span>&gt;());
+            <b>using</b> (<span class="r52 r">jobHost</span>)
+            {
+                <a href="#c2e2e85cdc6f8514" class="i field">_drainValidationPreDelay</a> = <b>new</b> <a href="@0@mscorlib/A.html#3f1e8fec681dd775" class="t constructor">ManualResetEvent</a>(<span class="r1 r">initialState</span>: <b>false</b>);
+                <a href="#204ee57ef24cd349" class="i field">_drainValidationPostDelay</a> = <b>new</b> <a href="@0@mscorlib/A.html#3f1e8fec681dd775" class="t constructor">ManualResetEvent</a>(<span class="r1 r">initialState</span>: <b>false</b>);
+ 
+                <b>if</b> (<span class="r51 r">sendToQueue</span>)
+                {
+                    <b>await</b> <a href="WebJobsServiceBusTestBase.cs.html#8bc20013dfd5d82a" class="i method">WriteQueueMessage</a>(<a href="#63e70c7e63f172b1" class="i field">DrainingQueueMessageBody</a>);
+                }
+                <b>else</b>
+                {
+                    <b>await</b> <a href="WebJobsServiceBusTestBase.cs.html#b2ef64c2d3036c5a" class="i method">WriteTopicMessage</a>(<a href="#3531f4489b46e1cb" class="i field">DrainingTopicMessageBody</a>);
+                }
+ 
+                <span class="c">// Wait to ensure function invocatoin has started before draining messages</span>
+                <span class="i">Assert</span>.<span class="i">True</span>(<a href="#c2e2e85cdc6f8514" class="i field">_drainValidationPreDelay</a>.<a href="@0@mscorlib/A.html#4b231a1c8efbe5a7" class="i method">WaitOne</a>(<a href="WebJobsServiceBusTestBase.cs.html#33660cc50fd13556" class="i field">SBTimeoutMills</a>));
+ 
+                <span class="c">// Start draining in-flight messages</span>
+                <b>var</b> <span id="r54 rd" class="r54 r">drainModeManager</span> = <span class="r53 r">host</span>.<span class="i">Services</span>.<span class="i">GetService</span>&lt;<span class="i">IDrainModeManager</span>&gt;();
+                <b>await</b> <span class="r54 r">drainModeManager</span>.<span class="i">EnableDrainModeAsync</span>(<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>);
+ 
+                <span class="c">// Validate that function execution was allowed to complete</span>
+                <span class="i">Assert</span>.<span class="i">True</span>(<a href="#204ee57ef24cd349" class="i field">_drainValidationPostDelay</a>.<a href="@0@mscorlib/A.html#4b231a1c8efbe5a7" class="i method">WaitOne</a>(<a href="WebJobsServiceBusTestBase.cs.html#8408a37785204ac8" class="i field">DrainWaitTimeoutMills</a> + <a href="WebJobsServiceBusTestBase.cs.html#33660cc50fd13556" class="i field">SBTimeoutMills</a>));
+            }
+        }
+ 
+        <b>private async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>int</b>&gt; <a id="a6e874a14e0e4e0c" href="R/a6e874a14e0e4e0c.html" target="n" data-glyph="76,1" class="i method">CleanUpEntity</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r55 rd" class="r55 r">queueName</span>)
+        {
+            <b>var</b> <span id="r56 rd" class="r56 r">messageReceiver</span> = <b>new</b> <span class="i">MessageReceiver</span>(<a href="Shared/ServiceBusTestEnvironment.cs.html#c29797947d97112b" class="t t">ServiceBusTestEnvironment</a>.<a href="Shared/ServiceBusTestEnvironment.cs.html#76d09c853f78a3e1" class="i property">Instance</a>.<a href="Shared/ServiceBusTestEnvironment.cs.html#2e255d4a6d75bc9a" class="i property">ServiceBusConnectionString</a>, <span class="r55 r">queueName</span>, <span class="i">ReceiveMode</span>.<span class="i">ReceiveAndDelete</span>);
+            <span class="i">Message</span> <span id="r57 rd" class="r57 r">message</span>;
+            <b>int</b> <span id="r58 rd" class="r58 r">count</span> = 0;
+ 
+            <b>do</b>
+            {
+                <span class="r57 r">message</span> = <b>await</b> <span class="r56 r">messageReceiver</span>.<span class="i">ReceiveAsync</span>(<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(1)).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <b>if</b> (<span class="r57 r">message</span> != <b>null</b>)
+                {
+                    <span class="r58 r">count</span>++;
+                }
+                <b>else</b>
+                {
+                    <b>break</b>;
+                }
+            } <b>while</b> (<b>true</b>);
+ 
+            <b>await</b> <span class="r56 r">messageReceiver</span>.<span class="i">CloseAsync</span>();
+ 
+            <b>return</b> <span class="r58 r">count</span>;
+        }
+ 
+        <b>private async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="3a9e930fc6d986a8" href="R/3a9e930fc6d986a8.html" target="n" data-glyph="76,1" class="i method">ServiceBusEndToEndInternal</a>&lt;<span id="r59 rd t" class="r59 r t">T</span>&gt;(<span class="i">IHost</span> <span id="r60 rd" class="r60 r">host</span>)
+        {
+            <a href="@0@mscorlib/A.html#3d00eeab9feb80f3" class="k">var</a> <span id="r61 rd" class="r61 r">jobContainerType</span> = <b>typeof</b>(<span class="r59 r t">T</span>);
+ 
+            <b>await</b> <a href="WebJobsServiceBusTestBase.cs.html#8bc20013dfd5d82a" class="i method">WriteQueueMessage</a>(<span class="s">&quot;E2E&quot;</span>);
+ 
+            <a href="#42d466eeef7a40ea" class="i field">_topicSubscriptionCalled1</a> = <b>new</b> <a href="@0@mscorlib/A.html#3f1e8fec681dd775" class="t constructor">ManualResetEvent</a>(<span class="r1 r">initialState</span>: <b>false</b>);
+            <a href="#97ecc74fa5ecf0e6" class="i field">_topicSubscriptionCalled2</a> = <b>new</b> <a href="@0@mscorlib/A.html#3f1e8fec681dd775" class="t constructor">ManualResetEvent</a>(<span class="r1 r">initialState</span>: <b>false</b>);
+ 
+            <b>await</b> <span class="r60 r">host</span>.<span class="i">StartAsync</span>();
+ 
+            <a href="#42d466eeef7a40ea" class="i field">_topicSubscriptionCalled1</a>.<a href="@0@mscorlib/A.html#4b231a1c8efbe5a7" class="i method">WaitOne</a>(<a href="WebJobsServiceBusTestBase.cs.html#33660cc50fd13556" class="i field">SBTimeoutMills</a>);
+            <a href="#97ecc74fa5ecf0e6" class="i field">_topicSubscriptionCalled2</a>.<a href="@0@mscorlib/A.html#4b231a1c8efbe5a7" class="i method">WaitOne</a>(<a href="WebJobsServiceBusTestBase.cs.html#33660cc50fd13556" class="i field">SBTimeoutMills</a>);
+ 
+            <span class="c">// ensure all logs have had a chance to flush</span>
+            <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#34b191a243434f6a" class="i method">Delay</a>(4000);
+ 
+            <span class="c">// Wait for the host to terminate</span>
+            <b>await</b> <span class="r60 r">host</span>.<span class="i">StopAsync</span>();
+ 
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;E2E-SBQueue2SBQueue-SBQueue2SBTopic-topic-1&quot;</span>, <a href="#9465d041e4e0b00c" class="i field">_resultMessage1</a>);
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="s">&quot;E2E-SBQueue2SBQueue-SBQueue2SBTopic-topic-2&quot;</span>, <a href="#93d06a8820a9e85e" class="i field">_resultMessage2</a>);
+ 
+            <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="Shared/LogMessage.cs.html#3f045fc13e8fb8ec" class="t t">LogMessage</a>&gt; <span id="r62 rd" class="r62 r">logMessages</span> = <span class="r60 r">host</span>.<a href="Shared/TestHelpers.cs.html#0ab18659f7fedf5f" class="i method">GetTestLoggerProvider</a>()
+                .<a href="Shared/TestLoggerProvider.cs.html#e50bbc71e52e4c35" class="i method">GetAllLogMessages</a>();
+ 
+            <span class="c">// filter out anything from the custom processor for easier validation.</span>
+            <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="Shared/LogMessage.cs.html#3f045fc13e8fb8ec" class="t t">LogMessage</a>&gt; <span id="r63 rd" class="r63 r">consoleOutput</span> = <span class="r62 r">logMessages</span>
+                .<a href="@0@System.Core/A.html#e73922753675387a" class="i method">Where</a>(<span id="r64 rd" class="r64 r">m</span> =&gt; <span class="r64 r">m</span>.<a href="Shared/LogMessage.cs.html#f13e97909da05e21" class="i property">Category</a> != <a href="#099630f8c4b0b082" class="t t">CustomMessagingProvider</a>.<a href="#59645f6d556ee9f9" class="i field">CustomMessagingCategory</a>);
+ 
+            <span class="i">Assert</span>.<span class="i">False</span>(<span class="r63 r">consoleOutput</span>.<span class="i">Where</span>(<span id="r65 rd" class="r65 r">p</span> =&gt; <span class="r65 r">p</span>.<a href="Shared/LogMessage.cs.html#0667ae8bfe8206ef" class="i property">Level</a> == <span class="i">LogLevel</span>.<span class="i">Error</span>).<span class="i">Any</span>());
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>[] <span id="r66 rd" class="r66 r">consoleOutputLines</span> = <span class="r63 r">consoleOutput</span>
+                .<a href="@0@System.Core/A.html#e73922753675387a" class="i method">Where</a>(<span id="r67 rd" class="r67 r">p</span> =&gt; <span class="r67 r">p</span>.<a href="Shared/LogMessage.cs.html#1c033875804a2aec" class="i property">FormattedMessage</a> != <b>null</b>)
+                .<a href="@0@System.Core/A.html#8f3471331178bcb0" class="i method">SelectMany</a>(<span id="r68 rd" class="r68 r">p</span> =&gt; <span class="r68 r">p</span>.<a href="Shared/LogMessage.cs.html#1c033875804a2aec" class="i property">FormattedMessage</a>.<a href="@0@mscorlib/A.html#1ff97959e1d46a53" class="i method">Split</a>(<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a>.<a href="@0@mscorlib/A.html#81c2d980f5d0ee35" class="i method">ToCharArray</a>(), <a href="@0@mscorlib/A.html#a948431c3f385783" class="t t">StringSplitOptions</a>.<a href="@0@mscorlib/A.html#249c323b50d44651" class="i field">RemoveEmptyEntries</a>))
+                .<a href="@0@System.Core/A.html#e449fbc07f49dc52" class="i method">OrderBy</a>(<span id="r69 rd" class="r69 r">p</span> =&gt; <span class="r69 r">p</span>)
+                .<a href="@0@System.Core/A.html#783a052330e7d48d" class="i method">ToArray</a>();
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>[] <span id="r70 rd" class="r70 r">expectedOutputLines</span> = <b>new</b> <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>[]
+            {
+                <span class="s">&quot;Found the following functions:&quot;</span>,
+                <span class="s">$&quot;</span>{<span class="r61 r">jobContainerType</span>.<a href="@0@mscorlib/A.html#976443bb39dc37cd" class="i property">FullName</a>}<span class="s">.SBQueue2SBQueue</span><span class="s">&quot;</span>,
+                <span class="s">$&quot;</span>{<span class="r61 r">jobContainerType</span>.<a href="@0@mscorlib/A.html#976443bb39dc37cd" class="i property">FullName</a>}<span class="s">.MultipleAccounts</span><span class="s">&quot;</span>,
+                <span class="s">$&quot;</span>{<span class="r61 r">jobContainerType</span>.<a href="@0@mscorlib/A.html#976443bb39dc37cd" class="i property">FullName</a>}<span class="s">.SBQueue2SBTopic</span><span class="s">&quot;</span>,
+                <span class="s">$&quot;</span>{<span class="r61 r">jobContainerType</span>.<a href="@0@mscorlib/A.html#976443bb39dc37cd" class="i property">FullName</a>}<span class="s">.SBTopicListener1</span><span class="s">&quot;</span>,
+                <span class="s">$&quot;</span>{<span class="r61 r">jobContainerType</span>.<a href="@0@mscorlib/A.html#976443bb39dc37cd" class="i property">FullName</a>}<span class="s">.SBTopicListener2</span><span class="s">&quot;</span>,
+                <span class="s">&quot;Job host started&quot;</span>,
+                <span class="s">$&quot;</span><span class="s">Executing &#39;</span>{<span class="r61 r">jobContainerType</span>.<a href="@0@mscorlib/A.html#aa4f112f79364b6e" class="i property">Name</a>}<span class="s">.SBQueue2SBQueue&#39;</span><span class="s">&quot;</span>,
+                <span class="s">$&quot;</span><span class="s">Executed &#39;</span>{<span class="r61 r">jobContainerType</span>.<a href="@0@mscorlib/A.html#aa4f112f79364b6e" class="i property">Name</a>}<span class="s">.SBQueue2SBQueue&#39; (Succeeded, Id=</span><span class="s">&quot;</span>,
+                <span class="s">$&quot;</span><span class="s">Trigger Details:</span><span class="s">&quot;</span>,
+                <span class="s">$&quot;</span><span class="s">Executing &#39;</span>{<span class="r61 r">jobContainerType</span>.<a href="@0@mscorlib/A.html#aa4f112f79364b6e" class="i property">Name</a>}<span class="s">.SBQueue2SBTopic&#39;</span><span class="s">&quot;</span>,
+                <span class="s">$&quot;</span><span class="s">Executed &#39;</span>{<span class="r61 r">jobContainerType</span>.<a href="@0@mscorlib/A.html#aa4f112f79364b6e" class="i property">Name</a>}<span class="s">.SBQueue2SBTopic&#39; (Succeeded, Id=</span><span class="s">&quot;</span>,
+                <span class="s">$&quot;</span><span class="s">Trigger Details:</span><span class="s">&quot;</span>,
+                <span class="s">$&quot;</span><span class="s">Executing &#39;</span>{<span class="r61 r">jobContainerType</span>.<a href="@0@mscorlib/A.html#aa4f112f79364b6e" class="i property">Name</a>}<span class="s">.SBTopicListener1&#39;</span><span class="s">&quot;</span>,
+                <span class="s">$&quot;</span><span class="s">Executed &#39;</span>{<span class="r61 r">jobContainerType</span>.<a href="@0@mscorlib/A.html#aa4f112f79364b6e" class="i property">Name</a>}<span class="s">.SBTopicListener1&#39; (Succeeded, Id=</span><span class="s">&quot;</span>,
+                <span class="s">$&quot;</span><span class="s">Trigger Details:</span><span class="s">&quot;</span>,
+                <span class="s">$&quot;</span><span class="s">Executing &#39;</span>{<span class="r61 r">jobContainerType</span>.<a href="@0@mscorlib/A.html#aa4f112f79364b6e" class="i property">Name</a>}<span class="s">.SBTopicListener2&#39;</span><span class="s">&quot;</span>,
+                <span class="s">$&quot;</span><span class="s">Executed &#39;</span>{<span class="r61 r">jobContainerType</span>.<a href="@0@mscorlib/A.html#aa4f112f79364b6e" class="i property">Name</a>}<span class="s">.SBTopicListener2&#39; (Succeeded, Id=</span><span class="s">&quot;</span>,
+                <span class="s">$&quot;</span><span class="s">Trigger Details:</span><span class="s">&quot;</span>,
+                <span class="s">&quot;Job host stopped&quot;</span>,
+                <span class="s">&quot;Starting JobHost&quot;</span>,
+                <span class="s">&quot;Stopping JobHost&quot;</span>,
+                <span class="s">&quot;Stoppingthelistener&#39;Microsoft.Azure.WebJobs.ServiceBus.Listeners.ServiceBusListener&#39;forfunction&#39;MultipleAccounts&#39;&quot;</span>,
+                <span class="s">&quot;Stoppedthelistener&#39;Microsoft.Azure.WebJobs.ServiceBus.Listeners.ServiceBusListener&#39;forfunction&#39;MultipleAccounts&#39;&quot;</span>,
+                <span class="s">&quot;Stoppingthelistener&#39;Microsoft.Azure.WebJobs.ServiceBus.Listeners.ServiceBusListener&#39;forfunction&#39;SBQueue2SBQueue&#39;&quot;</span>,
+                <span class="s">&quot;Stoppedthelistener&#39;Microsoft.Azure.WebJobs.ServiceBus.Listeners.ServiceBusListener&#39;forfunction&#39;SBQueue2SBQueue&#39;&quot;</span>,
+                <span class="s">&quot;Stoppingthelistener&#39;Microsoft.Azure.WebJobs.ServiceBus.Listeners.ServiceBusListener&#39;forfunction&#39;SBQueue2SBTopic&#39;&quot;</span>,
+                <span class="s">&quot;Stoppedthelistener&#39;Microsoft.Azure.WebJobs.ServiceBus.Listeners.ServiceBusListener&#39;forfunction&#39;SBQueue2SBTopic&#39;&quot;</span>,
+                <span class="s">&quot;Stoppingthelistener&#39;Microsoft.Azure.WebJobs.ServiceBus.Listeners.ServiceBusListener&#39;forfunction&#39;SBTopicListener1&#39;&quot;</span>,
+                <span class="s">&quot;Stoppedthelistener&#39;Microsoft.Azure.WebJobs.ServiceBus.Listeners.ServiceBusListener&#39;forfunction&#39;SBTopicListener1&#39;&quot;</span>,
+                <span class="s">&quot;Stoppingthelistener&#39;Microsoft.Azure.WebJobs.ServiceBus.Listeners.ServiceBusListener&#39;forfunction&#39;SBTopicListener2&#39;&quot;</span>,
+                <span class="s">&quot;Stoppedthelistener&#39;Microsoft.Azure.WebJobs.ServiceBus.Listeners.ServiceBusListener&#39;forfunction&#39;SBTopicListener2&#39;&quot;</span>,
+                <span class="s">&quot;FunctionResultAggregatorOptions&quot;</span>,
+                <span class="s">&quot;{&quot;</span>,
+                <span class="s">&quot;  \&quot;BatchSize\&quot;: 1000,&quot;</span>,
+                <span class="s">&quot;  \&quot;FlushTimeout\&quot;: \&quot;00:00:30\&quot;,&quot;</span>,
+                <span class="s">&quot;  \&quot;IsEnabled\&quot;: true&quot;</span>,
+                <span class="s">&quot;}&quot;</span>,
+                <span class="s">&quot;LoggerFilterOptions&quot;</span>,
+                <span class="s">&quot;{&quot;</span>,
+                <span class="s">&quot;  \&quot;MinLevel\&quot;: \&quot;Information\&quot;&quot;</span>,
+                <span class="s">&quot;  \&quot;Rules\&quot;: []&quot;</span>,
+                <span class="s">&quot;}&quot;</span>,
+                <span class="s">&quot;ServiceBusOptions&quot;</span>,
+                <span class="s">&quot;{&quot;</span>,
+                <span class="s">&quot;  \&quot;PrefetchCount\&quot;: 0,&quot;</span>,
+                <span class="s">&quot;  \&quot;MessageHandlerOptions\&quot;: {&quot;</span>,
+                <span class="s">&quot;      \&quot;AutoComplete\&quot;: true,&quot;</span>,
+                <span class="s">&quot;      \&quot;MaxAutoRenewDuration\&quot;: \&quot;00:05:00\&quot;,&quot;</span>,
+                <span class="s">$&quot;</span><span class="s">      \&quot;MaxConcurrentCalls\&quot;: </span>{16 * <span class="i">Utility</span>.<span class="i">GetProcessorCount</span>()}<span class="s">&quot;</span>,
+                <span class="s">&quot;  }&quot;</span>,
+                <span class="s">&quot;  \&quot;SessionHandlerOptions\&quot;: {&quot;</span>,
+                <span class="s">&quot;      \&quot;AutoComplete\&quot;: true,&quot;</span>,
+                <span class="s">&quot;      \&quot;MaxAutoRenewDuration\&quot;: \&quot;00:05:00\&quot;,&quot;</span>,
+                <span class="s">&quot;      \&quot;MaxConcurrentSessions\&quot;: 2000,&quot;</span>,
+                <span class="s">&quot;      \&quot;MessageWaitTimeout\&quot;: \&quot;00:01:00\&quot;&quot;</span>,
+                <span class="s">&quot;  }&quot;</span>,
+                <span class="s">&quot;}&quot;</span>,
+                <span class="s">&quot;  \&quot;BatchOptions\&quot;: {&quot;</span>,
+                <span class="s">&quot;      \&quot;MaxMessageCount\&quot;: 1000,&quot;</span>,
+                <span class="s">&quot;      \&quot;OperationTimeout\&quot;: \&quot;00:01:00\&quot;,&quot;</span>,
+                <span class="s">&quot;      \&quot;AutoComplete\&quot;: true&quot;</span>,
+                <span class="s">&quot;  }&quot;</span>,
+                <span class="s">&quot;SingletonOptions&quot;</span>,
+                <span class="s">&quot;{&quot;</span>,
+                <span class="s">&quot;  \&quot;ListenerLockPeriod\&quot;: \&quot;00:01:00\&quot;,&quot;</span>,
+                <span class="s">&quot;  \&quot;LockAcquisitionPollingInterval\&quot;: \&quot;00:00:05\&quot;,&quot;</span>,
+                <span class="s">&quot;  \&quot;LockAcquisitionTimeout\&quot;: \&quot;&quot;</span>,
+                <span class="s">&quot;  \&quot;LockPeriod\&quot;: \&quot;00:00:15\&quot;,&quot;</span>,
+                <span class="s">&quot;  \&quot;ListenerLockRecoveryPollingInterval\&quot;: \&quot;00:01:00\&quot;&quot;</span>,
+                <span class="s">&quot;}&quot;</span>,
+            }.<a href="@0@System.Core/A.html#e449fbc07f49dc52" class="i method">OrderBy</a>(<span id="r71 rd" class="r71 r">p</span> =&gt; <span class="r71 r">p</span>).<a href="@0@System.Core/A.html#783a052330e7d48d" class="i method">ToArray</a>();
+ 
+            <span class="r70 r">expectedOutputLines</span> = <span class="r70 r">expectedOutputLines</span>.<a href="@0@System.Core/A.html#5c652c53e80df013" class="i method">Select</a>(<span id="r72 rd" class="r72 r">x</span> =&gt; <span class="r72 r">x</span>.<a href="@0@mscorlib/A.html#69fc1d0aa6df8a90" class="i method">Replace</a>(<span class="s">&quot; &quot;</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#c9f70a27facb27cf" class="i field">Empty</a>)).<a href="@0@System.Core/A.html#783a052330e7d48d" class="i method">ToArray</a>();
+            <span class="r66 r">consoleOutputLines</span> = <span class="r66 r">consoleOutputLines</span>.<a href="@0@System.Core/A.html#5c652c53e80df013" class="i method">Select</a>(<span id="r73 rd" class="r73 r">x</span> =&gt; <span class="r73 r">x</span>.<a href="@0@mscorlib/A.html#69fc1d0aa6df8a90" class="i method">Replace</a>(<span class="s">&quot; &quot;</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#c9f70a27facb27cf" class="i field">Empty</a>)).<a href="@0@System.Core/A.html#783a052330e7d48d" class="i method">ToArray</a>();
+            <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r70 r">expectedOutputLines</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>, <span class="r66 r">consoleOutputLines</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>);
+            <b>for</b> (<b>int</b> <span id="r74 rd" class="r74 r">i</span> = 0; <span class="r74 r">i</span> &lt; <span class="r70 r">expectedOutputLines</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>; <span class="r74 r">i</span>++)
+            {
+                <span class="i">StringAssert</span>.<span class="i">StartsWith</span>(<span class="r70 r">expectedOutputLines</span>[<span class="r74 r">i</span>], <span class="r66 r">consoleOutputLines</span>[<span class="r74 r">i</span>]);
+            }
+ 
+            <span class="c">// Verify that trigger details are properly formatted</span>
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>[] <span id="r75 rd" class="r75 r">triggerDetailsConsoleOutput</span> = <span class="r66 r">consoleOutputLines</span>
+                .<a href="@0@System.Core/A.html#e73922753675387a" class="i method">Where</a>(<span id="r76 rd" class="r76 r">m</span> =&gt; <span class="r76 r">m</span>.<a href="@0@mscorlib/A.html#23804789ea4c9c0e" class="i method">StartsWith</a>(<a href="#4bc7ab87fb2c7b6d" class="i field">TriggerDetailsMessageStart</a>)).<a href="@0@System.Core/A.html#783a052330e7d48d" class="i method">ToArray</a>();
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r77 rd" class="r77 r">expectedPattern</span> = <span class="s">&quot;Trigger Details: MessageId: (.*), DeliveryCount: [0-9]+, EnqueuedTime: (.*), LockedUntil: (.*)&quot;</span>;
+ 
+            <b>foreach</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r78 rd" class="r78 r">msg</span> <b>in</b> <span class="r75 r">triggerDetailsConsoleOutput</span>)
+            {
+                <span class="i">Assert</span>.<span class="i">True</span>(<a href="@0@System/A.html#bbe3b2eb80ae5526" class="t t">Regex</a>.<a href="@0@System/A.html#ffaf97ebd1d02f3c" class="i method">IsMatch</a>(<span class="r78 r">msg</span>, <span class="r77 r">expectedPattern</span>), <span class="s">$&quot;</span><span class="s">Expected trace event </span>{<span class="r77 r">expectedPattern</span>}<span class="s"> not found.</span><span class="s">&quot;</span>);
+            }
+        }
+ 
+        <b>public abstract class</b> <a id="7e1afbc74c8b2b57" href="R/7e1afbc74c8b2b57.html" target="n" data-glyph="0,1" class="t t"><span id="e633d448c8ede33d">ServiceBusTestJobsBase</span></a>
+        {
+            <b>protected static</b> <span class="i">Message</span> <a id="2a5d815841758f2a" href="R/2a5d815841758f2a.html" target="n" data-glyph="75,2" class="i method">SBQueue2SBQueue_GetOutputMessage</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r79 rd" class="r79 r">input</span>)
+            {
+                <span class="r79 r">input</span> = <span class="r79 r">input</span> + <span class="s">&quot;-SBQueue2SBQueue&quot;</span>;
+                <b>return</b> <b>new</b> <span class="i">Message</span>
+                {
+                    <span class="i">ContentType</span> = <span class="s">&quot;text/plain&quot;</span>,
+                    <span class="i">Body</span> = <a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<span class="r79 r">input</span>)
+                };
+            }
+ 
+            <b>protected static</b> <span class="i">Message</span> <a id="156b0e7522515831" href="R/156b0e7522515831.html" target="n" data-glyph="75,2" class="i method">SBQueue2SBTopic_GetOutputMessage</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r80 rd" class="r80 r">input</span>)
+            {
+                <span class="r80 r">input</span> = <span class="r80 r">input</span> + <span class="s">&quot;-SBQueue2SBTopic&quot;</span>;
+ 
+                <b>return</b> <b>new</b> <span class="i">Message</span>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<span class="r80 r">input</span>))
+                {
+                    <span class="i">ContentType</span> = <span class="s">&quot;text/plain&quot;</span>
+                };
+            }
+ 
+            <b>protected static void</b> <a id="0edcafd1439282cd" href="R/0edcafd1439282cd.html" target="n" data-glyph="75,2" class="i method">SBTopicListener1Impl</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r81 rd" class="r81 r">input</span>)
+            {
+                <a href="#9465d041e4e0b00c" class="i field">_resultMessage1</a> = <span class="r81 r">input</span> + <span class="s">&quot;-topic-1&quot;</span>;
+                <a href="#42d466eeef7a40ea" class="i field">_topicSubscriptionCalled1</a>.<a href="@0@mscorlib/A.html#63f3d76fa45ccc3d" class="i method">Set</a>();
+            }
+ 
+            <b>protected static void</b> <a id="476eeb755d6adf2e" href="R/476eeb755d6adf2e.html" target="n" data-glyph="75,2" class="i method">SBTopicListener2Impl</a>(<span class="i">Message</span> <span id="r82 rd" class="r82 r">message</span>)
+            {
+                <b>using</b> (<a href="@0@mscorlib/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r83 rd" class="r83 r">stream</span> = <b>new</b> <span class="t">MemoryStream</span>(<span class="r82 r">message</span>.<span class="i">Body</span>))
+                <b>using</b> (<a href="@0@mscorlib/A.html#7b5eff52b5bf1164" class="t t">TextReader</a> <span id="r84 rd" class="r84 r">reader</span> = <b>new</b> <a href="@0@mscorlib/A.html#72447927169f6b77" class="t constructor">StreamReader</a>(<span class="r83 r">stream</span>))
+                {
+                    <a href="#93d06a8820a9e85e" class="i field">_resultMessage2</a> = <span class="r84 r">reader</span>.<a href="@0@mscorlib/A.html#500f43aa5f43a9c5" class="i method">ReadToEnd</a>() + <span class="s">&quot;-topic-2&quot;</span>;
+                }
+ 
+                <a href="#97ecc74fa5ecf0e6" class="i field">_topicSubscriptionCalled2</a>.<a href="@0@mscorlib/A.html#63f3d76fa45ccc3d" class="i method">Set</a>();
+            }
+        }
+ 
+        <b>public class</b> <a id="46f3f53bd30b1cbc" href="R/46f3f53bd30b1cbc.html" target="n" data-glyph="0,1" class="t t"><span id="c766539242401f4e">ServiceBusTestJobs</span></a> : <a href="#7e1afbc74c8b2b57" class="t t">ServiceBusTestJobsBase</a>
+        {
+            <span class="c">// Passes service bus message from a queue to another queue</span>
+            <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="7a782b7c90bfeb6b" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">SBQueue2SBQueue</a>(
+                [<span class="i">ServiceBusTrigger</span>(<a href="WebJobsServiceBusTestBase.cs.html#60fc4f324a5218fd" class="i field">FirstQueueNameKey</a>)] <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r85 rd" class="r85 r">start</span>, <b>int</b> <span id="r86 rd" class="r86 r">deliveryCount</span>,
+                <span class="i">MessageReceiver</span> <span id="r87 rd" class="r87 r">messageReceiver</span>,
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r88 rd" class="r88 r">lockToken</span>,
+                [<span class="i">ServiceBus</span>(<a href="WebJobsServiceBusTestBase.cs.html#6acede5e123dfa60" class="i field">SecondQueueNameKey</a>)] <span class="i">MessageSender</span> <span id="r89 rd" class="r89 r">messageSender</span>)
+            {
+                <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="WebJobsServiceBusTestBase.cs.html#adec697d8ff43b45" class="i field">_firstQueueScope</a>.<a href="Shared/ServiceBusScope.cs.html#06bce05840166851" class="i property">QueueName</a>, <span class="r87 r">messageReceiver</span>.<span class="i">Path</span>);
+                <span class="i">Assert</span>.<span class="i">AreEqual</span>(1, <span class="r86 r">deliveryCount</span>);
+ 
+                <span class="c">// verify the message receiver and token are valid</span>
+                <b>await</b> <span class="r87 r">messageReceiver</span>.<span class="i">RenewLockAsync</span>(<span class="r88 r">lockToken</span>);
+ 
+                <b>var</b> <span id="r90 rd" class="r90 r">message</span> = <a href="#2a5d815841758f2a" class="i method">SBQueue2SBQueue_GetOutputMessage</a>(<span class="r85 r">start</span>);
+                <b>await</b> <span class="r89 r">messageSender</span>.<span class="i">SendAsync</span>(<span class="r90 r">message</span>);
+            }
+ 
+            <span class="c">// Passes a service bus message from a queue to topic using a brokered message</span>
+            <b>public static void</b> <a id="15ccd4d84950cd3f" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">SBQueue2SBTopic</a>(
+                [<span class="i">ServiceBusTrigger</span>(<a href="WebJobsServiceBusTestBase.cs.html#6acede5e123dfa60" class="i field">SecondQueueNameKey</a>)] <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r91 rd" class="r91 r">message</span>,
+                [<span class="i">ServiceBus</span>(<a href="WebJobsServiceBusTestBase.cs.html#2b1bdf407c1367b2" class="i field">TopicNameKey</a>)] <b>out</b> <span class="i">Message</span> <span id="r92 rd" class="r92 r">output</span>)
+            {
+                <span class="r92 r">output</span> = <a href="#156b0e7522515831" class="i method">SBQueue2SBTopic_GetOutputMessage</a>(<span class="r91 r">message</span>);
+            }
+ 
+            <span class="c">// First listener for the topic</span>
+            <b>public static void</b> <a id="7d006875a4ea6cdb" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">SBTopicListener1</a>(
+                [<span class="i">ServiceBusTrigger</span>(<a href="WebJobsServiceBusTestBase.cs.html#2b1bdf407c1367b2" class="i field">TopicNameKey</a>, <a href="WebJobsServiceBusTestBase.cs.html#fbe1057e8b29bcd9" class="i field">FirstSubscriptionNameKey</a>)] <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r93 rd" class="r93 r">message</span>,
+                <span class="i">MessageReceiver</span> <span id="r94 rd" class="r94 r">messageReceiver</span>,
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r95 rd" class="r95 r">lockToken</span>)
+            {
+                <a href="#0edcafd1439282cd" class="i method">SBTopicListener1Impl</a>(<span class="r93 r">message</span>);
+            }
+ 
+            <span class="c">// Second listener for the topic</span>
+            <span class="c">// Just sprinkling Singleton here because previously we had a bug where this didn&#39;t work</span>
+            <span class="c">// for ServiceBus.</span>
+            [<span class="i">Singleton</span>]
+            <b>public static void</b> <a id="29227dc7696d26b6" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">SBTopicListener2</a>(
+                [<span class="i">ServiceBusTrigger</span>(<a href="WebJobsServiceBusTestBase.cs.html#2b1bdf407c1367b2" class="i field">TopicNameKey</a>, <a href="WebJobsServiceBusTestBase.cs.html#cc032bc3e937a22b" class="i field">SecondSubscriptionNameKey</a>)] <span class="i">Message</span> <span id="r96 rd" class="r96 r">message</span>)
+            {
+                <a href="#476eeb755d6adf2e" class="i method">SBTopicListener2Impl</a>(<span class="r96 r">message</span>);
+            }
+ 
+            <span class="c">// Demonstrate triggering on a queue in one account, and writing to a topic</span>
+            <span class="c">// in the primary subscription</span>
+            <b>public static void</b> <a id="319ec4d4e949a438" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">MultipleAccounts</a>(
+                [<span class="i">ServiceBusTrigger</span>(<a href="WebJobsServiceBusTestBase.cs.html#c1dfe7f52f2c0f4c" class="i field">SecondaryNamespaceQueueNameKey</a>, <a href="/Microsoft.Azure.WebJobs.Extensions.ServiceBus/A.html#622d2c66d3eeae99" class="i property">Connection</a> = <a href="WebJobsServiceBusTestBase.cs.html#2a2b8c29382bc475" class="i field">SecondaryConnectionStringKey</a>)] <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r97 rd" class="r97 r">input</span>,
+                [<span class="i">ServiceBus</span>(<a href="WebJobsServiceBusTestBase.cs.html#2b1bdf407c1367b2" class="i field">TopicNameKey</a>)] <b>out string</b> <span id="r98 rd" class="r98 r">output</span>)
+            {
+                <span class="r98 r">output</span> = <span class="r97 r">input</span>;
+            }
+        }
+ 
+        <b>public class</b> <a id="f3e509bc60d12174" href="R/f3e509bc60d12174.html" target="n" data-glyph="0,1" class="t t"><span id="7e6b3806f519bf88">BinderTestJobs</span></a>
+        {
+            [<span class="i">NoAutomaticTrigger</span>]
+            <b>public static async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="e93511c56b3984a4" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">ServiceBusBinderTest</a>(
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r99 rd" class="r99 r">message</span>,
+                <b>int</b> <span id="r100 rd" class="r100 r">numMessages</span>,
+                <a href="@0@mscorlib/A.html#a2834f25622e710a" class="t t">Binder</a> <span id="r101 rd" class="r101 r">binder</span>)
+            {
+                <a href="/Microsoft.Azure.WebJobs.Extensions.ServiceBus/A.html#d964ec8c3e659944" class="k">var</a> <span id="r102 rd" class="r102 r">attribute</span> = <b>new</b> <span class="t">ServiceBusAttribute</span>(<a href="WebJobsServiceBusTestBase.cs.html#adec697d8ff43b45" class="i field">_firstQueueScope</a>.<a href="Shared/ServiceBusScope.cs.html#06bce05840166851" class="i property">QueueName</a>)
+                {
+                    <span class="i">EntityType</span> = <a href="/Microsoft.Azure.WebJobs.Extensions.ServiceBus/A.html#47f4c97b32ecedee" class="t t">EntityType</a>.<a href="/Microsoft.Azure.WebJobs.Extensions.ServiceBus/A.html#fd62c5e89d39af68" class="i field">Queue</a>
+                };
+ 
+                <b>var</b> <span id="r103 rd" class="r103 r">collector</span> = <b>await</b> <span class="r101 r">binder</span>.<span class="i">BindAsync</span>&lt;<span class="i">IAsyncCollector</span>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;&gt;(<span class="r102 r">attribute</span>);
+ 
+                <b>for</b> (<b>int</b> <span id="r104 rd" class="r104 r">i</span> = 0; <span class="r104 r">i</span> &lt; <span class="r100 r">numMessages</span>; <span class="r104 r">i</span>++)
+                {
+                    <b>await</b> <span class="r103 r">collector</span>.<span class="i">AddAsync</span>(<span class="r99 r">message</span> + <span class="r104 r">i</span>);
+                }
+ 
+                <b>await</b> <span class="r103 r">collector</span>.<span class="i">FlushAsync</span>();
+            }
+        }
+ 
+        <b>public class</b> <a id="cf43d801f66aaef7" href="R/cf43d801f66aaef7.html" target="n" data-glyph="0,1" class="t t"><span id="0785a648c717ce0f">ServiceBusMultipleTestJobsBase</span></a>
+        {
+            <b>protected static bool</b> <a id="e1fb0841839a839c" href="R/e1fb0841839a839c.html" target="n" data-glyph="45,2" class="i field">firstReceived</a> = <b>false</b>;
+            <b>protected static bool</b> <a id="feafe1b2464d7d09" href="R/feafe1b2464d7d09.html" target="n" data-glyph="45,2" class="i field">secondReceived</a> = <b>false</b>;
+ 
+            <b>public static void</b> <a id="469c6cfd3f61c974" href="R/469c6cfd3f61c974.html" target="n" data-glyph="72,2" class="i method">ProcessMessages</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>[] <span id="r105 rd" class="r105 r">messages</span>)
+            {
+                <b>if</b> (<span class="r105 r">messages</span>.<a href="@0@System.Core/A.html#f60bab4c5e27a849" class="i method">Contains</a>(<span class="s">&quot;{&#39;Name&#39;: &#39;Test1&#39;, &#39;Value&#39;: &#39;Value&#39;}&quot;</span>))
+                {
+                    <a href="#e1fb0841839a839c" class="i field">firstReceived</a> = <b>true</b>;
+                }
+                <b>if</b> (<span class="r105 r">messages</span>.<a href="@0@System.Core/A.html#f60bab4c5e27a849" class="i method">Contains</a>(<span class="s">&quot;{&#39;Name&#39;: &#39;Test2&#39;, &#39;Value&#39;: &#39;Value&#39;}&quot;</span>))
+                {
+                    <a href="#feafe1b2464d7d09" class="i field">secondReceived</a> = <b>true</b>;
+                }
+ 
+                <b>if</b> (<a href="#e1fb0841839a839c" class="i field">firstReceived</a> &amp;&amp; <a href="#feafe1b2464d7d09" class="i field">secondReceived</a>)
+                {
+                    <a href="#42d466eeef7a40ea" class="i field">_topicSubscriptionCalled1</a>.<a href="@0@mscorlib/A.html#63f3d76fa45ccc3d" class="i method">Set</a>();
+                }
+            }
+        }
+ 
+        <b>public class</b> <a id="537c8e4332ce0e9c" href="R/537c8e4332ce0e9c.html" target="n" data-glyph="0,1" class="t t"><span id="7cb9f2346f791e92">ServiceBusMultipleMessagesTestJob_BindToStringArray</span></a>
+        {
+            <b>public static async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="59ae26cff2d99033" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">SBQueue2SBQueue</a>(
+                [<span class="i">ServiceBusTrigger</span>(<a href="WebJobsServiceBusTestBase.cs.html#60fc4f324a5218fd" class="i field">FirstQueueNameKey</a>)] <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>[] <span id="r106 rd" class="r106 r">messages</span>,
+                <span class="i">MessageReceiver</span> <span id="r107 rd" class="r107 r">messageReceiver</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r108 rd" class="r108 r">cancellationToken</span>)
+            {
+                <b>try</b>
+                {
+                    <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="WebJobsServiceBusTestBase.cs.html#adec697d8ff43b45" class="i field">_firstQueueScope</a>.<a href="Shared/ServiceBusScope.cs.html#06bce05840166851" class="i property">QueueName</a>, <span class="r107 r">messageReceiver</span>.<span class="i">Path</span>);
+                    <a href="#cf43d801f66aaef7" class="t t">ServiceBusMultipleTestJobsBase</a>.<a href="#469c6cfd3f61c974" class="i method">ProcessMessages</a>(<span class="r106 r">messages</span>);
+                    <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#5fb80297e082b8d6" class="i method">Delay</a>(0, <span class="r108 r">cancellationToken</span>);
+                }
+                <b>catch</b> (<a href="@0@mscorlib/A.html#a0a8b79c277cf327" class="t t">OperationCanceledException</a>)
+                {
+                }
+            }
+        }
+ 
+        <b>public class</b> <a id="3751e9acffaca05a" href="R/3751e9acffaca05a.html" target="n" data-glyph="0,1" class="t t"><span id="6928eb70ca6ee9a8">ServiceBusMultipleMessagesTestJob_BindToMessageArray</span></a>
+        {
+            <b>public static void</b> <a id="0f85bf3b9885054b" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">SBQueue2SBQueue</a>(
+                [<span class="i">ServiceBusTrigger</span>(<a href="WebJobsServiceBusTestBase.cs.html#60fc4f324a5218fd" class="i field">FirstQueueNameKey</a>)] <span class="i">Message</span>[] <span id="r109 rd" class="r109 r">array</span>,
+                <span class="i">MessageReceiver</span> <span id="r110 rd" class="r110 r">messageReceiver</span>)
+            {
+                <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="WebJobsServiceBusTestBase.cs.html#adec697d8ff43b45" class="i field">_firstQueueScope</a>.<a href="Shared/ServiceBusScope.cs.html#06bce05840166851" class="i property">QueueName</a>, <span class="r110 r">messageReceiver</span>.<span class="i">Path</span>);
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>[] <span id="r111 rd" class="r111 r">messages</span> = <span class="r109 r">array</span>.<a href="@0@System.Core/A.html#5c652c53e80df013" class="i method">Select</a>(<span id="r112 rd" class="r112 r">x</span> =&gt;
+                {
+                    <b>using</b> (<a href="@0@mscorlib/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r113 rd" class="r113 r">stream</span> = <b>new</b> <span class="t">MemoryStream</span>(<span class="r112 r">x</span>.<span class="i">Body</span>))
+                    <b>using</b> (<a href="@0@mscorlib/A.html#7b5eff52b5bf1164" class="t t">TextReader</a> <span id="r114 rd" class="r114 r">reader</span> = <b>new</b> <a href="@0@mscorlib/A.html#72447927169f6b77" class="t constructor">StreamReader</a>(<span class="r113 r">stream</span>))
+                    {
+                        <b>return</b> <span class="r114 r">reader</span>.<a href="@0@mscorlib/A.html#500f43aa5f43a9c5" class="i method">ReadToEnd</a>();
+                    }
+                }).<a href="@0@System.Core/A.html#783a052330e7d48d" class="i method">ToArray</a>();
+                <a href="#cf43d801f66aaef7" class="t t">ServiceBusMultipleTestJobsBase</a>.<a href="#469c6cfd3f61c974" class="i method">ProcessMessages</a>(<span class="r111 r">messages</span>);
+            }
+        }
+ 
+        <b>public class</b> <a id="3ffadf1447d41fd7" href="R/3ffadf1447d41fd7.html" target="n" data-glyph="0,1" class="t t"><span id="9327f8ab5294550b">ServiceBusMultipleMessagesTestJob_BindToPocoArray</span></a>
+        {
+            <b>public static void</b> <a id="9c663bcd1aca6b72" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">SBQueue2SBQueue</a>(
+                [<span class="i">ServiceBusTrigger</span>(<a href="WebJobsServiceBusTestBase.cs.html#60fc4f324a5218fd" class="i field">FirstQueueNameKey</a>)] <a href="#45c0a40901cf15bc" class="t t">TestPoco</a>[] <span id="r115 rd" class="r115 r">array</span>,
+                <span class="i">MessageReceiver</span> <span id="r116 rd" class="r116 r">messageReceiver</span>)
+            {
+                <span class="i">Assert</span>.<span class="i">AreEqual</span>(<a href="WebJobsServiceBusTestBase.cs.html#adec697d8ff43b45" class="i field">_firstQueueScope</a>.<a href="Shared/ServiceBusScope.cs.html#06bce05840166851" class="i property">QueueName</a>, <span class="r116 r">messageReceiver</span>.<span class="i">Path</span>);
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>[] <span id="r117 rd" class="r117 r">messages</span> = <span class="r115 r">array</span>.<a href="@0@System.Core/A.html#5c652c53e80df013" class="i method">Select</a>(<span id="r118 rd" class="r118 r">x</span> =&gt; <span class="s">&quot;{&#39;Name&#39;: &#39;&quot;</span> + <span class="r118 r">x</span>.<a href="#2a347da37bb294ad" class="i property">Name</a> + <span class="s">&quot;&#39;, &#39;Value&#39;: &#39;Value&#39;}&quot;</span>).<a href="@0@System.Core/A.html#783a052330e7d48d" class="i method">ToArray</a>();
+                <a href="#cf43d801f66aaef7" class="t t">ServiceBusMultipleTestJobsBase</a>.<a href="#469c6cfd3f61c974" class="i method">ProcessMessages</a>(<span class="r117 r">messages</span>);
+            }
+        }
+ 
+        <b>public class</b> <a id="970ca18fffe34eda" href="R/970ca18fffe34eda.html" target="n" data-glyph="0,1" class="t t"><span id="c16f755498b3b257">ServiceBusArgumentBindingJob</span></a>
+        {
+            <b>public static void</b> <a id="7deae633ccbc9c7f" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">BindToPoco</a>(
+                [<span class="i">ServiceBusTrigger</span>(<a href="WebJobsServiceBusTestBase.cs.html#60fc4f324a5218fd" class="i field">FirstQueueNameKey</a>)] <a href="#45c0a40901cf15bc" class="t t">TestPoco</a> <span id="r119 rd" class="r119 r">input</span>,
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r120 rd" class="r120 r">name</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r121 rd" class="r121 r">value</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r122 rd" class="r122 r">messageId</span>,
+                <span class="i">ILogger</span> <span id="r123 rd" class="r123 r">logger</span>)
+            {
+                <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r119 r">input</span>.<a href="#2a347da37bb294ad" class="i property">Name</a>, <span class="r120 r">name</span>);
+                <span class="i">Assert</span>.<span class="i">AreEqual</span>(<span class="r119 r">input</span>.<a href="#6c51bcdf0122d18e" class="i property">Value</a>, <span class="r121 r">value</span>);
+                <span class="r123 r">logger</span>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">PocoValues(</span>{<span class="r120 r">name</span>}<span class="s">,</span>{<span class="r121 r">value</span>}<span class="s">)</span><span class="s">&quot;</span>);
+                <a href="#5198e76414a76292" class="i field">_eventWait</a>.<a href="@0@mscorlib/A.html#63f3d76fa45ccc3d" class="i method">Set</a>();
+            }
+ 
+            [<span class="i">NoAutomaticTrigger</span>]
+            <b>public static void</b> <a id="9db1dc3517e300e9" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">BindToString</a>(
+                [<span class="i">ServiceBusTrigger</span>(<a href="WebJobsServiceBusTestBase.cs.html#60fc4f324a5218fd" class="i field">FirstQueueNameKey</a>)] <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r124 rd" class="r124 r">input</span>,
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r125 rd" class="r125 r">messageId</span>,
+                <span class="i">ILogger</span> <span id="r126 rd" class="r126 r">logger</span>)
+            {
+                <span class="r126 r">logger</span>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">Input(</span>{<span class="r124 r">input</span>}<span class="s">)</span><span class="s">&quot;</span>);
+                <a href="#5198e76414a76292" class="i field">_eventWait</a>.<a href="@0@mscorlib/A.html#63f3d76fa45ccc3d" class="i method">Set</a>();
+            }
+        }
+ 
+        <b>public class</b> <a id="d8ee25eed5dd4561" href="R/d8ee25eed5dd4561.html" target="n" data-glyph="0,1" class="t t"><span id="3b698ce9cdf19d23">DrainModeTestJobQueue</span></a>
+        {
+            <b>public static async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="050e23f0634ca6fd" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">QueueNoSessions</a>(
+                [<span class="i">ServiceBusTrigger</span>(<a href="WebJobsServiceBusTestBase.cs.html#60fc4f324a5218fd" class="i field">FirstQueueNameKey</a>)] <span class="i">Message</span> <span id="r127 rd" class="r127 r">msg</span>,
+                <span class="i">MessageReceiver</span> <span id="r128 rd" class="r128 r">messageReceiver</span>,
+                <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r129 rd" class="r129 r">cancellationToken</span>,
+                <span class="i">ILogger</span> <span id="r130 rd" class="r130 r">logger</span>)
+            {
+                <span class="r130 r">logger</span>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">DrainModeValidationFunctions.QueueNoSessions: message data </span>{<span class="r127 r">msg</span>.<span class="i">Body</span>}<span class="s">&quot;</span>);
+                <a href="#c2e2e85cdc6f8514" class="i field">_drainValidationPreDelay</a>.<a href="@0@mscorlib/A.html#63f3d76fa45ccc3d" class="i method">Set</a>();
+                <b>await</b> <a href="#70453670df7f279f" class="t t">DrainModeHelper</a>.<a href="#9d579ba07b19f630" class="i method">WaitForCancellation</a>(<span class="r129 r">cancellationToken</span>);
+                <span class="i">Assert</span>.<span class="i">True</span>(<span class="r129 r">cancellationToken</span>.<a href="@0@mscorlib/A.html#f32abbe8e2f1f6c1" class="i property">IsCancellationRequested</a>);
+                <b>await</b> <span class="r128 r">messageReceiver</span>.<span class="i">CompleteAsync</span>(<span class="r127 r">msg</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+                <a href="#204ee57ef24cd349" class="i field">_drainValidationPostDelay</a>.<a href="@0@mscorlib/A.html#63f3d76fa45ccc3d" class="i method">Set</a>();
+            }
+        }
+ 
+        <b>public class</b> <a id="5829c0a0531b9628" href="R/5829c0a0531b9628.html" target="n" data-glyph="0,1" class="t t"><span id="6cc66a25976ebf2a">DrainModeTestJobTopic</span></a>
+        {
+            <b>public static async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="db7fef771725e781" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">TopicNoSessions</a>(
+                [<span class="i">ServiceBusTrigger</span>(<a href="WebJobsServiceBusTestBase.cs.html#2b1bdf407c1367b2" class="i field">TopicNameKey</a>, <a href="WebJobsServiceBusTestBase.cs.html#fbe1057e8b29bcd9" class="i field">FirstSubscriptionNameKey</a>)] <span class="i">Message</span> <span id="r131 rd" class="r131 r">msg</span>,
+                <span class="i">MessageReceiver</span> <span id="r132 rd" class="r132 r">messageReceiver</span>,
+                <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r133 rd" class="r133 r">cancellationToken</span>,
+                <span class="i">ILogger</span> <span id="r134 rd" class="r134 r">logger</span>)
+            {
+                <span class="r134 r">logger</span>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">DrainModeValidationFunctions.NoSessions: message data </span>{<span class="r131 r">msg</span>.<span class="i">Body</span>}<span class="s">&quot;</span>);
+                <a href="#c2e2e85cdc6f8514" class="i field">_drainValidationPreDelay</a>.<a href="@0@mscorlib/A.html#63f3d76fa45ccc3d" class="i method">Set</a>();
+                <b>await</b> <a href="#70453670df7f279f" class="t t">DrainModeHelper</a>.<a href="#9d579ba07b19f630" class="i method">WaitForCancellation</a>(<span class="r133 r">cancellationToken</span>);
+                <span class="i">Assert</span>.<span class="i">True</span>(<span class="r133 r">cancellationToken</span>.<a href="@0@mscorlib/A.html#f32abbe8e2f1f6c1" class="i property">IsCancellationRequested</a>);
+                <b>await</b> <span class="r132 r">messageReceiver</span>.<span class="i">CompleteAsync</span>(<span class="r131 r">msg</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+                <a href="#204ee57ef24cd349" class="i field">_drainValidationPostDelay</a>.<a href="@0@mscorlib/A.html#63f3d76fa45ccc3d" class="i method">Set</a>();
+            }
+        }
+ 
+        <b>public class</b> <a id="9bd991c2fa8362ce" href="R/9bd991c2fa8362ce.html" target="n" data-glyph="0,1" class="t t"><span id="bdd7be323c92b0fc">DrainModeTestJobQueueBatch</span></a>
+        {
+            <b>public static async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="06edcf82a3924367" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">QueueNoSessionsBatch</a>(
+               [<span class="i">ServiceBusTrigger</span>(<a href="WebJobsServiceBusTestBase.cs.html#60fc4f324a5218fd" class="i field">FirstQueueNameKey</a>)] <span class="i">Message</span>[] <span id="r135 rd" class="r135 r">array</span>,
+               <span class="i">MessageReceiver</span> <span id="r136 rd" class="r136 r">messageReceiver</span>,
+               <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r137 rd" class="r137 r">cancellationToken</span>,
+               <span class="i">ILogger</span> <span id="r138 rd" class="r138 r">logger</span>)
+            {
+                <span class="i">Assert</span>.<span class="i">True</span>(<span class="r135 r">array</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a> &gt; 0);
+                <span class="r138 r">logger</span>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">DrainModeTestJobBatch.QueueNoSessionsBatch: received </span>{<span class="r135 r">array</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>}<span class="s"> messages</span><span class="s">&quot;</span>);
+                <a href="#c2e2e85cdc6f8514" class="i field">_drainValidationPreDelay</a>.<a href="@0@mscorlib/A.html#63f3d76fa45ccc3d" class="i method">Set</a>();
+                <b>await</b> <a href="#70453670df7f279f" class="t t">DrainModeHelper</a>.<a href="#9d579ba07b19f630" class="i method">WaitForCancellation</a>(<span class="r137 r">cancellationToken</span>);
+                <span class="i">Assert</span>.<span class="i">True</span>(<span class="r137 r">cancellationToken</span>.<a href="@0@mscorlib/A.html#f32abbe8e2f1f6c1" class="i property">IsCancellationRequested</a>);
+                <b>foreach</b> (<span class="i">Message</span> <span id="r139 rd" class="r139 r">msg</span> <b>in</b> <span class="r135 r">array</span>)
+                {
+                    <b>await</b> <span class="r136 r">messageReceiver</span>.<span class="i">CompleteAsync</span>(<span class="r139 r">msg</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+                }
+                <a href="#204ee57ef24cd349" class="i field">_drainValidationPostDelay</a>.<a href="@0@mscorlib/A.html#63f3d76fa45ccc3d" class="i method">Set</a>();
+            }
+        }
+ 
+        <b>public class</b> <a id="c6b2b4b154a4b12e" href="R/c6b2b4b154a4b12e.html" target="n" data-glyph="0,1" class="t t"><span id="2deeb588f6515199">DrainModeTestJobTopicBatch</span></a>
+        {
+            <b>public static async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="6302ac75ec8c9141" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">TopicNoSessionsBatch</a>(
+                [<span class="i">ServiceBusTrigger</span>(<a href="WebJobsServiceBusTestBase.cs.html#2b1bdf407c1367b2" class="i field">TopicNameKey</a>, <a href="WebJobsServiceBusTestBase.cs.html#fbe1057e8b29bcd9" class="i field">FirstSubscriptionNameKey</a>)] <span class="i">Message</span>[] <span id="r140 rd" class="r140 r">array</span>,
+                <span class="i">MessageReceiver</span> <span id="r141 rd" class="r141 r">messageReceiver</span>,
+                <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r142 rd" class="r142 r">cancellationToken</span>,
+                <span class="i">ILogger</span> <span id="r143 rd" class="r143 r">logger</span>)
+            {
+                <span class="i">Assert</span>.<span class="i">True</span>(<span class="r140 r">array</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a> &gt; 0);
+                <span class="r143 r">logger</span>.<span class="i">LogInformation</span>(<span class="s">$&quot;</span><span class="s">DrainModeTestJobBatch.TopicNoSessionsBatch: received </span>{<span class="r140 r">array</span>.<a href="@0@mscorlib/A.html#42e9b7616956cf94" class="i property">Length</a>}<span class="s"> messages</span><span class="s">&quot;</span>);
+                <a href="#c2e2e85cdc6f8514" class="i field">_drainValidationPreDelay</a>.<a href="@0@mscorlib/A.html#63f3d76fa45ccc3d" class="i method">Set</a>();
+                <b>await</b> <a href="#70453670df7f279f" class="t t">DrainModeHelper</a>.<a href="#9d579ba07b19f630" class="i method">WaitForCancellation</a>(<span class="r142 r">cancellationToken</span>);
+                <span class="i">Assert</span>.<span class="i">True</span>(<span class="r142 r">cancellationToken</span>.<a href="@0@mscorlib/A.html#f32abbe8e2f1f6c1" class="i property">IsCancellationRequested</a>);
+                <b>foreach</b> (<span class="i">Message</span> <span id="r144 rd" class="r144 r">msg</span> <b>in</b> <span class="r140 r">array</span>)
+                {
+                    <b>await</b> <span class="r141 r">messageReceiver</span>.<span class="i">CompleteAsync</span>(<span class="r144 r">msg</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>);
+                }
+                <a href="#204ee57ef24cd349" class="i field">_drainValidationPostDelay</a>.<a href="@0@mscorlib/A.html#63f3d76fa45ccc3d" class="i method">Set</a>();
+            }
+        }
+ 
+        <b>public class</b> <a id="70453670df7f279f" href="R/70453670df7f279f.html" target="n" data-glyph="0,1" class="t t"><span id="fd1ed50f6749f39e">DrainModeHelper</span></a>
+        {
+            <b>public static async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="9d579ba07b19f630" href="R/9d579ba07b19f630.html" target="n" data-glyph="72,2" class="i method">WaitForCancellation</a>(<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r145 rd" class="r145 r">cancellationToken</span>)
+            {
+                <span class="c">// Wait until the drain operation begins, signalled by the cancellation token</span>
+                <b>int</b> <span id="r146 rd" class="r146 r">elapsedTimeMills</span> = 0;
+                <b>while</b> (<span class="r146 r">elapsedTimeMills</span> &lt; <a href="WebJobsServiceBusTestBase.cs.html#8408a37785204ac8" class="i field">DrainWaitTimeoutMills</a> &amp;&amp; !<span class="r145 r">cancellationToken</span>.<a href="@0@mscorlib/A.html#f32abbe8e2f1f6c1" class="i property">IsCancellationRequested</a>)
+                {
+                    <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#34b191a243434f6a" class="i method">Delay</a>(<span class="r146 r">elapsedTimeMills</span> += 500);
+                }
+                <span class="c">// Allow some time for the Service Bus SDK to start draining before returning</span>
+                <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#34b191a243434f6a" class="i method">Delay</a>(<a href="WebJobsServiceBusTestBase.cs.html#8bdb96af81651a78" class="i field">DrainSleepMills</a>);
+            }
+        }
+ 
+        <b>private class</b> <a id="099630f8c4b0b082" href="R/099630f8c4b0b082.html" target="n" data-glyph="4,1" class="t t">CustomMessagingProvider</a> : <a href="/Microsoft.Azure.WebJobs.Extensions.ServiceBus/A.html#e26cb17dea33eeab" class="t t">MessagingProvider</a>
+        {
+            <b>public const string</b> <a id="59645f6d556ee9f9" href="R/59645f6d556ee9f9.html" target="n" data-glyph="6,2" class="i field">CustomMessagingCategory</a> = <span class="s">&quot;CustomMessagingProvider&quot;</span>;
+            <b>private readonly</b> <span class="i">ILogger</span> <a id="f0b23a426f881b20" href="R/f0b23a426f881b20.html" target="n" data-glyph="46,2" class="i field">_logger</a>;
+            <b>private readonly</b> <a href="/Microsoft.Azure.WebJobs.Extensions.ServiceBus/A.html#7bb8869f242758c2" class="t t">ServiceBusOptions</a> <a id="ac11b0ca949549da" href="R/ac11b0ca949549da.html" target="n" data-glyph="46,2" class="i field">_options</a>;
+ 
+            <b>public</b> <a id="9b230486956fe623" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="t constructor">CustomMessagingProvider</a>(<span class="i">IOptions</span>&lt;<a href="/Microsoft.Azure.WebJobs.Extensions.ServiceBus/A.html#7bb8869f242758c2" class="t t">ServiceBusOptions</a>&gt; <span id="r147 rd" class="r147 r">serviceBusOptions</span>, <span class="i">ILoggerFactory</span> <span id="r148 rd" class="r148 r">loggerFactory</span>)
+                : <b>base</b>(<span class="r147 r">serviceBusOptions</span>)
+            {
+                <a href="#ac11b0ca949549da" class="i field">_options</a> = <span class="r147 r">serviceBusOptions</span>.<span class="i">Value</span>;
+                <a href="#f0b23a426f881b20" class="i field">_logger</a> = <span class="r148 r">loggerFactory</span>?.<span class="i">CreateLogger</span>(<a href="#59645f6d556ee9f9" class="i field">CustomMessagingCategory</a>);
+            }
+ 
+            <b>public override</b> <a href="/Microsoft.Azure.WebJobs.Extensions.ServiceBus/A.html#7b07b93fd47f1aa3" class="t t">MessageProcessor</a> <a id="c02f29b40b2c100a" href="R/../../0000000000.html" target="n" data-glyph="72,2" class="i method">CreateMessageProcessor</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r149 rd" class="r149 r">entityPath</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r150 rd" class="r150 r">connectionName</span> = <b>null</b>)
+            {
+                <b>var</b> <span id="r151 rd" class="r151 r">options</span> = <b>new</b> <span class="i">MessageHandlerOptions</span>(<span class="i">ExceptionReceivedHandler</span>)
+                {
+                    <span class="i">MaxConcurrentCalls</span> = 3,
+                    <span class="i">MaxAutoRenewDuration</span> = <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#ae74be5264df78d8" class="i method">FromMinutes</a>(<a href="WebJobsServiceBusTestBase.cs.html#9d2fdd5aadf211ba" class="i field">MaxAutoRenewDurationMin</a>)
+                };
+ 
+                <b>var</b> <span id="r152 rd" class="r152 r">messageReceiver</span> = <b>new</b> <span class="i">MessageReceiver</span>(<a href="#ac11b0ca949549da" class="i field">_options</a>.<a href="/Microsoft.Azure.WebJobs.Extensions.ServiceBus/A.html#22fe1c185a079810" class="i property">ConnectionString</a>, <span class="r149 r">entityPath</span>);
+ 
+                <b>return</b> <b>new</b> <a href="#f9bb6a24dbffd093" class="t constructor">CustomMessageProcessor</a>(<span class="r152 r">messageReceiver</span>, <span class="r151 r">options</span>, <a href="#f0b23a426f881b20" class="i field">_logger</a>);
+            }
+ 
+            <b>private class</b> <a id="0b74c1e27ff86645" href="R/0b74c1e27ff86645.html" target="n" data-glyph="4,2" class="t t">CustomMessageProcessor</a> : <a href="/Microsoft.Azure.WebJobs.Extensions.ServiceBus/A.html#7b07b93fd47f1aa3" class="t t">MessageProcessor</a>
+            {
+                <b>private readonly</b> <span class="i">ILogger</span> <a id="61186c4973c9960e" href="R/61186c4973c9960e.html" target="n" data-glyph="46,3" class="i field">_logger</a>;
+ 
+                <b>public</b> <a id="f9bb6a24dbffd093" href="R/f9bb6a24dbffd093.html" target="n" data-glyph="72,3" class="t constructor">CustomMessageProcessor</a>(<span class="i">MessageReceiver</span> <span id="r153 rd" class="r153 r">messageReceiver</span>, <span class="i">MessageHandlerOptions</span> <span id="r154 rd" class="r154 r">messageOptions</span>, <span class="i">ILogger</span> <span id="r155 rd" class="r155 r">logger</span>)
+                    : <b>base</b>(<span class="r153 r">messageReceiver</span>, <span class="r154 r">messageOptions</span>)
+                {
+                    <a href="#61186c4973c9960e" class="i field">_logger</a> = <span class="r155 r">logger</span>;
+                }
+ 
+                <b>public override async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>bool</b>&gt; <a id="af8fbdff24ba1cec" href="R/../../0000000000.html" target="n" data-glyph="72,3" class="i method">BeginProcessingMessageAsync</a>(<span class="i">Message</span> <span id="r156 rd" class="r156 r">message</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r157 rd" class="r157 r">cancellationToken</span>)
+                {
+                    <a href="#61186c4973c9960e" class="i field">_logger</a>?.<span class="i">LogInformation</span>(<span class="s">&quot;Custom processor Begin called!&quot;</span>);
+                    <b>return</b> <b>await</b> <a href="/Microsoft.Azure.WebJobs.Extensions.ServiceBus/A.html#7b07b93fd47f1aa3" class="k">base</a>.<span class="i">BeginProcessingMessageAsync</span>(<span class="r156 r">message</span>, <span class="r157 r">cancellationToken</span>);
+                }
+ 
+                <b>public override async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="948f89e46eb8fce7" href="R/../../0000000000.html" target="n" data-glyph="72,3" class="i method">CompleteProcessingMessageAsync</a>(<span class="i">Message</span> <span id="r158 rd" class="r158 r">message</span>, <span class="i">Executors</span>.<span class="i">FunctionResult</span> <span id="r159 rd" class="r159 r">result</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r160 rd" class="r160 r">cancellationToken</span>)
+                {
+                    <a href="#61186c4973c9960e" class="i field">_logger</a>?.<span class="i">LogInformation</span>(<span class="s">&quot;Custom processor End called!&quot;</span>);
+                    <b>await</b> <a href="/Microsoft.Azure.WebJobs.Extensions.ServiceBus/A.html#7b07b93fd47f1aa3" class="k">base</a>.<span class="i">CompleteProcessingMessageAsync</span>(<span class="r158 r">message</span>, <span class="r159 r">result</span>, <span class="r160 r">cancellationToken</span>);
+                }
+            }
+ 
+            <b>private</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="03ca5337919e8386" href="R/../../0000000000.html" target="n" data-glyph="76,2" class="i method">ExceptionReceivedHandler</a>(<span class="i">ExceptionReceivedEventArgs</span> <span id="r161 rd" class="r161 r">eventArgs</span>)
+            {
+                <b>return</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>;
+            }
+        }
+    }
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">SA1402</span> <span class="c">// File may only contain a single type</span>
+    <b>public class</b> <a id="45c0a40901cf15bc" href="R/45c0a40901cf15bc.html" target="n" data-glyph="0,0" class="t t"><span id="f9225a1876cccbae">TestPoco</span></a>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">SA1402</span> <span class="c">// File may only contain a single type</span>
+    {
+        <b>public string</b> <a id="2a347da37bb294ad" href="R/2a347da37bb294ad.html" target="n" data-glyph="102,1" class="i property">Name</a> { <b>get</b>; <b>set</b>; }
+        <b>public string</b> <a id="6c51bcdf0122d18e" href="R/6c51bcdf0122d18e.html" target="n" data-glyph="102,1" class="i property">Value</a> { <b>get</b>; <b>set</b>; }
+    }
+}</pre></td></tr></table></div></body></html>

@@ -1,0 +1,391 @@
+﻿<!DOCTYPE html>
+<html><head><title>ServiceBusListener.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(382);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.ServiceBus/Listeners/ServiceBusListener.cs" target="_top">Listeners\ServiceBusListener.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.ServiceBus" target="_top">Microsoft.Azure.WebJobs.Extensions.ServiceBus.csproj</a> (Microsoft.Azure.WebJobs.Extensions.ServiceBus)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) .NET Foundation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>.<span class="i">CodeAnalysis</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Linq</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Threading</span>.<span class="i">Tasks</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">ServiceBus</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i">ServiceBus</span>.<span class="i">Core</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i">Host</span>.<span class="i">Executors</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i">Host</span>.<span class="i">Listeners</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i">Host</span>.<span class="i">Scale</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i">Logging</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">ServiceBus</span>.<span class="i n">Listeners</span>
+{
+    <b>internal sealed class</b> <a id="81d29965de220743" href="../R/81d29965de220743.html" target="n" data-glyph="2,0" class="t t">ServiceBusListener</a> : <span class="i">IListener</span>, <span class="i">IScaleMonitorProvider</span>
+    {
+        <b>private readonly</b> <a href="../MessagingProvider.cs.html#e26cb17dea33eeab" class="t t">MessagingProvider</a> <a id="1876d6ccac4b8d98" href="../R/1876d6ccac4b8d98.html" target="n" data-glyph="46,1" class="i field">_messagingProvider</a>;
+        <b>private readonly</b> <span class="i">ITriggeredFunctionExecutor</span> <a id="1e829e3d84e6689d" href="../R/1e829e3d84e6689d.html" target="n" data-glyph="46,1" class="i field">_triggerExecutor</a>;
+        <b>private readonly string</b> <a id="a2864c69605aaa94" href="../R/a2864c69605aaa94.html" target="n" data-glyph="46,1" class="i field">_functionId</a>;
+        <b>private readonly</b> <a href="../EntityType.cs.html#47f4c97b32ecedee" class="t t">EntityType</a> <a id="e0ee7ec5492f7dda" href="../R/e0ee7ec5492f7dda.html" target="n" data-glyph="46,1" class="i field">_entityType</a>;
+        <b>private readonly string</b> <a id="978510dd1ed5ac57" href="../R/978510dd1ed5ac57.html" target="n" data-glyph="46,1" class="i field">_entityPath</a>;
+        <b>private readonly bool</b> <a id="ad1f0e6289775f39" href="../R/ad1f0e6289775f39.html" target="n" data-glyph="46,1" class="i field">_isSessionsEnabled</a>;
+        <b>private readonly</b> <span class="i">CancellationTokenSource</span> <a id="d764efc04920a606" href="../R/d764efc04920a606.html" target="n" data-glyph="46,1" class="i field">_cancellationTokenSource</a>;
+        <b>private readonly</b> <a href="../MessageProcessor.cs.html#7b07b93fd47f1aa3" class="t t">MessageProcessor</a> <a id="62c74273b5acbee5" href="../R/62c74273b5acbee5.html" target="n" data-glyph="46,1" class="i field">_messageProcessor</a>;
+        <b>private readonly</b> <a href="../ServiceBusAccount.cs.html#25dbabf579e0e8d2" class="t t">ServiceBusAccount</a> <a id="a007bc8cbd89570e" href="../R/a007bc8cbd89570e.html" target="n" data-glyph="46,1" class="i field">_serviceBusAccount</a>;
+        <b>private readonly</b> <a href="../Config/ServiceBusOptions.cs.html#7bb8869f242758c2" class="t t">ServiceBusOptions</a> <a id="b37fcf6708a32bf6" href="../R/b37fcf6708a32bf6.html" target="n" data-glyph="46,1" class="i field">_serviceBusOptions</a>;
+        <b>private readonly</b> <span class="i">ILoggerFactory</span> <a id="7eb2b5ee0794fd57" href="../R/7eb2b5ee0794fd57.html" target="n" data-glyph="46,1" class="i field">_loggerFactory</a>;
+        <b>private readonly bool</b> <a id="f0f6dc9de9996aae" href="../R/f0f6dc9de9996aae.html" target="n" data-glyph="46,1" class="i field">_singleDispatch</a>;
+        <b>private readonly</b> <span class="i">ILogger</span>&lt;<a href="#81d29965de220743" class="t t">ServiceBusListener</a>&gt; <a id="32086e5ad518c122" href="../R/32086e5ad518c122.html" target="n" data-glyph="46,1" class="i field">_logger</a>;
+ 
+        <b>private</b> <span class="i">Lazy</span>&lt;<span class="i">MessageReceiver</span>&gt; <a id="bd01e881b2a1efca" href="../R/bd01e881b2a1efca.html" target="n" data-glyph="46,1" class="i field">_receiver</a>;
+        <b>private</b> <span class="i">Lazy</span>&lt;<span class="i">SessionClient</span>&gt; <a id="1e2d0f4f9fd1e6a6" href="../R/1e2d0f4f9fd1e6a6.html" target="n" data-glyph="46,1" class="i field">_sessionClient</a>;
+        <b>private</b> <span class="i">ClientEntity</span> <a id="7444319d5955bf5c" href="../R/7444319d5955bf5c.html" target="n" data-glyph="46,1" class="i field">_clientEntity</a>;
+        <b>private bool</b> <a id="ed6ba81660f025a3" href="../R/ed6ba81660f025a3.html" target="n" data-glyph="46,1" class="i field">_disposed</a>;
+        <b>private bool</b> <a id="55c212b6632e28fd" href="../R/55c212b6632e28fd.html" target="n" data-glyph="46,1" class="i field">_started</a>;
+        <span class="c">// Serialize execution of StopAsync to avoid calling Unregister* concurrently</span>
+        <b>private readonly</b> <span class="i">SemaphoreSlim</span> <a id="b6b77502250a4e56" href="../R/b6b77502250a4e56.html" target="n" data-glyph="46,1" class="i field">_stopAsyncSemaphore</a> = <b>new</b> <span class="i">SemaphoreSlim</span>(1, 1);
+ 
+        <b>private</b> <span class="i">IMessageSession</span> <a id="73d6f3fb373ef2c2" href="../R/73d6f3fb373ef2c2.html" target="n" data-glyph="46,1" class="i field">_messageSession</a>;
+        <b>private</b> <a href="../SessionMessageProcessor.cs.html#246b88007eae62a9" class="t t">SessionMessageProcessor</a> <a id="a21550163ec5602f" href="../R/a21550163ec5602f.html" target="n" data-glyph="46,1" class="i field">_sessionMessageProcessor</a>;
+ 
+        <b>private</b> <span class="i">Lazy</span>&lt;<a href="ServiceBusScaleMonitor.cs.html#7bf4d98a51f1fa33" class="t t">ServiceBusScaleMonitor</a>&gt; <a id="dc9511a61f885be0" href="../R/dc9511a61f885be0.html" target="n" data-glyph="46,1" class="i field">_scaleMonitor</a>;
+ 
+        <b>public</b> <a id="7b35d6379d3681b6" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">ServiceBusListener</a>(<b>string</b> <span id="r0 rd" class="r0 r">functionId</span>, <a href="../EntityType.cs.html#47f4c97b32ecedee" class="t t">EntityType</a> <span id="r1 rd" class="r1 r">entityType</span>, <b>string</b> <span id="r2 rd" class="r2 r">entityPath</span>, <b>bool</b> <span id="r3 rd" class="r3 r">isSessionsEnabled</span>, <span class="i">ITriggeredFunctionExecutor</span> <span id="r4 rd" class="r4 r">triggerExecutor</span>,
+            <a href="../Config/ServiceBusOptions.cs.html#7bb8869f242758c2" class="t t">ServiceBusOptions</a> <span id="r5 rd" class="r5 r">config</span>, <a href="../ServiceBusAccount.cs.html#25dbabf579e0e8d2" class="t t">ServiceBusAccount</a> <span id="r6 rd" class="r6 r">serviceBusAccount</span>, <a href="../MessagingProvider.cs.html#e26cb17dea33eeab" class="t t">MessagingProvider</a> <span id="r7 rd" class="r7 r">messagingProvider</span>, <span class="i">ILoggerFactory</span> <span id="r8 rd" class="r8 r">loggerFactory</span>, <b>bool</b> <span id="r9 rd" class="r9 r">singleDispatch</span>)
+        {
+            <a href="#a2864c69605aaa94" class="i field">_functionId</a> = <span class="r0 r">functionId</span>;
+            <a href="#e0ee7ec5492f7dda" class="i field">_entityType</a> = <span class="r1 r">entityType</span>;
+            <a href="#978510dd1ed5ac57" class="i field">_entityPath</a> = <span class="r2 r">entityPath</span>;
+            <a href="#ad1f0e6289775f39" class="i field">_isSessionsEnabled</a> = <span class="r3 r">isSessionsEnabled</span>;
+            <a href="#1e829e3d84e6689d" class="i field">_triggerExecutor</a> = <span class="r4 r">triggerExecutor</span>;
+            <a href="#d764efc04920a606" class="i field">_cancellationTokenSource</a> = <b>new</b> <span class="i">CancellationTokenSource</span>();
+            <a href="#1876d6ccac4b8d98" class="i field">_messagingProvider</a> = <span class="r7 r">messagingProvider</span>;
+            <a href="#a007bc8cbd89570e" class="i field">_serviceBusAccount</a> = <span class="r6 r">serviceBusAccount</span>;
+            <a href="#7eb2b5ee0794fd57" class="i field">_loggerFactory</a> = <span class="r8 r">loggerFactory</span>;
+            <a href="#32086e5ad518c122" class="i field">_logger</a> = <span class="r8 r">loggerFactory</span>.<span class="i">CreateLogger</span>&lt;<a href="#81d29965de220743" class="t t">ServiceBusListener</a>&gt;();
+            <a href="#bd01e881b2a1efca" class="i field">_receiver</a> = <a href="#ab5cc14349b63142" class="i method">CreateMessageReceiver</a>();
+            <a href="#1e2d0f4f9fd1e6a6" class="i field">_sessionClient</a> = <a href="#08f7637b75b88079" class="i method">CreateSessionClient</a>();
+            <a href="#dc9511a61f885be0" class="i field">_scaleMonitor</a> = <b>new</b> <span class="i">Lazy</span>&lt;<a href="ServiceBusScaleMonitor.cs.html#7bf4d98a51f1fa33" class="t t">ServiceBusScaleMonitor</a>&gt;(() =&gt; <b>new</b> <a href="ServiceBusScaleMonitor.cs.html#fd8e6372f9e14131" class="t constructor">ServiceBusScaleMonitor</a>(<a href="#a2864c69605aaa94" class="i field">_functionId</a>, <a href="#e0ee7ec5492f7dda" class="i field">_entityType</a>, <a href="#978510dd1ed5ac57" class="i field">_entityPath</a>, <a href="#a007bc8cbd89570e" class="i field">_serviceBusAccount</a>.<a href="../ServiceBusAccount.cs.html#1d1b4b028c5107cb" class="i property">ConnectionString</a>, <a href="#bd01e881b2a1efca" class="i field">_receiver</a>, <a href="#7eb2b5ee0794fd57" class="i field">_loggerFactory</a>));
+            <a href="#f0f6dc9de9996aae" class="i field">_singleDispatch</a> = <span class="r9 r">singleDispatch</span>;
+ 
+            <b>if</b> (<a href="#ad1f0e6289775f39" class="i field">_isSessionsEnabled</a>)
+            {
+                <a href="#a21550163ec5602f" class="i field">_sessionMessageProcessor</a> = <a href="#1876d6ccac4b8d98" class="i field">_messagingProvider</a>.<a href="../MessagingProvider.cs.html#b0f4f79e9acdc53b" class="i method">CreateSessionMessageProcessor</a>(<a href="#978510dd1ed5ac57" class="i field">_entityPath</a>, <a href="#a007bc8cbd89570e" class="i field">_serviceBusAccount</a>.<a href="../ServiceBusAccount.cs.html#1d1b4b028c5107cb" class="i property">ConnectionString</a>);
+            }
+            <b>else</b>
+            {
+                <a href="#62c74273b5acbee5" class="i field">_messageProcessor</a> = <a href="#1876d6ccac4b8d98" class="i field">_messagingProvider</a>.<a href="../MessagingProvider.cs.html#7d9118744c2019af" class="i method">CreateMessageProcessor</a>(<span class="r2 r">entityPath</span>, <a href="#a007bc8cbd89570e" class="i field">_serviceBusAccount</a>.<a href="../ServiceBusAccount.cs.html#1d1b4b028c5107cb" class="i property">ConnectionString</a>);
+            }
+            <a href="#b37fcf6708a32bf6" class="i field">_serviceBusOptions</a> = <span class="r5 r">config</span>;
+        }
+ 
+        <b>internal</b> <span class="i">MessageReceiver</span> <a id="f1fc1586833e030e" href="../R/f1fc1586833e030e.html" target="n" data-glyph="104,1" class="i property">Receiver</a> =&gt; <a href="#bd01e881b2a1efca" class="i field">_receiver</a>.<span class="i">Value</span>;
+ 
+        <b>internal</b> <span class="i">IMessageSession</span> <a id="4fc322da071df276" href="../R/../../0000000000.html" target="n" data-glyph="104,1" class="i property">MessageSession</a> =&gt; <a href="#73d6f3fb373ef2c2" class="i field">_messageSession</a>;
+ 
+        <b>public</b> <span class="i">Task</span> <a id="581b6b38677a3f5b" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">StartAsync</a>(<span class="i">CancellationToken</span> <span id="r10 rd" class="r10 r">cancellationToken</span>)
+        {
+            <a href="#c9820138c8bcfb49" class="i method">ThrowIfDisposed</a>();
+ 
+            <b>if</b> (<a href="#55c212b6632e28fd" class="i field">_started</a>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">InvalidOperationException</span>(<span class="s">&quot;The listener has already been started.&quot;</span>);
+            }
+ 
+            <b>if</b> (<a href="#f0f6dc9de9996aae" class="i field">_singleDispatch</a>)
+            {
+                <b>if</b> (<a href="#ad1f0e6289775f39" class="i field">_isSessionsEnabled</a>)
+                {
+                    <a href="#7444319d5955bf5c" class="i field">_clientEntity</a> = <a href="#1876d6ccac4b8d98" class="i field">_messagingProvider</a>.<a href="../MessagingProvider.cs.html#58d8d42670c52afb" class="i method">CreateClientEntity</a>(<a href="#978510dd1ed5ac57" class="i field">_entityPath</a>, <a href="#a007bc8cbd89570e" class="i field">_serviceBusAccount</a>.<a href="../ServiceBusAccount.cs.html#1d1b4b028c5107cb" class="i property">ConnectionString</a>);
+                    <b>if</b> (<a href="#7444319d5955bf5c" class="i field">_clientEntity</a> <b>is</b> <span class="i">QueueClient</span> <span id="r11 rd" class="r11 r">queueClient</span>)
+                    {
+                        <span class="r11 r">queueClient</span>.<span class="i">RegisterSessionHandler</span>(<span class="i">ProcessSessionMessageAsync</span>, <a href="#b37fcf6708a32bf6" class="i field">_serviceBusOptions</a>.<a href="../Config/ServiceBusOptions.cs.html#6e11e4181480c610" class="i property">SessionHandlerOptions</a>);
+                    }
+                    <b>else</b>
+                    {
+                        <span class="i">SubscriptionClient</span> <span id="r12 rd" class="r12 r">subscriptionClient</span> = <a href="#7444319d5955bf5c" class="i field">_clientEntity</a> <b>as</b> <span class="i">SubscriptionClient</span>;
+                        <span class="r12 r">subscriptionClient</span>.<span class="i">RegisterSessionHandler</span>(<span class="i">ProcessSessionMessageAsync</span>, <a href="#b37fcf6708a32bf6" class="i field">_serviceBusOptions</a>.<a href="../Config/ServiceBusOptions.cs.html#6e11e4181480c610" class="i property">SessionHandlerOptions</a>);
+                    }
+                }
+                <b>else</b>
+                {
+                    <a href="#f1fc1586833e030e" class="i property">Receiver</a>.<span class="i">RegisterMessageHandler</span>(<span class="i">ProcessMessageAsync</span>, <a href="#b37fcf6708a32bf6" class="i field">_serviceBusOptions</a>.<a href="../Config/ServiceBusOptions.cs.html#0adcfbc8682bca79" class="i property">MessageHandlerOptions</a>);
+                }
+            }
+            <b>else</b>
+            {
+                <span class="i">StartMessageBatchReceiver</span>(<a href="#d764efc04920a606" class="i field">_cancellationTokenSource</a>.<span class="i">Token</span>);
+            }
+            <a href="#55c212b6632e28fd" class="i field">_started</a> = <b>true</b>;
+ 
+            <b>return</b> <span class="i">Task</span>.<span class="i">CompletedTask</span>;
+        }
+ 
+        <b>public async</b> <span class="i">Task</span> <a id="8b39cff389c52464" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">StopAsync</a>(<span class="i">CancellationToken</span> <span id="r13 rd" class="r13 r">cancellationToken</span>)
+        {
+            <a href="#c9820138c8bcfb49" class="i method">ThrowIfDisposed</a>();
+            <b>await</b> <a href="#b6b77502250a4e56" class="i field">_stopAsyncSemaphore</a>.<span class="i">WaitAsync</span>(<span class="r13 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            {
+                <b>try</b>
+                {
+                    <b>if</b> (!<a href="#55c212b6632e28fd" class="i field">_started</a>)
+                    {
+                        <b>throw</b> <b>new</b> <span class="i">InvalidOperationException</span>(<span class="s">&quot;The listener has not yet been started or has already been stopped.&quot;</span>);
+                    }
+ 
+                    <span class="c">// Unregister* methods stop new messages from being processed while allowing in-flight messages to complete.</span>
+                    <span class="c">// As the amount of time functions are allowed to complete processing varies by SKU, we specify max timespan</span>
+                    <span class="c">// as the amount of time Service Bus SDK should wait for in-flight messages to complete procesing after</span>
+                    <span class="c">// unregistering the message handler so that functions have as long as the host continues to run time to complete.</span>
+                    <b>if</b> (<a href="#f0f6dc9de9996aae" class="i field">_singleDispatch</a>)
+                    {
+                        <b>if</b> (<a href="#ad1f0e6289775f39" class="i field">_isSessionsEnabled</a>)
+                        {
+                            <b>if</b> (<a href="#7444319d5955bf5c" class="i field">_clientEntity</a> != <b>null</b>)
+                            {
+                                <b>if</b> (<a href="#7444319d5955bf5c" class="i field">_clientEntity</a> <b>is</b> <span class="i">QueueClient</span> <span id="r14 rd" class="r14 r">queueClient</span>)
+                                {
+                                    <b>await</b> <span class="r14 r">queueClient</span>.<span class="i">UnregisterSessionHandlerAsync</span>(<span class="i">TimeSpan</span>.<span class="i">MaxValue</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                                }
+                                <b>else</b>
+                                {
+                                    <span class="i">SubscriptionClient</span> <span id="r15 rd" class="r15 r">subscriptionClient</span> = <a href="#7444319d5955bf5c" class="i field">_clientEntity</a> <b>as</b> <span class="i">SubscriptionClient</span>;
+                                    <b>await</b> <span class="r15 r">subscriptionClient</span>.<span class="i">UnregisterSessionHandlerAsync</span>(<span class="i">TimeSpan</span>.<span class="i">MaxValue</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                                }
+                            }
+                        }
+                        <b>else</b>
+                        {
+                            <b>if</b> (<a href="#bd01e881b2a1efca" class="i field">_receiver</a> != <b>null</b> &amp;&amp; <a href="#bd01e881b2a1efca" class="i field">_receiver</a>.<span class="i">IsValueCreated</span>)
+                            {
+                                <b>await</b> <a href="#f1fc1586833e030e" class="i property">Receiver</a>.<span class="i">UnregisterMessageHandlerAsync</span>(<span class="i">TimeSpan</span>.<span class="i">MaxValue</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                            }
+                        }
+                    }
+                    <span class="c">// Batch processing will be stopped via the _started flag on its next iteration</span>
+ 
+                    <a href="#55c212b6632e28fd" class="i field">_started</a> = <b>false</b>;
+                }
+                <b>finally</b>
+                {
+                    <a href="#b6b77502250a4e56" class="i field">_stopAsyncSemaphore</a>.<span class="i">Release</span>();
+                }
+            }
+        }
+ 
+        <b>public void</b> <a id="d2899a3181f82e90" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Cancel</a>()
+        {
+            <a href="#c9820138c8bcfb49" class="i method">ThrowIfDisposed</a>();
+            <a href="#d764efc04920a606" class="i field">_cancellationTokenSource</a>.<span class="i">Cancel</span>();
+        }
+ 
+        [<span class="i">SuppressMessage</span>(<span class="s">&quot;Microsoft.Usage&quot;</span>, <span class="s">&quot;CA2213:DisposableFieldsShouldBeDisposed&quot;</span>, <span class="i">MessageId</span> = <span class="s">&quot;_cancellationTokenSource&quot;</span>)]
+        <b>public void</b> <a id="4f2e8d3d6228dad4" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Dispose</a>()
+        {
+            <b>if</b> (!<a href="#ed6ba81660f025a3" class="i field">_disposed</a>)
+            {
+                <span class="c">// Running callers might still be using the cancellation token.</span>
+                <span class="c">// Mark it canceled but don&#39;t dispose of the source while the callers are running.</span>
+                <span class="c">// Otherwise, callers would receive ObjectDisposedException when calling token.Register.</span>
+                <span class="c">// For now, rely on finalization to clean up _cancellationTokenSource&#39;s wait handle (if allocated).</span>
+                <a href="#d764efc04920a606" class="i field">_cancellationTokenSource</a>.<span class="i">Cancel</span>();
+ 
+                <b>if</b> (<a href="#bd01e881b2a1efca" class="i field">_receiver</a> != <b>null</b> &amp;&amp; <a href="#bd01e881b2a1efca" class="i field">_receiver</a>.<span class="i">IsValueCreated</span>)
+                {
+                    <a href="#f1fc1586833e030e" class="i property">Receiver</a>.<span class="i">CloseAsync</span>().<span class="i">Wait</span>();
+                    <a href="#bd01e881b2a1efca" class="i field">_receiver</a> = <b>null</b>;
+                }
+ 
+                <b>if</b> (<a href="#1e2d0f4f9fd1e6a6" class="i field">_sessionClient</a> != <b>null</b> &amp;&amp; <a href="#1e2d0f4f9fd1e6a6" class="i field">_sessionClient</a>.<span class="i">IsValueCreated</span>)
+                {
+                    <a href="#1e2d0f4f9fd1e6a6" class="i field">_sessionClient</a>.<span class="i">Value</span>.<span class="i">CloseAsync</span>().<span class="i">Wait</span>();
+                    <a href="#1e2d0f4f9fd1e6a6" class="i field">_sessionClient</a> = <b>null</b>;
+                }
+ 
+                <b>if</b> (<a href="#7444319d5955bf5c" class="i field">_clientEntity</a> != <b>null</b>)
+                {
+                    <a href="#7444319d5955bf5c" class="i field">_clientEntity</a>.<span class="i">CloseAsync</span>().<span class="i">Wait</span>();
+                    <a href="#7444319d5955bf5c" class="i field">_clientEntity</a> = <b>null</b>;
+                }
+ 
+                <a href="#b6b77502250a4e56" class="i field">_stopAsyncSemaphore</a>.<span class="i">Dispose</span>();
+                <a href="#d764efc04920a606" class="i field">_cancellationTokenSource</a>.<span class="i">Dispose</span>();
+ 
+                <a href="#ed6ba81660f025a3" class="i field">_disposed</a> = <b>true</b>;
+            }
+        }
+ 
+        <b>private</b> <span class="i">Lazy</span>&lt;<span class="i">MessageReceiver</span>&gt; <a id="ab5cc14349b63142" href="../R/ab5cc14349b63142.html" target="n" data-glyph="76,1" class="i method">CreateMessageReceiver</a>()
+        {
+            <b>return</b> <b>new</b> <span class="i">Lazy</span>&lt;<span class="i">MessageReceiver</span>&gt;(() =&gt; <a href="#1876d6ccac4b8d98" class="i field">_messagingProvider</a>.<a href="../MessagingProvider.cs.html#7bd94f64d615953a" class="i method">CreateMessageReceiver</a>(<a href="#978510dd1ed5ac57" class="i field">_entityPath</a>, <a href="#a007bc8cbd89570e" class="i field">_serviceBusAccount</a>.<a href="../ServiceBusAccount.cs.html#1d1b4b028c5107cb" class="i property">ConnectionString</a>));
+        }
+ 
+        <b>private</b> <span class="i">Lazy</span>&lt;<span class="i">SessionClient</span>&gt; <a id="08f7637b75b88079" href="../R/08f7637b75b88079.html" target="n" data-glyph="76,1" class="i method">CreateSessionClient</a>()
+        {
+            <b>return</b> <b>new</b> <span class="i">Lazy</span>&lt;<span class="i">SessionClient</span>&gt;(() =&gt; <a href="#1876d6ccac4b8d98" class="i field">_messagingProvider</a>.<a href="../MessagingProvider.cs.html#5b17658056c641f9" class="i method">CreateSessionClient</a>(<a href="#978510dd1ed5ac57" class="i field">_entityPath</a>, <a href="#a007bc8cbd89570e" class="i field">_serviceBusAccount</a>.<a href="../ServiceBusAccount.cs.html#1d1b4b028c5107cb" class="i property">ConnectionString</a>));
+        }
+ 
+        <b>internal async</b> <span class="i">Task</span> <a id="a61f078a0f2f8280" href="../R/../../0000000000.html" target="n" data-glyph="74,1" class="i method">ProcessMessageAsync</a>(<span class="i">Message</span> <span id="r16 rd" class="r16 r">message</span>, <span class="i">CancellationToken</span> <span id="r17 rd" class="r17 r">cancellationToken</span>)
+        {
+            <b>using</b> (<span class="i">CancellationTokenSource</span> <span id="r18 rd" class="r18 r">linkedCts</span> = <span class="i">CancellationTokenSource</span>.<span class="i">CreateLinkedTokenSource</span>(<span class="r17 r">cancellationToken</span>, <a href="#d764efc04920a606" class="i field">_cancellationTokenSource</a>.<span class="i">Token</span>))
+            {
+                <b>if</b> (!<b>await</b> <a href="#62c74273b5acbee5" class="i field">_messageProcessor</a>.<span class="i">BeginProcessingMessageAsync</span>(<span class="r16 r">message</span>, <span class="r18 r">linkedCts</span>.<span class="i">Token</span>).<span class="i">ConfigureAwait</span>(<b>false</b>))
+                {
+                    <b>return</b>;
+                }
+ 
+                <a href="../Triggers/ServiceBusTriggerInput.cs.html#d07b0f5fb0406305" class="t t">ServiceBusTriggerInput</a> <span id="r19 rd" class="r19 r">input</span> = <a href="../Triggers/ServiceBusTriggerInput.cs.html#d07b0f5fb0406305" class="t t">ServiceBusTriggerInput</a>.<a href="../Triggers/ServiceBusTriggerInput.cs.html#af842540ae3d2382" class="i method">CreateSingle</a>(<span class="r16 r">message</span>);
+                <span class="r19 r">input</span>.<a href="../Triggers/ServiceBusTriggerInput.cs.html#bf075820c3bcebd9" class="i field">MessageReceiver</a> = <a href="#f1fc1586833e030e" class="i property">Receiver</a>;
+ 
+                <span class="i">TriggeredFunctionData</span> <span id="r20 rd" class="r20 r">data</span> = <span class="r19 r">input</span>.<a href="../Triggers/ServiceBusTriggerInput.cs.html#3e9929dea7f32a48" class="i method">GetTriggerFunctionData</a>();
+                <span class="i">FunctionResult</span> <span id="r21 rd" class="r21 r">result</span> = <b>await</b> <a href="#1e829e3d84e6689d" class="i field">_triggerExecutor</a>.<span class="i">TryExecuteAsync</span>(<span class="r20 r">data</span>, <span class="r18 r">linkedCts</span>.<span class="i">Token</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <b>await</b> <a href="#62c74273b5acbee5" class="i field">_messageProcessor</a>.<span class="i">CompleteProcessingMessageAsync</span>(<span class="r16 r">message</span>, <span class="r21 r">result</span>, <span class="r18 r">linkedCts</span>.<span class="i">Token</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+        }
+ 
+        <b>internal async</b> <span class="i">Task</span> <a id="4b6d227239321be6" href="../R/../../0000000000.html" target="n" data-glyph="74,1" class="i method">ProcessSessionMessageAsync</a>(<span class="i">IMessageSession</span> <span id="r22 rd" class="r22 r">session</span>, <span class="i">Message</span> <span id="r23 rd" class="r23 r">message</span>, <span class="i">CancellationToken</span> <span id="r24 rd" class="r24 r">cancellationToken</span>)
+        {
+            <b>using</b> (<span class="i">CancellationTokenSource</span> <span id="r25 rd" class="r25 r">linkedCts</span> = <span class="i">CancellationTokenSource</span>.<span class="i">CreateLinkedTokenSource</span>(<span class="r24 r">cancellationToken</span>, <a href="#d764efc04920a606" class="i field">_cancellationTokenSource</a>.<span class="i">Token</span>))
+            {
+                <a href="#73d6f3fb373ef2c2" class="i field">_messageSession</a> = <span class="r22 r">session</span>;
+                <b>if</b> (!<b>await</b> <a href="#a21550163ec5602f" class="i field">_sessionMessageProcessor</a>.<span class="i">BeginProcessingMessageAsync</span>(<span class="r22 r">session</span>, <span class="r23 r">message</span>, <span class="r25 r">linkedCts</span>.<span class="i">Token</span>).<span class="i">ConfigureAwait</span>(<b>false</b>))
+                {
+                    <b>return</b>;
+                }
+ 
+                <a href="../Triggers/ServiceBusTriggerInput.cs.html#d07b0f5fb0406305" class="t t">ServiceBusTriggerInput</a> <span id="r26 rd" class="r26 r">input</span> = <a href="../Triggers/ServiceBusTriggerInput.cs.html#d07b0f5fb0406305" class="t t">ServiceBusTriggerInput</a>.<a href="../Triggers/ServiceBusTriggerInput.cs.html#af842540ae3d2382" class="i method">CreateSingle</a>(<span class="r23 r">message</span>);
+                <span class="r26 r">input</span>.<a href="../Triggers/ServiceBusTriggerInput.cs.html#bf075820c3bcebd9" class="i field">MessageReceiver</a> = <span class="r22 r">session</span>;
+ 
+                <span class="i">TriggeredFunctionData</span> <span id="r27 rd" class="r27 r">data</span> = <span class="r26 r">input</span>.<a href="../Triggers/ServiceBusTriggerInput.cs.html#3e9929dea7f32a48" class="i method">GetTriggerFunctionData</a>();
+                <span class="i">FunctionResult</span> <span id="r28 rd" class="r28 r">result</span> = <b>await</b> <a href="#1e829e3d84e6689d" class="i field">_triggerExecutor</a>.<span class="i">TryExecuteAsync</span>(<span class="r27 r">data</span>, <span class="r25 r">linkedCts</span>.<span class="i">Token</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                <b>await</b> <a href="#a21550163ec5602f" class="i field">_sessionMessageProcessor</a>.<span class="i">CompleteProcessingMessageAsync</span>(<span class="r22 r">session</span>, <span class="r23 r">message</span>, <span class="r28 r">result</span>, <span class="r25 r">linkedCts</span>.<span class="i">Token</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+            }
+        }
+ 
+        <b>internal void</b> <a id="ae0f25937942894d" href="../R/../../0000000000.html" target="n" data-glyph="74,1" class="i method">StartMessageBatchReceiver</a>(<span class="i">CancellationToken</span> <span id="r29 rd" class="r29 r">cancellationToken</span>)
+        {
+            <span class="i">SessionClient</span> <span id="r30 rd" class="r30 r">sessionClient</span> = <b>null</b>;
+            <span class="i">IMessageReceiver</span> <span id="r31 rd" class="r31 r">receiver</span> = <b>null</b>;
+            <b>if</b> (<a href="#ad1f0e6289775f39" class="i field">_isSessionsEnabled</a>)
+            {
+                <span class="r30 r">sessionClient</span> = <a href="#1e2d0f4f9fd1e6a6" class="i field">_sessionClient</a>.<span class="i">Value</span>;
+            }
+            <b>else</b>
+            {
+                <span class="r31 r">receiver</span> = <a href="#f1fc1586833e030e" class="i property">Receiver</a>;
+            }
+ 
+            <span class="i">Task</span>.<span class="i">Run</span>(<b>async</b> () =&gt;
+            {
+                <b>while</b> (<b>true</b>)
+                {
+                    <b>try</b>
+                    {
+                        <b>if</b> (!<a href="#55c212b6632e28fd" class="i field">_started</a> || <span class="r29 r">cancellationToken</span>.<span class="i">IsCancellationRequested</span>)
+                        {
+                            <a href="#32086e5ad518c122" class="i field">_logger</a>.<span class="i">LogInformation</span>(<span class="s">&quot;Message processing has been stopped or cancelled&quot;</span>);
+                            <b>return</b>;
+                        }
+ 
+                        <b>if</b> (<a href="#ad1f0e6289775f39" class="i field">_isSessionsEnabled</a> &amp;&amp; ( <span class="r31 r">receiver</span> == <b>null</b> || <span class="r31 r">receiver</span>.<span class="i">IsClosedOrClosing</span>))
+                        {
+                            <b>try</b>
+                            {
+                                <span class="r31 r">receiver</span> = <b>await</b> <span class="r30 r">sessionClient</span>.<span class="i">AcceptMessageSessionAsync</span>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+                                <span class="r31 r">receiver</span>.<span class="i">PrefetchCount</span> = <a href="#b37fcf6708a32bf6" class="i field">_serviceBusOptions</a>.<a href="../Config/ServiceBusOptions.cs.html#7d2b2409ee2e11a2" class="i property">PrefetchCount</a>;
+                            }
+                            <b>catch</b> (<span class="i">ServiceBusTimeoutException</span>)
+                            {
+                                <span class="c">// it&#39;s expected if the entity is empty, try next time</span>
+                                <b>continue</b>;
+                            }
+                        }
+ 
+                        <span class="i">IList</span>&lt;<span class="i">Message</span>&gt; <span id="r32 rd" class="r32 r">messages</span> = <b>await</b> <span class="r31 r">receiver</span>.<span class="i">ReceiveAsync</span>(<a href="#b37fcf6708a32bf6" class="i field">_serviceBusOptions</a>.<a href="../Config/ServiceBusOptions.cs.html#67801fc6fa5bc630" class="i property">BatchOptions</a>.<a href="../Config/BatchOptions.cs.html#2a5b1225b7c7cbab" class="i property">MaxMessageCount</a>, <a href="#b37fcf6708a32bf6" class="i field">_serviceBusOptions</a>.<a href="../Config/ServiceBusOptions.cs.html#67801fc6fa5bc630" class="i property">BatchOptions</a>.<a href="../Config/BatchOptions.cs.html#905fa0b7f165f601" class="i property">OperationTimeout</a>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                        <b>if</b> (<span class="r32 r">messages</span> != <b>null</b>)
+                        {
+                            <span class="i">Message</span>[] <span id="r33 rd" class="r33 r">messagesArray</span> = <span class="r32 r">messages</span>.<span class="i">ToArray</span>();
+                            <a href="../Triggers/ServiceBusTriggerInput.cs.html#d07b0f5fb0406305" class="t t">ServiceBusTriggerInput</a> <span id="r34 rd" class="r34 r">input</span> = <a href="../Triggers/ServiceBusTriggerInput.cs.html#d07b0f5fb0406305" class="t t">ServiceBusTriggerInput</a>.<a href="../Triggers/ServiceBusTriggerInput.cs.html#f52944ef5a7de982" class="i method">CreateBatch</a>(<span class="r33 r">messagesArray</span>);
+                            <span class="r34 r">input</span>.<a href="../Triggers/ServiceBusTriggerInput.cs.html#bf075820c3bcebd9" class="i field">MessageReceiver</a> = <span class="r31 r">receiver</span>;
+ 
+                            <span class="i">FunctionResult</span> <span id="r35 rd" class="r35 r">result</span> = <b>await</b> <a href="#1e829e3d84e6689d" class="i field">_triggerExecutor</a>.<span class="i">TryExecuteAsync</span>(<span class="r34 r">input</span>.<a href="../Triggers/ServiceBusTriggerInput.cs.html#3e9929dea7f32a48" class="i method">GetTriggerFunctionData</a>(), <span class="r29 r">cancellationToken</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+ 
+                            <b>if</b> (<span class="r29 r">cancellationToken</span>.<span class="i">IsCancellationRequested</span>)
+                            {
+                                <b>return</b>;
+                            }
+ 
+                            <span class="c">// Complete batch of messages only if the execution was successful</span>
+                            <b>if</b> (<a href="#b37fcf6708a32bf6" class="i field">_serviceBusOptions</a>.<a href="../Config/ServiceBusOptions.cs.html#67801fc6fa5bc630" class="i property">BatchOptions</a>.<a href="../Config/BatchOptions.cs.html#68e06a6b2a39bd48" class="i property">AutoComplete</a> &amp;&amp; <a href="#55c212b6632e28fd" class="i field">_started</a>)
+                            {
+                                <b>if</b> (<span class="r35 r">result</span>.<span class="i">Succeeded</span>)
+                                {
+                                    <b>await</b> <span class="r31 r">receiver</span>.<span class="i">CompleteAsync</span>(<span class="r33 r">messagesArray</span>.<span class="i">Select</span>(<span id="r36 rd" class="r36 r">x</span> =&gt; <span class="r36 r">x</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>)).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                                }
+                                <b>else</b>
+                                {
+                                    <span class="i">List</span>&lt;<span class="i">Task</span>&gt; <span id="r37 rd" class="r37 r">abandonTasks</span> = <b>new</b> <span class="i">List</span>&lt;<span class="i">Task</span>&gt;();
+                                    <b>foreach</b> (<b>var</b> <span id="r38 rd" class="r38 r">lockTocken</span> <b>in</b> <span class="r33 r">messagesArray</span>.<span class="i">Select</span>(<span id="r39 rd" class="r39 r">x</span> =&gt; <span class="r39 r">x</span>.<span class="i">SystemProperties</span>.<span class="i">LockToken</span>))
+                                    {
+                                        <span class="r37 r">abandonTasks</span>.<span class="i">Add</span>(<span class="r31 r">receiver</span>.<span class="i">AbandonAsync</span>(<span class="r38 r">lockTocken</span>));
+                                    }
+                                    <b>await</b> <span class="i">Task</span>.<span class="i">WhenAll</span>(<span class="r37 r">abandonTasks</span>).<span class="i">ConfigureAwait</span>(<b>false</b>);
+                                }
+                            }
+                        }
+                        <b>else</b>
+                        {
+                            <span class="c">// Close the session and release the session lock after draining all messages for the accepted session.</span>
+                            <b>if</b> (<a href="#ad1f0e6289775f39" class="i field">_isSessionsEnabled</a>)
+                            {
+                                <b>await</b> <span class="r31 r">receiver</span>.<span class="i">CloseAsync</span>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+                            }
+                        }
+                    }
+                    <b>catch</b> (<span class="i">ObjectDisposedException</span>)
+                    {
+                        <span class="c">// Ignore as we are stopping the host</span>
+                    }
+                    <b>catch</b> (<span class="i">Exception</span> <span id="r40 rd" class="r40 r">ex</span>)
+                    {
+                        <span class="c">// Log another exception</span>
+                        <a href="#32086e5ad518c122" class="i field">_logger</a>.<span class="i">LogError</span>(<span class="r40 r">ex</span>, <span class="s">$&quot;</span><span class="s">An unhandled exception occurred in the message batch receive loop</span><span class="s">&quot;</span>);
+ 
+                        <b>if</b> (<a href="#ad1f0e6289775f39" class="i field">_isSessionsEnabled</a> &amp;&amp; <span class="r31 r">receiver</span> != <b>null</b>)
+                        {
+                            <span class="c">// Attempt to close the session and release session lock to accept a new session on the next loop iteration</span>
+                            <b>try</b>
+                            {
+                                <b>await</b> <span class="r31 r">receiver</span>.<span class="i">CloseAsync</span>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+                            }
+                            <b>catch</b>
+                            {
+                                <span class="c">// Best effort</span>
+                                <span class="r31 r">receiver</span> = <b>null</b>;
+                            }
+                        }
+                    }
+                }
+            }, <span class="r29 r">cancellationToken</span>);
+        }
+ 
+        <b>private void</b> <a id="c9820138c8bcfb49" href="../R/c9820138c8bcfb49.html" target="n" data-glyph="76,1" class="i method">ThrowIfDisposed</a>()
+        {
+            <b>if</b> (<a href="#ed6ba81660f025a3" class="i field">_disposed</a>)
+            {
+                <b>throw</b> <b>new</b> <span class="i">ObjectDisposedException</span>(<b>null</b>);
+            }
+        }
+ 
+        <b>public</b> <span class="i">IScaleMonitor</span> <a id="f8127dab8c3ee399" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetMonitor</a>()
+        {
+            <b>return</b> <a href="#dc9511a61f885be0" class="i field">_scaleMonitor</a>.<span class="i">Value</span>;
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>
