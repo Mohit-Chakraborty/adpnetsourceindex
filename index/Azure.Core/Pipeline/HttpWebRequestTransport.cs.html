@@ -1,9 +1,9 @@
 ﻿<!DOCTYPE html>
 <html><head><title>HttpWebRequestTransport.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
-<body class="cB" onload="i(340);"><div class="dH">
+<body class="cB" onload="i(379);"><div class="dH">
 <table style="width: 100%">
 <tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Core/Pipeline/HttpWebRequestTransport.cs" target="_top">Pipeline\HttpWebRequestTransport.cs</a><br/></td><td></td></tr>
-<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Core" target="_top">..\..\core\Azure.Core\src\Azure.Core.csproj</a> (Azure.Core)</td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Core" target="_top">Azure.Core.csproj</a> (Azure.Core)</td><td></td></tr>
 </table>
 </div>
 <div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
@@ -18,6 +18,7 @@
 <b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
 <b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>;
 <b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>.<span class="i n">Http</span>.<span class="i n">Headers</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
 <b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
  
 <b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>
@@ -28,14 +29,20 @@
     /// &lt;/summary&gt;
     internal class HttpWebRequestTransport : HttpPipelineTransport
     {
+        private readonly Action&lt;HttpWebRequest&gt; _configureRequest;
         public static readonly HttpWebRequestTransport Shared = new HttpWebRequestTransport();
         private readonly IWebProxy? _environmentProxy;
  
         /// &lt;summary&gt;
         /// Creates a new instance of &lt;see cref=&quot;HttpWebRequestTransport&quot;/&gt;
         /// &lt;/summary&gt;
-        public HttpWebRequestTransport()
+        public HttpWebRequestTransport(): this (_ =&gt; { })
         {
+        }
+ 
+        internal HttpWebRequestTransport(Action&lt;HttpWebRequest&gt; configureRequest)
+        {
+            _configureRequest = configureRequest;
             if (HttpEnvironmentProxy.TryCreate(out IWebProxy webProxy))
             {
                 _environmentProxy = webProxy;
@@ -65,12 +72,6 @@
             {
                 if (message.Request.Content != null)
                 {
-                    if (request.ContentLength == -1 &amp;&amp;
-                        message.Request.Content.TryComputeLength(out var length))
-                    {
-                        request.ContentLength = length;
-                    }
- 
                     using var requestStream = async ? await request.GetRequestStreamAsync().ConfigureAwait(false) : request.GetRequestStream();
  
                     if (async)
@@ -97,7 +98,13 @@
                 {
                     webResponse = exception.Response;
                 }
+ 
                 message.Response = new HttpWebResponseImplementation(message.Request.ClientRequestId, (HttpWebResponse) webResponse);
+            }
+            // ObjectDisposedException might be thrown if the request is aborted during the content upload via SSL
+            catch (ObjectDisposedException) when (message.CancellationToken.IsCancellationRequested)
+            {
+                throw new TaskCanceledException();
             }
             // WebException is thrown in the case of .Abort() call
             catch (WebException) when (message.CancellationToken.IsCancellationRequested)
@@ -113,13 +120,20 @@
         private HttpWebRequest CreateRequest(Request messageRequest)
         {
             var request = WebRequest.CreateHttp(messageRequest.Uri.ToUri());
-            request.Method = messageRequest.Method.Method;
+ 
+            // Timeouts are handled by the pipeline
+            request.Timeout = Timeout.Infinite;
+            request.ReadWriteTimeout = Timeout.Infinite;
+ 
             // Don&#39;t disable the default proxy when there is no environment proxy configured
             if (_environmentProxy != null)
             {
                 request.Proxy = _environmentProxy;
             }
  
+            _configureRequest(request);
+ 
+            request.Method = messageRequest.Method.Method;
             foreach (var messageRequestHeader in messageRequest.Headers)
             {
                 if (string.Equals(messageRequestHeader.Name, HttpHeader.Names.ContentLength, StringComparison.OrdinalIgnoreCase))
@@ -164,6 +178,24 @@
                     continue;
                 }
  
+                if (string.Equals(messageRequestHeader.Name, HttpHeader.Names.IfModifiedSince, StringComparison.OrdinalIgnoreCase))
+                {
+                    request.IfModifiedSince = DateTime.Parse(messageRequestHeader.Value, CultureInfo.InvariantCulture);
+                    continue;
+                }
+ 
+                if (string.Equals(messageRequestHeader.Name, &quot;Expect&quot;, StringComparison.OrdinalIgnoreCase))
+                {
+                    request.Expect = messageRequestHeader.Value;
+                    continue;
+                }
+ 
+                if (string.Equals(messageRequestHeader.Name, &quot;Transfer-Encoding&quot;, StringComparison.OrdinalIgnoreCase))
+                {
+                    request.TransferEncoding = messageRequestHeader.Value;
+                    continue;
+                }
+ 
                 if (string.Equals(messageRequestHeader.Name, HttpHeader.Names.Range, StringComparison.OrdinalIgnoreCase))
                 {
                     var value = RangeHeaderValue.Parse(messageRequestHeader.Value);
@@ -192,6 +224,13 @@
                 }
  
                 request.Headers.Add(messageRequestHeader.Name, messageRequestHeader.Value);
+            }
+ 
+            if (request.ContentLength == -1 &amp;&amp;
+                messageRequest.Content != null &amp;&amp;
+                messageRequest.Content.TryComputeLength(out var length))
+            {
+                request.ContentLength = length;
             }
  
             if (request.ContentLength != -1)
