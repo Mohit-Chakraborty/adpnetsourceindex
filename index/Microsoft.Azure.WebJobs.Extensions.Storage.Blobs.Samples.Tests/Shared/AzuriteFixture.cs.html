@@ -1,0 +1,253 @@
+﻿<!DOCTYPE html>
+<html><head><title>AzuriteFixture.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(244);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs.Samples.Tests/Shared/AzuriteFixture.cs" target="_top">Shared\AzuriteFixture.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/master/sdk/storage/Azure.Storage.Common/tests/Shared/AzuriteFixture.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs.Samples.Tests" target="_top">Microsoft.Azure.WebJobs.Extensions.Storage.Blobs.Samples.Tests.csproj</a> (Microsoft.Azure.WebJobs.Extensions.Storage.Blobs.Samples.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">ComponentModel</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>.<span class="i n">Http</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Reflection</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Test</span>.<span class="i n">Shared</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> This class manages Azurite Lifecycle for a test class.</span>
+    <span class="c">///</span><span class="c"> - Creates accounts pool, so that each test has own account, bump up pool size if you&#39;re running out of accounts</span>
+    <span class="c">///</span><span class="c"> - Starts Azurite process</span>
+    <span class="c">///</span><span class="c"> - Tears down Azurite process after test class is run</span>
+    <span class="c">///</span><span class="c"> It requires Azurite V3. See instalation insturctions here https://github.com/Azure/Azurite.</span>
+    <span class="c">///</span><span class="c"> After installing Azuirte define env variable AZURE_AZURITE_LOCATION that points to azurite installation (e.g. C:\Users\kasobol.REDMOND\AppData\Roaming\npm)</span>
+    <span class="c">///</span><span class="c"> NodeJS installation is also required and node should be in the $PATH.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>public class</b> <a id="e3f34be63721f9ba" href="../R/e3f34be63721f9ba.html" target="n" data-glyph="0,0" class="t t">AzuriteFixture</a> : <a href="@0@mscorlib/A.html#1f55292c3174123d" class="t t">IDisposable</a>
+    {
+        <b>private const string</b> <a id="97a0e0728ca49899" href="../R/97a0e0728ca49899.html" target="n" data-glyph="10,1" class="i field">AzuriteLocationKey</a> = <span class="s">&quot;AZURE_AZURITE_LOCATION&quot;</span>;
+        <b>private string</b> <a id="d43bad3e25f2c249" href="../R/d43bad3e25f2c249.html" target="n" data-glyph="46,1" class="i field">tempDirectory</a>;
+        <b>private</b> <a href="@0@System/A.html#f8b2e604d6f1fe04" class="t t">Process</a> <a id="ac7ba0b442301370" href="../R/ac7ba0b442301370.html" target="n" data-glyph="46,1" class="i field">process</a>;
+        <b>private</b> <a href="#f954871d3e8b2cb7" class="t t">AzuriteAccount</a> <a id="e8eead24db0aaf9f" href="../R/e8eead24db0aaf9f.html" target="n" data-glyph="46,1" class="i field">account</a>;
+        <b>private</b> <a href="@0@mscorlib/A.html#01a28a022c3918d1" class="t t">CountdownEvent</a> <a id="bf17b9d1b670bc78" href="../R/bf17b9d1b670bc78.html" target="n" data-glyph="46,1" class="i field">countdownEvent</a> = <b>new</b> <a href="@0@mscorlib/A.html#774e894b726fa55a" class="t constructor">CountdownEvent</a>(2);
+        <b>private</b> <a href="@0@mscorlib/A.html#adf60ee46ebd299f" class="t t">StringBuilder</a> <a id="4b1652a16712da79" href="../R/4b1652a16712da79.html" target="n" data-glyph="46,1" class="i field">azuriteOutput</a> = <b>new</b> <a href="@0@mscorlib/A.html#6e631639c1e2746b" class="t constructor">StringBuilder</a>();
+        <b>private</b> <a href="@0@mscorlib/A.html#adf60ee46ebd299f" class="t t">StringBuilder</a> <a id="87d822a07011b2f4" href="../R/87d822a07011b2f4.html" target="n" data-glyph="46,1" class="i field">azuriteError</a> = <b>new</b> <a href="@0@mscorlib/A.html#6e631639c1e2746b" class="t constructor">StringBuilder</a>();
+        <b>private int</b> <a id="c8eb4375969578dd" href="../R/c8eb4375969578dd.html" target="n" data-glyph="46,1" class="i field">blobsPort</a>;
+        <b>private int</b> <a id="c3d72a764fecb7db" href="../R/c3d72a764fecb7db.html" target="n" data-glyph="46,1" class="i field">queuesPort</a>;
+ 
+        <b>public</b> <a id="928318d714f44a97" href="../R/928318d714f44a97.html" target="n" data-glyph="72,1" class="t constructor">AzuriteFixture</a>(<b>bool</b> <span id="r0 rd" class="r0 r">includeDebugLog</span> = <b>false</b>)
+        {
+            <span class="c">// This is to force newer protocol on machines with older .NET Framework. Otherwise tests don&#39;t connect to Azurite with unsigned cert.</span>
+            <a href="@0@System/A.html#86ab68f9e9462330" class="t t">ServicePointManager</a>.<a href="@0@System/A.html#3f0961a123069ec8" class="i property">SecurityProtocol</a> = <a href="@0@System/A.html#523b9e56b4612626" class="t t">SecurityProtocolType</a>.<a href="@0@System/A.html#5a120aa38bb70419" class="i field">Tls12</a>;
+ 
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r1 rd" class="r1 r">azuriteLocation</span> = <a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#3956c71d4fc09576" class="i method">GetEnvironmentVariable</a>(<a href="#97a0e0728ca49899" class="i field">AzuriteLocationKey</a>);
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r2 rd" class="r2 r">defaultPath</span> = <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#2d7263f86a526264" class="i method">Combine</a>(<a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#3956c71d4fc09576" class="i method">GetEnvironmentVariable</a>(<span class="s">&quot;APPDATA&quot;</span>) ?? <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#c9f70a27facb27cf" class="i field">Empty</a>, <span class="s">&quot;npm&quot;</span>);
+ 
+            <b>if</b> (<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>(<span class="r1 r">azuriteLocation</span>))
+            {
+                <b>if</b> (<a href="@0@mscorlib/A.html#b3ad5f0ba800bb28" class="t t">Directory</a>.<a href="@0@mscorlib/A.html#6a2a3bee6b62826f" class="i method">Exists</a>(<span class="r2 r">defaultPath</span>))
+                {
+                    <span class="r1 r">azuriteLocation</span> = <span class="r2 r">defaultPath</span>;
+                }
+                <b>else</b>
+                {
+                    <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<a href="#0c5721e765b96ad0" class="i method">ErrorMessage</a>(<span class="s">$&quot;</span>{<a href="#97a0e0728ca49899" class="i field">AzuriteLocationKey</a>}<span class="s"> environment variable is not set and </span>{<span class="r2 r">defaultPath</span>}<span class="s"> doesn&#39;t exist</span><span class="s">&quot;</span>));
+                }
+            }
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r3 rd" class="r3 r">azuriteScriptLocation</span> = <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#2d7263f86a526264" class="i method">Combine</a>(<span class="r1 r">azuriteLocation</span>, <span class="s">&quot;node_modules/azurite/dist/src/azurite.js&quot;</span>);
+            <b>if</b> (!<a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#3360368484a9f131" class="i method">Exists</a>(<span class="r3 r">azuriteScriptLocation</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<a href="#0c5721e765b96ad0" class="i method">ErrorMessage</a>(<span class="s">$&quot;</span>{<span class="r3 r">azuriteScriptLocation</span>}<span class="s"> does not exist, check if </span>{<a href="#97a0e0728ca49899" class="i field">AzuriteLocationKey</a>}<span class="s"> is pointing to right location</span><span class="s">&quot;</span>));
+            }
+ 
+            <a href="#e8eead24db0aaf9f" class="i field">account</a> = <b>new</b> <a href="#f954871d3e8b2cb7" class="t constructor">AzuriteAccount</a>()
+            {
+                <a href="#1ca70995ad6b0a50" class="i property">Name</a> = <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#a6547a472def7796" class="i method">ToString</a>(),
+                <a href="#82578263b9d12eda" class="i property">Key</a> = <span class="i n">System</span>.<a href="@0@mscorlib/A.html#fc990bd1275d43d6" class="t t">Convert</a>.<a href="@0@mscorlib/A.html#f9e5bd7b69c5f334" class="i method">ToBase64String</a>(<a href="@0@mscorlib/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@0@mscorlib/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@0@mscorlib/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#a6547a472def7796" class="i method">ToString</a>())),
+            };
+ 
+            <a href="#d43bad3e25f2c249" class="i field">tempDirectory</a> = <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#2d7263f86a526264" class="i method">Combine</a>(<a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#3a7a8c72321c6e1d" class="i method">GetTempPath</a>(), <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#efb113f637a6bb47" class="i method">GetRandomFileName</a>());
+            <a href="@0@mscorlib/A.html#b3ad5f0ba800bb28" class="t t">Directory</a>.<a href="@0@mscorlib/A.html#5c99436f88797b6a" class="i method">CreateDirectory</a>(<a href="#d43bad3e25f2c249" class="i field">tempDirectory</a>);
+            <a href="#ac7ba0b442301370" class="i field">process</a> = <b>new</b> <a href="@0@System/A.html#47660cba985bdf77" class="t constructor">Process</a>();
+            <a href="#ac7ba0b442301370" class="i field">process</a>.<a href="@0@System/A.html#b0417e5300dc5565" class="i property">StartInfo</a>.<a href="@0@System/A.html#b5b64f6ecc2f77fd" class="i property">FileName</a> = <span class="s">&quot;node&quot;</span>;
+            <a href="#ac7ba0b442301370" class="i field">process</a>.<a href="@0@System/A.html#b0417e5300dc5565" class="i property">StartInfo</a>.<a href="@0@System/A.html#6ad746bde02c230d" class="i property">WorkingDirectory</a> = <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#f9128b02ffd0d3ea" class="i method">GetDirectoryName</a>(<a href="@0@mscorlib/A.html#73b5be5e9c2474b2" class="t t">Assembly</a>.<a href="@0@mscorlib/A.html#bd671af9926207e9" class="i method">GetExecutingAssembly</a>().<a href="@0@mscorlib/A.html#3faa3e0e41d8868b" class="i property">Location</a>);
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r4 rd" class="r4 r">arguments</span> = <span class="s">$&quot;</span>{<span class="r3 r">azuriteScriptLocation</span>}<span class="s"> --oauth basic -l </span>{<a href="#d43bad3e25f2c249" class="i field">tempDirectory</a>}<span class="s"> --blobPort 0 --queuePort 0 --cert azurite_cert.pem --key azurite_cert.pem --skipApiVersionCheck</span><span class="s">&quot;</span>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r5 rd" class="r5 r">debugLogPath</span> = <b>null</b>;
+            <b>if</b> (<span class="r0 r">includeDebugLog</span>)
+            {
+                <span class="r5 r">debugLogPath</span> = <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#3f28ce894873de0a" class="i method">GetTempFileName</a>();
+                <span class="r4 r">arguments</span> += <span class="s">$&quot;</span><span class="s"> -d </span>{<span class="r5 r">debugLogPath</span>}<span class="s">&quot;</span>;
+            }
+            <a href="#ac7ba0b442301370" class="i field">process</a>.<a href="@0@System/A.html#b0417e5300dc5565" class="i property">StartInfo</a>.<a href="@0@System/A.html#a0c4508e0c3df23b" class="i property">Arguments</a> = <span class="r4 r">arguments</span>;
+            <a href="#ac7ba0b442301370" class="i field">process</a>.<a href="@0@System/A.html#b0417e5300dc5565" class="i property">StartInfo</a>.<a href="@0@System/A.html#5611ad13d0b7376e" class="i property">EnvironmentVariables</a>.<a href="@0@System/A.html#385d1daea7851e4d" class="i method">Add</a>(<span class="s">&quot;AZURITE_ACCOUNTS&quot;</span>, <span class="s">$&quot;</span>{<a href="#e8eead24db0aaf9f" class="i field">account</a>.<a href="#1ca70995ad6b0a50" class="i property">Name</a>}<span class="s">:</span>{<a href="#e8eead24db0aaf9f" class="i field">account</a>.<a href="#82578263b9d12eda" class="i property">Key</a>}<span class="s">&quot;</span>);
+            <a href="#ac7ba0b442301370" class="i field">process</a>.<a href="@0@System/A.html#b0417e5300dc5565" class="i property">StartInfo</a>.<a href="@0@System/A.html#0e85c2ea7cbdedbe" class="i property">UseShellExecute</a> = <b>false</b>;
+            <a href="#ac7ba0b442301370" class="i field">process</a>.<a href="@0@System/A.html#b0417e5300dc5565" class="i property">StartInfo</a>.<a href="@0@System/A.html#7d08cff61e290062" class="i property">RedirectStandardOutput</a> = <b>true</b>;
+            <a href="#ac7ba0b442301370" class="i field">process</a>.<a href="@0@System/A.html#b0417e5300dc5565" class="i property">StartInfo</a>.<a href="@0@System/A.html#7010254a1850a71e" class="i property">RedirectStandardInput</a> = <b>true</b>;
+            <a href="#ac7ba0b442301370" class="i field">process</a>.<a href="@0@System/A.html#b0417e5300dc5565" class="i property">StartInfo</a>.<a href="@0@System/A.html#032d12b416e9d73e" class="i property">RedirectStandardError</a> = <b>true</b>;
+            <a href="#ac7ba0b442301370" class="i field">process</a>.<a href="@0@System/A.html#bfc6e73eeb739d81" class="i">OutputDataReceived</a> += <b>delegate</b> (<b>object</b> <span id="r6 rd" class="r6 r">sender</span>, <a href="@0@System/A.html#f1cfee83ea96c1cc" class="t t">DataReceivedEventArgs</a> <span id="r7 rd" class="r7 r">e</span>)
+            {
+                <b>if</b> (<span class="r7 r">e</span>.<a href="@0@System/A.html#b9b1f57e1959be86" class="i property">Data</a> != <b>null</b>)
+                {
+                    <b>if</b> (<span class="r7 r">e</span>.<a href="@0@System/A.html#b9b1f57e1959be86" class="i property">Data</a>.<a href="@0@mscorlib/A.html#428c5c9954dea844" class="i method">Contains</a>(<span class="s">&quot;Azurite Blob service is successfully listening at&quot;</span>))
+                    {
+                        <a href="#c8eb4375969578dd" class="i field">blobsPort</a> = <a href="#29c5d97a477d5060" class="i method">ParseAzuritePort</a>(<span class="r7 r">e</span>.<a href="@0@System/A.html#b9b1f57e1959be86" class="i property">Data</a>);
+                        <a href="#bf17b9d1b670bc78" class="i field">countdownEvent</a>.<a href="@0@mscorlib/A.html#4f1656cabde491d3" class="i method">Signal</a>();
+                    }
+                    <b>if</b> (<span class="r7 r">e</span>.<a href="@0@System/A.html#b9b1f57e1959be86" class="i property">Data</a>.<a href="@0@mscorlib/A.html#428c5c9954dea844" class="i method">Contains</a>(<span class="s">&quot;Azurite Queue service is successfully listening at&quot;</span>))
+                    {
+                        <a href="#c3d72a764fecb7db" class="i field">queuesPort</a> = <a href="#29c5d97a477d5060" class="i method">ParseAzuritePort</a>(<span class="r7 r">e</span>.<a href="@0@System/A.html#b9b1f57e1959be86" class="i property">Data</a>);
+                        <a href="#bf17b9d1b670bc78" class="i field">countdownEvent</a>.<a href="@0@mscorlib/A.html#4f1656cabde491d3" class="i method">Signal</a>();
+                    }
+                    <b>if</b> (!<a href="#bf17b9d1b670bc78" class="i field">countdownEvent</a>.<a href="@0@mscorlib/A.html#28912f0b9be9a000" class="i property">IsSet</a>) <span class="c">// stop output collection if it started successfully.</span>
+                    {
+                        <a href="#4b1652a16712da79" class="i field">azuriteOutput</a>.<a href="@0@mscorlib/A.html#73bc75596acbac77" class="i method">AppendLine</a>(<span class="r7 r">e</span>.<a href="@0@System/A.html#b9b1f57e1959be86" class="i property">Data</a>);
+                    }
+                }
+            };
+            <a href="#ac7ba0b442301370" class="i field">process</a>.<a href="@0@System/A.html#91ef272ee6a63293" class="i">ErrorDataReceived</a> += <b>delegate</b> (<b>object</b> <span id="r8 rd" class="r8 r">sender</span>, <a href="@0@System/A.html#f1cfee83ea96c1cc" class="t t">DataReceivedEventArgs</a> <span id="r9 rd" class="r9 r">e</span>)
+            {
+                <b>if</b> (<span class="r9 r">e</span>.<a href="@0@System/A.html#b9b1f57e1959be86" class="i property">Data</a> != <b>null</b>)
+                {
+                    <b>if</b> (!<a href="#bf17b9d1b670bc78" class="i field">countdownEvent</a>.<a href="@0@mscorlib/A.html#28912f0b9be9a000" class="i property">IsSet</a>) <span class="c">// stop error collection if it started successfully.</span>
+                    {
+                        <a href="#87d822a07011b2f4" class="i field">azuriteError</a>.<a href="@0@mscorlib/A.html#73bc75596acbac77" class="i method">AppendLine</a>(<span class="r9 r">e</span>.<a href="@0@System/A.html#b9b1f57e1959be86" class="i property">Data</a>);
+                    }
+                }
+            };
+            <b>try</b>
+            {
+                <a href="#ac7ba0b442301370" class="i field">process</a>.<a href="@0@System/A.html#e9edeff01b1851af" class="i method">Start</a>();
+            } <b>catch</b> (<a href="@0@System/A.html#824f982cf95a6267" class="t t">Win32Exception</a> <span id="r10 rd" class="r10 r">e</span>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#faac7c530516eefc" class="t constructor">ArgumentException</a>(<a href="#0c5721e765b96ad0" class="i method">ErrorMessage</a>(<span class="s">&quot;could not run NodeJS, make sure it&#39;s installed&quot;</span>), <span class="r10 r">e</span>);
+            }
+            <a href="#ac7ba0b442301370" class="i field">process</a>.<a href="@0@System/A.html#0192db46f50bfb24" class="i method">BeginOutputReadLine</a>();
+            <a href="#ac7ba0b442301370" class="i field">process</a>.<a href="@0@System/A.html#7aacd59d8205471f" class="i method">BeginErrorReadLine</a>();
+            <a href="@0@mscorlib/A.html#f1b135ff6c380b37" class="k">var</a> <span id="r11 rd" class="r11 r">didAzuriteStart</span> = <a href="#bf17b9d1b670bc78" class="i field">countdownEvent</a>.<a href="@0@mscorlib/A.html#ed1fd6c15092b0f2" class="i method">Wait</a>(<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(15));
+            <b>if</b> (!<span class="r11 r">didAzuriteStart</span>)
+            {
+                <b>if</b> (<a href="#ac7ba0b442301370" class="i field">process</a>.<a href="@0@System/A.html#4ee55b27a25daffb" class="i property">HasExited</a>)
+                {
+                    <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<a href="#0c5721e765b96ad0" class="i method">ErrorMessage</a>(<span class="s">$&quot;</span><span class="s">azurite process could not start with following output:\n</span>{<a href="#4b1652a16712da79" class="i field">azuriteOutput</a>}<span class="s">\nerror:\n</span>{<a href="#87d822a07011b2f4" class="i field">azuriteError</a>}<span class="s">\nexit code: </span>{<a href="#ac7ba0b442301370" class="i field">process</a>.<a href="@0@System/A.html#cc64e31f998c00f2" class="i property">ExitCode</a>}<span class="s">&quot;</span>));
+                }
+                <b>else</b>
+                {
+                    <a href="#ac7ba0b442301370" class="i field">process</a>.<a href="@0@System/A.html#4bfdd089d4e52d08" class="i method">Kill</a>();
+                    <a href="#ac7ba0b442301370" class="i field">process</a>.<a href="@0@System/A.html#52f69fa993002b54" class="i method">WaitForExit</a>();
+                    <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r12 rd" class="r12 r">message</span> = <span class="s">$&quot;</span><span class="s">azurite process could not initialize within timeout with following output:\n</span>{<a href="#4b1652a16712da79" class="i field">azuriteOutput</a>}<span class="s">\nerror:\n</span>{<a href="#87d822a07011b2f4" class="i field">azuriteError</a>}<span class="s">&quot;</span>;
+                    <b>if</b> (<span class="r0 r">includeDebugLog</span> &amp;&amp; <a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#3360368484a9f131" class="i method">Exists</a>(<span class="r5 r">debugLogPath</span>))
+                    {
+                        <b>using</b> <a href="@0@mscorlib/A.html#e23a38af5d11ddd3" class="k">var</a> <span id="r13 rd" class="r13 r">fileStream</span> = <a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#1a53662a82db3651" class="i method">Open</a>(<span class="r5 r">debugLogPath</span>, <a href="@0@mscorlib/A.html#c0cb6ba6af625b3a" class="t t">FileMode</a>.<a href="@0@mscorlib/A.html#f4421e1d202f76fa" class="i field">Open</a>, <a href="@0@mscorlib/A.html#5cc5644ae3acd24b" class="t t">FileAccess</a>.<a href="@0@mscorlib/A.html#0f1c68c756d0636b" class="i field">Read</a>, <a href="@0@mscorlib/A.html#2bfafb4d44a4f126" class="t t">FileShare</a>.<a href="@0@mscorlib/A.html#e51e30298bd05259" class="i field">ReadWrite</a>);
+                        <b>using</b> <a href="@0@mscorlib/A.html#b5fe1efcec14de32" class="k">var</a> <span id="r14 rd" class="r14 r">streamReader</span> = <b>new</b> <a href="@0@mscorlib/A.html#72447927169f6b77" class="t constructor">StreamReader</a>(<span class="r13 r">fileStream</span>);
+                        <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r15 rd" class="r15 r">debugLog</span> = <span class="r14 r">streamReader</span>.<a href="@0@mscorlib/A.html#dc5c2420e739a03e" class="i method">ReadToEnd</a>();
+                        <span class="r12 r">message</span> += <span class="s">$&quot;</span><span class="s">\ndebug log:\n</span>{<span class="r15 r">debugLog</span>}<span class="s">&quot;</span>;
+                    }
+                    <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<a href="#0c5721e765b96ad0" class="i method">ErrorMessage</a>(<span class="r12 r">message</span>));
+                }
+            }
+            <a href="#e8eead24db0aaf9f" class="i field">account</a>.<a href="#2937b669f277f305" class="i property">BlobsPort</a> = <a href="#c8eb4375969578dd" class="i field">blobsPort</a>;
+            <a href="#e8eead24db0aaf9f" class="i field">account</a>.<a href="#64366be8b1eccfe5" class="i property">QueuesPort</a> = <a href="#c3d72a764fecb7db" class="i field">queuesPort</a>;
+        }
+ 
+        <b>private int</b> <a id="29c5d97a477d5060" href="../R/29c5d97a477d5060.html" target="n" data-glyph="76,1" class="i method">ParseAzuritePort</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r16 rd" class="r16 r">outputLine</span>)
+        {
+            <b>int</b> <span id="r17 rd" class="r17 r">indexFrom</span> = <span class="r16 r">outputLine</span>.<a href="@0@mscorlib/A.html#43ea090a2243545e" class="i method">LastIndexOf</a>(<span class="s">&#39;:&#39;</span>) + 1;
+            <b>return</b> <b>int</b>.<a href="@0@mscorlib/A.html#a438016f815a35c3" class="i method">Parse</a>(<span class="r16 r">outputLine</span>.<a href="@0@mscorlib/A.html#882fa7998d6ca35a" class="i method">Substring</a>(<span class="r17 r">indexFrom</span>));
+        }
+ 
+        <b>private string</b> <a id="0c5721e765b96ad0" href="../R/0c5721e765b96ad0.html" target="n" data-glyph="76,1" class="i method">ErrorMessage</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r18 rd" class="r18 r">specificReason</span>)
+        {
+            <b>return</b> <span class="s">$&quot;</span><span class="s">\nCould not run Azurite based test due to: </span>{<span class="r18 r">specificReason</span>}<span class="s">.\n</span><span class="s">&quot;</span> +
+                <span class="s">&quot;Make sure that:\n&quot;</span> +
+                <span class="s">&quot;- NodeJS is installed and available in $PATH (i.e. &#39;node&#39; command can be run in terminal)\n&quot;</span> +
+                <span class="s">&quot;- Azurite V3 is installed via NPM (see https://github.com/Azure/Azurite for instructions)\n&quot;</span> +
+                <span class="s">$&quot;</span><span class="s">- </span>{<a href="#97a0e0728ca49899" class="i field">AzuriteLocationKey</a>}<span class="s"> envorinment is set and pointing to location of directory that has &#39;azurite&#39; command (i.e. run &#39;where azurite&#39; in Windows CMD)\n</span><span class="s">&quot;</span>;
+        }
+ 
+        <b>public</b> <a href="/Azure.Core/A.html#546178958a509374" class="t t">HttpClientTransport</a> <a id="4f52897b3a52f9bd" href="../R/4f52897b3a52f9bd.html" target="n" data-glyph="72,1" class="i method">GetTransport</a>()
+        {
+            <a href="/Azure.Core/A.html#546178958a509374" class="k">var</a> <span id="r19 rd" class="r19 r">transport</span> = <b>new</b> <a href="/Azure.Core/A.html#2f786ba6530ee31f" class="t constructor">HttpClientTransport</a>(<b>new</b> <span class="t constructor">HttpClient</span>(<b>new</b> <span class="t constructor">HttpClientHandler</span>()
+            {
+                <span class="i property">ServerCertificateCustomValidationCallback</span> = <span class="t t">HttpClientHandler</span>.<span class="i property">DangerousAcceptAnyServerCertificateValidator</span>
+            }));
+            <b>return</b> <span class="r19 r">transport</span>;
+        }
+ 
+        <b>public</b> <a href="/Azure.Core/A.html#d93a9ffee404e938" class="t t">TokenCredential</a> <a id="bb5b0b257ccaf804" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetCredential</a>()
+        {
+            <b>return</b> <b>new</b> <a href="#f8fa57d13d7f20b2" class="t constructor">AzuriteTokenCredential</a>();
+        }
+ 
+        <b>public</b> <a href="#f954871d3e8b2cb7" class="t t">AzuriteAccount</a> <a id="ece53a12773000d0" href="../R/ece53a12773000d0.html" target="n" data-glyph="72,1" class="i method">GetAzureAccount</a>()
+        {
+            <b>return</b> <a href="#e8eead24db0aaf9f" class="i field">account</a>;
+        }
+ 
+        <b>public void</b> <a id="8f2d3926f3725e96" href="../R/8f2d3926f3725e96.html" target="n" data-glyph="72,1" class="i method">Dispose</a>()
+        {
+            <b>if</b> (<a href="#ac7ba0b442301370" class="i field">process</a> != <b>null</b>)
+            {
+                <b>if</b> (!<a href="#ac7ba0b442301370" class="i field">process</a>.<a href="@0@System/A.html#4ee55b27a25daffb" class="i property">HasExited</a>)
+                {
+                    <a href="#ac7ba0b442301370" class="i field">process</a>.<a href="@0@System/A.html#4bfdd089d4e52d08" class="i method">Kill</a>();
+                    <a href="#ac7ba0b442301370" class="i field">process</a>.<a href="@0@System/A.html#52f69fa993002b54" class="i method">WaitForExit</a>();
+                }
+                <a href="@0@mscorlib/A.html#b3ad5f0ba800bb28" class="t t">Directory</a>.<a href="@0@mscorlib/A.html#7edbf8078ebb7f63" class="i method">Delete</a>(<a href="#d43bad3e25f2c249" class="i field">tempDirectory</a>, <b>true</b>);
+            }
+        }
+ 
+        <b>private class</b> <a id="f8fa57d13d7f20b2" href="../R/f8fa57d13d7f20b2.html" target="n" data-glyph="4,1" class="t t"><span id="281024a3e0bda336">AzuriteTokenCredential</span></a>: <a href="/Azure.Core/A.html#d93a9ffee404e938" class="t t">TokenCredential</a>
+        {
+            <b>public override</b> <span class="t t">ValueTask</span>&lt;<a href="/Azure.Core/A.html#b9cb398886850745" class="t t">AccessToken</a>&gt; <a id="8997e20f09afe87a" href="../R/8997e20f09afe87a.html" target="n" data-glyph="72,2" class="i method">GetTokenAsync</a>(<a href="/Azure.Core/A.html#9d9eb2813d5fd899" class="t t">TokenRequestContext</a> <span id="r20 rd" class="r20 r">requestContext</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r21 rd" class="r21 r">cancellationToken</span>)
+            {
+                <b>return</b> <b>new</b> <span class="t constructor">ValueTask</span>&lt;<a href="/Azure.Core/A.html#b9cb398886850745" class="t t">AccessToken</a>&gt;(<a href="#c9144f99b196a488" class="i method">GetToken</a>(<span class="r20 r">requestContext</span>, <span class="r21 r">cancellationToken</span>));
+            }
+ 
+            <b>public override</b> <a href="/Azure.Core/A.html#b9cb398886850745" class="t t">AccessToken</a> <a id="c9144f99b196a488" href="../R/c9144f99b196a488.html" target="n" data-glyph="72,2" class="i method">GetToken</a>(<a href="/Azure.Core/A.html#9d9eb2813d5fd899" class="t t">TokenRequestContext</a> <span id="r22 rd" class="r22 r">requestContext</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r23 rd" class="r23 r">cancellationToken</span>)
+            {
+                <span class="c">//{</span>
+                <span class="c">// &quot;aud&quot;: &quot;https://storage.azure.com&quot;,</span>
+                <span class="c">// &quot;iss&quot;: &quot;https://sts.windows-ppe.net/ab1f708d-50f6-404c-a006-d71b2ac7a606/&quot;,</span>
+                <span class="c">// &quot;iat&quot;: 1511859603,</span>
+                <span class="c">// &quot;nbf&quot;: 1511859603,</span>
+                <span class="c">// &quot;exp&quot;: 9999999999,</span>
+                <span class="c">// &quot;alg&quot;: &quot;HS256&quot;</span>
+                <span class="c">//}</span>
+                <span class="c">// Encoded using https://jwt.io/</span>
+                <b>return</b> <b>new</b> <a href="/Azure.Core/A.html#68b2c442cd1f3537" class="t constructor">AccessToken</a>(<span class="s">&quot;eyJhdWQiOiJodHRwczovL3N0b3JhZ2UuYXp1cmUuY29tIiwiaXNzIjoiaHR0cHM6Ly9zdHMud2luZG93cy1wcGUubmV0L2FiMWY3MDhkLTUwZjYtNDA0Yy1hMDA2LWQ3MWIyYWM3YTYwNi8iLCJpYXQiOjE1MTE4NTk2MDMsIm5iZiI6MTUxMTg1OTYwMywiZXhwIjo5OTk5OTk5OTk5LCJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJodHRwczovL3N0b3JhZ2UuYXp1cmUuY29tIiwiaXNzIjoiaHR0cHM6Ly9zdHMud2luZG93cy1wcGUubmV0L2FiMWY3MDhkLTUwZjYtNDA0Yy1hMDA2LWQ3MWIyYWM3YTYwNi8iLCJpYXQiOjE1MTE4NTk2MDMsIm5iZiI6MTUxMTg1OTYwMywiZXhwIjo5OTk5OTk5OTk5LCJhbGciOiJIUzI1NiJ9.z48ZJz_3k0ZOATIMjZ02AQxlDnUT3NXLEJXLgdHIKl8&quot;</span>, <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@0@mscorlib/A.html#371fa431c6a3a817" class="i field">MaxValue</a>);
+            }
+        }
+    }
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">SA1402</span> <span class="c">// File may only contain a single type</span>
+    <b>public class</b> <a id="f954871d3e8b2cb7" href="../R/f954871d3e8b2cb7.html" target="n" data-glyph="0,0" class="t t"><span id="69d4396f54dbc01a">AzuriteAccount</span></a>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">SA1402</span> <span class="c">// File may only contain a single type</span>
+    {
+        <b>public string</b> <a id="1ca70995ad6b0a50" href="../R/1ca70995ad6b0a50.html" target="n" data-glyph="102,1" class="i property">Name</a> { <b>get</b>; <b>set</b>; }
+        <b>public string</b> <a id="82578263b9d12eda" href="../R/82578263b9d12eda.html" target="n" data-glyph="102,1" class="i property">Key</a> { <b>get</b>; <b>set</b>; }
+        <b>public int</b> <a id="2937b669f277f305" href="../R/2937b669f277f305.html" target="n" data-glyph="102,1" class="i property">BlobsPort</a> { <b>get</b>; <b>set</b>; }
+        <b>public int</b> <a id="64366be8b1eccfe5" href="../R/64366be8b1eccfe5.html" target="n" data-glyph="102,1" class="i property">QueuesPort</a> { <b>get</b>; <b>set</b>; }
+ 
+        <b>public string</b> <a id="ffc979e84776fedd" href="../R/../../0000000000.html" target="n" data-glyph="102,1" class="i property">Endpoint</a> =&gt; <span class="s">$&quot;</span><span class="s">https://127.0.0.1:</span>{<a href="#2937b669f277f305" class="i property">BlobsPort</a>}<span class="s">/</span>{<a href="#1ca70995ad6b0a50" class="i property">Name</a>}<span class="s">&quot;</span>;
+ 
+        <b>public string</b> <a id="fdf5c321e79ba110" href="../R/fdf5c321e79ba110.html" target="n" data-glyph="102,1" class="i property">ConnectionString</a>
+        {
+            <b>get</b>
+            {
+                <b>return</b> <span class="s">$&quot;</span><span class="s">DefaultEndpointsProtocol=http;AccountName=</span>{<a href="#1ca70995ad6b0a50" class="i property">Name</a>}<span class="s">;AccountKey=</span>{<a href="#82578263b9d12eda" class="i property">Key</a>}<span class="s">;BlobEndpoint=https://127.0.0.1:</span>{<a href="#2937b669f277f305" class="i property">BlobsPort</a>}<span class="s">/</span>{<a href="#1ca70995ad6b0a50" class="i property">Name</a>}<span class="s">;QueueEndpoint=https://127.0.0.1:</span>{<a href="#64366be8b1eccfe5" class="i property">QueuesPort</a>}<span class="s">/</span>{<a href="#1ca70995ad6b0a50" class="i property">Name</a>}<span class="s">;</span><span class="s">&quot;</span>;
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

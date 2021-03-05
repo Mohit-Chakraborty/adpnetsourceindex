@@ -1,0 +1,203 @@
+﻿<!DOCTYPE html>
+<html><head><title>PemReader.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(194);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Identity/Shared/PemReader.cs" target="_top">Shared\PemReader.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/master/sdk/core/Azure.Core/src/Shared/PemReader.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Identity" target="_top">Azure.Identity.csproj</a> (Azure.Identity)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Reflection</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Security</span>.<span class="i n">Cryptography</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Security</span>.<span class="i n">Cryptography</span>.<span class="i n">X509Certificates</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Core</span>
+{
+    <b>internal static class</b> <a id="7cfeb2a4805407b3" href="../R/7cfeb2a4805407b3.html" target="n" data-glyph="2,0" class="t t">PemReader</a>
+    {
+        <b>private delegate void</b> <a id="29823814ac646933" href="../R/29823814ac646933.html" target="n" data-glyph="16,1" class="t t"><span id="6d9eabd59ef3201a">ImportPkcs8PrivateKeyDelegate</span></a>(<span class="t t">ReadOnlySpan</span>&lt;<b>byte</b>&gt; <span id="r0 rd" class="r0 r">blob</span>, <b>out int</b> <span id="r1 rd" class="r1 r">bytesRead</span>);
+ 
+        <b>private const string</b> <a id="d83cc2248f7df2fa" href="../R/d83cc2248f7df2fa.html" target="n" data-glyph="10,1" class="i field">Prolog</a> = <span class="s">&quot;-----BEGIN &quot;</span>;
+        <b>private const string</b> <a id="d4cf53e94e65904d" href="../R/d4cf53e94e65904d.html" target="n" data-glyph="10,1" class="i field">Epilog</a> = <span class="s">&quot;-----END &quot;</span>;
+        <b>private const string</b> <a id="8389097e344de6a6" href="../R/8389097e344de6a6.html" target="n" data-glyph="10,1" class="i field">LabelEnd</a> = <span class="s">&quot;-----&quot;</span>;
+ 
+        <b>private static bool</b> <a id="73d7cefb0b904ec0" href="../R/73d7cefb0b904ec0.html" target="n" data-glyph="46,1" class="i field">s_initializedImportPkcs8PrivateKeyMethod</a>;
+        <b>private static</b> <a href="@1@netstandard/A.html#382d90b1fa682bac" class="t t">MethodInfo</a> <a id="46ad143231be0cd6" href="../R/46ad143231be0cd6.html" target="n" data-glyph="46,1" class="i field">s_importPkcs8PrivateKeyMethod</a>;
+        <b>private static</b> <a href="@1@netstandard/A.html#382d90b1fa682bac" class="t t">MethodInfo</a> <a id="e35beb17427111a1" href="../R/e35beb17427111a1.html" target="n" data-glyph="46,1" class="i field">s_copyWithPrivateKeyMethod</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Loads an </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#2e8ad9e6007798e5" class="t t">X509Certificate2</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> from PEM data.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">data</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The PEM data to parse.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">cer</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Optional public certificate data if not defined within the PEM data.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">allowCertificateOnly</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Whether to create an </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#2e8ad9e6007798e5" class="t t">X509Certificate2</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> if no private key is read.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">An </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#2e8ad9e6007798e5" class="t t">X509Certificate2</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> loaded from the PEM data.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#0b7aa8a209a7f19f" class="t t">CryptographicException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A cryptographic exception occurred when trying to create the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#2e8ad9e6007798e5" class="t t">X509Certificate2</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#2b389f14fb01ad1b" class="t t">InvalidDataException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">cer</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> is null and no CERTIFICATE field is defined in PEM, or no PRIVATE KEY is defined in PEM.</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#c5c14f954574e491" class="t t">PlatformNotSupportedException</a><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Creating a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#2e8ad9e6007798e5" class="t t">X509Certificate2</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> from PEM data is not supported on the current platform.</span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>public static</b> <a href="@1@netstandard/A.html#2e8ad9e6007798e5" class="t t">X509Certificate2</a> <a id="e42ddd15a55d5096" href="../R/e42ddd15a55d5096.html" target="n" data-glyph="72,1" class="i method">LoadCertificate</a>(<span class="t t">ReadOnlySpan</span>&lt;<b>char</b>&gt; <span id="r2 rd" class="r2 r">data</span>, <b>byte</b>[] <span id="r3 rd" class="r3 r">cer</span> = <b>null</b>, <b>bool</b> <span id="r4 rd" class="r4 r">allowCertificateOnly</span> = <b>false</b>)
+        {
+            <b>byte</b>[] <span id="r5 rd" class="r5 r">priv</span> = <b>null</b>;
+ 
+            <b>while</b> (<a href="#57172100ffd1f606" class="i method">TryRead</a>(<span class="r2 r">data</span>, <b>out</b> <a href="#c1aeb97eb54ed486" class="t t">PemField</a> <span id="r6 rd" class="r6 r">field</span>))
+            {
+                <span class="c">// TODO: Consider building up a chain to determine the leaf certificate: https://github.com/Azure/azure-sdk-for-net/issues/19043</span>
+                <b>if</b> (<span class="r6 r">field</span>.<a href="#96116bea9deb53c1" class="i property">Label</a>.<span class="i method">Equals</span>(<span class="s">&quot;CERTIFICATE&quot;</span>.<span class="i method">AsSpan</span>(), <a href="@1@netstandard/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@1@netstandard/A.html#87891a6d28c64c9b" class="i field">Ordinal</a>))
+                {
+                    <span class="r3 r">cer</span> = <span class="r6 r">field</span>.<a href="#60865d55dc81b668" class="i method">FromBase64Data</a>();
+                }
+                <b>else</b> <b>if</b> (<span class="r6 r">field</span>.<a href="#96116bea9deb53c1" class="i property">Label</a>.<span class="i method">Equals</span>(<span class="s">&quot;PRIVATE KEY&quot;</span>.<span class="i method">AsSpan</span>(), <a href="@1@netstandard/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@1@netstandard/A.html#87891a6d28c64c9b" class="i field">Ordinal</a>))
+                {
+                    <span class="r5 r">priv</span> = <span class="r6 r">field</span>.<a href="#60865d55dc81b668" class="i method">FromBase64Data</a>();
+                }
+ 
+                <b>int</b> <span id="r7 rd" class="r7 r">offset</span> = <span class="r6 r">field</span>.<a href="#96fe4e1729785931" class="i property">Start</a> + <span class="r6 r">field</span>.<a href="#20464f07a82fd293" class="i property">Length</a>;
+                <b>if</b> (<span class="r7 r">offset</span> &gt;= <span class="r2 r">data</span>.<span class="i property">Length</span>)
+                {
+                    <b>break</b>;
+                }
+ 
+                <span class="r2 r">data</span> = <span class="r2 r">data</span>.<span class="i method">Slice</span>(<span class="r7 r">offset</span>);
+            }
+ 
+            <b>if</b> (<span class="r3 r">cer</span> <b>is null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#3be0a1f685d20864" class="t constructor">InvalidDataException</a>(<span class="s">&quot;The certificate is missing the public key&quot;</span>);
+            }
+ 
+            <b>if</b> (<span class="r5 r">priv</span> <b>is null</b>)
+            {
+                <b>if</b> (<span class="r4 r">allowCertificateOnly</span>)
+                {
+                    <b>return</b> <b>new</b> <a href="@1@netstandard/A.html#c9d1c203351eec15" class="t constructor">X509Certificate2</a>(<span class="r3 r">cer</span>);
+                }
+ 
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#3be0a1f685d20864" class="t constructor">InvalidDataException</a>(<span class="s">&quot;The certificate is missing the private key&quot;</span>);
+            }
+ 
+            <b>if</b> (!<a href="#73d7cefb0b904ec0" class="i field">s_initializedImportPkcs8PrivateKeyMethod</a>)
+            {
+                <span class="c">// ImportPkcs8PrivateKey was added in .NET Core 3.0 and is only present on Core. We will fall back to a lightweight decoder if this method is missing from the current runtime.</span>
+                <a href="#46ad143231be0cd6" class="i field">s_importPkcs8PrivateKeyMethod</a> = <b>typeof</b>(<a href="@1@netstandard/A.html#9e72392556b1419c" class="t t">RSA</a>).<a href="@1@netstandard/A.html#6cd11a2e3211bf71" class="i method">GetMethod</a>(<span class="s">&quot;ImportPkcs8PrivateKey&quot;</span>, <a href="@1@netstandard/A.html#4795caf3b483702d" class="t t">BindingFlags</a>.<a href="@1@netstandard/A.html#54a14f747b06c614" class="i field">Instance</a> | <a href="@1@netstandard/A.html#4795caf3b483702d" class="t t">BindingFlags</a>.<a href="@1@netstandard/A.html#ef2ef39bdfa059df" class="i field">Public</a>, <b>null</b>, <b>new</b>[] { <b>typeof</b>(<span class="t t">ReadOnlySpan</span>&lt;<b>byte</b>&gt;), <b>typeof</b>(<b>int</b>).<a href="@1@netstandard/A.html#a394028aecb1f144" class="i method">MakeByRefType</a>() }, <b>null</b>);
+                <a href="#73d7cefb0b904ec0" class="i field">s_initializedImportPkcs8PrivateKeyMethod</a> = <b>true</b>;
+            }
+ 
+            <b>if</b> (<a href="#e35beb17427111a1" class="i field">s_copyWithPrivateKeyMethod</a> <b>is null</b>)
+            {
+                <a href="#e35beb17427111a1" class="i field">s_copyWithPrivateKeyMethod</a> = <b>typeof</b>(<a href="@1@netstandard/A.html#f6e87702f71581c6" class="t t">RSACertificateExtensions</a>).<a href="@1@netstandard/A.html#6cd11a2e3211bf71" class="i method">GetMethod</a>(<span class="s">&quot;CopyWithPrivateKey&quot;</span>, <a href="@1@netstandard/A.html#4795caf3b483702d" class="t t">BindingFlags</a>.<a href="@1@netstandard/A.html#d1fa47f9abe3c16a" class="i field">Static</a> | <a href="@1@netstandard/A.html#4795caf3b483702d" class="t t">BindingFlags</a>.<a href="@1@netstandard/A.html#ef2ef39bdfa059df" class="i field">Public</a>, <b>null</b>, <b>new</b>[] { <b>typeof</b>(<a href="@1@netstandard/A.html#2e8ad9e6007798e5" class="t t">X509Certificate2</a>), <b>typeof</b>(<a href="@1@netstandard/A.html#9e72392556b1419c" class="t t">RSA</a>) }, <b>null</b>)
+                    ?? <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#db107a1c43e88816" class="t constructor">PlatformNotSupportedException</a>(<span class="s">&quot;The current platform does not support reading a private key from a PEM file&quot;</span>);
+            }
+ 
+            <a href="@1@netstandard/A.html#9e72392556b1419c" class="t t">RSA</a> <span id="r8 rd" class="r8 r">privateKey</span> = <b>null</b>;
+            <b>try</b>
+            {
+                <b>if</b> (<a href="#46ad143231be0cd6" class="i field">s_importPkcs8PrivateKeyMethod</a> != <b>null</b>)
+                {
+                    <span class="r8 r">privateKey</span> = <a href="@1@netstandard/A.html#9e72392556b1419c" class="t t">RSA</a>.<a href="@1@netstandard/A.html#7c10efd163896171" class="i method">Create</a>();
+ 
+                    <span class="c">// Because ImportPkcs8PrivateKey declares an out parameter we cannot call it directly using MethodInfo.Invoke since all arguments are passed as an object array.</span>
+                    <span class="c">// Instead we create a delegate with the correct signature and invoke it.</span>
+                    <a href="#29823814ac646933" class="t t">ImportPkcs8PrivateKeyDelegate</a> <span id="r9 rd" class="r9 r">importPkcs8PrivateKey</span> = (<a href="#29823814ac646933" class="t t">ImportPkcs8PrivateKeyDelegate</a>)<a href="#46ad143231be0cd6" class="i field">s_importPkcs8PrivateKeyMethod</a>.<a href="@1@netstandard/A.html#7a294cbe6dc58861" class="i method">CreateDelegate</a>(<b>typeof</b>(<a href="#29823814ac646933" class="t t">ImportPkcs8PrivateKeyDelegate</a>), <span class="r8 r">privateKey</span>);
+                    <span class="r9 r">importPkcs8PrivateKey</span>.<a href="#083e1a1dfa6c1fd6" class="i method">Invoke</a>(<span class="r5 r">priv</span>, <b>out _</b>);
+                }
+                <b>else</b>
+                {
+                    <span class="r8 r">privateKey</span> = <a href="LightweightPkcs8Decoder.cs.html#8907cf27e829343a" class="t t">LightweightPkcs8Decoder</a>.<a href="LightweightPkcs8Decoder.cs.html#54012de165838003" class="i method">DecodeRSAPkcs8</a>(<span class="r5 r">priv</span>);
+                }
+ 
+                <b>using</b> <a href="@1@netstandard/A.html#2e8ad9e6007798e5" class="t t">X509Certificate2</a> <span id="r10 rd" class="r10 r">certificateWithoutPrivateKey</span> = <b>new</b> <a href="@1@netstandard/A.html#c9d1c203351eec15" class="t constructor">X509Certificate2</a>(<span class="r3 r">cer</span>);
+                <a href="@1@netstandard/A.html#2e8ad9e6007798e5" class="t t">X509Certificate2</a> <span id="r11 rd" class="r11 r">certificate</span> = (<a href="@1@netstandard/A.html#2e8ad9e6007798e5" class="t t">X509Certificate2</a>)<a href="#e35beb17427111a1" class="i field">s_copyWithPrivateKeyMethod</a>.<a href="@1@netstandard/A.html#c8277ed81262a367" class="i method">Invoke</a>(<b>null</b>, <b>new</b> <b>object</b>[] { <span class="r10 r">certificateWithoutPrivateKey</span>, <span class="r8 r">privateKey</span> });
+ 
+                <span class="c">// On .NET Framework the PrivateKey member is not initialized after calling CopyWithPRivateKey.</span>
+                <b>if</b> (<span class="r11 r">certificate</span>.<a href="@1@netstandard/A.html#bdf1ba35b4aee386" class="i property">PrivateKey</a> <b>is null</b>)
+                {
+                    <span class="r11 r">certificate</span>.<a href="@1@netstandard/A.html#bdf1ba35b4aee386" class="i property">PrivateKey</a> = <span class="r8 r">privateKey</span>;
+                }
+ 
+                <span class="c">// Make sure the private key doesn&#39;t get disposed now that it&#39;s used.</span>
+                <span class="r8 r">privateKey</span> = <b>null</b>;
+ 
+                <b>return</b> <span class="r11 r">certificate</span>;
+            }
+            <b>finally</b>
+            {
+                <span class="c">// If we created and did not use the RSA private key, make sure it&#39;s disposed.</span>
+                <span class="r8 r">privateKey</span>?.<a href="@1@netstandard/A.html#496ab6e6cbd2d299" class="i method">Dispose</a>();
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Attempts to read the next PEM field from the given data.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">data</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The PEM data to parse.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">field</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The PEM first complete PEM field that was found.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">True if a valid PEM field was parsed; otherwise, false.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> To find subsequent fields, pass a slice of </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">data</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> past the found </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#c1aeb97eb54ed486" class="t t">PemField</a>.<a href="#20464f07a82fd293" class="i property">Length</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <b>public static bool</b> <a id="57172100ffd1f606" href="../R/57172100ffd1f606.html" target="n" data-glyph="72,1" class="i method">TryRead</a>(<span class="t t">ReadOnlySpan</span>&lt;<b>char</b>&gt; <span id="r12 rd" class="r12 r">data</span>, <b>out</b> <a href="#c1aeb97eb54ed486" class="t t">PemField</a> <span id="r13 rd" class="r13 r">field</span>)
+        {
+            <span class="r13 r">field</span> = <b>default</b>;
+ 
+            <b>int</b> <span id="r14 rd" class="r14 r">start</span> = <span class="r12 r">data</span>.<span class="i method">IndexOf</span>(<a href="#d83cc2248f7df2fa" class="i field">Prolog</a>.<span class="i method">AsSpan</span>());
+            <b>if</b> (<span class="r14 r">start</span> &lt; 0)
+            {
+                <b>return</b> <b>false</b>;
+            }
+ 
+            <span class="t t">ReadOnlySpan</span>&lt;<b>char</b>&gt; <span id="r15 rd" class="r15 r">label</span> = <span class="r12 r">data</span>.<span class="i method">Slice</span>(<span class="r14 r">start</span> + <a href="#d83cc2248f7df2fa" class="i field">Prolog</a>.<a href="@1@netstandard/A.html#e13f5829ef28aa07" class="i property">Length</a>);
+            <b>int</b> <span id="r16 rd" class="r16 r">end</span> = <span class="r15 r">label</span>.<span class="i method">IndexOf</span>(<a href="#8389097e344de6a6" class="i field">LabelEnd</a>.<span class="i method">AsSpan</span>());
+            <b>if</b> (<span class="r16 r">end</span> &lt; 0)
+            {
+                <b>return</b> <b>false</b>;
+            }
+ 
+            <span class="c">// Slice the label.</span>
+            <span class="r15 r">label</span> = <span class="r15 r">label</span>.<span class="i method">Slice</span>(0, <span class="r16 r">end</span>);
+ 
+            <span class="c">// Slice the remaining data after the label.</span>
+            <b>int</b> <span id="r17 rd" class="r17 r">dataOffset</span> = <span class="r14 r">start</span> + <a href="#d83cc2248f7df2fa" class="i field">Prolog</a>.<a href="@1@netstandard/A.html#e13f5829ef28aa07" class="i property">Length</a> + <span class="r16 r">end</span> + <a href="#8389097e344de6a6" class="i field">LabelEnd</a>.<a href="@1@netstandard/A.html#e13f5829ef28aa07" class="i property">Length</a>;
+            <span class="r12 r">data</span> = <span class="r12 r">data</span>.<span class="i method">Slice</span>(<span class="r17 r">dataOffset</span>);
+ 
+            <span class="c">// Find the label end.</span>
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r18 rd" class="r18 r">labelEpilog</span> = <a href="#d4cf53e94e65904d" class="i field">Epilog</a> + <span class="r15 r">label</span>.<span class="i method">ToString</span>() + <a href="#8389097e344de6a6" class="i field">LabelEnd</a>;
+            <span class="r16 r">end</span> = <span class="r12 r">data</span>.<span class="i method">IndexOf</span>(<span class="r18 r">labelEpilog</span>.<span class="i method">AsSpan</span>());
+            <b>if</b> (<span class="r16 r">end</span> &lt; 0)
+            {
+                <b>return</b> <b>false</b>;
+            }
+ 
+            <b>int</b> <span id="r19 rd" class="r19 r">fieldLength</span> = <span class="r17 r">dataOffset</span> + <span class="r16 r">end</span> + <span class="r18 r">labelEpilog</span>.<a href="@1@netstandard/A.html#e13f5829ef28aa07" class="i property">Length</a> - <span class="r14 r">start</span>;
+            <span class="r13 r">field</span> = <b>new</b> <a href="#84fbda4930537456" class="t constructor">PemField</a>(<span class="r14 r">start</span>, <span class="r15 r">label</span>, <span class="r12 r">data</span>.<span class="i method">Slice</span>(0, <span class="r16 r">end</span>), <span class="r19 r">fieldLength</span>);
+ 
+            <b>return</b> <b>true</b>;
+        }
+ 
+        <b>public ref struct</b> <a id="c1aeb97eb54ed486" href="../R/c1aeb97eb54ed486.html" target="n" data-glyph="108,1" class="t t"><span id="41f6bd76a4953293">PemField</span></a>
+        {
+            <b>internal</b> <a id="84fbda4930537456" href="../R/84fbda4930537456.html" target="n" data-glyph="74,2" class="t constructor">PemField</a>(<b>int</b> <span id="r20 rd" class="r20 r">start</span>, <span class="t t">ReadOnlySpan</span>&lt;<b>char</b>&gt; <span id="r21 rd" class="r21 r">label</span>, <span class="t t">ReadOnlySpan</span>&lt;<b>char</b>&gt; <span id="r22 rd" class="r22 r">data</span>, <b>int</b> <span id="r23 rd" class="r23 r">length</span>)
+            {
+                <a href="#96fe4e1729785931" class="i property">Start</a> = <span class="r20 r">start</span>;
+                <a href="#96116bea9deb53c1" class="i property">Label</a> = <span class="r21 r">label</span>;
+                <a href="#1627acdb995a8d8f" class="i property">Data</a> = <span class="r22 r">data</span>;
+                <a href="#20464f07a82fd293" class="i property">Length</a> = <span class="r23 r">length</span>;
+            }
+ 
+            <b>public int</b> <a id="96fe4e1729785931" href="../R/96fe4e1729785931.html" target="n" data-glyph="102,2" class="i property">Start</a> { <b>get</b>; }
+ 
+            <b>public</b> <span class="t t">ReadOnlySpan</span>&lt;<b>char</b>&gt; <a id="96116bea9deb53c1" href="../R/96116bea9deb53c1.html" target="n" data-glyph="102,2" class="i property">Label</a> { <b>get</b>; }
+ 
+            <b>public</b> <span class="t t">ReadOnlySpan</span>&lt;<b>char</b>&gt; <a id="1627acdb995a8d8f" href="../R/1627acdb995a8d8f.html" target="n" data-glyph="102,2" class="i property">Data</a> { <b>get</b>; }
+ 
+            <b>public int</b> <a id="20464f07a82fd293" href="../R/20464f07a82fd293.html" target="n" data-glyph="102,2" class="i property">Length</a> { <b>get</b>; }
+ 
+            <b>public byte</b>[] <a id="60865d55dc81b668" href="../R/60865d55dc81b668.html" target="n" data-glyph="72,2" class="i method">FromBase64Data</a>() =&gt; <a href="@1@netstandard/A.html#fc990bd1275d43d6" class="t t">Convert</a>.<a href="@1@netstandard/A.html#08c34f52087ba624" class="i method">FromBase64String</a>(<a href="#1627acdb995a8d8f" class="i property">Data</a>.<span class="i method">ToString</span>());
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>
