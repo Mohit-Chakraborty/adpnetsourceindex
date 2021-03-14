@@ -1,6 +1,6 @@
 ﻿<!DOCTYPE html>
 <html><head><title>TokenCache.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
-<body class="cB" onload="i(174);"><div class="dH">
+<body class="cB" onload="i(293);"><div class="dH">
 <table style="width: 100%">
 <tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Identity/TokenCache.cs" target="_top">TokenCache.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/master/sdk/identity/Azure.Identity/src/TokenCache.cs" target="_blank">View on GitHub</a></td></tr>
 <tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Identity" target="_top">Azure.Identity.csproj</a> (Azure.Identity)</td><td></td></tr>
@@ -11,12 +11,13 @@
 <span class="c">// Licensed under the MIT License.</span>
  
 <b>using</b> <span class="i n">System</span>;
-<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
 <b>using</b> <span class="i n">System</span>.<span class="i n">Runtime</span>.<span class="i n">CompilerServices</span>;
 <b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
 <b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
 <b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>;
 <b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Identity</span>.<span class="i n">Client</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Identity</span>.<span class="i n">Client</span>.<span class="i n">Extensions</span>.<span class="i n">Msal</span>;
  
 <b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Identity</span>
 {
@@ -25,13 +26,21 @@
     <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
 <span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA1001</span> <span class="c">// Types that own disposable fields should be disposable</span>
     <span class="c">// SemaphoreSlim only needs to be disposed when AvailableWaitHandle is called.</span>
-    <b>public class</b> <a id="f7486f13450160f0" href="R/f7486f13450160f0.html" target="n" data-glyph="0,0" class="t t">TokenCache</a>
+    <b>internal class</b> <a id="f7486f13450160f0" href="R/f7486f13450160f0.html" target="n" data-glyph="2,0" class="t t">TokenCache</a>
 <span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">CA1001</span> <span class="c">// Types that own disposable fields should be disposable</span>
     {
         <b>private readonly</b> <a href="@1@netstandard/A.html#d57f52e0341a581f" class="t t">SemaphoreSlim</a> <a id="8dd578214b2afda5" href="R/8dd578214b2afda5.html" target="n" data-glyph="46,1" class="i field">_lock</a> = <b>new</b> <a href="@1@netstandard/A.html#ed5ff10a1fcba4d4" class="t constructor">SemaphoreSlim</a>(1, 1);
         <b>private</b> <a href="@1@netstandard/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a> <a id="0a54c7da5e6756d2" href="R/0a54c7da5e6756d2.html" target="n" data-glyph="46,1" class="i field">_lastUpdated</a>;
         <b>private</b> <a href="@1@netstandard/A.html#33881cc60b76a932" class="t t">ConditionalWeakTable</a>&lt;<b>object</b>, <a href="#c412f10053d3fa44" class="t t">CacheTimestamp</a>&gt; <a id="5b9b35570e1a88e7" href="R/5b9b35570e1a88e7.html" target="n" data-glyph="46,1" class="i field">_cacheAccessMap</a>;
         <b>internal</b> <a href="@1@netstandard/A.html#87d60abb7092d5a4" class="t t">Func</a>&lt;<span class="t t">IPublicClientApplication</span>&gt; <a id="c6f93d78ef673210" href="R/c6f93d78ef673210.html" target="n" data-glyph="44,1" class="i field">_publicClientApplicationFactory</a>;
+        <span class="c">// we are creating the MsalCacheHelper with a random guid based clientId to work around issue https://github.com/AzureAD/microsoft-authentication-extensions-for-dotnet/issues/98</span>
+        <span class="c">// This does not impact the functionality of the cacheHelper as the ClientId is only used to iterate accounts in the cache not for authentication purposes.</span>
+        <b>internal static readonly string</b> <a id="9296a0cae0225a7b" href="R/9296a0cae0225a7b.html" target="n" data-glyph="44,1" class="i field">s_msalCacheClientId</a> = <a href="@1@netstandard/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@1@netstandard/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@1@netstandard/A.html#a6547a472def7796" class="i method">ToString</a>();
+        <b>private readonly bool</b> <a id="88a200026b1fcbbd" href="R/88a200026b1fcbbd.html" target="n" data-glyph="46,1" class="i field">_allowUnencryptedStorage</a>;
+        <b>private readonly string</b> <a id="0d906bb728a2b12d" href="R/0d906bb728a2b12d.html" target="n" data-glyph="46,1" class="i field">_name</a>;
+        <b>private readonly bool</b> <a id="0af707023cb5563d" href="R/0af707023cb5563d.html" target="n" data-glyph="46,1" class="i field">_persistToDisk</a>;
+        <b>private static</b> <a href="AsyncLockWithValue.cs.html#5e92cb3f7f76aa38" class="t t">AsyncLockWithValue</a>&lt;<a href="MsalCacheHelperWrapper.cs.html#95b43b078dcc2270" class="t t">MsalCacheHelperWrapper</a>&gt; <a id="7b354c79dac72517" href="R/7b354c79dac72517.html" target="n" data-glyph="46,1" class="i field">cacheHelperLock</a> = <b>new</b> <a href="AsyncLockWithValue.cs.html#5e92cb3f7f76aa38" class="t constructor">AsyncLockWithValue</a>&lt;<a href="MsalCacheHelperWrapper.cs.html#95b43b078dcc2270" class="t t">MsalCacheHelperWrapper</a>&gt;();
+        <b>private readonly</b> <a href="MsalCacheHelperWrapper.cs.html#95b43b078dcc2270" class="t t">MsalCacheHelperWrapper</a> <a id="c3fb92aebe4b81c2" href="R/c3fb92aebe4b81c2.html" target="n" data-glyph="46,1" class="i field">_cacheHelperWrapper</a>;
  
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
         <span class="c">///</span><span class="c"> The internal state of the cache.</span>
@@ -57,126 +66,236 @@
         }
  
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
-        <span class="c">///</span><span class="c"> Instantiates a new </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#f7486f13450160f0" class="t t">TokenCache</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> Creates a new instance of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#f7486f13450160f0" class="t t">TokenCache</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> with the specified options.</span>
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
-        <b>public</b> <a id="fd1f32013ce191d6" href="R/fd1f32013ce191d6.html" target="n" data-glyph="72,1" class="t constructor">TokenCache</a>()
-            : <a href="#03e0b7bba2ee4f2f" class="k">this</a>(<a href="@1@netstandard/A.html#156e066ecc4ccedf" class="t t">Array</a>.<a href="@1@netstandard/A.html#bc9fd1be0e4f4e70" class="i method">Empty</a>&lt;<b>byte</b>&gt;())
-        {
-        }
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">options</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Options controlling the storage of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#f7486f13450160f0" class="t t">TokenCache</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="dd047456a9e3efb2" href="R/dd047456a9e3efb2.html" target="n" data-glyph="72,1" class="t constructor">TokenCache</a>(<a href="TokenCachePersistenceOptions.cs.html#32d7f95071301e38" class="t t">TokenCachePersistenceOptions</a> <span id="r0 rd" class="r0 r">options</span> = <b>null</b>)
+            : <a href="#f97b301405234f07" class="k">this</a>(<span class="r0 r">options</span>, <b>default</b>, <b>default</b>)
+        { }
  
-        <b>internal</b> <a id="03e0b7bba2ee4f2f" href="R/03e0b7bba2ee4f2f.html" target="n" data-glyph="74,1" class="t constructor">TokenCache</a>(<b>byte</b>[] <span id="r0 rd" class="r0 r">data</span>, <a href="@1@netstandard/A.html#87d60abb7092d5a4" class="t t">Func</a>&lt;<span class="t t">IPublicClientApplication</span>&gt; <span id="r1 rd" class="r1 r">publicApplicationFactory</span> = <b>null</b>)
+        <b>internal</b> <a id="f97b301405234f07" href="R/f97b301405234f07.html" target="n" data-glyph="74,1" class="t constructor">TokenCache</a>(<a href="TokenCachePersistenceOptions.cs.html#32d7f95071301e38" class="t t">TokenCachePersistenceOptions</a> <span id="r1 rd" class="r1 r">options</span>, <a href="MsalCacheHelperWrapper.cs.html#95b43b078dcc2270" class="t t">MsalCacheHelperWrapper</a> <span id="r2 rd" class="r2 r">cacheHelperWrapper</span>, <a href="@1@netstandard/A.html#87d60abb7092d5a4" class="t t">Func</a>&lt;<span class="t t">IPublicClientApplication</span>&gt; <span id="r3 rd" class="r3 r">publicApplicationFactory</span> = <b>null</b>)
         {
-            <a href="#86bf21ee95a21516" class="i property">Data</a> = <span class="r0 r">data</span>;
-            <a href="#0a54c7da5e6756d2" class="i field">_lastUpdated</a> = <a href="@1@netstandard/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@1@netstandard/A.html#04abe0cac293ebd0" class="i property">UtcNow</a>;
-            <a href="#5b9b35570e1a88e7" class="i field">_cacheAccessMap</a> = <b>new</b> <a href="@1@netstandard/A.html#d658441e04ee99a2" class="t constructor">ConditionalWeakTable</a>&lt;<b>object</b>, <a href="#c412f10053d3fa44" class="t t">CacheTimestamp</a>&gt;();
-            <a href="#c6f93d78ef673210" class="i field">_publicClientApplicationFactory</a> = <span class="r1 r">publicApplicationFactory</span> ?? <b>new</b> (() =&gt; <span class="t t">PublicClientApplicationBuilder</span>.<span class="i method">Create</span>(<a href="@1@netstandard/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@1@netstandard/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@1@netstandard/A.html#a6547a472def7796" class="i method">ToString</a>()).<span class="i method">Build</span>());
-        }
- 
-        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
-        <span class="c">///</span><span class="c"> An event notifying the subscriber that the underlying </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#f7486f13450160f0" class="t t">TokenCache</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> has been updated. This event can be handled to persist the updated cache data.</span>
-        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
-        <b>public event</b> <a href="@1@netstandard/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<a href="TokenCacheUpdatedArgs.cs.html#5da0c9c92e4d21f1" class="t t">TokenCacheUpdatedArgs</a>, <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a>&gt; <a id="5f7d26663a86c521" href="R/5f7d26663a86c521.html" target="n" data-glyph="30,1" class="i">Updated</a>;
- 
-        <b>internal virtual async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="8c49ac4f572c0340" href="R/8c49ac4f572c0340.html" target="n" data-glyph="74,1" class="i method">RegisterCache</a>(<b>bool</b> <span id="r2 rd" class="r2 r">async</span>, <span class="t t">ITokenCache</span> <span id="r3 rd" class="r3 r">tokenCache</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r4 rd" class="r4 r">cancellationToken</span>)
-        {
-            <b>if</b> (<span class="r2 r">async</span>)
+            <a href="#c3fb92aebe4b81c2" class="i field">_cacheHelperWrapper</a> = <span class="r2 r">cacheHelperWrapper</span> ?? <b>new</b> <a href="MsalCacheHelperWrapper.cs.html#52a36cf0e6a27aa1" class="t constructor">MsalCacheHelperWrapper</a>();
+            <a href="#c6f93d78ef673210" class="i field">_publicClientApplicationFactory</a> = <span class="r3 r">publicApplicationFactory</span> ?? <b>new</b> <span class="t">Func</span>&lt;<span class="t t">IPublicClientApplication</span>&gt;(() =&gt; <span class="t t">PublicClientApplicationBuilder</span>.<span class="i method">Create</span>(<a href="@1@netstandard/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@1@netstandard/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@1@netstandard/A.html#a6547a472def7796" class="i method">ToString</a>()).<span class="i method">Build</span>());
+            <b>if</b> (<span class="r1 r">options</span> <b>is</b> <a href="UnsafeTokenCacheOptions.cs.html#705df30e366864f7" class="t t">UnsafeTokenCacheOptions</a> <span id="r4 rd" class="r4 r">inMemoryOptions</span>)
             {
-                <b>await</b> <a href="#8dd578214b2afda5" class="i field">_lock</a>.<a href="@1@netstandard/A.html#7a679e542c73988f" class="i method">WaitAsync</a>(<span class="r4 r">cancellationToken</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+                <a href="#1af0a27ddd9aaadd" class="i field">TokenCacheUpdatedAsync</a> = <span class="r4 r">inMemoryOptions</span>.<a href="UnsafeTokenCacheOptions.cs.html#9c9634ed55e79c4d" class="i method">TokenCacheUpdatedAsync</a>;
+                <a href="#28e337048364301d" class="i field">RefreshCacheFromOptionsAsync</a> = <span class="r4 r">inMemoryOptions</span>.<a href="UnsafeTokenCacheOptions.cs.html#ba6c94fd5050cf7d" class="i method">RefreshCacheAsync</a>;
+                <a href="#0a54c7da5e6756d2" class="i field">_lastUpdated</a> = <a href="@1@netstandard/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@1@netstandard/A.html#04abe0cac293ebd0" class="i property">UtcNow</a>;
+                <a href="#5b9b35570e1a88e7" class="i field">_cacheAccessMap</a> = <b>new</b> <a href="@1@netstandard/A.html#d658441e04ee99a2" class="t constructor">ConditionalWeakTable</a>&lt;<b>object</b>, <a href="#c412f10053d3fa44" class="t t">CacheTimestamp</a>&gt;();
             }
             <b>else</b>
             {
-                <a href="#8dd578214b2afda5" class="i field">_lock</a>.<a href="@1@netstandard/A.html#03b17b43bf2a7131" class="i method">Wait</a>(<span class="r4 r">cancellationToken</span>);
+                <a href="#88a200026b1fcbbd" class="i field">_allowUnencryptedStorage</a> = <span class="r1 r">options</span>?.<a href="TokenCachePersistenceOptions.cs.html#5161260c327fe78e" class="i property">UnsafeAllowUnencryptedStorage</a> ?? <b>false</b>;
+                <a href="#0d906bb728a2b12d" class="i field">_name</a> = <span class="r1 r">options</span>?.<a href="TokenCachePersistenceOptions.cs.html#fc0b9c892e6ae781" class="i property">Name</a> ?? <a href="Constants.cs.html#2a406b5e3af954ca" class="t t">Constants</a>.<a href="Constants.cs.html#0b6f9aeaa9ad5892" class="i field">DefaultMsalTokenCacheName</a>;
+                <a href="#0af707023cb5563d" class="i field">_persistToDisk</a> = <b>true</b>;
             }
+        }
  
-            <b>try</b>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A delegate that is called with the cache contents when the underlying </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#f7486f13450160f0" class="t t">TokenCache</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> has been updated.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal</b> <a href="@1@netstandard/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<a href="TokenCacheUpdatedArgs.cs.html#5da0c9c92e4d21f1" class="t t">TokenCacheUpdatedArgs</a>, <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a>&gt; <a id="1af0a27ddd9aaadd" href="R/1af0a27ddd9aaadd.html" target="n" data-glyph="44,1" class="i field">TokenCacheUpdatedAsync</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A delegate that will be called before the cache is accessed. The data returned will be used to set the current state of the cache.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal</b> <a href="@1@netstandard/A.html#87d60abb7092d5a4" class="t t">Func</a>&lt;<a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="t t">ReadOnlyMemory</span>&lt;<b>byte</b>&gt;&gt;&gt; <a id="28e337048364301d" href="R/28e337048364301d.html" target="n" data-glyph="44,1" class="i field">RefreshCacheFromOptionsAsync</a>;
+ 
+        <b>internal virtual async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="8c49ac4f572c0340" href="R/8c49ac4f572c0340.html" target="n" data-glyph="74,1" class="i method">RegisterCache</a>(<b>bool</b> <span id="r5 rd" class="r5 r">async</span>, <span class="t t">ITokenCache</span> <span id="r6 rd" class="r6 r">tokenCache</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r7 rd" class="r7 r">cancellationToken</span>)
+        {
+            <b>if</b> (<a href="#0af707023cb5563d" class="i field">_persistToDisk</a>)
             {
-                <b>if</b> (!<a href="#5b9b35570e1a88e7" class="i field">_cacheAccessMap</a>.<a href="@1@netstandard/A.html#8f9e002b21ba8881" class="i method">TryGetValue</a>(<span class="r3 r">tokenCache</span>, <b>out _</b>))
+                <a href="MsalCacheHelperWrapper.cs.html#95b43b078dcc2270" class="t t">MsalCacheHelperWrapper</a> <span id="r8 rd" class="r8 r">cacheHelper</span> = <b>await</b> <a href="#9e0512560d85e203" class="i method">GetCacheHelperAsync</a>(<span class="r5 r">async</span>, <span class="r7 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                <span class="r8 r">cacheHelper</span>.<a href="MsalCacheHelperWrapper.cs.html#a3d46a9ef3fa9434" class="i method">RegisterCache</a>(<span class="r6 r">tokenCache</span>);
+            }
+            <b>else</b>
+            {
+                <b>if</b> (<span class="r5 r">async</span>)
                 {
-                    <span class="r3 r">tokenCache</span>.<span class="i method">SetBeforeAccessAsync</span>(<a href="#e4d03737121ea485" class="i method">OnBeforeCacheAccessAsync</a>);
- 
-                    <span class="r3 r">tokenCache</span>.<span class="i method">SetAfterAccessAsync</span>(<a href="#750b544560e13063" class="i method">OnAfterCacheAccessAsync</a>);
- 
-                    <a href="#5b9b35570e1a88e7" class="i field">_cacheAccessMap</a>.<a href="@1@netstandard/A.html#81e96afb65da57f3" class="i method">Add</a>(<span class="r3 r">tokenCache</span>, <b>new</b> <a href="#fe4ad9f6ddb42995" class="t constructor">CacheTimestamp</a>());
-                }
-            }
-            <b>finally</b>
-            {
-                <a href="#8dd578214b2afda5" class="i field">_lock</a>.<a href="@1@netstandard/A.html#f7527810bcfc0842" class="i method">Release</a>();
-            }
-        }
- 
-        <b>private async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="e4d03737121ea485" href="R/e4d03737121ea485.html" target="n" data-glyph="76,1" class="i method">OnBeforeCacheAccessAsync</a>(<span class="t t">TokenCacheNotificationArgs</span> <span id="r5 rd" class="r5 r">args</span>)
-        {
-            <b>await</b> <a href="#8dd578214b2afda5" class="i field">_lock</a>.<a href="@1@netstandard/A.html#1af724aabf43d565" class="i method">WaitAsync</a>().<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
- 
-            <b>try</b>
-            {
-                <span class="r5 r">args</span>.<span class="i property">TokenCache</span>.<span class="i method">DeserializeMsalV3</span>(<a href="#86bf21ee95a21516" class="i property">Data</a>, <b>true</b>);
- 
-                <a href="#5b9b35570e1a88e7" class="i field">_cacheAccessMap</a>.<a href="@1@netstandard/A.html#cb9ea652970c3d1b" class="i method">GetOrCreateValue</a>(<span class="r5 r">args</span>.<span class="i property">TokenCache</span>).<a href="#88d73ceb56b78a24" class="i method">Update</a>();
-            }
-            <b>finally</b>
-            {
-                <a href="#8dd578214b2afda5" class="i field">_lock</a>.<a href="@1@netstandard/A.html#f7527810bcfc0842" class="i method">Release</a>();
-            }
-        }
- 
-        <b>private async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="750b544560e13063" href="R/750b544560e13063.html" target="n" data-glyph="76,1" class="i method">OnAfterCacheAccessAsync</a>(<span class="t t">TokenCacheNotificationArgs</span> <span id="r6 rd" class="r6 r">args</span>)
-        {
-            <b>if</b> (<span class="r6 r">args</span>.<span class="i property">HasStateChanged</span>)
-            {
-                <b>await</b> <a href="#2ea603e254387464" class="i method">UpdateCacheDataAsync</a>(<span class="r6 r">args</span>.<span class="i property">TokenCache</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
-            }
-        }
- 
-        <b>private async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="2ea603e254387464" href="R/2ea603e254387464.html" target="n" data-glyph="76,1" class="i method">UpdateCacheDataAsync</a>(<span class="t t">ITokenCacheSerializer</span> <span id="r7 rd" class="r7 r">tokenCache</span>)
-        {
-            <b>await</b> <a href="#8dd578214b2afda5" class="i field">_lock</a>.<a href="@1@netstandard/A.html#1af724aabf43d565" class="i method">WaitAsync</a>().<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
- 
-            <b>try</b>
-            {
-                <b>if</b> (!<a href="#5b9b35570e1a88e7" class="i field">_cacheAccessMap</a>.<a href="@1@netstandard/A.html#8f9e002b21ba8881" class="i method">TryGetValue</a>(<span class="r7 r">tokenCache</span>, <b>out</b> <a href="#c412f10053d3fa44" class="t t">CacheTimestamp</a> <span id="r8 rd" class="r8 r">lastRead</span>) || <span class="r8 r">lastRead</span>.<a href="#60f46b019f702232" class="i property">Value</a> &lt; <a href="#0a54c7da5e6756d2" class="i field">_lastUpdated</a>)
-                {
-                    <a href="#86bf21ee95a21516" class="i property">Data</a> = <b>await</b> <a href="#cc6a65bf234887d2" class="i method">MergeCacheData</a>(<a href="#86bf21ee95a21516" class="i property">Data</a>, <span class="r7 r">tokenCache</span>.<span class="i method">SerializeMsalV3</span>()).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                    <b>await</b> <a href="#8dd578214b2afda5" class="i field">_lock</a>.<a href="@1@netstandard/A.html#7a679e542c73988f" class="i method">WaitAsync</a>(<span class="r7 r">cancellationToken</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
                 }
                 <b>else</b>
                 {
-                    <a href="#86bf21ee95a21516" class="i property">Data</a> = <span class="r7 r">tokenCache</span>.<span class="i method">SerializeMsalV3</span>();
+                    <a href="#8dd578214b2afda5" class="i field">_lock</a>.<a href="@1@netstandard/A.html#03b17b43bf2a7131" class="i method">Wait</a>(<span class="r7 r">cancellationToken</span>);
                 }
  
-                <a href="#0a54c7da5e6756d2" class="i field">_lastUpdated</a> = <a href="#5b9b35570e1a88e7" class="i field">_cacheAccessMap</a>.<a href="@1@netstandard/A.html#cb9ea652970c3d1b" class="i method">GetOrCreateValue</a>(<span class="r7 r">tokenCache</span>).<a href="#88d73ceb56b78a24" class="i method">Update</a>();
+                <b>try</b>
+                {
+                    <b>if</b> (!<a href="#5b9b35570e1a88e7" class="i field">_cacheAccessMap</a>.<a href="@1@netstandard/A.html#8f9e002b21ba8881" class="i method">TryGetValue</a>(<span class="r6 r">tokenCache</span>, <b>out _</b>))
+                    {
+                        <span class="r6 r">tokenCache</span>.<span class="i method">SetBeforeAccessAsync</span>(<a href="#e4d03737121ea485" class="i method">OnBeforeCacheAccessAsync</a>);
+ 
+                        <span class="r6 r">tokenCache</span>.<span class="i method">SetAfterAccessAsync</span>(<a href="#750b544560e13063" class="i method">OnAfterCacheAccessAsync</a>);
+ 
+                        <a href="#5b9b35570e1a88e7" class="i field">_cacheAccessMap</a>.<a href="@1@netstandard/A.html#81e96afb65da57f3" class="i method">Add</a>(<span class="r6 r">tokenCache</span>, <b>new</b> <a href="#fe4ad9f6ddb42995" class="t constructor">CacheTimestamp</a>());
+                    }
+                }
+                <b>finally</b>
+                {
+                    <a href="#8dd578214b2afda5" class="i field">_lock</a>.<a href="@1@netstandard/A.html#f7527810bcfc0842" class="i method">Release</a>();
+                }
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Resets the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#7b354c79dac72517" class="i field">cacheHelperLock</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> so that tests can validate multiple calls to </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#8c49ac4f572c0340" class="i method">RegisterCache</a><span class="c">&quot;</span><span class="c">/&gt;</span>
+        <span class="c">///</span><span class="c"> This should only be used for testing.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>internal static void</b> <a id="4e8d0c467a929e60" href="R/4e8d0c467a929e60.html" target="n" data-glyph="74,1" class="i method">ResetWrapperCache</a>()
+        {
+            <a href="#7b354c79dac72517" class="i field">cacheHelperLock</a> = <b>new</b> <a href="AsyncLockWithValue.cs.html#5e92cb3f7f76aa38" class="t constructor">AsyncLockWithValue</a>&lt;<a href="MsalCacheHelperWrapper.cs.html#95b43b078dcc2270" class="t t">MsalCacheHelperWrapper</a>&gt;();
+        }
+ 
+        <b>private async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="e4d03737121ea485" href="R/e4d03737121ea485.html" target="n" data-glyph="76,1" class="i method">OnBeforeCacheAccessAsync</a>(<span class="t t">TokenCacheNotificationArgs</span> <span id="r9 rd" class="r9 r">args</span>)
+        {
+            <b>await</b> <a href="#8dd578214b2afda5" class="i field">_lock</a>.<a href="@1@netstandard/A.html#1af724aabf43d565" class="i method">WaitAsync</a>().<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <b>try</b>
+            {
+                <b>if</b> (<a href="#28e337048364301d" class="i field">RefreshCacheFromOptionsAsync</a> != <b>null</b>)
+                {
+                    <a href="#86bf21ee95a21516" class="i property">Data</a> = (<b>await</b> <a href="#28e337048364301d" class="i field">RefreshCacheFromOptionsAsync</a>().<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>)).<span class="i method">ToArray</span>();
+                }
+                <span class="r9 r">args</span>.<span class="i property">TokenCache</span>.<span class="i method">DeserializeMsalV3</span>(<a href="#86bf21ee95a21516" class="i property">Data</a>, <b>true</b>);
+ 
+                <a href="#5b9b35570e1a88e7" class="i field">_cacheAccessMap</a>.<a href="@1@netstandard/A.html#cb9ea652970c3d1b" class="i method">GetOrCreateValue</a>(<span class="r9 r">args</span>.<span class="i property">TokenCache</span>).<a href="#88d73ceb56b78a24" class="i method">Update</a>();
             }
             <b>finally</b>
             {
                 <a href="#8dd578214b2afda5" class="i field">_lock</a>.<a href="@1@netstandard/A.html#f7527810bcfc0842" class="i method">Release</a>();
             }
+        }
  
-            <b>if</b> (<a href="#5f7d26663a86c521" class="i">Updated</a> != <b>null</b>)
+        <b>private async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="750b544560e13063" href="R/750b544560e13063.html" target="n" data-glyph="76,1" class="i method">OnAfterCacheAccessAsync</a>(<span class="t t">TokenCacheNotificationArgs</span> <span id="r10 rd" class="r10 r">args</span>)
+        {
+            <b>if</b> (<span class="r10 r">args</span>.<span class="i property">HasStateChanged</span>)
             {
-                <b>foreach</b> (<a href="@1@netstandard/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<a href="TokenCacheUpdatedArgs.cs.html#5da0c9c92e4d21f1" class="t t">TokenCacheUpdatedArgs</a>, <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a>&gt; <span id="r9 rd" class="r9 r">handler</span> <b>in</b> <a href="#5f7d26663a86c521" class="i">Updated</a>.<a href="@1@netstandard/A.html#4f8502d733f4bb5d" class="i method">GetInvocationList</a>())
-                {
-                    <b>await</b> <span class="r9 r">handler</span>(<b>new</b> <a href="TokenCacheUpdatedArgs.cs.html#d1fe1a0047421361" class="t constructor">TokenCacheUpdatedArgs</a>(<a href="#f7486f13450160f0" class="k">this</a>)).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
-                }
+                <b>await</b> <a href="#2ea603e254387464" class="i method">UpdateCacheDataAsync</a>(<span class="r10 r">args</span>.<span class="i property">TokenCache</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
             }
         }
  
-        <b>private async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>byte</b>[]&gt; <a id="cc6a65bf234887d2" href="R/cc6a65bf234887d2.html" target="n" data-glyph="76,1" class="i method">MergeCacheData</a>(<b>byte</b>[] <span id="r10 rd" class="r10 r">cacheA</span>, <b>byte</b>[] <span id="r11 rd" class="r11 r">cacheB</span>)
+        <b>private async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="2ea603e254387464" href="R/2ea603e254387464.html" target="n" data-glyph="76,1" class="i method">UpdateCacheDataAsync</a>(<span class="t t">ITokenCacheSerializer</span> <span id="r11 rd" class="r11 r">tokenCache</span>)
         {
-            <b>byte</b>[] <span id="r12 rd" class="r12 r">merged</span> = <b>null</b>;
+            <b>await</b> <a href="#8dd578214b2afda5" class="i field">_lock</a>.<a href="@1@netstandard/A.html#1af724aabf43d565" class="i method">WaitAsync</a>().<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
  
-            <span class="t t">IPublicClientApplication</span> <span id="r13 rd" class="r13 r">client</span> = <a href="#c6f93d78ef673210" class="i field">_publicClientApplicationFactory</a>();
+            <b>try</b>
+            {
+                <b>if</b> (!<a href="#5b9b35570e1a88e7" class="i field">_cacheAccessMap</a>.<a href="@1@netstandard/A.html#8f9e002b21ba8881" class="i method">TryGetValue</a>(<span class="r11 r">tokenCache</span>, <b>out</b> <a href="#c412f10053d3fa44" class="t t">CacheTimestamp</a> <span id="r12 rd" class="r12 r">lastRead</span>) || <span class="r12 r">lastRead</span>.<a href="#60f46b019f702232" class="i property">Value</a> &lt; <a href="#0a54c7da5e6756d2" class="i field">_lastUpdated</a>)
+                {
+                    <a href="#86bf21ee95a21516" class="i property">Data</a> = <b>await</b> <a href="#cc6a65bf234887d2" class="i method">MergeCacheData</a>(<a href="#86bf21ee95a21516" class="i property">Data</a>, <span class="r11 r">tokenCache</span>.<span class="i method">SerializeMsalV3</span>()).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                }
+                <b>else</b>
+                {
+                    <a href="#86bf21ee95a21516" class="i property">Data</a> = <span class="r11 r">tokenCache</span>.<span class="i method">SerializeMsalV3</span>();
+                }
  
-            <span class="r13 r">client</span>.<span class="i property">UserTokenCache</span>.<span class="i method">SetBeforeAccess</span>(<span id="r14 rd" class="r14 r">args</span> =&gt; <span class="r14 r">args</span>.<span class="i property">TokenCache</span>.<span class="i method">DeserializeMsalV3</span>(<span class="r10 r">cacheA</span>));
+                <b>if</b> (<a href="#1af0a27ddd9aaadd" class="i field">TokenCacheUpdatedAsync</a> != <b>null</b>)
+                {
+                    <b>var</b> <span id="r13 rd" class="r13 r">eventBytes</span> = <a href="#86bf21ee95a21516" class="i property">Data</a>.<a href="@1@netstandard/A.html#783a052330e7d48d" class="i method">ToArray</a>();
+                    <b>await</b> <a href="#1af0a27ddd9aaadd" class="i field">TokenCacheUpdatedAsync</a>(<b>new</b> <a href="TokenCacheUpdatedArgs.cs.html#8d202af025b959b8" class="t constructor">TokenCacheUpdatedArgs</a>(<span class="r13 r">eventBytes</span>)).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+                }
  
-            <b>await</b> <span class="r13 r">client</span>.<span class="i method">GetAccountsAsync</span>().<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                <a href="#0a54c7da5e6756d2" class="i field">_lastUpdated</a> = <a href="#5b9b35570e1a88e7" class="i field">_cacheAccessMap</a>.<a href="@1@netstandard/A.html#cb9ea652970c3d1b" class="i method">GetOrCreateValue</a>(<span class="r11 r">tokenCache</span>).<a href="#88d73ceb56b78a24" class="i method">Update</a>();
+            }
+            <b>finally</b>
+            {
+                <a href="#8dd578214b2afda5" class="i field">_lock</a>.<a href="@1@netstandard/A.html#f7527810bcfc0842" class="i method">Release</a>();
+            }
+        }
  
-            <span class="r13 r">client</span>.<span class="i property">UserTokenCache</span>.<span class="i method">SetBeforeAccess</span>(<span id="r15 rd" class="r15 r">args</span> =&gt; <span class="r15 r">args</span>.<span class="i property">TokenCache</span>.<span class="i method">DeserializeMsalV3</span>(<span class="r11 r">cacheB</span>, <span class="r16 r">shouldClearExistingCache</span>: <b>false</b>));
+        <b>private async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>byte</b>[]&gt; <a id="cc6a65bf234887d2" href="R/cc6a65bf234887d2.html" target="n" data-glyph="76,1" class="i method">MergeCacheData</a>(<b>byte</b>[] <span id="r14 rd" class="r14 r">cacheA</span>, <b>byte</b>[] <span id="r15 rd" class="r15 r">cacheB</span>)
+        {
+            <b>byte</b>[] <span id="r16 rd" class="r16 r">merged</span> = <b>null</b>;
  
-            <span class="r13 r">client</span>.<span class="i property">UserTokenCache</span>.<span class="i method">SetAfterAccess</span>(<span id="r17 rd" class="r17 r">args</span> =&gt; <span class="r12 r">merged</span> = <span class="r17 r">args</span>.<span class="i property">TokenCache</span>.<span class="i method">SerializeMsalV3</span>());
+            <span class="t t">IPublicClientApplication</span> <span id="r17 rd" class="r17 r">client</span> = <a href="#c6f93d78ef673210" class="i field">_publicClientApplicationFactory</a>();
  
-            <b>await</b> <span class="r13 r">client</span>.<span class="i method">GetAccountsAsync</span>().<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+            <span class="r17 r">client</span>.<span class="i property">UserTokenCache</span>.<span class="i method">SetBeforeAccess</span>(<span id="r18 rd" class="r18 r">args</span> =&gt; <span class="r18 r">args</span>.<span class="i property">TokenCache</span>.<span class="i method">DeserializeMsalV3</span>(<span class="r14 r">cacheA</span>));
  
-            <b>return</b> <span class="r12 r">merged</span>;
+            <b>await</b> <span class="r17 r">client</span>.<span class="i method">GetAccountsAsync</span>().<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <span class="r17 r">client</span>.<span class="i property">UserTokenCache</span>.<span class="i method">SetBeforeAccess</span>(<span id="r19 rd" class="r19 r">args</span> =&gt; <span class="r19 r">args</span>.<span class="i property">TokenCache</span>.<span class="i method">DeserializeMsalV3</span>(<span class="r15 r">cacheB</span>, <span class="r20 r">shouldClearExistingCache</span>: <b>false</b>));
+ 
+            <span class="r17 r">client</span>.<span class="i property">UserTokenCache</span>.<span class="i method">SetAfterAccess</span>(<span id="r21 rd" class="r21 r">args</span> =&gt; <span class="r16 r">merged</span> = <span class="r21 r">args</span>.<span class="i property">TokenCache</span>.<span class="i method">SerializeMsalV3</span>());
+ 
+            <b>await</b> <span class="r17 r">client</span>.<span class="i method">GetAccountsAsync</span>().<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <b>return</b> <span class="r16 r">merged</span>;
+        }
+ 
+        <b>private async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="MsalCacheHelperWrapper.cs.html#95b43b078dcc2270" class="t t">MsalCacheHelperWrapper</a>&gt; <a id="9e0512560d85e203" href="R/9e0512560d85e203.html" target="n" data-glyph="76,1" class="i method">GetCacheHelperAsync</a>(<b>bool</b> <span id="r22 rd" class="r22 r">async</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r23 rd" class="r23 r">cancellationToken</span>)
+        {
+            <b>using</b> <a href="AsyncLockWithValue.cs.html#286c27a3197b72f3" class="k">var</a> <span id="r24 rd" class="r24 r">asyncLock</span> = <b>await</b> <a href="#7b354c79dac72517" class="i field">cacheHelperLock</a>.<a href="AsyncLockWithValue.cs.html#5ef9be9ea30144dd" class="i method">GetLockOrValueAsync</a>(<span class="r22 r">async</span>, <span class="r23 r">cancellationToken</span>).<span class="i method">ConfigureAwait</span>(<b>false</b>);
+ 
+            <b>if</b> (<span class="r24 r">asyncLock</span>.<a href="AsyncLockWithValue.cs.html#0466f2968c6dce2a" class="i property">HasValue</a>)
+            {
+                <b>return</b> <span class="r24 r">asyncLock</span>.<a href="AsyncLockWithValue.cs.html#3c39250d077d5409" class="i property">Value</a>;
+            }
+ 
+            <a href="MsalCacheHelperWrapper.cs.html#95b43b078dcc2270" class="t t">MsalCacheHelperWrapper</a> <span id="r25 rd" class="r25 r">cacheHelper</span>;
+ 
+            <b>try</b>
+            {
+                <span class="r25 r">cacheHelper</span> = <b>await</b> <a href="#ca7e85cb1cd1541a" class="i method">GetProtectedCacheHelperAsync</a>(<span class="r22 r">async</span>, <a href="#0d906bb728a2b12d" class="i field">_name</a>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                <span class="r25 r">cacheHelper</span>.<a href="MsalCacheHelperWrapper.cs.html#d87ac475c1cf12dc" class="i method">VerifyPersistence</a>();
+            }
+            <b>catch</b> (<span class="t t">MsalCachePersistenceException</span>)
+            {
+                <b>if</b> (<a href="#88a200026b1fcbbd" class="i field">_allowUnencryptedStorage</a>)
+                {
+                    <span class="r25 r">cacheHelper</span> = <b>await</b> <a href="#a84ff550d86000c2" class="i method">GetFallbackCacheHelperAsync</a>(<span class="r22 r">async</span>, <a href="#0d906bb728a2b12d" class="i field">_name</a>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                    <span class="r25 r">cacheHelper</span>.<a href="MsalCacheHelperWrapper.cs.html#d87ac475c1cf12dc" class="i method">VerifyPersistence</a>();
+                }
+                <b>else</b>
+                {
+                    <b>throw</b>;
+                }
+            }
+ 
+            <span class="r24 r">asyncLock</span>.<a href="AsyncLockWithValue.cs.html#706ee2072c29c8ff" class="i method">SetValue</a>(<span class="r25 r">cacheHelper</span>);
+ 
+            <b>return</b> <span class="r25 r">cacheHelper</span>;
+        }
+ 
+        <b>private async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="MsalCacheHelperWrapper.cs.html#95b43b078dcc2270" class="t t">MsalCacheHelperWrapper</a>&gt; <a id="ca7e85cb1cd1541a" href="R/ca7e85cb1cd1541a.html" target="n" data-glyph="76,1" class="i method">GetProtectedCacheHelperAsync</a>(<b>bool</b> <span id="r26 rd" class="r26 r">async</span>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r27 rd" class="r27 r">name</span>)
+        {
+            <span class="t t">StorageCreationProperties</span> <span id="r28 rd" class="r28 r">storageProperties</span> = <b>new</b> <span class="t constructor">StorageCreationPropertiesBuilder</span>(<span class="r27 r">name</span>, <a href="Constants.cs.html#2a406b5e3af954ca" class="t t">Constants</a>.<a href="Constants.cs.html#8af9c3834c5bb21b" class="i field">DefaultMsalTokenCacheDirectory</a>, <a href="#9296a0cae0225a7b" class="i field">s_msalCacheClientId</a>)
+                .<span class="i method">WithMacKeyChain</span>(<a href="Constants.cs.html#2a406b5e3af954ca" class="t t">Constants</a>.<a href="Constants.cs.html#f252fa678a9f9dc6" class="i field">DefaultMsalTokenCacheKeychainService</a>, <span class="r27 r">name</span>)
+                .<span class="i method">WithLinuxKeyring</span>(<a href="Constants.cs.html#2a406b5e3af954ca" class="t t">Constants</a>.<a href="Constants.cs.html#2527ca9c982bff3a" class="i field">DefaultMsalTokenCacheKeyringSchema</a>, <a href="Constants.cs.html#2a406b5e3af954ca" class="t t">Constants</a>.<a href="Constants.cs.html#3a3b34c2927d4e30" class="i field">DefaultMsalTokenCacheKeyringCollection</a>, <span class="r27 r">name</span>, <a href="Constants.cs.html#2a406b5e3af954ca" class="t t">Constants</a>.<a href="Constants.cs.html#666639ec5e6ca546" class="i field">DefaultMsaltokenCacheKeyringAttribute1</a>, <a href="Constants.cs.html#2a406b5e3af954ca" class="t t">Constants</a>.<a href="Constants.cs.html#4baee218822fb77e" class="i field">DefaultMsaltokenCacheKeyringAttribute2</a>)
+                .<span class="i method">Build</span>();
+ 
+            <a href="MsalCacheHelperWrapper.cs.html#95b43b078dcc2270" class="t t">MsalCacheHelperWrapper</a> <span id="r29 rd" class="r29 r">cacheHelper</span> = <b>await</b> <a href="#29461046b04c77c6" class="i method">InitializeCacheHelper</a>(<span class="r26 r">async</span>, <span class="r28 r">storageProperties</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <b>return</b> <span class="r29 r">cacheHelper</span>;
+        }
+ 
+        <b>private async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="MsalCacheHelperWrapper.cs.html#95b43b078dcc2270" class="t t">MsalCacheHelperWrapper</a>&gt; <a id="a84ff550d86000c2" href="R/a84ff550d86000c2.html" target="n" data-glyph="76,1" class="i method">GetFallbackCacheHelperAsync</a>(<b>bool</b> <span id="r30 rd" class="r30 r">async</span>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r31 rd" class="r31 r">name</span> = <a href="Constants.cs.html#2a406b5e3af954ca" class="t t">Constants</a>.<a href="Constants.cs.html#0b6f9aeaa9ad5892" class="i field">DefaultMsalTokenCacheName</a>)
+        {
+            <span class="t t">StorageCreationProperties</span> <span id="r32 rd" class="r32 r">storageProperties</span> = <b>new</b> <span class="t constructor">StorageCreationPropertiesBuilder</span>(<span class="r31 r">name</span>, <a href="Constants.cs.html#2a406b5e3af954ca" class="t t">Constants</a>.<a href="Constants.cs.html#8af9c3834c5bb21b" class="i field">DefaultMsalTokenCacheDirectory</a>, <a href="#9296a0cae0225a7b" class="i field">s_msalCacheClientId</a>)
+                .<span class="i method">WithMacKeyChain</span>(<a href="Constants.cs.html#2a406b5e3af954ca" class="t t">Constants</a>.<a href="Constants.cs.html#f252fa678a9f9dc6" class="i field">DefaultMsalTokenCacheKeychainService</a>, <span class="r31 r">name</span>)
+                .<span class="i method">WithLinuxUnprotectedFile</span>()
+                .<span class="i method">Build</span>();
+ 
+            <a href="MsalCacheHelperWrapper.cs.html#95b43b078dcc2270" class="t t">MsalCacheHelperWrapper</a> <span id="r33 rd" class="r33 r">cacheHelper</span> = <b>await</b> <a href="#29461046b04c77c6" class="i method">InitializeCacheHelper</a>(<span class="r30 r">async</span>, <span class="r32 r">storageProperties</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <b>return</b> <span class="r33 r">cacheHelper</span>;
+        }
+ 
+        <b>private async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="MsalCacheHelperWrapper.cs.html#95b43b078dcc2270" class="t t">MsalCacheHelperWrapper</a>&gt; <a id="29461046b04c77c6" href="R/29461046b04c77c6.html" target="n" data-glyph="76,1" class="i method">InitializeCacheHelper</a>(<b>bool</b> <span id="r34 rd" class="r34 r">async</span>, <span class="t t">StorageCreationProperties</span> <span id="r35 rd" class="r35 r">storageProperties</span>)
+        {
+            <b>if</b> (<span class="r34 r">async</span>)
+            {
+                <b>await</b> <a href="#c3fb92aebe4b81c2" class="i field">_cacheHelperWrapper</a>.<a href="MsalCacheHelperWrapper.cs.html#b9ef990dd47a4aa1" class="i method">InitializeAsync</a>(<span class="r35 r">storageProperties</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+            }
+            <b>else</b>
+            {
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">AZC0102</span> <span class="c">// Do not use GetAwaiter().GetResult(). Use the TaskExtensions.EnsureCompleted() extension method instead.</span>
+                <a href="#c3fb92aebe4b81c2" class="i field">_cacheHelperWrapper</a>.<a href="MsalCacheHelperWrapper.cs.html#b9ef990dd47a4aa1" class="i method">InitializeAsync</a>(<span class="r35 r">storageProperties</span>).<a href="@1@netstandard/A.html#9865ec4fb8abca74" class="i method">GetAwaiter</a>().<a href="@1@netstandard/A.html#fac5be2731353aa8" class="i method">GetResult</a>();
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">AZC0102</span> <span class="c">// Do not use GetAwaiter().GetResult(). Use the TaskExtensions.EnsureCompleted() extension method instead.</span>
+            }
+            <b>return</b> <a href="#c3fb92aebe4b81c2" class="i field">_cacheHelperWrapper</a>;
         }
     }
 }
