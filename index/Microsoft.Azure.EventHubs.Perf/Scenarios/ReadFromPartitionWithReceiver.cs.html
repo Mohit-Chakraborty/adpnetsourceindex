@@ -1,0 +1,244 @@
+﻿<!DOCTYPE html>
+<html><head><title>ReadFromPartitionWithReceiver.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(235);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.EventHubs.Perf/Scenarios/ReadFromPartitionWithReceiver.cs" target="_top">Scenarios\ReadFromPartitionWithReceiver.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/master/sdk/eventhub/Microsoft.Azure.EventHubs/perf/Scenarios/ReadFromPartitionWithReceiver.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.EventHubs.Perf" target="_top">Microsoft.Azure.EventHubs.Perf.csproj</a> (Microsoft.Azure.EventHubs.Perf)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Concurrent</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Test</span>.<span class="i n">Perf</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">EventHubs</span>.<span class="i n">Tests</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">EventHubs</span>.<span class="i n">Perf</span>.<span class="i n">Scenarios</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">   The performance test scenario focused on reading events</span>
+    <span class="c">///</span><span class="c">   with the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="/Microsoft.Azure.EventHubs/A.html#c6301acd46b0811a" class="t t">PartitionReceiver</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="../Infrastructure/EventHubsPerfTest.cs.html#51af4aa53eace2a0" class="t t">EventHubsPerfTest</a><span class="c">&quot;</span> <span class="c">/&gt;</span>
+    <span class="c">///</span>
+    <b>public sealed class</b> <a id="60a5c044c27d6949" href="../R/60a5c044c27d6949.html" target="n" data-glyph="0,0" class="t t">ReadFromPartitionWithReceiver</a> : <a href="../Infrastructure/EventHubsPerfTest.cs.html#51af4aa53eace2a0" class="t t">EventHubsPerfTest</a>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The Event Hub to publish events to; shared across all concurrent instances of the scenario.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static</b> <a href="../SharedSource/EventHubScope.cs.html#4c9b7b58ec842865" class="t t">EventHubScope</a> <a id="7f46587f8c7ddb7a" href="../R/7f46587f8c7ddb7a.html" target="n" data-glyph="46,1" class="i field">s_scope</a> ;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The set of consumer groups available for readers to reserve an instance of; shared across all concurrent instances of the scenario.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static</b> <a href="@0@mscorlib/A.html#18bcbcbdddbcfdcb" class="t t">ConcurrentQueue</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="91c5fb1079b69b24" href="../R/91c5fb1079b69b24.html" target="n" data-glyph="46,1" class="i field">s_consumerGroups</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The client instance that owns the connection to the Event Hubs namespace; each concurrent instance of the scenario will use an independent connection.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private</b> <a href="/Microsoft.Azure.EventHubs/A.html#ef11bbb905992f88" class="t t">EventHubClient</a> <a id="0648fe2906c452d3" href="../R/0648fe2906c452d3.html" target="n" data-glyph="46,1" class="i field">_client</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The receiver instance for reading events.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private</b> <a href="/Microsoft.Azure.EventHubs/A.html#c6301acd46b0811a" class="t t">PartitionReceiver</a> <a id="533d9a4b9c04764a" href="../R/533d9a4b9c04764a.html" target="n" data-glyph="46,1" class="i field">_receiver</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The identifier of the Event Hub partition from which events should be read.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private string</b> <a id="666549a6b87c673c" href="../R/666549a6b87c673c.html" target="n" data-glyph="46,1" class="i field">_partitionId</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#60a5c044c27d6949" class="t t">ReadFromPartitionWithReceiver</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">options</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The set of options to consider for configuring the scenario.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="0517522ce581dd67" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">ReadFromPartitionWithReceiver</a>(<a href="/Azure.Test.Perf/A.html#36fd2afd5cf97bf6" class="t t">SizeCountOptions</a> <span id="r0 rd" class="r0 r">options</span>) : <a href="../Infrastructure/EventHubsPerfTest.cs.html#ee9e4ea621d0a8b7" class="k">base</a>(<span class="r0 r">options</span>)
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Performs the tasks needed to initialize and set up the environment for the test scenario.</span>
+        <span class="c">///</span><span class="c">   When multiple instances are run in parallel, the setup will take place once, prior to the</span>
+        <span class="c">///</span><span class="c">   execution of the first test instance.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public async override</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="39fc864eef8d5aba" href="../R/39fc864eef8d5aba.html" target="n" data-glyph="72,1" class="i method">GlobalSetupAsync</a>()
+        {
+            <b>await</b> <a href="../Infrastructure/EventHubsPerfTest.cs.html#51af4aa53eace2a0" class="k">base</a>.<a href="/Azure.Test.Perf/A.html#f321c21be5274d4d" class="i method">GlobalCleanupAsync</a>().<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <span class="c">// The limit for concurrent readers in a consumer group is 5; create</span>
+            <span class="c">// enough consumer groups to support the requested parallelism.</span>
+ 
+            <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="k">var</a> <span id="r1 rd" class="r1 r">consumerGroups</span> = <a href="@0@System.Core/A.html#577032c8811e20d3" class="t t">Enumerable</a>
+                .<a href="@0@System.Core/A.html#fda9d378095a6464" class="i method">Range</a>(0, (<b>int</b>)<a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#1841a5ce24ed9fb3" class="i method">Ceiling</a>(<a href="/Azure.Test.Perf/A.html#6753d1eb81ca846e" class="i property">Options</a>.<a href="/Azure.Test.Perf/A.html#ad51e0cb6a8c8a44" class="i property">Parallel</a> / 5.0d))
+                .<a href="@0@System.Core/A.html#5c652c53e80df013" class="i method">Select</a>(<span id="r2 rd" class="r2 r">index</span> =&gt; <span class="s">$&quot;</span><span class="s">group</span>{ <span class="r2 r">index</span> }<span class="s">&quot;</span>);
+ 
+            <span class="c">// Create the Event Hub scope using the computed consumer groups; queue the</span>
+            <span class="c">// groups with 5 instances each, so that readers can reserve one without</span>
+            <span class="c">// exceeding the concurrent reader limit.</span>
+ 
+            <a href="#7f46587f8c7ddb7a" class="i field">s_scope</a> = <b>await</b> <a href="../SharedSource/EventHubScope.cs.html#4c9b7b58ec842865" class="t t">EventHubScope</a>.<a href="../SharedSource/EventHubScope.cs.html#fe578893259fbcd8" class="i method">CreateAsync</a>(4, <span class="r1 r">consumerGroups</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+            <a href="#91c5fb1079b69b24" class="i field">s_consumerGroups</a> = <b>new</b> <a href="@0@mscorlib/A.html#50871c13ec8cfd35" class="t constructor">ConcurrentQueue</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span class="r1 r">consumerGroups</span>.<a href="@0@System.Core/A.html#8f3471331178bcb0" class="i method">SelectMany</a>(<span id="r3 rd" class="r3 r">group</span> =&gt; <a href="#f85cbe06cab0e32b" class="i method">Repeat</a>(<span class="r3 r">group</span>, 5)));
+ 
+            <span class="c">// Seed the necessary number of events to the selected partition.  Note that this</span>
+            <span class="c">// method makes heavy use of class state such as the TestUtility, Options, and</span>
+            <span class="c">// PartitionId.</span>
+ 
+            <b>await</b> <a href="#9f7298757ec0be5e" class="i method">SeedEventsToBeReadAsync</a>(<a href="#0648fe2906c452d3" class="i field">_client</a>, <a href="#666549a6b87c673c" class="i field">_partitionId</a>).<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <span class="c">// Force a pause to give the events time to be committed in the Event Hubs</span>
+            <span class="c">// service and made available to read.</span>
+ 
+            <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#87a671fb5b9b4384" class="i method">Delay</a>(<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(30)).<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Performs the tasks needed to clean up the environment for the test scenario.</span>
+        <span class="c">///</span><span class="c">   When multiple instances are run in parallel, the cleanup will take place once,</span>
+        <span class="c">///</span><span class="c">   after the execution of all test instances.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public async override</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="0b68de57b1bb3a3d" href="../R/0b68de57b1bb3a3d.html" target="n" data-glyph="72,1" class="i method">GlobalCleanupAsync</a>()
+        {
+            <b>await</b> <a href="#7f46587f8c7ddb7a" class="i field">s_scope</a>.<a href="../SharedSource/EventHubScope.cs.html#0cc9ee7dd19bc55d" class="i method">DisposeAsync</a>().<span class="i">ConfigureAwait</span>(<b>false</b>);
+            <b>await</b> <a href="../Infrastructure/EventHubsPerfTest.cs.html#51af4aa53eace2a0" class="k">base</a>.<a href="/Azure.Test.Perf/A.html#f321c21be5274d4d" class="i method">GlobalCleanupAsync</a>().<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Performs the tasks needed to initialize and set up the environment for an instance</span>
+        <span class="c">///</span><span class="c">   of the test scenario.  When multiple instances are run in parallel, setup will be</span>
+        <span class="c">///</span><span class="c">   run once for each prior to its execution.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public async override</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="c6bf56b6ff61a5a1" href="../R/c6bf56b6ff61a5a1.html" target="n" data-glyph="72,1" class="i method">SetupAsync</a>()
+        {
+            <b>await</b> <a href="../Infrastructure/EventHubsPerfTest.cs.html#51af4aa53eace2a0" class="k">base</a>.<a href="/Azure.Test.Perf/A.html#5bcf2ef2415e5758" class="i method">SetupAsync</a>().<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <span class="c">// Attempt to take a consumer group from the available set; to ensure that the</span>
+            <span class="c">// test scenario can support the requested level of parallelism without violating</span>
+            <span class="c">// the concurrent reader limits of a consumer group, the default consumer group</span>
+            <span class="c">// should not be used.</span>
+ 
+            <b>if</b> (!<a href="#91c5fb1079b69b24" class="i field">s_consumerGroups</a>.<a href="@0@mscorlib/A.html#88b9f17c9182267f" class="i method">TryDequeue</a>(<b>out</b> <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r4 rd" class="r4 r">consumerGroup</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;Unable to reserve a consumer group to read from.&quot;</span>);
+            }
+ 
+            <a href="#0648fe2906c452d3" class="i field">_client</a> = <a href="/Microsoft.Azure.EventHubs/A.html#ef11bbb905992f88" class="t t">EventHubClient</a>.<a href="/Microsoft.Azure.EventHubs/A.html#911ed71627886602" class="i method">CreateFromConnectionString</a>(<a href="../SharedSource/TestUtility.cs.html#1718c2e5884a4c76" class="t t">TestUtility</a>.<a href="../SharedSource/TestUtility.cs.html#25875c9a7016b669" class="i method">BuildEventHubsConnectionString</a>(<a href="#7f46587f8c7ddb7a" class="i field">s_scope</a>.<a href="../SharedSource/EventHubScope.cs.html#8005a78a892ade08" class="i property">EventHubName</a>));
+            <a href="#666549a6b87c673c" class="i field">_partitionId</a> = (<b>await</b> <a href="#0648fe2906c452d3" class="i field">_client</a>.<a href="/Microsoft.Azure.EventHubs/A.html#c54802e92c6bcf7a" class="i method">GetRuntimeInformationAsync</a>().<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>)).<a href="/Microsoft.Azure.EventHubs/A.html#6f7d55289e44ee46" class="i property">PartitionIds</a>[0];
+ 
+            <a href="#533d9a4b9c04764a" class="i field">_receiver</a> = <a href="#0648fe2906c452d3" class="i field">_client</a>.<a href="/Microsoft.Azure.EventHubs/A.html#de3b024c736874a2" class="i method">CreateReceiver</a>(
+                <span class="r4 r">consumerGroup</span>,
+                <a href="#666549a6b87c673c" class="i field">_partitionId</a>,
+                <a href="/Microsoft.Azure.EventHubs/A.html#5c55f1ce5bfdf68d" class="t t">EventPosition</a>.<a href="/Microsoft.Azure.EventHubs/A.html#1869cec8b62a47a2" class="i method">FromStart</a>());
+ 
+            <span class="c">// Force the connection and link creation by reading a single event.</span>
+ 
+            <b>await</b> <a href="#533d9a4b9c04764a" class="i field">_receiver</a>.<a href="/Microsoft.Azure.EventHubs/A.html#bb31ba9a4e2f93c1" class="i method">ReceiveAsync</a>(1).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Performs the tasks needed to clean up the environment for an instance</span>
+        <span class="c">///</span><span class="c">   of the test scenario.  When multiple instances are run in parallel, cleanup</span>
+        <span class="c">///</span><span class="c">   will be run once for each after execution has completed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public async override</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="195b15d8881bb528" href="../R/195b15d8881bb528.html" target="n" data-glyph="72,1" class="i method">CleanupAsync</a>()
+        {
+            <b>await</b> <a href="#0648fe2906c452d3" class="i field">_client</a>.<a href="/Microsoft.Azure.EventHubs/A.html#b5a78e9c3de00805" class="i method">CloseAsync</a>().<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+            <b>await</b> <a href="#533d9a4b9c04764a" class="i field">_receiver</a>.<a href="/Microsoft.Azure.EventHubs/A.html#8e558432509fb0f0" class="i method">CloseAsync</a>().<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+            <b>await</b> <a href="../Infrastructure/EventHubsPerfTest.cs.html#51af4aa53eace2a0" class="k">base</a>.<a href="/Azure.Test.Perf/A.html#912d4c73ddef5685" class="i method">CleanupAsync</a>().<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Executes the performance test scenario asynchronously.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The token used to signal when cancellation is requested.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public async override</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="b7f4487b6caf82fc" href="../R/b7f4487b6caf82fc.html" target="n" data-glyph="72,1" class="i method">RunAsync</a>(<a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r5 rd" class="r5 r">cancellationToken</span>)
+        {
+            <span class="c">// Read the requested number of events.</span>
+ 
+            <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r6 rd" class="r6 r">remainingEvents</span> = <a href="/Azure.Test.Perf/A.html#6753d1eb81ca846e" class="i property">Options</a>.<a href="/Azure.Test.Perf/A.html#6687c1b23991e046" class="i property">Count</a>;
+ 
+            <b>while</b> ((!<span class="r5 r">cancellationToken</span>.<a href="@0@mscorlib/A.html#f32abbe8e2f1f6c1" class="i property">IsCancellationRequested</a>) &amp;&amp; (<span class="r6 r">remainingEvents</span> &gt; 0))
+            {
+                <span class="r6 r">remainingEvents</span> -= (<b>await</b> <a href="#533d9a4b9c04764a" class="i field">_receiver</a>.<a href="/Microsoft.Azure.EventHubs/A.html#bb31ba9a4e2f93c1" class="i method">ReceiveAsync</a>(<span class="r6 r">remainingEvents</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>)).<a href="@0@System.Core/A.html#41ef9e39e54d0d0b" class="i method">Count</a>();
+            }
+ 
+            <span class="c">// If iteration stopped due to cancellation, ensure that the expected exception is thrown.</span>
+ 
+            <span class="r5 r">cancellationToken</span>.<a href="@0@mscorlib/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Seeds the Event Hub partition with enough events to satisfy the read operations the test scenario</span>
+        <span class="c">///</span><span class="c">   is expected to perform.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">client</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The client to use for publishing events; ownership is assumed to be retained by the caller.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">partitionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The identifier of the partition to which events should be published.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   This method makes heavy use of class state, including the</span>
+        <span class="c">///</span><span class="c">   test environment and command line options.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="9f7298757ec0be5e" href="../R/9f7298757ec0be5e.html" target="n" data-glyph="76,1" class="i method">SeedEventsToBeReadAsync</a>(<a href="/Microsoft.Azure.EventHubs/A.html#ef11bbb905992f88" class="t t">EventHubClient</a> <span id="r7 rd" class="r7 r">client</span>,
+                                                   <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r8 rd" class="r8 r">partitionId</span>)
+        {
+            <span class="c">// Calculate the number of events needed to satisfy the number of events per iteration</span>
+            <span class="c">// and then buffer it to allow for the warm-up.</span>
+ 
+            <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r9 rd" class="r9 r">eventCount</span> = <a href="/Azure.Test.Perf/A.html#6753d1eb81ca846e" class="i property">Options</a>.<a href="/Azure.Test.Perf/A.html#6687c1b23991e046" class="i property">Count</a> * <a href="/Azure.Test.Perf/A.html#6753d1eb81ca846e" class="i property">Options</a>.<a href="/Azure.Test.Perf/A.html#ffefc9416dae57fb" class="i property">Iterations</a> * 3;
+            <b>var</b> <span id="r10 rd" class="r10 r">eventBody</span> = <a href="../Infrastructure/EventGenerator.cs.html#c9ebf375ef4eea25" class="t t">EventGenerator</a>.<a href="../Infrastructure/EventGenerator.cs.html#e02d6aa7cb1112d9" class="i method">CreateRandomBody</a>(<a href="/Azure.Test.Perf/A.html#6753d1eb81ca846e" class="i property">Options</a>.<a href="/Azure.Test.Perf/A.html#a392729c8e15f3c7" class="i property">Size</a>);
+            <a href="/Microsoft.Azure.EventHubs/A.html#8b49c497c5b6a804" class="k">var</a> <span id="r11 rd" class="r11 r">sender</span> = <span class="r7 r">client</span>.<a href="/Microsoft.Azure.EventHubs/A.html#a34202db42c39c02" class="i method">CreatePartitionSender</a>(<span class="r8 r">partitionId</span>);
+ 
+            <b>try</b>
+            {
+                <b>foreach</b> (<a href="/Microsoft.Azure.EventHubs/A.html#f56ed6e805f7061b" class="k">var</a> <span id="r12 rd" class="r12 r">eventData</span> <b>in</b> <a href="../Infrastructure/EventGenerator.cs.html#c9ebf375ef4eea25" class="t t">EventGenerator</a>.<a href="../Infrastructure/EventGenerator.cs.html#74f25c9ee4ac6825" class="i method">CreateEventsFromBody</a>(<span class="r9 r">eventCount</span>, <span class="r10 r">eventBody</span>))
+                {
+                    <b>using</b> <a href="/Microsoft.Azure.EventHubs/A.html#3d69be77480a8202" class="k">var</a> <span id="r13 rd" class="r13 r">batch</span> = <span class="r11 r">sender</span>.<a href="/Microsoft.Azure.EventHubs/A.html#559117386ed6d37a" class="i method">CreateBatch</a>();
+ 
+                    <span class="c">// Fill the batch with as many events that will fit.</span>
+ 
+                    <b>while</b> (<span class="r13 r">batch</span>.<a href="/Microsoft.Azure.EventHubs/A.html#ede06a89dff1d816" class="i method">TryAdd</a>(<a href="../Infrastructure/EventGenerator.cs.html#c9ebf375ef4eea25" class="t t">EventGenerator</a>.<a href="../Infrastructure/EventGenerator.cs.html#60cdf239f610c5a4" class="i method">CreateEventFromBody</a>(<span class="r10 r">eventBody</span>)))
+                    {
+                    }
+ 
+                    <span class="c">// If there were no events in the batch, then a single event was generated that is too large to</span>
+                    <span class="c">// ever send.  In this context, it will be detected on the first TryAdd call, since events are</span>
+                    <span class="c">// sharing a common body.</span>
+ 
+                    <b>if</b> (<span class="r13 r">batch</span>.<a href="/Microsoft.Azure.EventHubs/A.html#4cccfdf523c818d8" class="i property">Count</a> == 0)
+                    {
+                        <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;There was an event too large to fit into a batch.&quot;</span>);
+                    }
+ 
+                    <b>await</b> <span class="r11 r">sender</span>.<a href="/Microsoft.Azure.EventHubs/A.html#4f6d5d8a0ab5027c" class="i method">SendAsync</a>(<span class="r13 r">batch</span>).<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+                }
+            }
+            <b>finally</b>
+            {
+                <b>await</b> <span class="r11 r">sender</span>.<a href="/Microsoft.Azure.EventHubs/A.html#3047ba6cc2c1461f" class="i method">CloseAsync</a>().<a href="@0@mscorlib/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Repeats the specified string the requested number of times, capturing the instances</span>
+        <span class="c">///</span><span class="c">   into a set.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r14 r">item</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The item to duplicate.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">count</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The number of duplicate items that the resulting set should contain.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">A set of </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r14 r">item</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> duplicated </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">count</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> times.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private</b> <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="f85cbe06cab0e32b" href="../R/f85cbe06cab0e32b.html" target="n" data-glyph="76,1" class="i method">Repeat</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r14 rd" class="r14 r">item</span>,
+                                           <b>int</b> <span id="r15 rd" class="r15 r">count</span>) =&gt;
+            <a href="@0@System.Core/A.html#577032c8811e20d3" class="t t">Enumerable</a>
+                .<a href="@0@System.Core/A.html#fda9d378095a6464" class="i method">Range</a>(1, <span class="r15 r">count</span>)
+                .<a href="@0@System.Core/A.html#5c652c53e80df013" class="i method">Select</a>(<span id="r16 rd" class="r16 r">index</span> =&gt; <span class="r14 r">item</span>);
+    }
+}
+</pre></td></tr></table></div></body></html>
