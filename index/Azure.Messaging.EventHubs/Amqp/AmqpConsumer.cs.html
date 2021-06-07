@@ -1,6 +1,6 @@
 ﻿<!DOCTYPE html>
 <html><head><title>AmqpConsumer.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
-<body class="cB" onload="i(460);"><div class="dH">
+<body class="cB" onload="i(579);"><div class="dH">
 <table style="width: 100%">
 <tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Messaging.EventHubs/Amqp/AmqpConsumer.cs" target="_top">Amqp\AmqpConsumer.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/master/sdk/eventhub/Azure.Messaging.EventHubs/src/Amqp/AmqpConsumer.cs" target="_blank">View on GitHub</a></td></tr>
 <tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Messaging.EventHubs" target="_top">Azure.Messaging.EventHubs.csproj</a> (Azure.Messaging.EventHubs)</td><td></td></tr>
@@ -13,7 +13,6 @@
 <b>using</b> <span class="i n">System</span>;
 <b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
 <b>using</b> <span class="i n">System</span>.<span class="i n">Globalization</span>;
-<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
 <b>using</b> <span class="i n">System</span>.<span class="i n">Runtime</span>.<span class="i n">ExceptionServices</span>;
 <b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
 <b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
@@ -41,6 +40,9 @@
  
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">An empty set of events which can be dispatched when no events are available.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
         <b>private static readonly</b> <a href="@1@netstandard/A.html#b040fb780bdd59f4" class="t t">IReadOnlyList</a>&lt;<a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a>&gt; <a id="e84edb4b309d45d8" href="../R/e84edb4b309d45d8.html" target="n" data-glyph="46,1" class="i field">EmptyEventSet</a> = <a href="@1@netstandard/A.html#156e066ecc4ccedf" class="t t">Array</a>.<a href="@1@netstandard/A.html#bc9fd1be0e4f4e70" class="i method">Empty</a>&lt;<a href="../EventData.cs.html#557aa370d1369b89" class="t t">EventData</a>&gt;();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">A captured exception that indicates the partition was stolen by another consumer; this should be surfaced when an attempt is made to open a consumer link.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private volatile</b> <a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a> <a id="7cfc608f47891f85" href="../R/7cfc608f47891f85.html" target="n" data-glyph="46,1" class="i field">_activePartitionStolenException</a>;
  
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">Indicates whether or not this instance has been closed.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
         <b>private volatile bool</b> <a id="133d285472047177" href="../R/133d285472047177.html" target="n" data-glyph="46,1" class="i field">_closed</a>;
@@ -98,6 +100,16 @@
         <b>private bool</b> <a id="e427d1b40c1caf14" href="../R/e427d1b40c1caf14.html" target="n" data-glyph="106,1" class="i property">TrackLastEnqueuedEventProperties</a> { <b>get</b>; }
  
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Indicates whether or not the consumer should consider itself invalid when a partition is stolen.  If set,</span>
+        <span class="c">///</span><span class="c">   an observed exception indicating that the partition was stolen will be captured and surfaced when any</span>
+        <span class="c">///</span><span class="c">   operation is requested.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">value</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the consumer is considered invalid after a partition is stolen; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">value</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private bool</b> <a id="200892560c5f7e56" href="../R/200892560c5f7e56.html" target="n" data-glyph="106,1" class="i property">InvalidateConsumerWhenPartitionStolen</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
         <span class="c">///</span><span class="c">   The policy to use for determining retry behavior for when an operation fails.</span>
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
         <span class="c">///</span>
@@ -134,9 +146,10 @@
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">prefetchSizeInBytes</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The cache size of the prefetch queue. When set, the link makes a best effort to ensure prefetched messages fit into the specified size.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">ownerLevel</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The relative priority to associate with the link; for a non-exclusive link, this value should be </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">trackLastEnqueuedEventProperties</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Indicates whether information on the last enqueued event on the partition is sent as events are received.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
-        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">connectionScope</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The AMQP connection context for operations .</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
-        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">messageConverter</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The converter to use for translating between AMQP messages and client types.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
-        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r10 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The retry policy to consider when an operation fails.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">invalidateConsumerWhenPartitionStolen</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Indicates whether or not the consumer should consider itself invalid when a partition is stolen.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">connectionScope</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The AMQP connection context for operations .</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r10 r">messageConverter</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The converter to use for translating between AMQP messages and client types.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r11 r">retryPolicy</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The retry policy to consider when an operation fails.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
         <span class="c">///</span>
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
         <span class="c">///</span><span class="c">   As an internal type, this class performs only basic sanity checks against its arguments.  It</span>
@@ -147,36 +160,38 @@
         <span class="c">///</span><span class="c">   caller.</span>
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
         <span class="c">///</span>
-        <b>public</b> <a id="d575f5c6832bd20b" href="../R/d575f5c6832bd20b.html" target="n" data-glyph="72,1" class="t constructor">AmqpConsumer</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r0 rd" class="r0 r">eventHubName</span>,
+        <b>public</b> <a id="3e61b4d48ac1a6ae" href="../R/3e61b4d48ac1a6ae.html" target="n" data-glyph="72,1" class="t constructor">AmqpConsumer</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r0 rd" class="r0 r">eventHubName</span>,
                             <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r1 rd" class="r1 r">consumerGroup</span>,
                             <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r2 rd" class="r2 r">partitionId</span>,
                             <a href="../Consumer/EventPosition.cs.html#97742fa7b7b6b68f" class="t t">EventPosition</a> <span id="r3 rd" class="r3 r">eventPosition</span>,
                             <b>bool</b> <span id="r7 rd" class="r7 r">trackLastEnqueuedEventProperties</span>,
+                            <b>bool</b> <span id="r8 rd" class="r8 r">invalidateConsumerWhenPartitionStolen</span>,
                             <b>long</b>? <span id="r6 rd" class="r6 r">ownerLevel</span>,
                             <b>uint</b>? <span id="r4 rd" class="r4 r">prefetchCount</span>,
                             <b>long</b>? <span id="r5 rd" class="r5 r">prefetchSizeInBytes</span>,
-                            <a href="AmqpConnectionScope.cs.html#2f26dbfbbea02e07" class="t t">AmqpConnectionScope</a> <span id="r8 rd" class="r8 r">connectionScope</span>,
-                            <a href="AmqpMessageConverter.cs.html#4d1b857e8b567cc4" class="t t">AmqpMessageConverter</a> <span id="r9 rd" class="r9 r">messageConverter</span>,
-                            <a href="../EventHubsRetryPolicy.cs.html#bc28d871ab581a88" class="t t">EventHubsRetryPolicy</a> <span id="r10 rd" class="r10 r">retryPolicy</span>)
+                            <a href="AmqpConnectionScope.cs.html#2f26dbfbbea02e07" class="t t">AmqpConnectionScope</a> <span id="r9 rd" class="r9 r">connectionScope</span>,
+                            <a href="AmqpMessageConverter.cs.html#4d1b857e8b567cc4" class="t t">AmqpMessageConverter</a> <span id="r10 rd" class="r10 r">messageConverter</span>,
+                            <a href="../EventHubsRetryPolicy.cs.html#bc28d871ab581a88" class="t t">EventHubsRetryPolicy</a> <span id="r11 rd" class="r11 r">retryPolicy</span>)
         {
             <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r0 r">eventHubName</span>, <b>nameof</b>(<span class="r0 r">eventHubName</span>));
             <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r1 r">consumerGroup</span>, <b>nameof</b>(<span class="r1 r">consumerGroup</span>));
             <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#6f15f042abe7f96a" class="i method">AssertNotNullOrEmpty</a>(<span class="r2 r">partitionId</span>, <b>nameof</b>(<span class="r2 r">partitionId</span>));
-            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r8 r">connectionScope</span>, <b>nameof</b>(<span class="r8 r">connectionScope</span>));
-            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r9 r">messageConverter</span>, <b>nameof</b>(<span class="r9 r">messageConverter</span>));
-            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r10 r">retryPolicy</span>, <b>nameof</b>(<span class="r10 r">retryPolicy</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r9 r">connectionScope</span>, <b>nameof</b>(<span class="r9 r">connectionScope</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r10 r">messageConverter</span>, <b>nameof</b>(<span class="r10 r">messageConverter</span>));
+            <a href="../P/0198b1312554d2ed.html#0198b1312554d2ed" class="t t">Argument</a>.<a href="../SharedSource/Azure.Core/Argument.cs.html#208d023d6fa23d33" class="i method">AssertNotNull</a>(<span class="r11 r">retryPolicy</span>, <b>nameof</b>(<span class="r11 r">retryPolicy</span>));
  
             <a href="#a65f69a8f68e2258" class="i property">EventHubName</a> = <span class="r0 r">eventHubName</span>;
             <a href="#77490465f86b911d" class="i property">ConsumerGroup</a> = <span class="r1 r">consumerGroup</span>;
             <a href="#9c8b823725a19048" class="i property">PartitionId</a> = <span class="r2 r">partitionId</span>;
             <a href="#6bb42d0f98c2df81" class="i property">CurrentEventPosition</a> = <span class="r3 r">eventPosition</span>;
             <a href="#e427d1b40c1caf14" class="i property">TrackLastEnqueuedEventProperties</a> = <span class="r7 r">trackLastEnqueuedEventProperties</span>;
-            <a href="#2b0d3abe83e8de9f" class="i property">ConnectionScope</a> = <span class="r8 r">connectionScope</span>;
-            <a href="#f9e86f3427d1e1e3" class="i property">RetryPolicy</a> = <span class="r10 r">retryPolicy</span>;
-            <a href="#0a9aee87d4c763fb" class="i property">MessageConverter</a> = <span class="r9 r">messageConverter</span>;
+            <a href="#200892560c5f7e56" class="i property">InvalidateConsumerWhenPartitionStolen</a> = <span class="r8 r">invalidateConsumerWhenPartitionStolen</span>;
+            <a href="#2b0d3abe83e8de9f" class="i property">ConnectionScope</a> = <span class="r9 r">connectionScope</span>;
+            <a href="#f9e86f3427d1e1e3" class="i property">RetryPolicy</a> = <span class="r11 r">retryPolicy</span>;
+            <a href="#0a9aee87d4c763fb" class="i property">MessageConverter</a> = <span class="r10 r">messageConverter</span>;
  
             <a href="#d6999d44ae9424b3" class="i property">ReceiveLink</a> = <b>new</b> <span class="t constructor">FaultTolerantAmqpObject</span>&lt;<span class="t t">ReceivingAmqpLink</span>&gt;(
-                <span id="r11 rd" class="r11 r">timeout</span> =&gt;
+                <span id="r12 rd" class="r12 r">timeout</span> =&gt;
                    <a href="#a4c0548224eedae4" class="i method">CreateConsumerLinkAsync</a>(
                         <span class="r1 r">consumerGroup</span>,
                         <span class="r2 r">partitionId</span>,
@@ -185,13 +200,9 @@
                         <span class="r5 r">prefetchSizeInBytes</span>,
                         <span class="r6 r">ownerLevel</span>,
                         <span class="r7 r">trackLastEnqueuedEventProperties</span>,
-                        <span class="r11 r">timeout</span>,
+                        <span class="r12 r">timeout</span>,
                         <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@1@netstandard/A.html#ec32c41597007382" class="i property">None</a>),
-                <span id="r12 rd" class="r12 r">link</span> =&gt;
-                {
-                    <span class="r12 r">link</span>.<span class="i property">Session</span>?.<span class="i method">SafeClose</span>();
-                    <span class="r12 r">link</span>.<span class="i method">SafeClose</span>();
-                });
+                <a href="#1adaeb4da098f83c" class="i method">CloseConsumerLink</a>);
         }
  
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
@@ -316,6 +327,33 @@
                     {
                         <a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r40 rd" class="r40 r">activeEx</span> = <span class="r39 r">ex</span>.<a href="ExceptionExtensions.cs.html#6453d876153de652" class="i method">TranslateServiceException</a>(<a href="#a65f69a8f68e2258" class="i property">EventHubName</a>);
  
+                        <span class="c">// If the partition was stolen determine the correct action to take for</span>
+                        <span class="c">// capturing it with respect to whether the consumer should be invalidated.</span>
+                        <span class="c">//</span>
+                        <span class="c">// In either case, it is a terminal exception and will not trigger a retry;</span>
+                        <span class="c">// allow the normal error handling flow to surface the exception.</span>
+ 
+                        <b>if</b> (<span class="r39 r">ex</span>.<a href="ExceptionExtensions.cs.html#032c5de713b3d709" class="i method">IsConsumerPartitionStolenException</a>())
+                        {
+                             <span class="c">// If the consumer should be invalidated, capture the exception</span>
+                             <span class="c">// and force-close the link.  This will ensure that the next operation</span>
+                             <span class="c">// will surface it.</span>
+ 
+                            <b>if</b> (<a href="#200892560c5f7e56" class="i property">InvalidateConsumerWhenPartitionStolen</a>)
+                            {
+                                <a href="#7cfc608f47891f85" class="i field">_activePartitionStolenException</a> = <span class="r39 r">ex</span>;
+                                <a href="#1adaeb4da098f83c" class="i method">CloseConsumerLink</a>(<span class="r21 r">link</span>);
+                            }
+                            <b>else</b>
+                            {
+                                <span class="c">// If the consumer should not be invalidated, clear any previously captured exception to avoid</span>
+                                <span class="c">// surfacing the failure multiple times.  If the link is stolen after this operation, it will</span>
+                                <span class="c">// be intercepted and handled as needed.</span>
+ 
+                                <a href="#7cfc608f47891f85" class="i field">_activePartitionStolenException</a> = <b>null</b>;
+                            }
+                        }
+ 
                         <span class="c">// Determine if there should be a retry for the next attempt; if so enforce the delay but do not quit the loop.</span>
                         <span class="c">// Otherwise, bubble the exception.</span>
  
@@ -420,21 +458,47 @@
         <span class="c">///</span>
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The AMQP link to use for consumer-related operations.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
         <span class="c">///</span>
-        <b>private async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="t t">ReceivingAmqpLink</span>&gt; <a id="a4c0548224eedae4" href="../R/a4c0548224eedae4.html" target="n" data-glyph="76,1" class="i method">CreateConsumerLinkAsync</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r46 rd" class="r46 r">consumerGroup</span>,
-                                                                      <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r47 rd" class="r47 r">partitionId</span>,
-                                                                      <a href="../Consumer/EventPosition.cs.html#97742fa7b7b6b68f" class="t t">EventPosition</a> <span id="r48 rd" class="r48 r">eventStartingPosition</span>,
-                                                                      <b>uint</b> <span id="r49 rd" class="r49 r">prefetchCount</span>,
-                                                                      <b>long</b>? <span id="r50 rd" class="r50 r">prefetchSizeInBytes</span>,
-                                                                      <b>long</b>? <span id="r51 rd" class="r51 r">ownerLevel</span>,
-                                                                      <b>bool</b> <span id="r52 rd" class="r52 r">trackLastEnqueuedEventProperties</span>,
-                                                                      <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r53 rd" class="r53 r">timeout</span>,
-                                                                      <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r54 rd" class="r54 r">cancellationToken</span>)
+        <b>protected async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="t t">ReceivingAmqpLink</span>&gt; <a id="a4c0548224eedae4" href="../R/a4c0548224eedae4.html" target="n" data-glyph="75,1" class="i method">CreateConsumerLinkAsync</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r46 rd" class="r46 r">consumerGroup</span>,
+                                                                        <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r47 rd" class="r47 r">partitionId</span>,
+                                                                        <a href="../Consumer/EventPosition.cs.html#97742fa7b7b6b68f" class="t t">EventPosition</a> <span id="r48 rd" class="r48 r">eventStartingPosition</span>,
+                                                                        <b>uint</b> <span id="r49 rd" class="r49 r">prefetchCount</span>,
+                                                                        <b>long</b>? <span id="r50 rd" class="r50 r">prefetchSizeInBytes</span>,
+                                                                        <b>long</b>? <span id="r51 rd" class="r51 r">ownerLevel</span>,
+                                                                        <b>bool</b> <span id="r52 rd" class="r52 r">trackLastEnqueuedEventProperties</span>,
+                                                                        <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r53 rd" class="r53 r">timeout</span>,
+                                                                        <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r54 rd" class="r54 r">cancellationToken</span>)
         {
-            <b>var</b> <span id="r55 rd" class="r55 r">link</span> = <b>default</b>(<span class="t t">ReceivingAmqpLink</span>);
+            <span class="c">// Determine if there is an active is an active exception that needs to be surfaced,</span>
+            <span class="c">// do so now.</span>
+            <span class="c">//</span>
+            <span class="c">// Note that this is a benign race; it is possible that multiple threads</span>
+            <span class="c">// will observe the active exception and surface it, even if the consumer is not</span>
+            <span class="c">// considered invalid.  This is reasonable behavior for this scenario as the underlying</span>
+            <span class="c">// condition is itself a race condition between multiple consumers.</span>
+ 
+            <a href="@1@netstandard/A.html#f092fb2b893a0162" class="k">var</a> <span id="r55 rd" class="r55 r">activeException</span> = <a href="#7cfc608f47891f85" class="i field">_activePartitionStolenException</a>;
+ 
+            <b>if</b> (<span class="r55 r">activeException</span> != <b>null</b>)
+            {
+                <span class="c">// If the consumer should not be considered invalid, clear the active exception if</span>
+                <span class="c">// it hasn&#39;t already been reset.</span>
+ 
+                <b>if</b> (!<a href="#200892560c5f7e56" class="i property">InvalidateConsumerWhenPartitionStolen</a>)
+                {
+                    <a href="@1@netstandard/A.html#8792520ddc6dadcb" class="t t">Interlocked</a>.<a href="@1@netstandard/A.html#21b11108350025da" class="i method">CompareExchange</a>(<b>ref</b> <a href="#7cfc608f47891f85" class="i field">_activePartitionStolenException</a>, <b>null</b>, <span class="r55 r">activeException</span>);
+                }
+ 
+                <a href="../Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#c960e5896e4dd589" class="i property">Log</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#10b4cb7416d0793d" class="i method">AmqpConsumerLinkCreateCapturedErrorThrow</a>(<a href="#a65f69a8f68e2258" class="i property">EventHubName</a>, <span class="r46 r">consumerGroup</span>, <span class="r47 r">partitionId</span>, <span class="r51 r">ownerLevel</span>?.<a href="@1@netstandard/A.html#db750e3aaa9e3279" class="i method">ToString</a>(<a href="@1@netstandard/A.html#e319c6636909012f" class="t t">CultureInfo</a>.<a href="@1@netstandard/A.html#26ef1c020f0dbb7a" class="i property">InvariantCulture</a>), <span class="r48 r">eventStartingPosition</span>.<a href="../Consumer/EventPosition.cs.html#71ff657092efb718" class="i method">ToString</a>(), <span class="r55 r">activeException</span>.<a href="@1@netstandard/A.html#5fba0e16215b42a3" class="i property">Message</a>);
+                <a href="@1@netstandard/A.html#1443447025759846" class="t t">ExceptionDispatchInfo</a>.<a href="@1@netstandard/A.html#139923899a417d5a" class="i method">Capture</a>(<span class="r55 r">activeException</span>).<a href="@1@netstandard/A.html#fc3b312e2d0ab87a" class="i method">Throw</a>();
+            }
+ 
+            <span class="c">// Create and open the consumer link.</span>
+ 
+            <b>var</b> <span id="r56 rd" class="r56 r">link</span> = <b>default</b>(<span class="t t">ReceivingAmqpLink</span>);
  
             <b>try</b>
             {
-                <span class="r55 r">link</span> = <b>await</b> <a href="#2b0d3abe83e8de9f" class="i property">ConnectionScope</a>.<a href="AmqpConnectionScope.cs.html#500df0d9e25bd675" class="i method">OpenConsumerLinkAsync</a>(
+                <span class="r56 r">link</span> = <b>await</b> <a href="#2b0d3abe83e8de9f" class="i property">ConnectionScope</a>.<a href="AmqpConnectionScope.cs.html#500df0d9e25bd675" class="i method">OpenConsumerLinkAsync</a>(
                     <span class="r46 r">consumerGroup</span>,
                     <span class="r47 r">partitionId</span>,
                     <span class="r48 r">eventStartingPosition</span>,
@@ -445,25 +509,80 @@
                     <span class="r52 r">trackLastEnqueuedEventProperties</span>,
                     <span class="r54 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
             }
-            <b>catch</b> (<a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r56 rd" class="r56 r">ex</span>)
+            <b>catch</b> (<a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r57 rd" class="r57 r">ex</span>)
             {
-                <a href="@1@netstandard/A.html#1443447025759846" class="t t">ExceptionDispatchInfo</a>.<a href="@1@netstandard/A.html#139923899a417d5a" class="i method">Capture</a>(<span class="r56 r">ex</span>.<a href="ExceptionExtensions.cs.html#6bb56e6a95a6147e" class="i method">TranslateConnectionCloseDuringLinkCreationException</a>(<a href="#a65f69a8f68e2258" class="i property">EventHubName</a>)).<a href="@1@netstandard/A.html#fc3b312e2d0ab87a" class="i method">Throw</a>();
+                <a href="@1@netstandard/A.html#1443447025759846" class="t t">ExceptionDispatchInfo</a>.<a href="@1@netstandard/A.html#139923899a417d5a" class="i method">Capture</a>(<span class="r57 r">ex</span>.<a href="ExceptionExtensions.cs.html#6bb56e6a95a6147e" class="i method">TranslateConnectionCloseDuringLinkCreationException</a>(<a href="#a65f69a8f68e2258" class="i property">EventHubName</a>)).<a href="@1@netstandard/A.html#fc3b312e2d0ab87a" class="i method">Throw</a>();
             }
  
-            <b>return</b> <span class="r55 r">link</span>;
+            <b>return</b> <span class="r56 r">link</span>;
         }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Closes the AMQP link used by the consumer, capturing the passive terminal exception that triggered</span>
+        <span class="c">///</span><span class="c">   closing if it should be surfaced during the next requested operation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>protected void</b> <a id="1adaeb4da098f83c" href="../R/1adaeb4da098f83c.html" target="n" data-glyph="75,1" class="i method">CloseConsumerLink</a>(<span class="t t">ReceivingAmqpLink</span> <span id="r58 rd" class="r58 r">link</span>)
+        {
+            <span class="c">// If there is no link, then no action needs to be</span>
+            <span class="c">// taken.</span>
+ 
+            <b>if</b> (<span class="r58 r">link</span> == <b>null</b>)
+            {
+                <b>return</b>;
+            }
+ 
+            <span class="c">// If the consumer is being closed, the sentinel variable will already be set, and</span>
+            <span class="c">// the terminal exception need not be considered.</span>
+ 
+            <b>if</b> (!<a href="#133d285472047177" class="i field">_closed</a>)
+            {
+                <a href="@1@netstandard/A.html#f092fb2b893a0162" class="k">var</a> <span id="r59 rd" class="r59 r">linkException</span> = <a href="#3b428a12cea513b7" class="i method">GetTerminalException</a>(<span class="r58 r">link</span>);
+ 
+                <span class="c">// If the terminal exception indicates that the partition was stolen from the consumer,</span>
+                <span class="c">// capture it so that it can be surfaced when the next operation is requested.</span>
+ 
+                <b>if</b> (<span class="r59 r">linkException</span>.<a href="ExceptionExtensions.cs.html#032c5de713b3d709" class="i method">IsConsumerPartitionStolenException</a>())
+                {
+                    <a href="../Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#c960e5896e4dd589" class="i property">Log</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#75bcfe51521138d5" class="i method">AmqpConsumerLinkFaultCapture</a>(<a href="#a65f69a8f68e2258" class="i property">EventHubName</a>, <a href="#77490465f86b911d" class="i property">ConsumerGroup</a>, <a href="#9c8b823725a19048" class="i property">PartitionId</a>, <span class="r59 r">linkException</span>.<a href="@1@netstandard/A.html#5fba0e16215b42a3" class="i property">Message</a>);
+                    <a href="#7cfc608f47891f85" class="i field">_activePartitionStolenException</a> = <span class="r59 r">linkException</span>;
+                }
+            }
+ 
+            <span class="c">// Close the link and it&#39;s associated session.</span>
+ 
+            <span class="r58 r">link</span>.<span class="i property">Session</span>?.<span class="i method">SafeClose</span>();
+            <span class="r58 r">link</span>.<span class="i method">SafeClose</span>();
+ 
+            <a href="../Diagnostics/EventHubsEventSource.cs.html#88bca2b6f3cfd5f2" class="t t">EventHubsEventSource</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#c960e5896e4dd589" class="i property">Log</a>.<a href="../Diagnostics/EventHubsEventSource.cs.html#057e767977a00b29" class="i method">FaultTolerantAmqpObjectClose</a>(<b>nameof</b>(<span class="t t">ReceivingAmqpLink</span>), <span class="s">&quot;&quot;</span>, <a href="#a65f69a8f68e2258" class="i property">EventHubName</a>, <a href="#77490465f86b911d" class="i property">ConsumerGroup</a>, <a href="#9c8b823725a19048" class="i property">PartitionId</a>, <span class="r58 r">link</span>.<span class="i property">TerminalException</span>?.<a href="@1@netstandard/A.html#5fba0e16215b42a3" class="i property">Message</a>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Gets the terminal exception that caused link closure.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r60 r">link</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The link to inspect for a terminal exception.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The terminal exception, if one was captured; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>protected virtual</b> <a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a> <a id="3b428a12cea513b7" href="../R/3b428a12cea513b7.html" target="n" data-glyph="75,1" class="i method">GetTerminalException</a>(<span class="t t">ReceivingAmqpLink</span> <span id="r60 rd" class="r60 r">link</span>) =&gt;
+            <span class="r60 r">link</span> <b>switch</b>
+            {
+                <b>null</b> =&gt; <b>null</b>,
+                <b>_</b> =&gt; <span class="r60 r">link</span>.<span class="i property">TerminalException</span>
+            };
  
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
         <span class="c">///</span><span class="c">   Uses the minimum value of the two specified </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> instances.</span>
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
         <span class="c">///</span>
-        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r57 r">firstOption</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The first option to consider.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
-        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r58 r">secondOption</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The second option to consider.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r61 r">firstOption</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The first option to consider.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r62 r">secondOption</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The second option to consider.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
         <span class="c">///</span>
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The smaller of the two specified intervals.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
         <span class="c">///</span>
-        <b>private static</b> <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="a33d1556d3588d05" href="../R/a33d1556d3588d05.html" target="n" data-glyph="76,1" class="i method">UseMinimum</a>(<a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r57 rd" class="r57 r">firstOption</span>,
-                                           <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r58 rd" class="r58 r">secondOption</span>) =&gt; (<span class="r57 r">firstOption</span> &lt; <span class="r58 r">secondOption</span>) ? <span class="r57 r">firstOption</span> : <span class="r58 r">secondOption</span>;
+        <b>private static</b> <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="a33d1556d3588d05" href="../R/a33d1556d3588d05.html" target="n" data-glyph="76,1" class="i method">UseMinimum</a>(<a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r61 rd" class="r61 r">firstOption</span>,
+                                           <a href="@1@netstandard/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <span id="r62 rd" class="r62 r">secondOption</span>) =&gt; (<span class="r61 r">firstOption</span> &lt; <span class="r62 r">secondOption</span>) ? <span class="r61 r">firstOption</span> : <span class="r62 r">secondOption</span>;
     }
 }
 </pre></td></tr></table></div></body></html>
