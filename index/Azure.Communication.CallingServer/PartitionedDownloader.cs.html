@@ -1,0 +1,227 @@
+﻿<!DOCTYPE html>
+<html><head><title>PartitionedDownloader.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(218);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Communication.CallingServer/PartitionedDownloader.cs" target="_top">PartitionedDownloader.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/master/sdk/communication/Azure.Communication.CallingServer/src/PartitionedDownloader.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Communication.CallingServer" target="_top">Azure.Communication.CallingServer.csproj</a> (Azure.Communication.CallingServer)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Globalization</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Communication</span>.<span class="i n">CallingServer</span>
+{
+    <b>internal class</b> <a id="35873a128c297869" href="R/35873a128c297869.html" target="n" data-glyph="2,0" class="t t">PartitionedDownloader</a>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The client used to download the blob.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly</b> <a href="ConversationClient.cs.html#ab51e102d7669309" class="t t">ConversationClient</a> <a id="4762689be40626a5" href="R/4762689be40626a5.html" target="n" data-glyph="46,1" class="i field">_client</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The maximum number of simultaneous workers.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly int</b> <a id="3eef9611a0787b19" href="R/3eef9611a0787b19.html" target="n" data-glyph="46,1" class="i field">_maxWorkerCount</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The size of the first range requested (which can be larger than the</span>
+        <span class="c">///</span><span class="c"> other ranges).</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly long</b> <a id="6d8ace331656efd4" href="R/6d8ace331656efd4.html" target="n" data-glyph="46,1" class="i field">_initialRangeSize</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> The size of subsequent ranges.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly long</b> <a id="b572802217bd3e10" href="R/b572802217bd3e10.html" target="n" data-glyph="46,1" class="i field">_rangeSize</a>;
+ 
+        <b>internal</b> <a id="57773b195af80369" href="R/../../0000000000.html" target="n" data-glyph="74,1" class="t constructor">PartitionedDownloader</a>(
+            <a href="ConversationClient.cs.html#ab51e102d7669309" class="t t">ConversationClient</a> <span id="r0 rd" class="r0 r">client</span>,
+            <a href="Models/ContentTransferOptions.cs.html#82d4af3e8c1d86ee" class="t t">ContentTransferOptions</a> <span id="r1 rd" class="r1 r">transferOptions</span> = <b>default</b>)
+        {
+            <a href="#4762689be40626a5" class="i field">_client</a> = <span class="r0 r">client</span>;
+            <a href="#3eef9611a0787b19" class="i field">_maxWorkerCount</a> = <span class="r1 r">transferOptions</span>.<a href="Models/ContentTransferOptions.cs.html#e70f01eac2733f79" class="i property">MaximumConcurrency</a>;
+            <a href="#b572802217bd3e10" class="i field">_rangeSize</a> = <a href="@1@netstandard/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@1@netstandard/A.html#8cf0c6d1543ff08d" class="i method">Min</a>(<span class="r1 r">transferOptions</span>.<a href="Models/ContentTransferOptions.cs.html#9f6f554edf31e149" class="i property">MaximumTransferSize</a>, <a href="Constants.cs.html#bd07061f3b6b4a57" class="t t">Constants</a>.<a href="Constants.cs.html#9c50d80f98d1a881" class="t t">ContentDownloader</a>.<a href="Constants.cs.html#2e484b5737b93155" class="t t">Partition</a>.<a href="Constants.cs.html#180a2c1189039d23" class="i field">MaxDownloadBytes</a>);
+            <a href="#6d8ace331656efd4" class="i field">_initialRangeSize</a> = <span class="r1 r">transferOptions</span>.<a href="Models/ContentTransferOptions.cs.html#382ae4182cedcd3b" class="i property">InitialTransferSize</a>;
+        }
+ 
+        <b>internal async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a>&gt; <a id="43b2ce05b34bb00f" href="R/43b2ce05b34bb00f.html" target="n" data-glyph="74,1" class="i method">DownloadToAsync</a>(
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r2 rd" class="r2 r">destination</span>,
+            <a href="@1@netstandard/A.html#991565dd25f47c90" class="t t">Uri</a> <span id="r3 rd" class="r3 r">endpoint</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r4 rd" class="r4 r">cancellationToken</span>)
+        {
+            <a href="/Azure.Core/A.html#d6f9b3aba6783671" class="k">var</a> <span id="r5 rd" class="r5 r">initialRange</span> = <b>new</b> <a href="/Azure.Core/A.html#6ed33a49a04456b8" class="t constructor">HttpRange</a>(0, <a href="#6d8ace331656efd4" class="i field">_initialRangeSize</a>);
+            <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;<a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a>&gt;&gt; <span id="r6 rd" class="r6 r">initialResponseTask</span> =
+                <a href="#4762689be40626a5" class="i field">_client</a>.<a href="ConversationClient.cs.html#80f4db39a890ae51" class="i method">DownloadStreamingAsync</a>(
+                    <span class="r3 r">endpoint</span>,
+                    <span class="r5 r">initialRange</span>,
+                    <span class="r4 r">cancellationToken</span>);
+ 
+            <a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;<a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a>&gt; <span id="r7 rd" class="r7 r">initialResponse</span>;
+            <b>try</b>
+            {
+                <span class="r7 r">initialResponse</span> = <b>await</b> <span class="r6 r">initialResponseTask</span>.<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+            }
+            <b>catch</b> (<a href="/Azure.Core/A.html#253c51f73f5cd67d" class="t t">RequestFailedException</a> <span id="r8 rd" class="r8 r">ex</span>) <b>when</b> (<span class="r8 r">ex</span>.<a href="/Azure.Core/A.html#2e95914e1b156417" class="i property">Status</a> == 416) <span class="c">//Invalid Range</span>
+            {
+                <span class="r6 r">initialResponseTask</span> = <a href="#4762689be40626a5" class="i field">_client</a>.<a href="ConversationClient.cs.html#80f4db39a890ae51" class="i method">DownloadStreamingAsync</a>(
+                    <span class="r3 r">endpoint</span>,
+                    <span class="r9 r">range</span>: <b>default</b>,
+                    <span class="r4 r">cancellationToken</span>);
+                <span class="r7 r">initialResponse</span> = <b>await</b> <span class="r6 r">initialResponseTask</span>.<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+            }
+ 
+            <b>long</b> <span id="r10 rd" class="r10 r">initialLength</span> = <a href="#b6ed62b80c83c10e" class="i method">ParseResponseContentLength</a>(<span class="r7 r">initialResponse</span>);
+            <b>long</b> <span id="r11 rd" class="r11 r">totalLength</span> = <a href="#a06a2e9d46bc145d" class="i method">ParseRangeTotalLength</a>(<span class="r7 r">initialResponse</span>);
+            <b>if</b> (<span class="r10 r">initialLength</span> == <span class="r11 r">totalLength</span>)
+            {
+                <b>await</b> <a href="#026dd11d72c66f5c" class="i method">CopyToAsync</a>(
+                    <span class="r7 r">initialResponse</span>,
+                    <span class="r2 r">destination</span>,
+                    <span class="r4 r">cancellationToken</span>)
+                    .<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+                <b>return</b> <span class="r7 r">initialResponse</span>.<a href="/Azure.Core/A.html#959994a72d6ef38a" class="i method">GetRawResponse</a>();
+            }
+ 
+            <a href="@1@netstandard/A.html#aa3beab99b2e0db2" class="k">var</a> <span id="r12 rd" class="r12 r">runningTasks</span> = <b>new</b> <a href="@1@netstandard/A.html#a09109def640b7b1" class="t constructor">Queue</a>&lt;<a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;<a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a>&gt;&gt;&gt;();
+            <span class="r12 r">runningTasks</span>.<a href="@1@netstandard/A.html#14c3cc45ceaf1566" class="i method">Enqueue</a>(<span class="r6 r">initialResponseTask</span>);
+ 
+            <b>foreach</b> (<a href="/Azure.Core/A.html#d6f9b3aba6783671" class="t t">HttpRange</a> <span id="r13 rd" class="r13 r">httpRange</span> <b>in</b> <a href="#1d48659bad8f864d" class="i method">GetRanges</a>(<span class="r10 r">initialLength</span>, <span class="r11 r">totalLength</span>))
+            {
+                <span class="r12 r">runningTasks</span>.<a href="@1@netstandard/A.html#14c3cc45ceaf1566" class="i method">Enqueue</a>(<a href="#4762689be40626a5" class="i field">_client</a>.<a href="ConversationClient.cs.html#80f4db39a890ae51" class="i method">DownloadStreamingAsync</a>(
+                    <span class="r3 r">endpoint</span>,
+                    <span class="r13 r">httpRange</span>,
+                    <span class="r4 r">cancellationToken</span>));
+ 
+                <b>if</b> (<span class="r12 r">runningTasks</span>.<a href="@1@netstandard/A.html#2d2504e4ca700843" class="i property">Count</a> &gt;= <a href="#3eef9611a0787b19" class="i field">_maxWorkerCount</a>)
+                {
+                    <b>await</b> <a href="#2c8ae81163cab46b" class="i method">ConsumeQueuedTask</a>().<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+                }
+            }
+ 
+            <b>while</b> (<span class="r12 r">runningTasks</span>.<a href="@1@netstandard/A.html#2d2504e4ca700843" class="i property">Count</a> &gt; 0)
+            {
+                <b>await</b> <a href="#2c8ae81163cab46b" class="i method">ConsumeQueuedTask</a>().<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+            }
+ 
+            <b>return</b> <span class="r7 r">initialResponse</span>.<a href="/Azure.Core/A.html#959994a72d6ef38a" class="i method">GetRawResponse</a>();
+ 
+            <b>async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="2c8ae81163cab46b" href="R/2c8ae81163cab46b.html" target="n" data-glyph="76,2" class="i method">ConsumeQueuedTask</a>()
+            {
+                <b>using</b> <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r14 rd" class="r14 r">result</span> =
+                    <b>await</b> <span class="r12 r">runningTasks</span>.<a href="@1@netstandard/A.html#e68caf2d91344411" class="i method">Dequeue</a>().<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                <b>await</b> <a href="#026dd11d72c66f5c" class="i method">CopyToAsync</a>(
+                    <span class="r14 r">result</span>,
+                    <span class="r2 r">destination</span>,
+                    <span class="r4 r">cancellationToken</span>)
+                    .<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+            }
+        }
+ 
+        <b>private static long</b> <a id="b6ed62b80c83c10e" href="R/b6ed62b80c83c10e.html" target="n" data-glyph="76,1" class="i method">ParseResponseContentLength</a>(<a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;<a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a>&gt; <span id="r15 rd" class="r15 r">initialResponse</span>)
+        {
+            <span class="r15 r">initialResponse</span>.<a href="/Azure.Core/A.html#959994a72d6ef38a" class="i method">GetRawResponse</a>().<a href="/Azure.Core/A.html#9f6adbd7e81f8000" class="i property">Headers</a>.<a href="/Azure.Core/A.html#b9e2782d1af92ede" class="i method">TryGetValue</a>(<span class="s">&quot;Content-Length&quot;</span>, <b>out string</b> <span id="r16 rd" class="r16 r">initialContentLength</span>);
+            <b>long</b> <span id="r17 rd" class="r17 r">initialLength</span> = <b>long</b>.<a href="@1@netstandard/A.html#aa76bf9458630289" class="i method">Parse</a>(<span class="r16 r">initialContentLength</span> ?? <span class="s">&quot;0&quot;</span>, <a href="@1@netstandard/A.html#e319c6636909012f" class="t t">CultureInfo</a>.<a href="@1@netstandard/A.html#26ef1c020f0dbb7a" class="i property">InvariantCulture</a>.<a href="@1@netstandard/A.html#ba1a7b1678622235" class="i property">NumberFormat</a>);
+            <b>return</b> <span class="r17 r">initialLength</span>;
+        }
+ 
+        <b>internal</b> <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a> <a id="8cc5c4f584b40d3d" href="R/8cc5c4f584b40d3d.html" target="n" data-glyph="74,1" class="i method">DownloadTo</a>(
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r18 rd" class="r18 r">destination</span>,
+            <a href="@1@netstandard/A.html#991565dd25f47c90" class="t t">Uri</a> <span id="r19 rd" class="r19 r">endpoint</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r20 rd" class="r20 r">cancellationToken</span>)
+        {
+            <a href="/Azure.Core/A.html#d6f9b3aba6783671" class="k">var</a> <span id="r21 rd" class="r21 r">initialRange</span> = <b>new</b> <a href="/Azure.Core/A.html#6ed33a49a04456b8" class="t constructor">HttpRange</a>(0, <a href="#6d8ace331656efd4" class="i field">_initialRangeSize</a>);
+            <a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;<a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a>&gt; <span id="r22 rd" class="r22 r">initialResponse</span>;
+ 
+            <b>try</b>
+            {
+                <span class="r22 r">initialResponse</span> = <a href="#4762689be40626a5" class="i field">_client</a>.<a href="ConversationClient.cs.html#ddeacd310a70a77a" class="i method">DownloadStreaming</a>(
+                    <span class="r19 r">endpoint</span>,
+                    <span class="r21 r">initialRange</span>,
+                    <span class="r20 r">cancellationToken</span>);
+            }
+            <b>catch</b> (<a href="/Azure.Core/A.html#253c51f73f5cd67d" class="t t">RequestFailedException</a> <span id="r23 rd" class="r23 r">ex</span>) <b>when</b> (<span class="r23 r">ex</span>.<a href="/Azure.Core/A.html#2e95914e1b156417" class="i property">Status</a> == 416) <span class="c">// Invalid Range</span>
+            {
+                <span class="r22 r">initialResponse</span> = <a href="#4762689be40626a5" class="i field">_client</a>.<a href="ConversationClient.cs.html#ddeacd310a70a77a" class="i method">DownloadStreaming</a>(
+                    <span class="r19 r">endpoint</span>,
+                    <span class="r24 r">range</span>: <b>default</b>,
+                    <span class="r20 r">cancellationToken</span>);
+            }
+ 
+            <a href="#313674e87875e8c2" class="i method">CopyTo</a>(<span class="r22 r">initialResponse</span>, <span class="r18 r">destination</span>, <span class="r20 r">cancellationToken</span>);
+ 
+            <b>long</b> <span id="r25 rd" class="r25 r">initialLength</span> = <a href="#b6ed62b80c83c10e" class="i method">ParseResponseContentLength</a>(<span class="r22 r">initialResponse</span>);
+            <b>long</b> <span id="r26 rd" class="r26 r">totalLength</span> = <a href="#a06a2e9d46bc145d" class="i method">ParseRangeTotalLength</a>(<span class="r22 r">initialResponse</span>);
+            <b>if</b> (<span class="r25 r">initialLength</span> == <span class="r26 r">totalLength</span>)
+            {
+                <b>return</b> <span class="r22 r">initialResponse</span>.<a href="/Azure.Core/A.html#959994a72d6ef38a" class="i method">GetRawResponse</a>();
+            }
+ 
+            <b>foreach</b> (<a href="/Azure.Core/A.html#d6f9b3aba6783671" class="t t">HttpRange</a> <span id="r27 rd" class="r27 r">httpRange</span> <b>in</b> <a href="#1d48659bad8f864d" class="i method">GetRanges</a>(<span class="r25 r">initialLength</span>, <span class="r26 r">totalLength</span>))
+            {
+                <a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;<a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a>&gt; <span id="r28 rd" class="r28 r">result</span> = <a href="#4762689be40626a5" class="i field">_client</a>.<a href="ConversationClient.cs.html#ddeacd310a70a77a" class="i method">DownloadStreaming</a>(
+                    <span class="r19 r">endpoint</span>,
+                    <span class="r27 r">httpRange</span>,
+                    <span class="r20 r">cancellationToken</span>);
+                <a href="#313674e87875e8c2" class="i method">CopyTo</a>(<span class="r28 r">result</span>.<a href="/Azure.Core/A.html#26af68e791f2f80a" class="i property">Value</a>, <span class="r18 r">destination</span>, <span class="r20 r">cancellationToken</span>);
+            }
+ 
+            <b>return</b> <span class="r22 r">initialResponse</span>.<a href="/Azure.Core/A.html#959994a72d6ef38a" class="i method">GetRawResponse</a>();
+        }
+ 
+        <b>private static long</b> <a id="a06a2e9d46bc145d" href="R/a06a2e9d46bc145d.html" target="n" data-glyph="76,1" class="i method">ParseRangeTotalLength</a>(<a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;<a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a>&gt; <span id="r29 rd" class="r29 r">response</span>)
+        {
+            <span class="r29 r">response</span>.<a href="/Azure.Core/A.html#959994a72d6ef38a" class="i method">GetRawResponse</a>().<a href="/Azure.Core/A.html#9f6adbd7e81f8000" class="i property">Headers</a>.<a href="/Azure.Core/A.html#b9e2782d1af92ede" class="i method">TryGetValue</a>(<span class="s">&quot;Content-Range&quot;</span>, <b>out string</b> <span id="r30 rd" class="r30 r">range</span>);
+ 
+            <b>if</b> (<span class="r30 r">range</span> == <b>null</b>)
+            {
+                <b>return</b> <a href="#b6ed62b80c83c10e" class="i method">ParseResponseContentLength</a>(<span class="r29 r">response</span>);
+            }
+            <b>int</b> <span id="r31 rd" class="r31 r">lengthSeparator</span> = <span class="r30 r">range</span>.<a href="@1@netstandard/A.html#7d6aed52d875ec59" class="i method">IndexOf</a>(<span class="s">&quot;/&quot;</span>, <a href="@1@netstandard/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@1@netstandard/A.html#eabf4db5f5c52b6a" class="i field">InvariantCultureIgnoreCase</a>);
+            <b>if</b> (<span class="r31 r">lengthSeparator</span> == -1)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#38aa21140ca79104" class="t constructor">SystemException</a>(<span class="s">&quot;Could not obtain the total length from HTTP range &quot;</span> + <span class="r30 r">range</span>);
+            }
+            <b>return</b> <b>long</b>.<a href="@1@netstandard/A.html#aa76bf9458630289" class="i method">Parse</a>(<span class="r30 r">range</span>.<a href="@1@netstandard/A.html#882fa7998d6ca35a" class="i method">Substring</a>(<span class="r31 r">lengthSeparator</span> + 1), <a href="@1@netstandard/A.html#e319c6636909012f" class="t t">CultureInfo</a>.<a href="@1@netstandard/A.html#26ef1c020f0dbb7a" class="i property">InvariantCulture</a>);
+        }
+ 
+        <b>private async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="026dd11d72c66f5c" href="R/026dd11d72c66f5c.html" target="n" data-glyph="76,1" class="i method">CopyToAsync</a>(
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r32 rd" class="r32 r">result</span>,
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r33 rd" class="r33 r">destination</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r34 rd" class="r34 r">cancellationToken</span>)
+        {
+            <b>await</b> <span class="r32 r">result</span>.<a href="@1@netstandard/A.html#8048a9680abdd13b" class="i method">CopyToAsync</a>(
+                <span class="r33 r">destination</span>,
+                (<b>int</b>)<a href="#b572802217bd3e10" class="i field">_rangeSize</a>,
+                <span class="r34 r">cancellationToken</span>)
+                .<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+        }
+ 
+        <b>private static void</b> <a id="313674e87875e8c2" href="R/313674e87875e8c2.html" target="n" data-glyph="76,1" class="i method">CopyTo</a>(
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r35 rd" class="r35 r">result</span>,
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r36 rd" class="r36 r">destination</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r37 rd" class="r37 r">cancellationToken</span>)
+        {
+            <span class="r37 r">cancellationToken</span>.<a href="@1@netstandard/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
+            <span class="r35 r">result</span>.<a href="@1@netstandard/A.html#295ec16c77d4fafb" class="i method">CopyTo</a>(<span class="r36 r">destination</span>);
+            <span class="r35 r">result</span>.<a href="@1@netstandard/A.html#f1b4285950a82354" class="i method">Dispose</a>();
+        }
+ 
+        <b>private</b> <a href="@1@netstandard/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="/Azure.Core/A.html#d6f9b3aba6783671" class="t t">HttpRange</a>&gt; <a id="1d48659bad8f864d" href="R/1d48659bad8f864d.html" target="n" data-glyph="76,1" class="i method">GetRanges</a>(<b>long</b> <span id="r38 rd" class="r38 r">initialLength</span>, <b>long</b> <span id="r39 rd" class="r39 r">totalLength</span>)
+        {
+            <b>for</b> (<b>long</b> <span id="r40 rd" class="r40 r">offset</span> = <span class="r38 r">initialLength</span>; <span class="r40 r">offset</span> &lt; <span class="r39 r">totalLength</span>; <span class="r40 r">offset</span> += <a href="#b572802217bd3e10" class="i field">_rangeSize</a>)
+            {
+                <b>yield</b> <b>return</b> <b>new</b> <a href="/Azure.Core/A.html#6ed33a49a04456b8" class="t constructor">HttpRange</a>(<span class="r40 r">offset</span>, <a href="@1@netstandard/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@1@netstandard/A.html#8cf0c6d1543ff08d" class="i method">Min</a>(<span class="r39 r">totalLength</span> - <span class="r40 r">offset</span>, <a href="#b572802217bd3e10" class="i field">_rangeSize</a>));
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>
