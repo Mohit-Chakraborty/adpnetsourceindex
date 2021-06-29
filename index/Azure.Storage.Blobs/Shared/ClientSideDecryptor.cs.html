@@ -1,0 +1,291 @@
+﻿<!DOCTYPE html>
+<html><head><title>ClientSideDecryptor.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(282);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Storage.Blobs/Shared/ClientSideDecryptor.cs" target="_top">Shared\ClientSideDecryptor.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/storage/Azure.Storage.Common/src/Shared/ClientsideEncryption/ClientSideDecryptor.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Storage.Blobs" target="_top">Azure.Storage.Blobs.csproj</a> (Azure.Storage.Blobs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Security</span>.<span class="i n">Cryptography</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Cryptography</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Cryptography</span>.<span class="i n">Models</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Cryptography</span>
+{
+    <b>internal class</b> <a id="8dcd285d4140d330" href="../R/8dcd285d4140d330.html" target="n" data-glyph="2,0" class="t t">ClientSideDecryptor</a>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> A cache for encryption key if high level API spans across multiple service calls.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static readonly</b> <a href="@1@netstandard/A.html#ef9ce034697240ba" class="t t">AsyncLocal</a>&lt;<a href="#4f8719edc44590c9" class="t t">ContentEncryptionKeyCache</a>&gt; <a id="30b8e883bb0e168e" href="../R/30b8e883bb0e168e.html" target="n" data-glyph="46,1" class="i field">s_contentEncryptionKeyCache</a> = <b>new</b>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Clients that can upload data have a key encryption key stored on them. Checking if</span>
+        <span class="c">///</span><span class="c"> a cached key exists and matches a given </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="EncryptionData.cs.html#108eb54fb53af893" class="t t">EncryptionData</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> saves a call</span>
+        <span class="c">///</span><span class="c"> to the external key resolver implementation when available.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly</b> <a href="/Azure.Core/A.html#5222d81440258fca" class="t t">IKeyEncryptionKey</a> <a id="8f603870863cdeb1" href="../R/8f603870863cdeb1.html" target="n" data-glyph="46,1" class="i field">_potentialCachedIKeyEncryptionKey</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Resolver to fetch the key encryption key.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly</b> <a href="/Azure.Core/A.html#f3bf4cc57adf0f46" class="t t">IKeyEncryptionKeyResolver</a> <a id="bb07a031635516c5" href="../R/bb07a031635516c5.html" target="n" data-glyph="46,1" class="i field">_keyResolver</a>;
+ 
+        <b>public</b> <a id="17347fc23502f26d" href="../R/17347fc23502f26d.html" target="n" data-glyph="72,1" class="t constructor">ClientSideDecryptor</a>(<a href="/Azure.Storage.Common/A.html#4782b1cceaa064cf" class="t t">ClientSideEncryptionOptions</a> <span id="r0 rd" class="r0 r">options</span>)
+        {
+            <a href="#8f603870863cdeb1" class="i field">_potentialCachedIKeyEncryptionKey</a> = <span class="r0 r">options</span>.<a href="/Azure.Storage.Common/A.html#8ba8aaf8d55a5ebd" class="i property">KeyEncryptionKey</a>;
+            <a href="#bb07a031635516c5" class="i field">_keyResolver</a> = <span class="r0 r">options</span>.<a href="/Azure.Storage.Common/A.html#cf1501381d240316" class="i property">KeyResolver</a>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Decrypts the given stream if decryption information is provided.</span>
+        <span class="c">///</span><span class="c"> Does not shave off unwanted start/end bytes, but will shave off padding.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">ciphertext</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Stream to decrypt.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">encryptionData</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Encryption metadata and wrapped content encryption key.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">ivInStream</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Whether to use the first block of the stream for the IV instead of the value in</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">encryptionData</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">. Generally for partial blob downloads where the</span>
+        <span class="c">///</span><span class="c"> previous block of the ciphertext is the IV for the next.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">noPadding</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Whether to ignore padding. Generally for partial blob downloads where the end of</span>
+        <span class="c">///</span><span class="c"> the blob (where the padding occurs) was not downloaded.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">async</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Whether to perform this function asynchronously.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Decrypted plaintext.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Exceptions thrown based on implementations of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="/Azure.Core/A.html#5222d81440258fca" class="t t">IKeyEncryptionKey</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> and</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="/Azure.Core/A.html#f3bf4cc57adf0f46" class="t t">IKeyEncryptionKeyResolver</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>public async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a>&gt; <a id="9592826c9455bf81" href="../R/9592826c9455bf81.html" target="n" data-glyph="72,1" class="i method">DecryptInternal</a>(
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r1 rd" class="r1 r">ciphertext</span>,
+            <a href="EncryptionData.cs.html#108eb54fb53af893" class="t t">EncryptionData</a> <span id="r2 rd" class="r2 r">encryptionData</span>,
+            <b>bool</b> <span id="r3 rd" class="r3 r">ivInStream</span>,
+            <b>bool</b> <span id="r4 rd" class="r4 r">noPadding</span>,
+            <b>bool</b> <span id="r5 rd" class="r5 r">async</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r6 rd" class="r6 r">cancellationToken</span>)
+        {
+            <b>switch</b> (<span class="r2 r">encryptionData</span>.<a href="EncryptionData.cs.html#a25f7e0a2245267c" class="i property">EncryptionAgent</a>.<a href="EncryptionAgent.cs.html#617a47550e979446" class="i property">EncryptionVersion</a>)
+            {
+                <b>case</b> <a href="/Azure.Storage.Common/A.html#0d1c57da6ccbaadf" class="t t">ClientSideEncryptionVersion</a>.<a href="/Azure.Storage.Common/A.html#a8cbfad136df5289" class="i field">V1_0</a>:
+                    <b>return</b> <b>await</b> <a href="#59caf8a99bfffaee" class="i method">DecryptInternalV1_0</a>(
+                        <span class="r1 r">ciphertext</span>,
+                        <span class="r2 r">encryptionData</span>,
+                        <span class="r3 r">ivInStream</span>,
+                        <span class="r4 r">noPadding</span>,
+                        <span class="r5 r">async</span>,
+                        <span class="r6 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                <b>default</b>:
+                    <b>throw</b> <a href="../P/5ed86f0799b000b6.html#5ed86f0799b000b6" class="t t">Errors</a>.<a href="Errors.Clients.cs.html#f97ffd90dd0a80b2" class="t t">ClientSideEncryption</a>.<a href="Errors.Clients.cs.html#e8d04321401f5a5a" class="i method">BadEncryptionAgent</a>(<span class="r2 r">encryptionData</span>.<a href="EncryptionData.cs.html#a25f7e0a2245267c" class="i property">EncryptionAgent</a>.<a href="EncryptionAgent.cs.html#617a47550e979446" class="i property">EncryptionVersion</a>.<a href="@1@netstandard/A.html#1365cfeffd45409d" class="i method">ToString</a>());
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Decrypts the given stream if decryption information is provided.</span>
+        <span class="c">///</span><span class="c"> Does not shave off unwanted start/end bytes, but will shave off padding.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">ciphertext</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Stream to decrypt.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">encryptionData</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Encryption metadata and wrapped content encryption key.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r9 r">ivInStream</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Whether to use the first block of the stream for the IV instead of the value in</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">encryptionData</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">. Generally for partial blob downloads where the</span>
+        <span class="c">///</span><span class="c"> previous block of the ciphertext is the IV for the next.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r10 r">noPadding</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Whether to ignore padding. Generally for partial blob downloads where the end of</span>
+        <span class="c">///</span><span class="c"> the blob (where the padding occurs) was not downloaded.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r11 r">async</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Whether to perform this function asynchronously.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Decrypted plaintext.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Exceptions thrown based on implementations of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="/Azure.Core/A.html#5222d81440258fca" class="t t">IKeyEncryptionKey</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> and</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="/Azure.Core/A.html#f3bf4cc57adf0f46" class="t t">IKeyEncryptionKeyResolver</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>private async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a>&gt; <a id="59caf8a99bfffaee" href="../R/59caf8a99bfffaee.html" target="n" data-glyph="76,1" class="i method">DecryptInternalV1_0</a>(
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r7 rd" class="r7 r">ciphertext</span>,
+            <a href="EncryptionData.cs.html#108eb54fb53af893" class="t t">EncryptionData</a> <span id="r8 rd" class="r8 r">encryptionData</span>,
+            <b>bool</b> <span id="r9 rd" class="r9 r">ivInStream</span>,
+            <b>bool</b> <span id="r10 rd" class="r10 r">noPadding</span>,
+            <b>bool</b> <span id="r11 rd" class="r11 r">async</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r12 rd" class="r12 r">cancellationToken</span>)
+        {
+            <b>var</b> <span id="r13 rd" class="r13 r">contentEncryptionKey</span> = <b>await</b> <a href="#5f17380ecfb9cc56" class="i method">GetContentEncryptionKeyAsync</a>(
+                <span class="r8 r">encryptionData</span>,
+                <span class="r11 r">async</span>,
+                <span class="r12 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r14 rd" class="r14 r">plaintext</span>;
+            <span class="c">//int read = 0;</span>
+            <b>if</b> (<span class="r8 r">encryptionData</span> != <b>default</b>)
+            {
+                <b>byte</b>[] <span id="r15 rd" class="r15 r">IV</span>;
+                <b>if</b> (!<span class="r9 r">ivInStream</span>)
+                {
+                    <span class="r15 r">IV</span> = <span class="r8 r">encryptionData</span>.<a href="EncryptionData.cs.html#33bcef258a5e7065" class="i property">ContentEncryptionIV</a>;
+                }
+                <b>else</b>
+                {
+                    <span class="r15 r">IV</span> = <b>new</b> <b>byte</b>[<a href="Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Constants.cs.html#20aa02dd318ed719" class="t t">ClientSideEncryption</a>.<a href="Constants.cs.html#c2613db02fedd7ee" class="i field">EncryptionBlockSize</a>];
+                    <b>if</b> (<span class="r11 r">async</span>)
+                    {
+                        <b>await</b> <span class="r7 r">ciphertext</span>.<a href="@1@netstandard/A.html#e224b4bec8748849" class="i method">ReadAsync</a>(<span class="r15 r">IV</span>, 0, <span class="r15 r">IV</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>, <span class="r12 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                    }
+                    <b>else</b>
+                    {
+                        <span class="r7 r">ciphertext</span>.<a href="@1@netstandard/A.html#6fb9c001d7524ba2" class="i method">Read</a>(<span class="r15 r">IV</span>, 0, <span class="r15 r">IV</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>);
+                    }
+                    <span class="c">//read = IV.Length;</span>
+                }
+ 
+                <span class="r14 r">plaintext</span> = <a href="#70b4833fddd2ff45" class="i method">WrapStream</a>(
+                    <span class="r7 r">ciphertext</span>,
+                    <span class="r13 r">contentEncryptionKey</span>.<span class="i method">ToArray</span>(),
+                    <span class="r8 r">encryptionData</span>,
+                    <span class="r15 r">IV</span>,
+                    <span class="r10 r">noPadding</span>);
+            }
+            <b>else</b>
+            {
+                <span class="r14 r">plaintext</span> = <span class="r7 r">ciphertext</span>;
+            }
+ 
+            <b>return</b> <span class="r14 r">plaintext</span>;
+        }
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CS1587</span> <span class="c">// XML comment is not placed on a valid language element</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Returns the content encryption key for blob. First tries to get the key encryption key from KeyResolver,</span>
+        <span class="c">///</span><span class="c"> then falls back to IKey stored on this EncryptionPolicy. Unwraps the content encryption key with the</span>
+        <span class="c">///</span><span class="c"> correct key wrapper.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r16 r">encryptionData</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The encryption data.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r17 r">async</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Whether to perform asynchronously.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r18 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Encryption key as a byte array.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">exception</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Exceptions thrown based on implementations of </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="/Azure.Core/A.html#5222d81440258fca" class="t t">IKeyEncryptionKey</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> and</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="/Azure.Core/A.html#f3bf4cc57adf0f46" class="t t">IKeyEncryptionKeyResolver</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">exception</span><span class="c">&gt;</span>
+        <b>private async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<span class="t t">Memory</span>&lt;<b>byte</b>&gt;&gt; <a id="5f17380ecfb9cc56" href="../R/5f17380ecfb9cc56.html" target="n" data-glyph="76,1" class="i method">GetContentEncryptionKeyAsync</a>(
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">CS1587</span> <span class="c">// XML comment is not placed on a valid language element</span>
+            <a href="EncryptionData.cs.html#108eb54fb53af893" class="t t">EncryptionData</a> <span id="r16 rd" class="r16 r">encryptionData</span>,
+            <b>bool</b> <span id="r17 rd" class="r17 r">async</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r18 rd" class="r18 r">cancellationToken</span>)
+        {
+            <b>if</b> (<a href="#30b8e883bb0e168e" class="i field">s_contentEncryptionKeyCache</a>.<a href="@1@netstandard/A.html#abbd6d7874f04d2e" class="i property">Value</a>?.<a href="#ac5cd6d164d68e9d" class="i property">Key</a>.<a href="@1@netstandard/A.html#7bbe60e33e857298" class="i property">HasValue</a> ?? <b>false</b>)
+            {
+                <b>return</b> <a href="#30b8e883bb0e168e" class="i field">s_contentEncryptionKeyCache</a>.<a href="@1@netstandard/A.html#abbd6d7874f04d2e" class="i property">Value</a>.<a href="#ac5cd6d164d68e9d" class="i property">Key</a>.<a href="@1@netstandard/A.html#7b38d1fa76071c95" class="i property">Value</a>;
+            }
+ 
+            <a href="/Azure.Core/A.html#5222d81440258fca" class="t t">IKeyEncryptionKey</a> <span id="r19 rd" class="r19 r">key</span> = <b>default</b>;
+ 
+            <span class="c">// If we already have a local key and it is the correct one, use that.</span>
+            <b>if</b> (<span class="r16 r">encryptionData</span>.<a href="EncryptionData.cs.html#1a7f17dea3a2bdd4" class="i property">WrappedContentKey</a>.<a href="KeyEnvelope.cs.html#debda462f934ec06" class="i property">KeyId</a> == <a href="#8f603870863cdeb1" class="i field">_potentialCachedIKeyEncryptionKey</a>?.<a href="/Azure.Core/A.html#c5fb23d1bd9fb749" class="i property">KeyId</a>)
+            {
+                <span class="r19 r">key</span> = <a href="#8f603870863cdeb1" class="i field">_potentialCachedIKeyEncryptionKey</a>;
+            }
+            <span class="c">// Otherwise, use the resolver.</span>
+            <b>else</b> <b>if</b> (<a href="#bb07a031635516c5" class="i field">_keyResolver</a> != <b>null</b>)
+            {
+                <span class="r19 r">key</span> = <span class="r17 r">async</span>
+                    ? <b>await</b> <a href="#bb07a031635516c5" class="i field">_keyResolver</a>.<a href="/Azure.Core/A.html#f24e90aeb6d94b11" class="i method">ResolveAsync</a>(<span class="r16 r">encryptionData</span>.<a href="EncryptionData.cs.html#1a7f17dea3a2bdd4" class="i property">WrappedContentKey</a>.<a href="KeyEnvelope.cs.html#debda462f934ec06" class="i property">KeyId</a>, <span class="r18 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>)
+                    : <a href="#bb07a031635516c5" class="i field">_keyResolver</a>.<a href="/Azure.Core/A.html#dc3a76672db3a311" class="i method">Resolve</a>(<span class="r16 r">encryptionData</span>.<a href="EncryptionData.cs.html#1a7f17dea3a2bdd4" class="i property">WrappedContentKey</a>.<a href="KeyEnvelope.cs.html#debda462f934ec06" class="i property">KeyId</a>, <span class="r18 r">cancellationToken</span>);
+            }
+ 
+            <span class="c">// We throw for every other reason that decryption couldn&#39;t happen. Throw a reasonable</span>
+            <span class="c">// exception here instead of nullref.</span>
+            <b>if</b> (<span class="r19 r">key</span> == <b>default</b>)
+            {
+                <b>throw</b> <a href="../P/5ed86f0799b000b6.html#5ed86f0799b000b6" class="t t">Errors</a>.<a href="Errors.Clients.cs.html#f97ffd90dd0a80b2" class="t t">ClientSideEncryption</a>.<a href="Errors.Clients.cs.html#769df54ac1aa7e16" class="i method">KeyNotFound</a>(<span class="r16 r">encryptionData</span>.<a href="EncryptionData.cs.html#1a7f17dea3a2bdd4" class="i property">WrappedContentKey</a>.<a href="KeyEnvelope.cs.html#debda462f934ec06" class="i property">KeyId</a>);
+            }
+ 
+            <b>var</b> <span id="r20 rd" class="r20 r">contentEncryptionKey</span> = <span class="r17 r">async</span>
+                ? <b>await</b> <span class="r19 r">key</span>.<a href="/Azure.Core/A.html#96214359302da4d6" class="i method">UnwrapKeyAsync</a>(
+                    <span class="r16 r">encryptionData</span>.<a href="EncryptionData.cs.html#1a7f17dea3a2bdd4" class="i property">WrappedContentKey</a>.<a href="KeyEnvelope.cs.html#c5045f355d9477ae" class="i property">Algorithm</a>,
+                    <span class="r16 r">encryptionData</span>.<a href="EncryptionData.cs.html#1a7f17dea3a2bdd4" class="i property">WrappedContentKey</a>.<a href="KeyEnvelope.cs.html#2b74194f75c15f9d" class="i property">EncryptedKey</a>,
+                    <span class="r18 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>)
+                : <span class="r19 r">key</span>.<a href="/Azure.Core/A.html#3c3e0aedcbc6cf4e" class="i method">UnwrapKey</a>(
+                    <span class="r16 r">encryptionData</span>.<a href="EncryptionData.cs.html#1a7f17dea3a2bdd4" class="i property">WrappedContentKey</a>.<a href="KeyEnvelope.cs.html#c5045f355d9477ae" class="i property">Algorithm</a>,
+                    <span class="r16 r">encryptionData</span>.<a href="EncryptionData.cs.html#1a7f17dea3a2bdd4" class="i property">WrappedContentKey</a>.<a href="KeyEnvelope.cs.html#2b74194f75c15f9d" class="i property">EncryptedKey</a>,
+                    <span class="r18 r">cancellationToken</span>);
+ 
+            <b>if</b> (<a href="#30b8e883bb0e168e" class="i field">s_contentEncryptionKeyCache</a>.<a href="@1@netstandard/A.html#abbd6d7874f04d2e" class="i property">Value</a> != <b>default</b>)
+            {
+                <a href="#30b8e883bb0e168e" class="i field">s_contentEncryptionKeyCache</a>.<a href="@1@netstandard/A.html#abbd6d7874f04d2e" class="i property">Value</a>.<a href="#ac5cd6d164d68e9d" class="i property">Key</a> = <span class="r20 r">contentEncryptionKey</span>;
+            }
+ 
+            <b>return</b> <span class="r20 r">contentEncryptionKey</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Wraps a stream of ciphertext to stream plaintext.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r21 r">contentStream</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r22 r">contentEncryptionKey</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r23 r">encryptionData</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r24 r">iv</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r25 r">noPadding</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private static</b> <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <a id="70b4833fddd2ff45" href="../R/70b4833fddd2ff45.html" target="n" data-glyph="76,1" class="i method">WrapStream</a>(
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r21 rd" class="r21 r">contentStream</span>,
+            <b>byte</b>[] <span id="r22 rd" class="r22 r">contentEncryptionKey</span>,
+            <a href="EncryptionData.cs.html#108eb54fb53af893" class="t t">EncryptionData</a> <span id="r23 rd" class="r23 r">encryptionData</span>,
+            <b>byte</b>[] <span id="r24 rd" class="r24 r">iv</span>,
+            <b>bool</b> <span id="r25 rd" class="r25 r">noPadding</span>)
+        {
+            <b>if</b> (<span class="r23 r">encryptionData</span>.<a href="EncryptionData.cs.html#a25f7e0a2245267c" class="i property">EncryptionAgent</a>.<a href="EncryptionAgent.cs.html#991ea664ccb458a4" class="i property">EncryptionAlgorithm</a> == <a href="ClientSideEncryptionAlgorithm.cs.html#d4256d87f04353b9" class="t t">ClientSideEncryptionAlgorithm</a>.<a href="ClientSideEncryptionAlgorithm.cs.html#eeaf324d1cc45a31" class="i property">AesCbc256</a>)
+            {
+                <b>using</b> (<a href="@1@netstandard/A.html#ebbfb497a699d7de" class="t t">AesCryptoServiceProvider</a> <span id="r26 rd" class="r26 r">aesProvider</span> = <b>new</b> <a href="@1@netstandard/A.html#6b3c2c2cf88c1df6" class="t constructor">AesCryptoServiceProvider</a>())
+                {
+                    <span class="r26 r">aesProvider</span>.<a href="@1@netstandard/A.html#8aec726f39da634f" class="i property">IV</a> = <span class="r24 r">iv</span> ?? <span class="r23 r">encryptionData</span>.<a href="EncryptionData.cs.html#33bcef258a5e7065" class="i property">ContentEncryptionIV</a>;
+                    <span class="r26 r">aesProvider</span>.<a href="@1@netstandard/A.html#352815c7385c052d" class="i property">Key</a> = <span class="r22 r">contentEncryptionKey</span>;
+ 
+                    <b>if</b> (<span class="r25 r">noPadding</span>)
+                    {
+                        <span class="r26 r">aesProvider</span>.<a href="@1@netstandard/A.html#5ed32cf1d4686f68" class="i property">Padding</a> = <a href="@1@netstandard/A.html#78e6983a4b4595dc" class="t t">PaddingMode</a>.<a href="@1@netstandard/A.html#fc70985b2abe8ddf" class="i field">None</a>;
+                    }
+ 
+                    <span class="c">// Buffer network stream. CryptoStream issues tiny (~16 byte) reads which can lead to resources churn.</span>
+                    <span class="c">// By default buffer is 4KB.</span>
+                    <a href="@1@netstandard/A.html#7ee3b8c340d71eb3" class="k">var</a> <span id="r27 rd" class="r27 r">bufferedContentStream</span> = <b>new</b> <a href="@1@netstandard/A.html#7446e2bc9a83f8de" class="t constructor">BufferedStream</a>(<span class="r21 r">contentStream</span>);
+ 
+                    <b>return</b> <b>new</b> <a href="@1@netstandard/A.html#330d087abc7bf5a4" class="t constructor">CryptoStream</a>(<span class="r27 r">bufferedContentStream</span>, <span class="r26 r">aesProvider</span>.<a href="@1@netstandard/A.html#106893d179345246" class="i method">CreateDecryptor</a>(), <a href="@1@netstandard/A.html#8fdebb3719bf2a18" class="t t">CryptoStreamMode</a>.<a href="@1@netstandard/A.html#7072e29bc68130ac" class="i field">Read</a>);
+                }
+            }
+ 
+            <b>throw</b> <a href="../P/5ed86f0799b000b6.html#5ed86f0799b000b6" class="t t">Errors</a>.<a href="Errors.Clients.cs.html#f97ffd90dd0a80b2" class="t t">ClientSideEncryption</a>.<a href="Errors.Clients.cs.html#e53d22e164ab0f70" class="i method">BadEncryptionAlgorithm</a>(<span class="r23 r">encryptionData</span>.<a href="EncryptionData.cs.html#a25f7e0a2245267c" class="i property">EncryptionAgent</a>.<a href="EncryptionAgent.cs.html#991ea664ccb458a4" class="i property">EncryptionAlgorithm</a>.<a href="ClientSideEncryptionAlgorithm.cs.html#56f322654084aa0e" class="i method">ToString</a>());
+        }
+ 
+        <b>internal static void</b> <a id="d2f662f4dc7003cf" href="../R/d2f662f4dc7003cf.html" target="n" data-glyph="74,1" class="i method">BeginContentEncryptionKeyCaching</a>(<a href="#4f8719edc44590c9" class="t t">ContentEncryptionKeyCache</a> <span id="r28 rd" class="r28 r">cache</span> = <b>default</b>)
+        {
+            <a href="#30b8e883bb0e168e" class="i field">s_contentEncryptionKeyCache</a>.<a href="@1@netstandard/A.html#abbd6d7874f04d2e" class="i property">Value</a> = <span class="r28 r">cache</span> ?? <b>new</b> <a href="#4f8719edc44590c9" class="t constructor">ContentEncryptionKeyCache</a>();
+        }
+ 
+        <b>internal class</b> <a id="4f8719edc44590c9" href="../R/4f8719edc44590c9.html" target="n" data-glyph="2,1" class="t t"><span id="91b9333c13d199fd">ContentEncryptionKeyCache</span></a>
+        {
+            <b>public</b> <span class="t t">Memory</span>&lt;<b>byte</b>&gt;? <a id="ac5cd6d164d68e9d" href="../R/ac5cd6d164d68e9d.html" target="n" data-glyph="102,2" class="i property">Key</a> { <b>get</b>; <b>set</b>; }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>
