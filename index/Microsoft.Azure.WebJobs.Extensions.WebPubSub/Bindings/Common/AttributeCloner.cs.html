@@ -1,0 +1,422 @@
+﻿<!DOCTYPE html>
+<html><head><title>AttributeCloner.cs</title><link rel="stylesheet" href="../../../styles.css"><script src="../../../scripts.js"></script></head>
+<body class="cB" onload="i(413);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.WebPubSub/Bindings/Common/AttributeCloner.cs" target="_top">Bindings\Common\AttributeCloner.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/webpubsub/Microsoft.Azure.WebJobs.Extensions.WebPubSub/src/Bindings/Common/AttributeCloner.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.WebPubSub" target="_top">Microsoft.Azure.WebJobs.Extensions.WebPubSub.csproj</a> (Microsoft.Azure.WebJobs.Extensions.WebPubSub)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) .NET Foundation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License. See License.txt in the project root for license information.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">ComponentModel</span>.<span class="i n">DataAnnotations</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Reflection</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Description</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i n">Bindings</span>.<span class="i n">Path</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Extensions</span>.<span class="i n">Configuration</span>;
+<b>using</b> <span class="t">BindingData</span> = <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>.<a href="@1@netstandard/A.html#f786bcc5e7b69c7d" class="t t">IReadOnlyDictionary</a>&lt;<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>, <b>object</b>&gt;;
+<b>using</b> <span class="t">BindingDataContract</span> = <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>.<a href="@1@netstandard/A.html#f786bcc5e7b69c7d" class="t t">IReadOnlyDictionary</a>&lt;<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>, <span class="i n">System</span>.<a href="@1@netstandard/A.html#3d00eeab9feb80f3" class="t t">Type</a>&gt;;
+<span class="c">// Func to transform Attribute,BindingData into value for cloned attribute property/constructor arg</span>
+<span class="c">// Attribute is the new cloned attribute - null if constructor arg (new cloned attr not created yet)</span>
+<b>using</b> <span class="t">BindingDataResolver</span> = <span class="i n">System</span>.<a href="@1@netstandard/A.html#8adbe0476ca899db" class="t t">Func</a>&lt;<span class="i n">System</span>.<a href="@1@netstandard/A.html#707d3dbc6c887265" class="t t">Attribute</a>, <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>.<a href="@1@netstandard/A.html#f786bcc5e7b69c7d" class="t t">IReadOnlyDictionary</a>&lt;<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>, <b>object</b>&gt;, <b>object</b>&gt;;
+ 
+<b>using</b> <span class="t">Validator</span> = <span class="i n">System</span>.<a href="@1@netstandard/A.html#486d58da4553e12d" class="t t">Action</a>&lt;<b>object</b>&gt;;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Host</span>.<span class="i n">Bindings</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Copy from: https://github.com/Azure/azure-webjobs-sdk/blob/v3.0.29/src/Microsoft.Azure.WebJobs.Host/Bindings/AttributeCloner.cs.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">// Clone an attribute and resolve it.</span>
+    <span class="c">// This can be tricky since some read-only properties are set via the constructor.</span>
+    <span class="c">// This assumes that the property name matches the constructor argument name.</span>
+    <b>internal class</b> <a id="86606db78cf2e0e4" href="../../R/86606db78cf2e0e4.html" target="n" data-glyph="2,0" class="t t">AttributeCloner</a>&lt;<span id="r0 rd t" class="r0 r t">TAttribute</span>&gt;
+        <b>where</b> <span class="r0 r t">TAttribute</span> : <a href="@1@netstandard/A.html#707d3dbc6c887265" class="t t">Attribute</a>
+    {
+        <b>private readonly</b> <span class="r0 r t">TAttribute</span> <a id="121f7232e79304b6" href="../../R/121f7232e79304b6.html" target="n" data-glyph="46,1" class="i field">_source</a>;
+ 
+        <span class="c">// Which constructor do we invoke to instantiate the new attribute?</span>
+        <span class="c">// The attribute is configured through a) constructor arguments, b) settable properties.</span>
+        <b>private readonly</b> <a href="@1@netstandard/A.html#efafec8b833cfa7f" class="t t">ConstructorInfo</a> <a id="58f80418d0fa7548" href="../../R/58f80418d0fa7548.html" target="n" data-glyph="46,1" class="i field">_matchedCtor</a>;
+ 
+        <span class="c">// Compute the arguments to pass to the chosen constructor. Arguments are based on binding data.</span>
+        <b>private readonly</b> <a href="@1@netstandard/A.html#8adbe0476ca899db" class="t t">BindingDataResolver</a>[] <a id="67d1343676b9a6c1" href="../../R/67d1343676b9a6c1.html" target="n" data-glyph="46,1" class="i field">_ctorParamResolvers</a>;
+ 
+        <span class="c">// Compute the values to apply to Settable properties on newly created attribute.</span>
+        <b>private readonly</b> <a href="@1@netstandard/A.html#27863de72c2c9b49" class="t t">Action</a>&lt;<span class="r0 r t">TAttribute</span>, <a href="@1@netstandard/A.html#f786bcc5e7b69c7d" class="t t">BindingData</a>&gt;[] <a id="b983a090e0da80ce" href="../../R/b983a090e0da80ce.html" target="n" data-glyph="46,1" class="i field">_propertySetters</a>;
+ 
+        <b>private readonly</b> <a href="@1@netstandard/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;<a href="@1@netstandard/A.html#f3f0ea5f89a8f162" class="t t">PropertyInfo</a>, <span class="t t">AutoResolveAttribute</span>&gt; <a id="bb9c02a41c956437" href="../../R/bb9c02a41c956437.html" target="n" data-glyph="46,1" class="i field">_autoResolves</a> = <b>new</b>();
+ 
+        <b>private const</b> <a href="@1@netstandard/A.html#4795caf3b483702d" class="t t">BindingFlags</a> <a id="dce0fdb401197890" href="../../R/dce0fdb401197890.html" target="n" data-glyph="10,1" class="i field">Flags</a> = <a href="@1@netstandard/A.html#4795caf3b483702d" class="t t">BindingFlags</a>.<a href="@1@netstandard/A.html#54a14f747b06c614" class="i field">Instance</a> | <a href="@1@netstandard/A.html#4795caf3b483702d" class="t t">BindingFlags</a>.<a href="@1@netstandard/A.html#ef2ef39bdfa059df" class="i field">Public</a>;
+        <b>private readonly</b> <span class="t t">IConfiguration</span> <a id="471d90511d9e6fbe" href="../../R/471d90511d9e6fbe.html" target="n" data-glyph="46,1" class="i field">_configuration</a>;
+ 
+        <b>internal</b> <a id="2cb9c47f052e1822" href="../../R/2cb9c47f052e1822.html" target="n" data-glyph="74,1" class="t constructor">AttributeCloner</a>(
+            <span class="r0 r t">TAttribute</span> <span id="r1 rd" class="r1 r">source</span>,
+            <a href="@1@netstandard/A.html#f786bcc5e7b69c7d" class="t t">BindingDataContract</a> <span id="r2 rd" class="r2 r">bindingDataContract</span>,
+            <span class="t t">IConfiguration</span> <span id="r3 rd" class="r3 r">configuration</span>,
+            <span class="t t">INameResolver</span> <span id="r4 rd" class="r4 r">nameResolver</span> = <b>null</b>)
+        {
+            <a href="#471d90511d9e6fbe" class="i field">_configuration</a> = <span class="r3 r">configuration</span>;
+ 
+            <span class="r4 r">nameResolver</span> ??= <b>new</b> <a href="#98b8bcf41bc3425c" class="t constructor">EmptyNameResolver</a>();
+            <a href="#121f7232e79304b6" class="i field">_source</a> = <span class="r1 r">source</span>;
+ 
+            <a href="@1@netstandard/A.html#3d00eeab9feb80f3" class="t t">Type</a> <span id="r5 rd" class="r5 r">attributeType</span> = <b>typeof</b>(<span class="r0 r t">TAttribute</span>);
+ 
+            <a href="@1@netstandard/A.html#f3f0ea5f89a8f162" class="t t">PropertyInfo</a>[] <span id="r6 rd" class="r6 r">allProperties</span> = <span class="r5 r">attributeType</span>.<a href="@1@netstandard/A.html#bc75fdb60d33fb57" class="i method">GetProperties</a>(<a href="#dce0fdb401197890" class="i field">Flags</a>);
+ 
+            <span class="c">// Create dictionary of all non-null properties on source attribute.</span>
+            <a href="@1@netstandard/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@1@netstandard/A.html#f3f0ea5f89a8f162" class="t t">PropertyInfo</a>&gt; <span id="r7 rd" class="r7 r">nonNullProps</span> = <span class="r6 r">allProperties</span>
+                .<a href="@1@netstandard/A.html#e73922753675387a" class="i method">Where</a>(<span id="r8 rd" class="r8 r">prop</span> =&gt; <span class="r8 r">prop</span>.<a href="@1@netstandard/A.html#7f41c0c1ebadcc33" class="i method">GetValue</a>(<span class="r1 r">source</span>) != <b>null</b>)
+                .<a href="@1@netstandard/A.html#a6091311eadfdd8a" class="i method">ToDictionary</a>(<span id="r9 rd" class="r9 r">prop</span> =&gt; <span class="r9 r">prop</span>.<a href="@1@netstandard/A.html#aa4f112f79364b6e" class="i property">Name</a>, <span id="r10 rd" class="r10 r">prop</span> =&gt; <span class="r10 r">prop</span>, <a href="@1@netstandard/A.html#a1c3d85bbf4ae20e" class="t t">StringComparer</a>.<a href="@1@netstandard/A.html#59b9c33842417944" class="i property">OrdinalIgnoreCase</a>);
+ 
+            <span class="c">// Pick the ctor with the longest parameter list where all are matched to non-null props.</span>
+            <a href="#dfe3b8f435c41279" class="k">var</a> <span id="r11 rd" class="r11 r">ctorAndParams</span> = <span class="r5 r">attributeType</span>.<a href="@1@netstandard/A.html#2b0cd0144efca2ad" class="i method">GetConstructors</a>(<a href="#dce0fdb401197890" class="i field">Flags</a>)
+                .<a href="@1@netstandard/A.html#5c652c53e80df013" class="i method">Select</a>(<span id="r12 rd" class="r12 r">ctor</span> =&gt; <b>new</b> { <span class="r12 r">ctor</span>, <a href="#e591d0f1b01ea1d6" class="i property">parameters</a> = <span class="r12 r">ctor</span>.<a href="@1@netstandard/A.html#91801fac9c14db1f" class="i method">GetParameters</a>() })
+                .<a href="@1@netstandard/A.html#7eec09816d04e761" class="i method">OrderByDescending</a>(<span id="r13 rd" class="r13 r">tuple</span> =&gt; <span class="r13 r">tuple</span>.<a href="#e591d0f1b01ea1d6" class="i property">parameters</a>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>)
+                .<a href="@1@netstandard/A.html#b7e5965cab68b1cf" class="i method">FirstOrDefault</a>(<span id="r14 rd" class="r14 r">tuple</span> =&gt; <span class="r14 r">tuple</span>.<a href="#e591d0f1b01ea1d6" class="i property">parameters</a>.<a href="@1@netstandard/A.html#be4bfd025bd2724c" class="i method">All</a>(<span id="r15 rd" class="r15 r">param</span> =&gt; <span class="r7 r">nonNullProps</span>.<a href="@1@netstandard/A.html#22fd7cd7408aed6e" class="i method">ContainsKey</a>(<span class="r15 r">param</span>.<a href="@1@netstandard/A.html#5189606fee27d248" class="i property">Name</a>)));
+ 
+            <b>if</b> (<span class="r11 r">ctorAndParams</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;Can&#39;t figure out which ctor to call.&quot;</span>);
+            }
+ 
+            <a href="#58f80418d0fa7548" class="i field">_matchedCtor</a> = <span class="r11 r">ctorAndParams</span>.<a href="#1427a46041b5b031" class="i property">ctor</a>;
+ 
+            <span class="c">// Get appropriate binding data resolver (appsetting, autoresolve, or originalValue) for each constructor parameter</span>
+            <a href="#67d1343676b9a6c1" class="i field">_ctorParamResolvers</a> = <span class="r11 r">ctorAndParams</span>.<a href="#e591d0f1b01ea1d6" class="i property">parameters</a>
+                .<a href="@1@netstandard/A.html#5c652c53e80df013" class="i method">Select</a>(<span id="r16 rd" class="r16 r">param</span> =&gt; <a href="#c29dfce510762671" class="i method">GetResolver</a>(<span class="r7 r">nonNullProps</span><a href="@1@netstandard/A.html#49962975508e2d83">[</a><span class="r16 r">param</span>.<a href="@1@netstandard/A.html#5189606fee27d248" class="i property">Name</a>], <span class="r4 r">nameResolver</span>, <span class="r2 r">bindingDataContract</span>))
+                .<a href="@1@netstandard/A.html#783a052330e7d48d" class="i method">ToArray</a>();
+ 
+            <span class="c">// Get appropriate binding data resolver (appsetting, autoresolve, or originalValue) for each writeable property</span>
+            <a href="#b983a090e0da80ce" class="i field">_propertySetters</a> = <span class="r6 r">allProperties</span>
+                .<a href="@1@netstandard/A.html#e73922753675387a" class="i method">Where</a>(<span id="r17 rd" class="r17 r">prop</span> =&gt; <span class="r17 r">prop</span>.<a href="@1@netstandard/A.html#4f511c2f30622a6d" class="i property">CanWrite</a>)
+                .<a href="@1@netstandard/A.html#5c652c53e80df013" class="i method">Select</a>(<span id="r18 rd" class="r18 r">prop</span> =&gt;
+                {
+                    <a href="@1@netstandard/A.html#8adbe0476ca899db" class="k">var</a> <span id="r19 rd" class="r19 r">resolver</span> = <a href="#c29dfce510762671" class="i method">GetResolver</a>(<span class="r18 r">prop</span>, <span class="r4 r">nameResolver</span>, <span class="r2 r">bindingDataContract</span>);
+                    <b>return</b> (<a href="@1@netstandard/A.html#27863de72c2c9b49" class="t t">Action</a>&lt;<span class="r0 r t">TAttribute</span>, <a href="@1@netstandard/A.html#f786bcc5e7b69c7d" class="t t">BindingData</a>&gt;)((<span id="r20 rd" class="r20 r">attr</span>, <span id="r21 rd" class="r21 r">data</span>) =&gt; <span class="r18 r">prop</span>.<a href="@1@netstandard/A.html#4e43ac7a41b37349" class="i method">SetValue</a>(<span class="r20 r">attr</span>, <span class="r19 r">resolver</span>(<span class="r20 r">attr</span>, <span class="r21 r">data</span>)));
+                })
+                .<a href="@1@netstandard/A.html#783a052330e7d48d" class="i method">ToArray</a>();
+        }
+ 
+        <span class="c">// transforms binding data to appropriate resolver (appsetting, autoresolve, or originalValue)</span>
+        <b>private</b> <a href="@1@netstandard/A.html#8adbe0476ca899db" class="t t">BindingDataResolver</a> <a id="c29dfce510762671" href="../../R/c29dfce510762671.html" target="n" data-glyph="76,1" class="i method">GetResolver</a>(<a href="@1@netstandard/A.html#f3f0ea5f89a8f162" class="t t">PropertyInfo</a> <span id="r22 rd" class="r22 r">propInfo</span>, <span class="t t">INameResolver</span> <span id="r23 rd" class="r23 r">nameResolver</span>, <a href="@1@netstandard/A.html#f786bcc5e7b69c7d" class="t t">BindingDataContract</a> <span id="r24 rd" class="r24 r">contract</span>)
+        {
+            <span class="c">// Do the attribute lookups once upfront, and then cache them (via func closures) for subsequent runtime usage.</span>
+            <b>object</b> <span id="r25 rd" class="r25 r">originalValue</span> = <span class="r22 r">propInfo</span>.<a href="@1@netstandard/A.html#7f41c0c1ebadcc33" class="i method">GetValue</a>(<a href="#121f7232e79304b6" class="i field">_source</a>);
+            <span class="t t">ConnectionStringAttribute</span> <span id="r26 rd" class="r26 r">connStrAttr</span> = <span class="r22 r">propInfo</span>.<a href="@1@netstandard/A.html#0497c27b6539bfd9" class="i method">GetCustomAttribute</a>&lt;<span class="t t">ConnectionStringAttribute</span>&gt;();
+            <span class="t t">AppSettingAttribute</span> <span id="r27 rd" class="r27 r">appSettingAttr</span> = <span class="r22 r">propInfo</span>.<a href="@1@netstandard/A.html#0497c27b6539bfd9" class="i method">GetCustomAttribute</a>&lt;<span class="t t">AppSettingAttribute</span>&gt;();
+            <span class="t t">AutoResolveAttribute</span> <span id="r28 rd" class="r28 r">autoResolveAttr</span> = <span class="r22 r">propInfo</span>.<a href="@1@netstandard/A.html#0497c27b6539bfd9" class="i method">GetCustomAttribute</a>&lt;<span class="t t">AutoResolveAttribute</span>&gt;();
+            <a href="@1@netstandard/A.html#486d58da4553e12d" class="t t">Validator</a> <span id="r29 rd" class="r29 r">validator</span> = <a href="#9d810eea07027299" class="i method">GetValidatorFunc</a>(<span class="r22 r">propInfo</span>, <span class="r27 r">appSettingAttr</span> != <b>null</b>);
+ 
+            <b>if</b> (<span class="r27 r">appSettingAttr</span> == <b>null</b> &amp;&amp; <span class="r28 r">autoResolveAttr</span> == <b>null</b> &amp;&amp; <span class="r26 r">connStrAttr</span> == <b>null</b>)
+            {
+                <span class="r29 r">validator</span>(<span class="r25 r">originalValue</span>);
+ 
+                <span class="c">// No special attributes, treat as literal.</span>
+                <b>return</b> (<span id="r30 rd" class="r30 r">newAttr</span>, <span id="r31 rd" class="r31 r">bindingData</span>) =&gt; <span class="r25 r">originalValue</span>;
+            }
+ 
+            <b>int</b> <span id="r32 rd" class="r32 r">attrCount</span> = <b>new</b> <a href="@1@netstandard/A.html#707d3dbc6c887265" class="t t">Attribute</a>[] { <span class="r26 r">connStrAttr</span>, <span class="r27 r">appSettingAttr</span>, <span class="r28 r">autoResolveAttr</span> }.<a href="@1@netstandard/A.html#d35db0dea6ae310a" class="i method">Count</a>(<span id="r33 rd" class="r33 r">a</span> =&gt; <span class="r33 r">a</span> != <b>null</b>);
+            <b>if</b> (<span class="r32 r">attrCount</span> &gt; 1)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span><span class="s">Property &#39;</span>{<span class="r22 r">propInfo</span>.<a href="@1@netstandard/A.html#aa4f112f79364b6e" class="i property">Name</a>}<span class="s">&#39; can only be annotated with one of the types </span>{<b>nameof</b>(<span class="t t">AppSettingAttribute</span>)}<span class="s">, </span>{<b>nameof</b>(<span class="t t">AutoResolveAttribute</span>)}<span class="s">, and </span>{<b>nameof</b>(<span class="t t">ConnectionStringAttribute</span>)}<span class="s">.</span><span class="s">&quot;</span>);
+            }
+ 
+            <span class="c">// attributes only work on string properties.</span>
+            <b>if</b> (<span class="r22 r">propInfo</span>.<a href="@1@netstandard/A.html#c9d06b39de74ade6" class="i property">PropertyType</a> != <b>typeof</b>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>))
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="t t">ConnectionStringAttribute</span>)}<span class="s">, </span>{<b>nameof</b>(<span class="t t">AutoResolveAttribute</span>)}<span class="s">, or </span>{<b>nameof</b>(<span class="t t">AppSettingAttribute</span>)}<span class="s"> property &#39;</span>{<span class="r22 r">propInfo</span>.<a href="@1@netstandard/A.html#aa4f112f79364b6e" class="i property">Name</a>}<span class="s">&#39; must be of type string.</span><span class="s">&quot;</span>);
+            }
+ 
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r34 rd" class="r34 r">str</span> = (<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>)<span class="r25 r">originalValue</span>;
+ 
+            <span class="c">// first try to resolve with connection string</span>
+            <b>if</b> (<span class="r26 r">connStrAttr</span> != <b>null</b>)
+            {
+                <b>return</b> <a href="#157fd939997837f1" class="i method">GetConfigurationResolver</a>(<span class="r34 r">str</span>, <span class="r26 r">connStrAttr</span>.<span class="i property">Default</span>, <span class="r22 r">propInfo</span>, <span class="r29 r">validator</span>, <span id="r35 rd" class="r35 r">s</span> =&gt; <a href="#471d90511d9e6fbe" class="i field">_configuration</a>.<span class="i method">GetConnectionStringOrSetting</span>(<span class="r23 r">nameResolver</span>.<span class="i method">ResolveWholeString</span>(<span class="r35 r">s</span>)));
+            }
+ 
+            <span class="c">// then app setting</span>
+            <b>if</b> (<span class="r27 r">appSettingAttr</span> != <b>null</b>)
+            {
+                <b>return</b> <a href="#157fd939997837f1" class="i method">GetConfigurationResolver</a>(<span class="r34 r">str</span>, <span class="r27 r">appSettingAttr</span>.<span class="i property">Default</span>, <span class="r22 r">propInfo</span>, <span class="r29 r">validator</span>, <span id="r36 rd" class="r36 r">s</span> =&gt; <a href="#471d90511d9e6fbe" class="i field">_configuration</a>[<span class="r36 r">s</span>]);
+            }
+ 
+            <span class="c">// Must have an [AutoResolve]</span>
+            <span class="c">// try to resolve with auto resolve ({...}, %...%)</span>
+            <b>return</b> <a href="#551566697306325a" class="i method">GetAutoResolveResolver</a>(<span class="r34 r">str</span>, <span class="r28 r">autoResolveAttr</span>, <span class="r23 r">nameResolver</span>, <span class="r22 r">propInfo</span>, <span class="r24 r">contract</span>, <span class="r29 r">validator</span>);
+        }
+ 
+        <span class="c">// Apply AutoResolve attribute</span>
+        <b>internal</b> <a href="@1@netstandard/A.html#8adbe0476ca899db" class="t t">BindingDataResolver</a> <a id="551566697306325a" href="../../R/551566697306325a.html" target="n" data-glyph="74,1" class="i method">GetAutoResolveResolver</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r37 rd" class="r37 r">originalValue</span>, <span class="t t">AutoResolveAttribute</span> <span id="r38 rd" class="r38 r">autoResolveAttr</span>, <span class="t t">INameResolver</span> <span id="r39 rd" class="r39 r">nameResolver</span>, <a href="@1@netstandard/A.html#f3f0ea5f89a8f162" class="t t">PropertyInfo</a> <span id="r40 rd" class="r40 r">propInfo</span>, <a href="@1@netstandard/A.html#f786bcc5e7b69c7d" class="t t">BindingDataContract</a> <span id="r41 rd" class="r41 r">contract</span>, <a href="@1@netstandard/A.html#486d58da4553e12d" class="t t">Validator</a> <span id="r42 rd" class="r42 r">validator</span>)
+        {
+            <b>if</b> (<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@netstandard/A.html#55e241b6143365ef" class="i method">IsNullOrWhiteSpace</a>(<span class="r37 r">originalValue</span>))
+            {
+                <b>if</b> (<span class="r38 r">autoResolveAttr</span>.<span class="i property">Default</span> != <b>null</b>)
+                {
+                    <b>return</b> <a href="#c667e2c8d9a702dc" class="i method">GetBuiltinTemplateResolver</a>(<span class="r38 r">autoResolveAttr</span>.<span class="i property">Default</span>, <span class="r39 r">nameResolver</span>, <span class="r42 r">validator</span>);
+                }
+                <b>else</b>
+                {
+                    <span class="r42 r">validator</span>(<span class="r37 r">originalValue</span>);
+                    <b>return</b> (<span id="r43 rd" class="r43 r">newAttr</span>, <span id="r44 rd" class="r44 r">bindingData</span>) =&gt; <span class="r37 r">originalValue</span>;
+                }
+            }
+            <b>else</b>
+            {
+                <a href="#bb9c02a41c956437" class="i field">_autoResolves</a><a href="@1@netstandard/A.html#49962975508e2d83">[</a><span class="r40 r">propInfo</span>] = <span class="r38 r">autoResolveAttr</span>;
+                <b>return</b> <a href="#5dcdce6d6b9acf22" class="i method">GetTemplateResolver</a>(<span class="r37 r">originalValue</span>, <span class="r38 r">autoResolveAttr</span>, <span class="r39 r">nameResolver</span>, <span class="r40 r">propInfo</span>, <span class="r41 r">contract</span>, <span class="r42 r">validator</span>);
+            }
+        }
+ 
+        <span class="c">// Both ConnectionString and AppSetting have the same behavior, but perform the lookup differently.</span>
+        <b>internal static</b> <a href="@1@netstandard/A.html#8adbe0476ca899db" class="t t">BindingDataResolver</a> <a id="157fd939997837f1" href="../../R/157fd939997837f1.html" target="n" data-glyph="74,1" class="i method">GetConfigurationResolver</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r45 rd" class="r45 r">propertyValue</span>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r46 rd" class="r46 r">defaultValue</span>, <a href="@1@netstandard/A.html#f3f0ea5f89a8f162" class="t t">PropertyInfo</a> <span id="r47 rd" class="r47 r">propInfo</span>, <a href="@1@netstandard/A.html#486d58da4553e12d" class="t t">Validator</a> <span id="r48 rd" class="r48 r">validator</span>, <a href="@1@netstandard/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <span id="r49 rd" class="r49 r">resolveValue</span>)
+        {
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r50 rd" class="r50 r">configurationKey</span> = <span class="r45 r">propertyValue</span> ?? <span class="r46 r">defaultValue</span>;
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r51 rd" class="r51 r">resolvedValue</span> = <b>null</b>;
+ 
+            <b>if</b> (!<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@netstandard/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r50 r">configurationKey</span>))
+            {
+                <span class="r51 r">resolvedValue</span> = <span class="r49 r">resolveValue</span>(<span class="r50 r">configurationKey</span>);
+            }
+ 
+            <span class="c">// If a value is non-null and cannot be found, we throw to match the behavior</span>
+            <span class="c">// when %% values are not found in ResolveWholeString below.</span>
+            <b>if</b> (<span class="r51 r">resolvedValue</span> == <b>null</b> &amp;&amp; <span class="r45 r">propertyValue</span> != <b>null</b>)
+            {
+                <span class="c">// It&#39;s important that we only log the attribute property name, not the actual value to ensure</span>
+                <span class="c">// that in cases where users accidentally use a secret key *value* rather than indirect setting name</span>
+                <span class="c">// that value doesn&#39;t get written to logs.</span>
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span><span class="s">Unable to resolve the value for property &#39;</span>{<span class="r47 r">propInfo</span>.<a href="@1@netstandard/A.html#3eb1391de297c1a8" class="i property">DeclaringType</a>.<a href="@1@netstandard/A.html#aa4f112f79364b6e" class="i property">Name</a>}<span class="s">.</span>{<span class="r47 r">propInfo</span>.<a href="@1@netstandard/A.html#aa4f112f79364b6e" class="i property">Name</a>}<span class="s">&#39;. Make sure the setting exists and has a valid value.</span><span class="s">&quot;</span>);
+            }
+ 
+            <span class="c">// validate after the %% is substituted.</span>
+            <span class="r48 r">validator</span>(<span class="r51 r">resolvedValue</span>);
+ 
+            <b>return</b> (<span id="r52 rd" class="r52 r">newAttr</span>, <span id="r53 rd" class="r53 r">bindingData</span>) =&gt; <span class="r51 r">resolvedValue</span>;
+        }
+ 
+        <span class="c">// Run validition. This needs to be run at different stages.</span>
+        <span class="c">// In general, run as early as possible. If there are { } tokens, then we can&#39;t run until runtime.</span>
+        <span class="c">// But if there are no { }, we can run statically.</span>
+        <span class="c">// If there&#39;s no [AutoResolve], [AppSettings], then we can run immediately.</span>
+        <b>private static</b> <a href="@1@netstandard/A.html#486d58da4553e12d" class="t t">Validator</a> <a id="9d810eea07027299" href="../../R/9d810eea07027299.html" target="n" data-glyph="76,1" class="i method">GetValidatorFunc</a>(<a href="@1@netstandard/A.html#f3f0ea5f89a8f162" class="t t">PropertyInfo</a> <span id="r54 rd" class="r54 r">propInfo</span>, <b>bool</b> <span id="r55 rd" class="r55 r">dontLogValues</span>)
+        {
+            <span class="c">// This implicitly caches the attribute lookup once and then shares for each runtime invocation.</span>
+            <a href="@1@netstandard/A.html#3acf01620172c7f0" class="k">var</a> <span id="r56 rd" class="r56 r">attrs</span> = <span class="r54 r">propInfo</span>.<a href="@1@netstandard/A.html#1ffe18a9b0190ab3" class="i method">GetCustomAttributes</a>&lt;<span class="t t">ValidationAttribute</span>&gt;();
+ 
+            <b>return</b> (<span id="r57 rd" class="r57 r">value</span>) =&gt;
+            {
+                <b>foreach</b> (<b>var</b> <span id="r58 rd" class="r58 r">attr</span> <b>in</b> <span class="r56 r">attrs</span>)
+                {
+                    <b>try</b>
+                    {
+                        <span class="r58 r">attr</span>.<span class="i method">Validate</span>(<span class="r57 r">value</span>, <span class="r54 r">propInfo</span>.<a href="@1@netstandard/A.html#aa4f112f79364b6e" class="i property">Name</a>);
+                    }
+                    <b>catch</b> (<a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r59 rd" class="r59 r">e</span>)
+                    {
+                        <b>if</b> (<span class="r55 r">dontLogValues</span>)
+                        {
+                            <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span><span class="s">Validation failed for property &#39;</span>{<span class="r54 r">propInfo</span>.<a href="@1@netstandard/A.html#aa4f112f79364b6e" class="i property">Name</a>}<span class="s">&#39;. </span>{<span class="r59 r">e</span>.<a href="@1@netstandard/A.html#5fba0e16215b42a3" class="i property">Message</a>}<span class="s">&quot;</span>);
+                        }
+                        <b>else</b>
+                        {
+                            <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span><span class="s">Validation failed for property &#39;</span>{<span class="r54 r">propInfo</span>.<a href="@1@netstandard/A.html#aa4f112f79364b6e" class="i property">Name</a>}<span class="s">&#39;, value &#39;</span>{<span class="r57 r">value</span>}<span class="s">&#39;. </span>{<span class="r59 r">e</span>.<a href="@1@netstandard/A.html#5fba0e16215b42a3" class="i property">Message</a>}<span class="s">&quot;</span>);
+                        }
+                    }
+                }
+            };
+        }
+ 
+        <span class="c">// Resolve for AutoResolve.Default templates.</span>
+        <span class="c">// These only have access to the {sys} builtin variable and don&#39;t get access to trigger binding data.</span>
+        <b>internal static</b> <a href="@1@netstandard/A.html#8adbe0476ca899db" class="t t">BindingDataResolver</a> <a id="c667e2c8d9a702dc" href="../../R/c667e2c8d9a702dc.html" target="n" data-glyph="74,1" class="i method">GetBuiltinTemplateResolver</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r60 rd" class="r60 r">originalValue</span>, <span class="t t">INameResolver</span> <span id="r61 rd" class="r61 r">nameResolver</span>, <a href="@1@netstandard/A.html#486d58da4553e12d" class="t t">Validator</a> <span id="r62 rd" class="r62 r">validator</span>)
+        {
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r63 rd" class="r63 r">resolvedValue</span> = <span class="r61 r">nameResolver</span>.<span class="i method">ResolveWholeString</span>(<span class="r60 r">originalValue</span>);
+ 
+            <b>var</b> <span id="r64 rd" class="r64 r">template</span> = <span class="t t">BindingTemplate</span>.<span class="i method">FromString</span>(<span class="r63 r">resolvedValue</span>);
+            <b>if</b> (!<span class="r64 r">template</span>.<span class="i property">HasParameters</span>)
+            {
+                <span class="c">// No { } tokens, bind eagerly up front.</span>
+                <span class="r62 r">validator</span>(<span class="r60 r">originalValue</span>);
+            }
+ 
+            <a href="SystemBindingData.cs.html#3ba5fd3b9df0bcad" class="t t">SystemBindingData</a>.<a href="SystemBindingData.cs.html#0e10557526948f60" class="i method">ValidateStaticContract</a>(<span class="r64 r">template</span>);
+ 
+            <span class="c">// For static default contracts, we only have access to the built in binding data.</span>
+            <b>return</b> (<span id="r65 rd" class="r65 r">newAttr</span>, <span id="r66 rd" class="r66 r">bindingData</span>) =&gt;
+            {
+                <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r67 rd" class="r67 r">newValue</span> = <span class="r64 r">template</span>.<span class="i method">Bind</span>(<a href="SystemBindingData.cs.html#3ba5fd3b9df0bcad" class="t t">SystemBindingData</a>.<a href="SystemBindingData.cs.html#d5ec00426508bd0c" class="i method">GetSystemBindingData</a>(<span class="r66 r">bindingData</span>));
+                <span class="r62 r">validator</span>(<span class="r67 r">newValue</span>);
+                <b>return</b> <span class="r67 r">newValue</span>;
+            };
+        }
+ 
+        <span class="c">// AutoResolve</span>
+        <b>internal static</b> <a href="@1@netstandard/A.html#8adbe0476ca899db" class="t t">BindingDataResolver</a> <a id="5dcdce6d6b9acf22" href="../../R/5dcdce6d6b9acf22.html" target="n" data-glyph="74,1" class="i method">GetTemplateResolver</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r68 rd" class="r68 r">originalValue</span>, <span class="t t">AutoResolveAttribute</span> <span id="r69 rd" class="r69 r">attr</span>, <span class="t t">INameResolver</span> <span id="r70 rd" class="r70 r">nameResolver</span>, <a href="@1@netstandard/A.html#f3f0ea5f89a8f162" class="t t">PropertyInfo</a> <span id="r71 rd" class="r71 r">propInfo</span>, <a href="@1@netstandard/A.html#f786bcc5e7b69c7d" class="t t">BindingDataContract</a> <span id="r72 rd" class="r72 r">contract</span>, <a href="@1@netstandard/A.html#486d58da4553e12d" class="t t">Validator</a> <span id="r73 rd" class="r73 r">validator</span>)
+        {
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r74 rd" class="r74 r">resolvedValue</span> = <span class="r70 r">nameResolver</span>.<span class="i method">ResolveWholeString</span>(<span class="r68 r">originalValue</span>);
+            <b>var</b> <span id="r75 rd" class="r75 r">template</span> = <span class="t t">BindingTemplate</span>.<span class="i method">FromString</span>(<span class="r74 r">resolvedValue</span>);
+ 
+            <b>if</b> (!<span class="r75 r">template</span>.<span class="i property">HasParameters</span>)
+            {
+                <span class="c">// No { } tokens, bind eagerly up front.</span>
+                <span class="r73 r">validator</span>(<span class="r74 r">resolvedValue</span>);
+            }
+ 
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CS0618</span> <span class="c">// IResolutionPolicy is obsolete</span>
+            <span class="t t">IResolutionPolicy</span> <span id="r76 rd" class="r76 r">policy</span> = <a href="#4007f6da1ff6a490" class="i method">GetPolicy</a>(<span class="r69 r">attr</span>.<span class="i property">ResolutionPolicyType</span>, <span class="r71 r">propInfo</span>);
+            <span class="r75 r">template</span>.<span class="i method">ValidateContractCompatibility</span>(<span class="r72 r">contract</span>);
+            <b>return</b> (<span id="r77 rd" class="r77 r">newAttr</span>, <span id="r78 rd" class="r78 r">bindingData</span>) =&gt; <a href="#a19829df63acbd36" class="i method">TemplateBind</a>(<span class="r76 r">policy</span>, <span class="r71 r">propInfo</span>, <span class="r77 r">newAttr</span>, <span class="r75 r">template</span>, <span class="r78 r">bindingData</span>, <span class="r73 r">validator</span>);
+        }
+ 
+        <span class="c">// Get a attribute with %% resolved, but not runtime {} resolved.</span>
+        <b>public</b> <span class="r0 r t">TAttribute</span> <a id="7f04c6eeeb257190" href="../../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetNameResolvedAttribute</a>()
+        {
+            <span class="r0 r t">TAttribute</span> <span id="r79 rd" class="r79 r">attr</span> = <a href="#68afc4ff450f84d0" class="i method">ResolveFromBindings</a>(<b>null</b>);
+            <b>return</b> <span class="r79 r">attr</span>;
+        }
+ 
+        <b>public string</b> <a id="37492dcbe0e17866" href="../../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetInvokeString</a>(<span class="r0 r t">TAttribute</span> <span id="r80 rd" class="r80 r">attributeResolved</span>)
+        {
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r81 rd" class="r81 r">invokeString</span>;
+ 
+            <b>if</b> (<a href="#121f7232e79304b6" class="i field">_source</a> <b>is not</b> <span class="t t">IAttributeInvokeDescriptor</span>&lt;<span class="r0 r t">TAttribute</span>&gt; <span id="r82 rd" class="r82 r">resolver</span>)
+            {
+                <span class="r81 r">invokeString</span> = <a href="DefaultAttributeInvokerDescriptor.cs.html#cc06f57a05967deb" class="t t">DefaultAttributeInvokerDescriptor</a>&lt;<span class="r0 r t">TAttribute</span>&gt;.<a href="DefaultAttributeInvokerDescriptor.cs.html#83332b29d7ac9b68" class="i method">ToInvokeString</a>(<a href="#bb9c02a41c956437" class="i field">_autoResolves</a>, <span class="r80 r">attributeResolved</span>);
+            }
+            <b>else</b>
+            {
+                <span class="r81 r">invokeString</span> = <span class="r82 r">resolver</span>.<span class="i method">ToInvokeString</span>();
+            }
+            <b>return</b> <span class="r81 r">invokeString</span>;
+        }
+ 
+        <b>public</b> <span class="r0 r t">TAttribute</span> <a id="6f47f2e78760ec84" href="../../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ResolveFromInvokeString</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r83 rd" class="r83 r">invokeString</span>)
+        {
+            <span class="r0 r t">TAttribute</span> <span id="r84 rd" class="r84 r">attr</span>;
+            <b>if</b> (<a href="#121f7232e79304b6" class="i field">_source</a> <b>is not</b> <span class="t t">IAttributeInvokeDescriptor</span>&lt;<span class="r0 r t">TAttribute</span>&gt; <span id="r85 rd" class="r85 r">resolver</span>)
+            {
+                <span class="r84 r">attr</span> = <a href="DefaultAttributeInvokerDescriptor.cs.html#cc06f57a05967deb" class="t t">DefaultAttributeInvokerDescriptor</a>&lt;<span class="r0 r t">TAttribute</span>&gt;.<a href="DefaultAttributeInvokerDescriptor.cs.html#d0039fc39d14a426" class="i method">FromInvokeString</a>(<a href="#86606db78cf2e0e4" class="k">this</a>, <span class="r83 r">invokeString</span>);
+            }
+            <b>else</b>
+            {
+                <span class="r84 r">attr</span> = <span class="r85 r">resolver</span>.<span class="i method">FromInvokeString</span>(<span class="r83 r">invokeString</span>);
+            }
+            <b>return</b> <span class="r84 r">attr</span>;
+        }
+ 
+        <b>public</b> <span class="r0 r t">TAttribute</span> <a id="a5f4ff0ece8455f3" href="../../R/a5f4ff0ece8455f3.html" target="n" data-glyph="72,1" class="i method">ResolveFromBindingData</a>(<span class="t t">BindingContext</span> <span id="r86 rd" class="r86 r">ctx</span>)
+        {
+            <span class="r0 r t">var</span> <span id="r87 rd" class="r87 r">attr</span> = <a href="#68afc4ff450f84d0" class="i method">ResolveFromBindings</a>(<span class="r86 r">ctx</span>.<span class="i property">BindingData</span>);
+            <b>return</b> <span class="r87 r">attr</span>;
+        }
+ 
+        <span class="c">// When there&#39;s only 1 resolvable property</span>
+        <b>internal</b> <span class="r0 r t">TAttribute</span> <a id="995c6c4fc282391a" href="../../R/995c6c4fc282391a.html" target="n" data-glyph="74,1" class="i method">New</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r88 rd" class="r88 r">invokeString</span>)
+        {
+            <b>if</b> (<a href="#bb9c02a41c956437" class="i field">_autoResolves</a>.<a href="@1@netstandard/A.html#12b9bba2a1f9c3e2" class="i property">Count</a> != 1)
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;Invalid invoke string format for attribute.&quot;</span>);
+            }
+            <a href="@1@netstandard/A.html#d3599058f8d79be0" class="k">var</a> <span id="r89 rd" class="r89 r">overrideProps</span> = <a href="#bb9c02a41c956437" class="i field">_autoResolves</a>.<a href="@1@netstandard/A.html#5c652c53e80df013" class="i method">Select</a>(<span id="r90 rd" class="r90 r">pair</span> =&gt; <span class="r90 r">pair</span>.<a href="@1@netstandard/A.html#f9d1c04feb1af032" class="i property">Key</a>)
+                .<a href="@1@netstandard/A.html#a6091311eadfdd8a" class="i method">ToDictionary</a>(<span id="r91 rd" class="r91 r">prop</span> =&gt; <span class="r91 r">prop</span>.<a href="@1@netstandard/A.html#aa4f112f79364b6e" class="i property">Name</a>, <span id="r92 rd" class="r92 r">prop</span> =&gt; <span class="r88 r">invokeString</span>, <a href="@1@netstandard/A.html#a1c3d85bbf4ae20e" class="t t">StringComparer</a>.<a href="@1@netstandard/A.html#59b9c33842417944" class="i property">OrdinalIgnoreCase</a>);
+            <b>return</b> <a href="#0f65cdc6cc509c11" class="i method">New</a>(<span class="r89 r">overrideProps</span>);
+        }
+ 
+        <span class="c">// Clone the source attribute, but override the properties with the supplied.</span>
+        <b>internal</b> <span class="r0 r t">TAttribute</span> <a id="0f65cdc6cc509c11" href="../../R/0f65cdc6cc509c11.html" target="n" data-glyph="74,1" class="i method">New</a>(<a href="@1@netstandard/A.html#20343df0c96b629b" class="t t">IDictionary</a>&lt;<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <span id="r93 rd" class="r93 r">overrideProperties</span>)
+        {
+            <a href="@1@netstandard/A.html#20343df0c96b629b" class="t t">IDictionary</a>&lt;<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>, <b>object</b>&gt; <span id="r94 rd" class="r94 r">propertyValues</span> = <b>new</b> <a href="@1@netstandard/A.html#05d4a216235a779c" class="t constructor">Dictionary</a>&lt;<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>, <b>object</b>&gt;(<a href="@1@netstandard/A.html#a1c3d85bbf4ae20e" class="t t">StringComparer</a>.<a href="@1@netstandard/A.html#59b9c33842417944" class="i property">OrdinalIgnoreCase</a>);
+ 
+            <span class="c">// Populate inititial properties from the source</span>
+            <a href="@1@netstandard/A.html#3d00eeab9feb80f3" class="t t">Type</a> <span id="r95 rd" class="r95 r">t</span> = <b>typeof</b>(<span class="r0 r t">TAttribute</span>);
+            <b>var</b> <span id="r96 rd" class="r96 r">properties</span> = <span class="r95 r">t</span>.<a href="@1@netstandard/A.html#bc75fdb60d33fb57" class="i method">GetProperties</a>(<a href="#dce0fdb401197890" class="i field">Flags</a>);
+            <b>foreach</b> (<a href="@1@netstandard/A.html#f3f0ea5f89a8f162" class="k">var</a> <span id="r97 rd" class="r97 r">prop</span> <b>in</b> <span class="r96 r">properties</span>)
+            {
+                <span class="r94 r">propertyValues</span><a href="@1@netstandard/A.html#86884956b17e491a">[</a><span class="r97 r">prop</span>.<a href="@1@netstandard/A.html#aa4f112f79364b6e" class="i property">Name</a>] = <span class="r97 r">prop</span>.<a href="@1@netstandard/A.html#7f41c0c1ebadcc33" class="i method">GetValue</a>(<a href="#121f7232e79304b6" class="i field">_source</a>);
+            }
+ 
+            <b>foreach</b> (<a href="@1@netstandard/A.html#8585965bb176a426" class="k">var</a> <span id="r98 rd" class="r98 r">kv</span> <b>in</b> <span class="r93 r">overrideProperties</span>)
+            {
+                <span class="r94 r">propertyValues</span><a href="@1@netstandard/A.html#86884956b17e491a">[</a><span class="r98 r">kv</span>.<a href="@1@netstandard/A.html#f9d1c04feb1af032" class="i property">Key</a>] = <span class="r98 r">kv</span>.<a href="@1@netstandard/A.html#38c0e86cc4b30170" class="i property">Value</a>;
+            }
+ 
+            <b>var</b> <span id="r99 rd" class="r99 r">ctorArgs</span> = <a href="@1@netstandard/A.html#156e066ecc4ccedf" class="t t">Array</a>.<a href="@1@netstandard/A.html#f4af030bcf8c8991" class="i method">ConvertAll</a>(<a href="#58f80418d0fa7548" class="i field">_matchedCtor</a>.<a href="@1@netstandard/A.html#91801fac9c14db1f" class="i method">GetParameters</a>(), <span id="r100 rd" class="r100 r">param</span> =&gt; <span class="r94 r">propertyValues</span><a href="@1@netstandard/A.html#86884956b17e491a">[</a><span class="r100 r">param</span>.<a href="@1@netstandard/A.html#5189606fee27d248" class="i property">Name</a>]);
+            <span class="r0 r t">var</span> <span id="r101 rd" class="r101 r">newAttr</span> = (<span class="r0 r t">TAttribute</span>)<a href="#58f80418d0fa7548" class="i field">_matchedCtor</a>.<a href="@1@netstandard/A.html#2c515982c196f40a" class="i method">Invoke</a>(<span class="r99 r">ctorArgs</span>);
+ 
+            <b>foreach</b> (<a href="@1@netstandard/A.html#f3f0ea5f89a8f162" class="k">var</a> <span id="r102 rd" class="r102 r">prop</span> <b>in</b> <span class="r96 r">properties</span>)
+            {
+                <b>if</b> (<span class="r102 r">prop</span>.<a href="@1@netstandard/A.html#4f511c2f30622a6d" class="i property">CanWrite</a>)
+                {
+                    <a href="@1@netstandard/A.html#d9262ceecc1719ab" class="k">var</a> <span id="r103 rd" class="r103 r">val</span> = <span class="r94 r">propertyValues</span><a href="@1@netstandard/A.html#86884956b17e491a">[</a><span class="r102 r">prop</span>.<a href="@1@netstandard/A.html#aa4f112f79364b6e" class="i property">Name</a>];
+                    <span class="r102 r">prop</span>.<a href="@1@netstandard/A.html#4e43ac7a41b37349" class="i method">SetValue</a>(<span class="r101 r">newAttr</span>, <span class="r103 r">val</span>);
+                }
+            }
+            <b>return</b> <span class="r101 r">newAttr</span>;
+        }
+ 
+        <b>internal</b> <span class="r0 r t">TAttribute</span> <a id="68afc4ff450f84d0" href="../../R/68afc4ff450f84d0.html" target="n" data-glyph="74,1" class="i method">ResolveFromBindings</a>(<a href="@1@netstandard/A.html#f786bcc5e7b69c7d" class="t t">BindingData</a> <span id="r104 rd" class="r104 r">bindingData</span>)
+        {
+            <span class="c">// Invoke ctor</span>
+            <b>var</b> <span id="r105 rd" class="r105 r">ctorArgs</span> = <a href="@1@netstandard/A.html#156e066ecc4ccedf" class="t t">Array</a>.<a href="@1@netstandard/A.html#f4af030bcf8c8991" class="i method">ConvertAll</a>(<a href="#67d1343676b9a6c1" class="i field">_ctorParamResolvers</a>, <span id="r106 rd" class="r106 r">func</span> =&gt; <span class="r106 r">func</span>(<a href="#121f7232e79304b6" class="i field">_source</a>, <span class="r104 r">bindingData</span>));
+            <span class="r0 r t">var</span> <span id="r107 rd" class="r107 r">newAttr</span> = (<span class="r0 r t">TAttribute</span>)<a href="#58f80418d0fa7548" class="i field">_matchedCtor</a>.<a href="@1@netstandard/A.html#2c515982c196f40a" class="i method">Invoke</a>(<span class="r105 r">ctorArgs</span>);
+ 
+            <b>foreach</b> (<a href="@1@netstandard/A.html#27863de72c2c9b49" class="k">var</a> <span id="r108 rd" class="r108 r">setProp</span> <b>in</b> <a href="#b983a090e0da80ce" class="i field">_propertySetters</a>)
+            {
+                <span class="r108 r">setProp</span>(<span class="r107 r">newAttr</span>, <span class="r104 r">bindingData</span>);
+            }
+ 
+            <b>return</b> <span class="r107 r">newAttr</span>;
+        }
+ 
+        <b>private static string</b> <a id="a19829df63acbd36" href="../../R/a19829df63acbd36.html" target="n" data-glyph="76,1" class="i method">TemplateBind</a>(<span class="t t">IResolutionPolicy</span> <span id="r109 rd" class="r109 r">policy</span>, <a href="@1@netstandard/A.html#f3f0ea5f89a8f162" class="t t">PropertyInfo</a> <span id="r110 rd" class="r110 r">prop</span>, <a href="@1@netstandard/A.html#707d3dbc6c887265" class="t t">Attribute</a> <span id="r111 rd" class="r111 r">attr</span>, <span class="t t">BindingTemplate</span> <span id="r112 rd" class="r112 r">template</span>, <a href="@1@netstandard/A.html#f786bcc5e7b69c7d" class="t t">BindingData</a> <span id="r113 rd" class="r113 r">bindingData</span>, <a href="@1@netstandard/A.html#486d58da4553e12d" class="t t">Validator</a> <span id="r114 rd" class="r114 r">validator</span>)
+        {
+            <b>if</b> (<span class="r113 r">bindingData</span> == <b>null</b>)
+            {
+                <span class="c">// Skip validation if no binding data provided. We can&#39;t do the { } substitutions.</span>
+                <b>return</b> <span class="r112 r">template</span>?.<span class="i property">Pattern</span>;
+            }
+ 
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r115 rd" class="r115 r">newValue</span> = <span class="r109 r">policy</span>.<span class="i method">TemplateBind</span>(<span class="r110 r">prop</span>, <span class="r111 r">attr</span>, <span class="r112 r">template</span>, <span class="r113 r">bindingData</span>);
+            <span class="r114 r">validator</span>(<span class="r115 r">newValue</span>);
+            <b>return</b> <span class="r115 r">newValue</span>;
+        }
+ 
+        <b>internal static</b> <span class="t t">IResolutionPolicy</span> <a id="4007f6da1ff6a490" href="../../R/4007f6da1ff6a490.html" target="n" data-glyph="74,1" class="i method">GetPolicy</a>(<a href="@1@netstandard/A.html#3d00eeab9feb80f3" class="t t">Type</a> <span id="r116 rd" class="r116 r">formatterType</span>, <a href="@1@netstandard/A.html#f3f0ea5f89a8f162" class="t t">PropertyInfo</a> <span id="r117 rd" class="r117 r">propInfo</span>)
+        {
+            <b>if</b> (<span class="r116 r">formatterType</span> != <b>null</b>)
+            {
+                <b>if</b> (!<b>typeof</b>(<span class="t t">IResolutionPolicy</span>).<a href="@1@netstandard/A.html#ba0cffea035fe210" class="i method">IsAssignableFrom</a>(<span class="r116 r">formatterType</span>))
+                {
+                    <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span><span class="s">The </span>{<b>nameof</b>(<span class="t t">AutoResolveAttribute</span>.<span class="i property">ResolutionPolicyType</span>)}<span class="s"> on </span>{<span class="r117 r">propInfo</span>.<a href="@1@netstandard/A.html#aa4f112f79364b6e" class="i property">Name</a>}<span class="s"> must derive from </span>{<b>typeof</b>(<span class="t t">IResolutionPolicy</span>).<a href="@1@netstandard/A.html#aa4f112f79364b6e" class="i property">Name</a>}<span class="s">.</span><span class="s">&quot;</span>);
+                }
+ 
+                <b>try</b>
+                {
+                    <a href="@1@netstandard/A.html#d9262ceecc1719ab" class="k">var</a> <span id="r118 rd" class="r118 r">obj</span> = <a href="@1@netstandard/A.html#955a7437554c8efc" class="t t">Activator</a>.<a href="@1@netstandard/A.html#4c7b92371a93f246" class="i method">CreateInstance</a>(<span class="r116 r">formatterType</span>);
+                    <b>return</b> (<span class="t t">IResolutionPolicy</span>)<span class="r118 r">obj</span>;
+                }
+                <b>catch</b> (<a href="@1@netstandard/A.html#b0d32699efb065e9" class="t t">MissingMethodException</a>)
+                {
+                    <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span><span class="s">The </span>{<b>nameof</b>(<span class="t t">AutoResolveAttribute</span>.<span class="i property">ResolutionPolicyType</span>)}<span class="s"> on </span>{<span class="r117 r">propInfo</span>.<a href="@1@netstandard/A.html#aa4f112f79364b6e" class="i property">Name</a>}<span class="s"> must derive from </span>{<b>typeof</b>(<span class="t t">IResolutionPolicy</span>).<a href="@1@netstandard/A.html#aa4f112f79364b6e" class="i property">Name</a>}<span class="s"> and have a default constructor.</span><span class="s">&quot;</span>);
+                }
+            }
+ 
+            <span class="c">// return the default policy</span>
+            <b>return</b> <b>new</b> <a href="DefaultResolutionPolicy.cs.html#e8218df3452a0d4e" class="t constructor">DefaultResolutionPolicy</a>();
+        }
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">CS0618</span> <span class="c">// Type or member is obsolete</span>
+ 
+        <span class="c">// If no name resolver is specified, then any %% becomes an error.</span>
+        <b>private class</b> <a id="98b8bcf41bc3425c" href="../../R/98b8bcf41bc3425c.html" target="n" data-glyph="4,1" class="t t"><span id="f5a14313e42e1bcf">EmptyNameResolver</span></a> : <span class="t t">INameResolver</span>
+        {
+            <b>public string</b> <a id="d7248e5d2625c621" href="../../R/d7248e5d2625c621.html" target="n" data-glyph="72,2" class="i method">Resolve</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r119 rd" class="r119 r">name</span>) =&gt; <b>null</b>;
+        }
+    }
+}</pre></td></tr></table></div></body></html>
