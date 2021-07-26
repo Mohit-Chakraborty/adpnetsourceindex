@@ -1,0 +1,109 @@
+﻿<!DOCTYPE html>
+<html><head><title>AzureEventSourceTests.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(100);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Core.Tests/AzureEventSourceTests.cs" target="_top">AzureEventSourceTests.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/core/Azure.Core/tests/AzureEventSourceTests.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Core.Tests" target="_top">Azure.Core.Tests.csproj</a> (Azure.Core.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">NET5_0</span>
+<span class="e">
+using System;
+using System.Collections.Generic;
+using System.Diagnostics.Tracing;
+using System.Linq;
+using System.Reflection;
+using System.Runtime.Loader;
+using Azure.Core.Diagnostics;
+using NUnit.Framework;
+ 
+namespace Azure.Core.Tests
+{
+    public class AzureEventSourceTests
+    {
+        [Test]
+        public void CanCreateMultipleEventSources()
+        {
+            EventSource GetEventSource(TestAssemblyLoadContext testAssemblyLoadContext)
+            {
+                return (EventSource)Activator.CreateInstance(testAssemblyLoadContext.Assemblies
+                    .Single()
+                    .GetType(&quot;Azure.Core.Tests.AzureEventSourceTests+TestEventSource&quot;));
+            }
+ 
+            void LogEvent(EventSource azureCoreEventSource)
+            {
+                azureCoreEventSource.GetType()
+                    .GetMethod(&quot;LogSomething&quot;, BindingFlags.Public | BindingFlags.Instance)
+                    .Invoke(azureCoreEventSource, Array.Empty&lt;object&gt;());
+            }
+ 
+            var alc = new TestAssemblyLoadContext(&quot;Test 1&quot;);
+            var alc2 = new TestAssemblyLoadContext(&quot;Test 2&quot;);
+ 
+            try
+            {
+                List&lt;EventWrittenEventArgs&gt; events = new();
+                using var listener = new AzureEventSourceListener((args, s) =&gt; events.Add(args), EventLevel.Verbose);
+ 
+                alc.LoadFromAssemblyPath(typeof(TestEventSource).Assembly.Location);
+                alc2.LoadFromAssemblyPath(typeof(TestEventSource).Assembly.Location);
+ 
+                using var es0 = new TestEventSource();
+                using var es1 = GetEventSource(alc);
+                using var es2 = GetEventSource(alc2);
+ 
+                LogEvent(es0);
+                LogEvent(es1);
+                LogEvent(es2);
+ 
+                Assert.AreEqual(&quot;Azure-Corez&quot;, es0.Name);
+                Assert.AreEqual(&quot;Azure-Corez-1&quot;, es1.Name);
+                Assert.AreEqual(&quot;Azure-Corez-2&quot;, es2.Name);
+ 
+                Assert.AreEqual(3, events.Count);
+ 
+                Assert.AreEqual(&quot;Azure-Corez&quot;, events[0].EventSource.Name);
+                Assert.AreEqual(&quot;Azure-Corez-1&quot;, events[1].EventSource.Name);
+                Assert.AreEqual(&quot;Azure-Corez-2&quot;, events[2].EventSource.Name);
+            }
+            finally
+            {
+                alc.Unload();
+                alc2.Unload();
+            }
+        }
+ 
+        [Test]
+        public void SetsTraits()
+        {
+            using var es = new TestEventSource();
+            Assert.AreEqual(&quot;true&quot;, es.GetTrait(&quot;AzureEventSource&quot;));
+        }
+ 
+        public class TestAssemblyLoadContext : AssemblyLoadContext
+        {
+            public TestAssemblyLoadContext(string name) : base(name, true)
+            {
+            }
+        }
+ 
+        internal class TestEventSource: AzureEventSource
+        {
+            public TestEventSource() : base(&quot;Azure-Corez&quot;)
+            {
+            }
+ 
+            [Event(1)]
+            public void LogSomething()
+            {
+                WriteEvent(1);
+            }
+        }
+    }
+}
+</span><span class="k preprocess">#</span><span class="k preprocess">endif</span></pre></td></tr></table></div></body></html>

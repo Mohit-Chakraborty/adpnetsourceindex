@@ -1,0 +1,235 @@
+﻿<!DOCTYPE html>
+<html><head><title>Multipart.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(226);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Data.Tables/Shared/Multipart.cs" target="_top">Shared\Multipart.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/core/Azure.Core/src/Shared/Multipart/Multipart.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Data.Tables" target="_top">Azure.Data.Tables.csproj</a> (Azure.Data.Tables)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Globalization</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+ 
+<span class="k preprocess">#</span><span class="k preprocess">nullable</span> <span class="k preprocess">disable</span>
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Core</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Provides support for creating and parsing multipart/mixed content.</span>
+    <span class="c">///</span><span class="c"> This is implementing a couple of layered standards as mentioned at</span>
+    <span class="c">///</span><span class="c"> https://docs.microsoft.com/en-us/rest/api/storageservices/blob-batch and</span>
+    <span class="c">///</span><span class="c"> https://docs.microsoft.com/en-us/rest/api/storageservices/performing-entity-group-transactions</span>
+    <span class="c">///</span><span class="c"> including https://www.odata.org/documentation/odata-version-3-0/batch-processing/</span>
+    <span class="c">///</span><span class="c"> and https://www.ietf.org/rfc/rfc2046.txt.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal static class</b> <a id="f158bb76d85ee407" href="../R/f158bb76d85ee407.html" target="n" data-glyph="2,0" class="t t">Multipart</a>
+    {
+        <b>private const int</b> <a id="6dfc8232fd220ed9" href="../R/6dfc8232fd220ed9.html" target="n" data-glyph="10,1" class="i field">KB</a> = 1024;
+        <b>private const int</b> <a id="742149fa93f6bf05" href="../R/742149fa93f6bf05.html" target="n" data-glyph="10,1" class="i field">ResponseLineSize</a> = 4 * <a href="#6dfc8232fd220ed9" class="i field">KB</a>;
+        <b>private const string</b> <a id="8d6b6f6deecb7ecd" href="../R/8d6b6f6deecb7ecd.html" target="n" data-glyph="10,1" class="i field">MultipartContentTypePrefix</a> = <span class="s">&quot;multipart/mixed; boundary=&quot;</span>;
+        <b>private const string</b> <a id="883d3c781eb16a1a" href="../R/883d3c781eb16a1a.html" target="n" data-glyph="10,1" class="i field">ContentIdName</a> = <span class="s">&quot;Content-ID&quot;</span>;
+        <b>internal static</b> <a href="@1@netstandard/A.html#beac22dfca574cd4" class="t t">InvalidOperationException</a> <a id="e3ac222cd38170d2" href="../R/e3ac222cd38170d2.html" target="n" data-glyph="74,1" class="i method">InvalidBatchContentType</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r0 rd" class="r0 r">contentType</span>) =&gt;
+            <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span><span class="s">Expected </span>{<a href="/Azure.Core/A.html#c33e005b997e77ad" class="t t">HttpHeader</a>.<a href="/Azure.Core/A.html#9d4171ae0141e914" class="t t">Names</a>.<a href="/Azure.Core/A.html#bc72ca0e1abef094" class="i property">ContentType</a>}<span class="s"> to start with </span>{<a href="#8d6b6f6deecb7ecd" class="i field">MultipartContentTypePrefix</a>}<span class="s"> but received </span>{<span class="r0 r">contentType</span>}<span class="s">&quot;</span>);
+ 
+        <b>internal static</b> <a href="@1@netstandard/A.html#beac22dfca574cd4" class="t t">InvalidOperationException</a> <a id="bc484b08c1d26069" href="../R/bc484b08c1d26069.html" target="n" data-glyph="74,1" class="i method">InvalidHttpStatusLine</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r1 rd" class="r1 r">statusLine</span>) =&gt;
+            <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span><span class="s">Expected an HTTP status line, not </span>{<span class="r1 r">statusLine</span>}<span class="s">&quot;</span>);
+ 
+        <b>internal static</b> <a href="@1@netstandard/A.html#beac22dfca574cd4" class="t t">InvalidOperationException</a> <a id="d5d77c4311f8189c" href="../R/d5d77c4311f8189c.html" target="n" data-glyph="74,1" class="i method">InvalidHttpHeaderLine</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r2 rd" class="r2 r">headerLine</span>) =&gt;
+            <b>new</b> <a href="@1@netstandard/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span><span class="s">Expected an HTTP header line, not </span>{<span class="r2 r">headerLine</span>}<span class="s">&quot;</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Parse a multipart/mixed response body into several responses.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">batchContent</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The response content.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">batchContentType</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The response content type.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">expectBoundariesWithCRLF</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Controls whether the parser will expect all multi-part boundaries to use CRLF line breaks. This should be true unless more permissive line break parsing is required.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">async</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Whether to invoke the operation asynchronously.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to propagate notifications</span>
+        <span class="c">///</span><span class="c"> that the operation should be cancelled.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The parsed </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">s.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>internal static async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a>[]&gt; <a id="d696a1c84d6466fd" href="../R/d696a1c84d6466fd.html" target="n" data-glyph="74,1" class="i method">ParseAsync</a>(
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r3 rd" class="r3 r">batchContent</span>,
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r4 rd" class="r4 r">batchContentType</span>,
+            <b>bool</b> <span id="r5 rd" class="r5 r">expectBoundariesWithCRLF</span>,
+            <b>bool</b> <span id="r6 rd" class="r6 r">async</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r7 rd" class="r7 r">cancellationToken</span>)
+        {
+            <span class="c">// Get the batch boundary</span>
+            <b>if</b> (!<a href="#7fd3102561a615eb" class="i method">GetBoundary</a>(<span class="r4 r">batchContentType</span>, <b>out string</b> <span id="r8 rd" class="r8 r">batchBoundary</span>))
+            {
+                <b>throw</b> <a href="#e3ac222cd38170d2" class="i method">InvalidBatchContentType</a>(<span class="r4 r">batchContentType</span>);
+            }
+ 
+            <span class="c">// Collect the responses in a dictionary (in case the Content-ID</span>
+            <span class="c">// values come back out of order)</span>
+            <a href="@1@netstandard/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;<b>int</b>, <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a>&gt; <span id="r9 rd" class="r9 r">responses</span> = <b>new</b> <a href="@1@netstandard/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<b>int</b>, <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a>&gt;();
+ 
+            <span class="c">// Collect responses without a Content-ID in a List</span>
+            <a href="@1@netstandard/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a>&gt; <span id="r10 rd" class="r10 r">responsesWithoutId</span> = <b>new</b> <a href="@1@netstandard/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a>&gt;();
+ 
+            <span class="c">// Read through the batch body one section at a time until the</span>
+            <span class="c">// reader returns null</span>
+            <a href="MultipartReader.cs.html#5c8c9479a493a9cd" class="t t">MultipartReader</a> <span id="r11 rd" class="r11 r">reader</span> = <b>new</b> <a href="MultipartReader.cs.html#e1460735dfa3677e" class="t constructor">MultipartReader</a>(<span class="r8 r">batchBoundary</span>, <span class="r3 r">batchContent</span>) { <a href="MultipartReader.cs.html#106bcfbec948d113" class="i property">ExpectBoundariesWithCRLF</a> = <span class="r5 r">expectBoundariesWithCRLF</span> };
+            <b>for</b> (<a href="MultipartSection.cs.html#1327d72eb23d105c" class="t t">MultipartSection</a> <span id="r12 rd" class="r12 r">section</span> = <b>await</b> <span class="r11 r">reader</span>.<a href="#24218a1a665dd27e" class="i method">GetNextSectionAsync</a>(<span class="r6 r">async</span>, <span class="r7 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                <span class="r12 r">section</span> != <b>null</b>;
+                <span class="r12 r">section</span> = <b>await</b> <span class="r11 r">reader</span>.<a href="#24218a1a665dd27e" class="i method">GetNextSectionAsync</a>(<span class="r6 r">async</span>, <span class="r7 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>))
+            {
+                <b>bool</b> <span id="r13 rd" class="r13 r">contentIdFound</span> = <b>true</b>;
+                <b>if</b> (<span class="r12 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a>.<a href="@1@netstandard/A.html#2e5bc6d8c0f21e67" class="i method">TryGetValue</a>(<a href="/Azure.Core/A.html#c33e005b997e77ad" class="t t">HttpHeader</a>.<a href="/Azure.Core/A.html#9d4171ae0141e914" class="t t">Names</a>.<a href="/Azure.Core/A.html#bc72ca0e1abef094" class="i property">ContentType</a>, <b>out string</b>[] <span id="r14 rd" class="r14 r">contentTypeValues</span>) &amp;&amp;
+                        <span class="r14 r">contentTypeValues</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a> == 1 &amp;&amp;
+                        <a href="#7fd3102561a615eb" class="i method">GetBoundary</a>(<span class="r14 r">contentTypeValues</span>[0], <b>out string</b> <span id="r15 rd" class="r15 r">subBoundary</span>))
+                {
+                    <span class="c">// ExpectBoundariesWithCRLF should always be true for the Body.</span>
+                    <span class="r11 r">reader</span> = <b>new</b> <a href="MultipartReader.cs.html#e1460735dfa3677e" class="t constructor">MultipartReader</a>(<span class="r15 r">subBoundary</span>, <span class="r12 r">section</span>.<a href="MultipartSection.cs.html#08df6b8e14f1d5cc" class="i property">Body</a>){ <a href="MultipartReader.cs.html#106bcfbec948d113" class="i property">ExpectBoundariesWithCRLF</a> = <b>true</b> };
+                    <b>continue</b>;
+                }
+                <span class="c">// Get the Content-ID header</span>
+                <b>if</b> (!<span class="r12 r">section</span>.<a href="MultipartSection.cs.html#109b0e6d42cd9789" class="i property">Headers</a>.<a href="@1@netstandard/A.html#2e5bc6d8c0f21e67" class="i method">TryGetValue</a>(<a href="#883d3c781eb16a1a" class="i field">ContentIdName</a>, <b>out string</b>[] <span id="r16 rd" class="r16 r">contentIdValues</span>) ||
+                    <span class="r16 r">contentIdValues</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a> != 1 ||
+                    !<b>int</b>.<a href="@1@netstandard/A.html#325507e509229dbc" class="i method">TryParse</a>(<span class="r16 r">contentIdValues</span>[0], <b>out int</b> <span id="r17 rd" class="r17 r">contentId</span>))
+                {
+                    <span class="c">// If the header wasn&#39;t found, this is either:</span>
+                    <span class="c">// - a failed request with the details being sent as the first sub-operation</span>
+                    <span class="c">// - a tables batch request, which does not utilize Content-ID headers</span>
+                    <span class="c">// so we default the Content-ID to 0 and track that no Content-ID was found.</span>
+                    <span class="r17 r">contentId</span> = 0;
+                    <span class="r13 r">contentIdFound</span> = <b>false</b>;
+                }
+ 
+                <span class="c">// Build a response</span>
+                <a href="MemoryResponse.cs.html#e1ee8aabd12a3e77" class="t t">MemoryResponse</a> <span id="r18 rd" class="r18 r">response</span> = <b>new</b> <a href="MemoryResponse.cs.html#e1ee8aabd12a3e77" class="t constructor">MemoryResponse</a>();
+                <b>if</b> (<span class="r13 r">contentIdFound</span>)
+                {
+                    <span class="c">// track responses by Content-ID</span>
+                    <span class="r9 r">responses</span><a href="@1@netstandard/A.html#49962975508e2d83">[</a><span class="r17 r">contentId</span>] = <span class="r18 r">response</span>;
+                }
+                <b>else</b>
+                {
+                    <span class="c">// track responses without a Content-ID</span>
+                    <span class="r10 r">responsesWithoutId</span>.<a href="@1@netstandard/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r18 r">response</span>);
+                }
+ 
+                <span class="c">// We&#39;re going to read the section&#39;s response body line by line</span>
+                <b>using</b> <a href="BufferedReadStream.cs.html#2bf7462855da2a0e" class="k">var</a> <span id="r19 rd" class="r19 r">body</span> = <b>new</b> <a href="BufferedReadStream.cs.html#c7c5c414c86cc311" class="t constructor">BufferedReadStream</a>(<span class="r12 r">section</span>.<a href="MultipartSection.cs.html#08df6b8e14f1d5cc" class="i property">Body</a>, <a href="#742149fa93f6bf05" class="i field">ResponseLineSize</a>);
+ 
+                <span class="c">// The first line is the status like &quot;HTTP/1.1 202 Accepted&quot;</span>
+                <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r20 rd" class="r20 r">line</span> = <b>await</b> <span class="r19 r">body</span>.<a href="#d6955fe16289537e" class="i method">ReadLineAsync</a>(<span class="r6 r">async</span>, <span class="r7 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>[] <span id="r21 rd" class="r21 r">status</span> = <span class="r20 r">line</span>.<a href="@1@netstandard/A.html#df9a5cab8e8f85a9" class="i method">Split</a>(<b>new</b> <b>char</b>[] { <span class="s">&#39; &#39;</span> }, 3, <a href="@1@netstandard/A.html#a948431c3f385783" class="t t">StringSplitOptions</a>.<a href="@1@netstandard/A.html#249c323b50d44651" class="i field">RemoveEmptyEntries</a>);
+                <b>if</b> (<span class="r21 r">status</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a> != 3)
+                {
+                    <b>throw</b> <a href="#bc484b08c1d26069" class="i method">InvalidHttpStatusLine</a>(<span class="r20 r">line</span>);
+                }
+                <span class="r18 r">response</span>.<a href="MemoryResponse.cs.html#00b8177e95354dd7" class="i method">SetStatus</a>(<b>int</b>.<a href="@1@netstandard/A.html#78ffbe1e274ca0bb" class="i method">Parse</a>(<span class="r21 r">status</span>[1], <a href="@1@netstandard/A.html#e319c6636909012f" class="t t">CultureInfo</a>.<a href="@1@netstandard/A.html#26ef1c020f0dbb7a" class="i property">InvariantCulture</a>));
+                <span class="r18 r">response</span>.<a href="MemoryResponse.cs.html#8805c9e5c3dfa907" class="i method">SetReasonPhrase</a>(<span class="r21 r">status</span>[2]);
+ 
+                <span class="c">// Continue reading headers until we reach a blank line</span>
+                <span class="r20 r">line</span> = <b>await</b> <span class="r19 r">body</span>.<a href="#d6955fe16289537e" class="i method">ReadLineAsync</a>(<span class="r6 r">async</span>, <span class="r7 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                <b>while</b> (!<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@netstandard/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r20 r">line</span>))
+                {
+                    <span class="c">// Split the header into the name and value</span>
+                    <b>int</b> <span id="r22 rd" class="r22 r">splitIndex</span> = <span class="r20 r">line</span>.<a href="@1@netstandard/A.html#eb06d6d166f6a3d9" class="i method">IndexOf</a>(<span class="s">&#39;:&#39;</span>);
+                    <b>if</b> (<span class="r22 r">splitIndex</span> &lt;= 0)
+                    {
+                        <b>throw</b> <a href="#d5d77c4311f8189c" class="i method">InvalidHttpHeaderLine</a>(<span class="r20 r">line</span>);
+                    }
+                    <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r23 rd" class="r23 r">name</span> = <span class="r20 r">line</span>.<a href="@1@netstandard/A.html#8124961f027d9ac9" class="i method">Substring</a>(0, <span class="r22 r">splitIndex</span>);
+                    <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r24 rd" class="r24 r">value</span> = <span class="r20 r">line</span>.<a href="@1@netstandard/A.html#8124961f027d9ac9" class="i method">Substring</a>(<span class="r22 r">splitIndex</span> + 1, <span class="r20 r">line</span>.<a href="@1@netstandard/A.html#e13f5829ef28aa07" class="i property">Length</a> - <span class="r22 r">splitIndex</span> - 1).<a href="@1@netstandard/A.html#06a5f7c688e69307" class="i method">Trim</a>();
+                    <span class="r18 r">response</span>.<a href="MemoryResponse.cs.html#96f57d2f253b1d10" class="i method">AddHeader</a>(<span class="r23 r">name</span>, <span class="r24 r">value</span>);
+ 
+                    <span class="r20 r">line</span> = <b>await</b> <span class="r19 r">body</span>.<a href="#d6955fe16289537e" class="i method">ReadLineAsync</a>(<span class="r6 r">async</span>, <span class="r7 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                }
+ 
+                <span class="c">// Copy the rest of the body as the response content</span>
+                <a href="@1@netstandard/A.html#1a4dcb744a23ba6f" class="k">var</a> <span id="r25 rd" class="r25 r">responseContent</span> = <b>new</b> <a href="@1@netstandard/A.html#d308091cc690e78d" class="t constructor">MemoryStream</a>();
+                <b>if</b> (<span class="r6 r">async</span>)
+                {
+                    <b>await</b> <span class="r19 r">body</span>.<a href="@1@netstandard/A.html#1ed7a6d41a19abf9" class="i method">CopyToAsync</a>(<span class="r25 r">responseContent</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+                }
+                <b>else</b>
+                {
+                    <span class="r19 r">body</span>.<a href="@1@netstandard/A.html#295ec16c77d4fafb" class="i method">CopyTo</a>(<span class="r25 r">responseContent</span>);
+                }
+                <span class="r25 r">responseContent</span>.<a href="@1@netstandard/A.html#30f00da49c798fe1" class="i method">Seek</a>(0, <a href="@1@netstandard/A.html#2cc1cf6635f00a52" class="t t">SeekOrigin</a>.<a href="@1@netstandard/A.html#c29481af7c617299" class="i field">Begin</a>);
+                <span class="r18 r">response</span>.<a href="MemoryResponse.cs.html#6bb7d366818e1526" class="i property">ContentStream</a> = <span class="r25 r">responseContent</span>;
+            }
+ 
+            <span class="c">// Collect the responses and order by Content-ID, when available.</span>
+            <span class="c">// Otherwise collect them as we received them.</span>
+            <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a>[] <span id="r26 rd" class="r26 r">ordered</span> = <b>new</b> <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a>[<span class="r9 r">responses</span>.<a href="@1@netstandard/A.html#12b9bba2a1f9c3e2" class="i property">Count</a> + <span class="r10 r">responsesWithoutId</span>.<a href="@1@netstandard/A.html#78a69d857716bc68" class="i property">Count</a>];
+            <b>for</b> (<b>int</b> <span id="r27 rd" class="r27 r">i</span> = 0; <span class="r27 r">i</span> &lt; <span class="r9 r">responses</span>.<a href="@1@netstandard/A.html#12b9bba2a1f9c3e2" class="i property">Count</a>; <span class="r27 r">i</span>++)
+            {
+                <span class="r26 r">ordered</span>[<span class="r27 r">i</span>] = <span class="r9 r">responses</span><a href="@1@netstandard/A.html#49962975508e2d83">[</a><span class="r27 r">i</span>];
+            }
+            <b>for</b> (<b>int</b> <span id="r28 rd" class="r28 r">i</span> = <span class="r9 r">responses</span>.<a href="@1@netstandard/A.html#12b9bba2a1f9c3e2" class="i property">Count</a>; <span class="r28 r">i</span> &lt; <span class="r26 r">ordered</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>; <span class="r28 r">i</span>++)
+            {
+                <span class="r26 r">ordered</span>[<span class="r28 r">i</span>] = <span class="r10 r">responsesWithoutId</span><a href="@1@netstandard/A.html#0c65bec4d3fac21e">[</a><span class="r28 r">i</span> - <span class="r9 r">responses</span>.<a href="@1@netstandard/A.html#12b9bba2a1f9c3e2" class="i property">Count</a>];
+            }
+            <b>return</b> <span class="r26 r">ordered</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Read the next line of text.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r29 r">stream</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The stream to read from.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r30 r">async</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Whether to invoke the operation asynchronously.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r31 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to propagate notifications</span>
+        <span class="c">///</span><span class="c"> that the operation should be cancelled.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The next line of text.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>internal static async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="d6955fe16289537e" href="../R/d6955fe16289537e.html" target="n" data-glyph="221,1" class="i method">ReadLineAsync</a>(
+            <b>this</b> <a href="BufferedReadStream.cs.html#2bf7462855da2a0e" class="t t">BufferedReadStream</a> <span id="r29 rd" class="r29 r">stream</span>,
+            <b>bool</b> <span id="r30 rd" class="r30 r">async</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r31 rd" class="r31 r">cancellationToken</span>) =&gt;
+            <span class="r30 r">async</span> ?
+                <b>await</b> <span class="r29 r">stream</span>.<a href="BufferedReadStream.cs.html#821c039371da4a36" class="i method">ReadLineAsync</a>(<a href="#742149fa93f6bf05" class="i field">ResponseLineSize</a>, <span class="r31 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>) :
+                <span class="r29 r">stream</span>.<a href="BufferedReadStream.cs.html#4299c5845568b511" class="i method">ReadLine</a>(<a href="#742149fa93f6bf05" class="i field">ResponseLineSize</a>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Read the next multipart section.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r32 r">reader</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The reader to parse with.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r33 r">async</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Whether to invoke the operation asynchronously.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r34 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Optional </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to propagate notifications</span>
+        <span class="c">///</span><span class="c"> that the operation should be cancelled.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The next multipart section.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>internal static async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="MultipartSection.cs.html#1327d72eb23d105c" class="t t">MultipartSection</a>&gt; <a id="24218a1a665dd27e" href="../R/24218a1a665dd27e.html" target="n" data-glyph="221,1" class="i method">GetNextSectionAsync</a>(
+            <b>this</b> <a href="MultipartReader.cs.html#5c8c9479a493a9cd" class="t t">MultipartReader</a> <span id="r32 rd" class="r32 r">reader</span>,
+            <b>bool</b> <span id="r33 rd" class="r33 r">async</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r34 rd" class="r34 r">cancellationToken</span>) =&gt;
+            <span class="r33 r">async</span> ?
+                <b>await</b> <span class="r32 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>(<span class="r34 r">cancellationToken</span>).<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>) :
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">AZC0102</span> <span class="c">// Do not use GetAwaiter().GetResult(). Use the TaskExtensions.EnsureCompleted() extension method instead.</span>
+                <span class="r32 r">reader</span>.<a href="MultipartReader.cs.html#d55c1573fa49708a" class="i method">ReadNextSectionAsync</a>(<span class="r34 r">cancellationToken</span>).<a href="@1@netstandard/A.html#e1d639f68b66715a" class="i method">GetAwaiter</a>().<a href="@1@netstandard/A.html#c2597ba59f71d619" class="i method">GetResult</a>(); <span class="c">// #7972: Decide if we need a proper sync API here</span>
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">AZC0102</span> <span class="c">// Do not use GetAwaiter().GetResult(). Use the TaskExtensions.EnsureCompleted() extension method instead.</span>
+ 
+        <b>private static bool</b> <a id="7fd3102561a615eb" href="../R/7fd3102561a615eb.html" target="n" data-glyph="76,1" class="i method">GetBoundary</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r35 rd" class="r35 r">contentType</span>, <b>out string</b> <span id="r36 rd" class="r36 r">batchBoundary</span>)
+        {
+            <b>if</b> (<span class="r35 r">contentType</span> == <b>null</b> || !<span class="r35 r">contentType</span>.<a href="@1@netstandard/A.html#1c787ba07a7b11ab" class="i method">StartsWith</a>(<a href="#8d6b6f6deecb7ecd" class="i field">MultipartContentTypePrefix</a>, <a href="@1@netstandard/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@1@netstandard/A.html#87891a6d28c64c9b" class="i field">Ordinal</a>))
+            {
+                <span class="r36 r">batchBoundary</span> = <b>null</b>;
+                <b>return</b> <b>false</b>;
+            }
+            <span class="r36 r">batchBoundary</span> = <span class="r35 r">contentType</span>.<a href="@1@netstandard/A.html#882fa7998d6ca35a" class="i method">Substring</a>(<a href="#8d6b6f6deecb7ecd" class="i field">MultipartContentTypePrefix</a>.<a href="@1@netstandard/A.html#e13f5829ef28aa07" class="i property">Length</a>);
+            <b>return</b> <b>true</b>;
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>
