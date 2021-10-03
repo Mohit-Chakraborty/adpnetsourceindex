@@ -1,6 +1,6 @@
 ﻿<!DOCTYPE html>
 <html><head><title>DiagnosticScope.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
-<body class="cB" onload="i(169);"><div class="dH">
+<body class="cB" onload="i(660);"><div class="dH">
 <table style="width: 100%">
 <tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.ResourceManager.Template/Shared/DiagnosticScope.cs" target="_top">Shared\DiagnosticScope.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/core/Azure.Core/src/Shared/DiagnosticScope.cs" target="_blank">View on GitHub</a></td></tr>
 <tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.ResourceManager.Template" target="_top">Azure.ResourceManager.Template.csproj</a> (Azure.ResourceManager.Template)</td><td></td></tr>
@@ -13,166 +13,657 @@
 <span class="k preprocess">#</span><span class="k preprocess">nullable</span> <span class="k preprocess">enable</span>
  
 <b>using</b> <span class="i">System</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Concurrent</span>;
 <b>using</b> <span class="i">System</span>.<span class="i">Collections</span>.<span class="i">Generic</span>;
 <b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Diagnostics</span>.<span class="i">CodeAnalysis</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Globalization</span>;
+<b>using</b> <span class="i">System</span>.<span class="i">Linq</span>.<span class="i">Expressions</span>;
 <b>using</b> <span class="i">System</span>.<span class="i">Reflection</span>;
  
 <b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>
 {
     <b>internal readonly struct</b> <a id="df3fc9a09421f052" href="../R/df3fc9a09421f052.html" target="n" data-glyph="110,0" class="t t"><span id="eeba88e1de86959f">DiagnosticScope</span></a> : <span class="i">IDisposable</span>
     {
-        <b>private readonly</b> <a href="#59a182597499d5de" class="t t">DiagnosticActivity</a>? <a id="acf9491ae2808973" href="../R/acf9491ae2808973.html" target="n" data-glyph="46,1" class="i field">_activity</a>;
+        <b>private static readonly</b> <span class="i">ConcurrentDictionary</span>&lt;<b>string</b>, <b>object</b>?&gt; <a id="8cc58655c1ac9c03" href="../R/8cc58655c1ac9c03.html" target="n" data-glyph="46,1" class="i field">ActivitySources</a> = <b>new</b>();
  
-        <b>private readonly string</b> <a id="b23256cb7e0bf719" href="../R/b23256cb7e0bf719.html" target="n" data-glyph="46,1" class="i field">_name</a>;
+        <b>private readonly</b> <a href="#7cf2d9e8eb4678c4" class="t t">ActivityAdapter</a>? <a id="5578ca039c8b48d3" href="../R/5578ca039c8b48d3.html" target="n" data-glyph="46,1" class="i field">_activityAdapter</a>;
  
-        <b>private readonly</b> <span class="i">DiagnosticListener</span> <a id="85823d9affccf407" href="../R/85823d9affccf407.html" target="n" data-glyph="46,1" class="i field">_source</a>;
- 
-        <b>internal</b> <a id="1423fb879265330d" href="../R/../../0000000000.html" target="n" data-glyph="74,1" class="t constructor">DiagnosticScope</a>(<b>string</b> <span id="r0 rd" class="r0 r">name</span>, <span class="i">DiagnosticListener</span> <span id="r1 rd" class="r1 r">source</span>)
+        <b>internal</b> <a id="f6097d2e3e1be7b9" href="../R/../../0000000000.html" target="n" data-glyph="74,1" class="t constructor">DiagnosticScope</a>(<b>string</b> <span id="r0 rd" class="r0 r">ns</span>, <b>string</b> <span id="r1 rd" class="r1 r">scopeName</span>, <span class="i">DiagnosticListener</span> <span id="r2 rd" class="r2 r">source</span>, <a href="#7dc7e7e7f0f247a6" class="t t">ActivityKind</a> <span id="r3 rd" class="r3 r">kind</span>)
         {
-            <a href="#b23256cb7e0bf719" class="i field">_name</a> = <span class="r0 r">name</span>;
-            <a href="#85823d9affccf407" class="i field">_source</a> = <span class="r1 r">source</span>;
-            <a href="#acf9491ae2808973" class="i field">_activity</a> = <a href="#85823d9affccf407" class="i field">_source</a>.<span class="i">IsEnabled</span>(<a href="#b23256cb7e0bf719" class="i field">_name</a>) ? <b>new</b> <a href="#afc2a0a3e543b68a" class="t constructor">DiagnosticActivity</a>(<a href="#b23256cb7e0bf719" class="i field">_name</a>) : <b>null</b>;
-            <a href="#acf9491ae2808973" class="i field">_activity</a>?.<span class="i">SetW3CFormat</span>();
+            <b>var</b> <span id="r4 rd" class="r4 r">activitySource</span> = <a href="#6fc83ce8f8970272" class="i method">GetActivitySource</a>(<span class="r0 r">ns</span>, <span class="r1 r">scopeName</span>);
+ 
+            <a href="#75babd7c7d588dd8" class="i property">IsEnabled</a> = <span class="r2 r">source</span>.<span class="i">IsEnabled</span>() || <a href="#b178cf7606d1be15" class="t t">ActivityExtensions</a>.<a href="#81f7a0be45c9d3f6" class="i method">ActivitySourceHasListeners</a>(<span class="r4 r">activitySource</span>);
+ 
+            <a href="#5578ca039c8b48d3" class="i field">_activityAdapter</a> = <a href="#75babd7c7d588dd8" class="i property">IsEnabled</a> ? <b>new</b> <span class="t">ActivityAdapter</span>(<span class="r4 r">activitySource</span>, <span class="r2 r">source</span>, <span class="r1 r">scopeName</span>, <span class="r3 r">kind</span>, <b>null</b>) : <b>null</b>;
         }
  
-        <b>public bool</b> <a id="75babd7c7d588dd8" href="../R/../../0000000000.html" target="n" data-glyph="102,1" class="i property">IsEnabled</a> =&gt; <a href="#acf9491ae2808973" class="i field">_activity</a> != <b>null</b>;
- 
-        <b>public void</b> <a id="de8c555385928780" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">AddAttribute</a>(<b>string</b> <span id="r2 rd" class="r2 r">name</span>, <b>string</b> <span id="r3 rd" class="r3 r">value</span>)
+        <b>internal</b> <a id="c47296e60be96034" href="../R/../../0000000000.html" target="n" data-glyph="74,1" class="t constructor">DiagnosticScope</a>(<b>string</b> <span id="r5 rd" class="r5 r">scopeName</span>, <span class="i">DiagnosticListener</span> <span id="r6 rd" class="r6 r">source</span>, <b>object</b>? <span id="r7 rd" class="r7 r">diagnosticSourceArgs</span>, <b>object</b>? <span id="r8 rd" class="r8 r">activitySource</span>, <a href="#7dc7e7e7f0f247a6" class="t t">ActivityKind</a> <span id="r9 rd" class="r9 r">kind</span>)
         {
-            <a href="#acf9491ae2808973" class="i field">_activity</a>?.<span class="i">AddTag</span>(<span class="r2 r">name</span>, <span class="r3 r">value</span>);
+            <a href="#75babd7c7d588dd8" class="i property">IsEnabled</a> = <span class="r6 r">source</span>.<span class="i">IsEnabled</span>() || <a href="#b178cf7606d1be15" class="t t">ActivityExtensions</a>.<a href="#81f7a0be45c9d3f6" class="i method">ActivitySourceHasListeners</a>(<span class="r8 r">activitySource</span>);
+ 
+            <a href="#5578ca039c8b48d3" class="i field">_activityAdapter</a> = <a href="#75babd7c7d588dd8" class="i property">IsEnabled</a> ? <b>new</b> <span class="t">ActivityAdapter</span>(<span class="r8 r">activitySource</span>, <span class="r6 r">source</span>, <span class="r5 r">scopeName</span>, <span class="r9 r">kind</span>, <span class="r7 r">diagnosticSourceArgs</span>) : <b>null</b>;
         }
  
-        <b>public void</b> <a id="3b81b25f4881de08" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">AddAttribute</a>&lt;<span id="r4 rd t" class="r4 r t">T</span>&gt;(<b>string</b> <span id="r5 rd" class="r5 r">name</span>, <span class="r4 r t">T</span> <span id="r6 rd" class="r6 r">value</span>)
+        <b>public bool</b> <a id="75babd7c7d588dd8" href="../R/75babd7c7d588dd8.html" target="n" data-glyph="102,1" class="i property">IsEnabled</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> This method combines client namespace and operation name into an ActivitySource name and creates the activity source.</span>
+        <span class="c">///</span><span class="c"> For example:</span>
+        <span class="c">///</span><span class="c">     ns: Azure.Storage.Blobs</span>
+        <span class="c">///</span><span class="c">     name: BlobClient.DownloadTo</span>
+        <span class="c">///</span><span class="c">     result Azure.Storage.Blobs.BlobClient</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static object</b>? <a id="6fc83ce8f8970272" href="../R/6fc83ce8f8970272.html" target="n" data-glyph="76,1" class="i method">GetActivitySource</a>(<b>string</b> <span id="r10 rd" class="r10 r">ns</span>, <b>string</b> <span id="r11 rd" class="r11 r">name</span>)
         {
-            <b>if</b> (<a href="#acf9491ae2808973" class="i field">_activity</a> != <b>null</b> &amp;&amp; <span class="r6 r">value</span> != <b>null</b>)
+            <b>if</b> (!<a href="#b178cf7606d1be15" class="t t">ActivityExtensions</a>.<a href="#a6a8d0ccfa6b516c" class="i method">SupportsActivitySource</a>())
             {
-                <span class="i">AddAttribute</span>(<span class="r5 r">name</span>, <span class="r6 r">value</span>.<span class="i">ToString</span>() ?? <b>string</b>.<span class="i">Empty</span>);
+                <b>return</b> <b>null</b>;
+            }
+ 
+            <b>int</b> <span id="r12 rd" class="r12 r">indexOfDot</span> = <span class="r11 r">name</span>.<span class="i">IndexOf</span>(<span class="s">&quot;.&quot;</span>, <span class="i">StringComparison</span>.<span class="i">OrdinalIgnoreCase</span>);
+            <b>if</b> (<span class="r12 r">indexOfDot</span> == -1)
+            {
+                <b>return</b> <b>null</b>;
+            }
+ 
+            <b>string</b> <span id="r13 rd" class="r13 r">clientName</span> = <span class="r10 r">ns</span> + <span class="s">&quot;.&quot;</span> + <span class="r11 r">name</span>.<span class="i">Substring</span>(0, <span class="r12 r">indexOfDot</span>);
+ 
+            <b>return</b> <a href="#8cc58655c1ac9c03" class="i field">ActivitySources</a>.<span class="i">GetOrAdd</span>(<span class="r13 r">clientName</span>, <b>static</b> <span id="r14 rd" class="r14 r">n</span> =&gt; <a href="#b178cf7606d1be15" class="t t">ActivityExtensions</a>.<span class="i">CreateActivitySource</span>(<span class="r14 r">n</span>));
+        }
+ 
+        <b>public void</b> <a id="de8c555385928780" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">AddAttribute</a>(<b>string</b> <span id="r15 rd" class="r15 r">name</span>, <b>string</b> <span id="r16 rd" class="r16 r">value</span>)
+        {
+            <a href="#5578ca039c8b48d3" class="i field">_activityAdapter</a>?.<a href="#6e43fbbcaea563a0" class="i method">AddTag</a>(<span class="r15 r">name</span>, <span class="r16 r">value</span>);
+        }
+ 
+        <b>public void</b> <a id="3b81b25f4881de08" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">AddAttribute</a>&lt;<span id="r17 rd t" class="r17 r t">T</span>&gt;(<b>string</b> <span id="r18 rd" class="r18 r">name</span>,
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">AZURE_NULLABLE</span>
+<span class="e">            [AllowNull]
+</span><span class="k preprocess">#</span><span class="k preprocess">endif</span>
+            <span class="r17 r t">T</span> <span id="r19 rd" class="r19 r">value</span>)
+        {
+            <span class="i">AddAttribute</span>(<span class="r18 r">name</span>, <span class="r19 r">value</span>, <b>static</b> <span id="r20 rd" class="r20 r">v</span> =&gt; <span class="i">Convert</span>.<span class="i">ToString</span>(<span class="r20 r">v</span>, <span class="i">CultureInfo</span>.<span class="i">InvariantCulture</span>) ?? <b>string</b>.<span class="i">Empty</span>);
+        }
+ 
+        <b>public void</b> <a id="9b41ab04d4972272" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">AddAttribute</a>&lt;<span id="r21 rd t" class="r21 r t">T</span>&gt;(<b>string</b> <span id="r22 rd" class="r22 r">name</span>, <span class="r21 r t">T</span> <span id="r23 rd" class="r23 r">value</span>, <span class="i">Func</span>&lt;<span class="r21 r t">T</span>, <b>string</b>&gt; <span id="r24 rd" class="r24 r">format</span>)
+        {
+            <b>if</b> (<a href="#5578ca039c8b48d3" class="i field">_activityAdapter</a> != <b>null</b>)
+            {
+                <b>var</b> <span id="r25 rd" class="r25 r">formattedValue</span> = <span class="r24 r">format</span>(<span class="r23 r">value</span>);
+                <a href="#5578ca039c8b48d3" class="i field">_activityAdapter</a>.<span class="i">AddTag</span>(<span class="r22 r">name</span>, <span class="r25 r">formattedValue</span>);
             }
         }
  
-        <b>public void</b> <a id="9b41ab04d4972272" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">AddAttribute</a>&lt;<span id="r7 rd t" class="r7 r t">T</span>&gt;(<b>string</b> <span id="r8 rd" class="r8 r">name</span>, <span class="r7 r t">T</span> <span id="r9 rd" class="r9 r">value</span>, <span class="i">Func</span>&lt;<span class="r7 r t">T</span>, <b>string</b>&gt; <span id="r10 rd" class="r10 r">format</span>)
+        <b>public void</b> <a id="83dfccc147bb30f9" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">AddLink</a>(<b>string</b> <span id="r26 rd" class="r26 r">id</span>, <span class="i">IDictionary</span>&lt;<b>string</b>, <b>string</b>&gt;? <span id="r27 rd" class="r27 r">attributes</span> = <b>null</b>)
         {
-            <b>if</b> (<a href="#acf9491ae2808973" class="i field">_activity</a> != <b>null</b>)
-            {
-                <span class="i">AddAttribute</span>(<span class="r8 r">name</span>, <span class="r10 r">format</span>(<span class="r9 r">value</span>));
-            }
-        }
- 
-        <b>public void</b> <a id="83dfccc147bb30f9" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">AddLink</a>(<b>string</b> <span id="r11 rd" class="r11 r">id</span>, <span class="i">IDictionary</span>&lt;<b>string</b>, <b>string</b>&gt;? <span id="r12 rd" class="r12 r">attributes</span> = <b>null</b>)
-        {
-            <b>if</b> (<a href="#acf9491ae2808973" class="i field">_activity</a> != <b>null</b>)
-            {
-                <b>var</b> <span id="r13 rd" class="r13 r">linkedActivity</span> = <b>new</b> <span class="i">Activity</span>(<span class="s">&quot;LinkedActivity&quot;</span>);
-                <span class="r13 r">linkedActivity</span>.<a href="#5ed63d98d0a56059" class="i method">SetW3CFormat</a>();
-                <span class="r13 r">linkedActivity</span>.<span class="i">SetParentId</span>(<span class="r11 r">id</span>);
- 
-                <b>if</b> (<span class="r12 r">attributes</span> != <b>null</b>)
-                {
-                    <b>foreach</b> (<b>var</b> <span id="r14 rd" class="r14 r">kvp</span> <b>in</b> <span class="r12 r">attributes</span>)
-                    {
-                        <span class="r13 r">linkedActivity</span>.<span class="i">AddTag</span>(<span class="r14 r">kvp</span>.<span class="i">Key</span>, <span class="r14 r">kvp</span>.<span class="i">Value</span>);
-                    }
-                }
- 
-                <a href="#acf9491ae2808973" class="i field">_activity</a>.<a href="#b7fa8af27839a615" class="i method">AddLink</a>(<span class="r13 r">linkedActivity</span>);
-            }
+            <a href="#5578ca039c8b48d3" class="i field">_activityAdapter</a>?.<a href="#19d8a3315a4aa559" class="i method">AddLink</a>(<span class="r26 r">id</span>, <span class="r27 r">attributes</span>);
         }
  
         <b>public void</b> <a id="687cad18b595ff81" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Start</a>()
         {
-            <b>if</b> (<a href="#acf9491ae2808973" class="i field">_activity</a> != <b>null</b>)
-            {
-                <a href="#85823d9affccf407" class="i field">_source</a>.<span class="i">StartActivity</span>(<a href="#acf9491ae2808973" class="i field">_activity</a>, <a href="#acf9491ae2808973" class="i field">_activity</a>);
-            }
+            <a href="#5578ca039c8b48d3" class="i field">_activityAdapter</a>?.<a href="#076566992a6b35af" class="i method">Start</a>();
         }
  
-        <b>public void</b> <a id="42c919029bf983f3" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">SetStartTime</a>(<span class="i">DateTime</span> <span id="r15 rd" class="r15 r">dateTime</span>) =&gt; <a href="#acf9491ae2808973" class="i field">_activity</a>?.<span class="i">SetStartTime</span>(<span class="r15 r">dateTime</span>);
+        <b>public void</b> <a id="42c919029bf983f3" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">SetStartTime</a>(<span class="i">DateTime</span> <span id="r28 rd" class="r28 r">dateTime</span>)
+        {
+            <a href="#5578ca039c8b48d3" class="i field">_activityAdapter</a>?.<a href="#87ae9e4514c256db" class="i method">SetStartTime</a>(<span class="r28 r">dateTime</span>);
+        }
  
         <b>public void</b> <a id="499ad84145f6c35d" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Dispose</a>()
         {
-            <b>if</b> (<a href="#acf9491ae2808973" class="i field">_activity</a> == <b>null</b>)
-            {
-                <b>return</b>;
-            }
- 
-            <b>if</b> (<a href="#85823d9affccf407" class="i field">_source</a> != <b>null</b>)
-            {
-                <a href="#85823d9affccf407" class="i field">_source</a>.<span class="i">StopActivity</span>(<a href="#acf9491ae2808973" class="i field">_activity</a>, <b>null</b>);
-            }
-            <b>else</b>
-            {
-                <a href="#acf9491ae2808973" class="i field">_activity</a>?.<span class="i">Stop</span>();
-            }
+            <span class="c">// Reverse the Start order</span>
+            <a href="#5578ca039c8b48d3" class="i field">_activityAdapter</a>?.<a href="#631650858a1a8912" class="i method">Dispose</a>();
         }
  
-        <b>public void</b> <a id="1fc9b81e757b438c" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Failed</a>(<span class="i">Exception</span> <span id="r16 rd" class="r16 r">e</span>)
+        <b>public void</b> <a id="1fc9b81e757b438c" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">Failed</a>(<span class="i">Exception</span> <span id="r29 rd" class="r29 r">e</span>)
         {
-            <b>if</b> (<a href="#acf9491ae2808973" class="i field">_activity</a> == <b>null</b>)
-            {
-                <b>return</b>;
-            }
+            <a href="#5578ca039c8b48d3" class="i field">_activityAdapter</a>?.<a href="#3b8194c4ec08f629" class="i method">MarkFailed</a>(<span class="r29 r">e</span>);
+        }
  
-            <a href="#85823d9affccf407" class="i field">_source</a>?.<span class="i">Write</span>(<a href="#acf9491ae2808973" class="i field">_activity</a>.<span class="i">OperationName</span> + <span class="s">&quot;.Exception&quot;</span>, <span class="r16 r">e</span>);
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Kind describes the relationship between the Activity, its parents, and its children in a Trace.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public enum</b> <a id="7dc7e7e7f0f247a6" href="../R/7dc7e7e7f0f247a6.html" target="n" data-glyph="18,1" class="t t"><span id="24d418c2169a1121">ActivityKind</span></a>
+        {
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> Default value.</span>
+            <span class="c">///</span><span class="c"> Indicates that the Activity represents an internal operation within an application, as opposed to an operations with remote parents or children.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <a id="5e0de21a29bc833e" href="../R/5e0de21a29bc833e.html" target="n" data-glyph="24,2" class="i field">Internal</a> = 0,
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> Server activity represents request incoming from external component.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <a id="3756f532434f9313" href="../R/3756f532434f9313.html" target="n" data-glyph="24,2" class="i field">Server</a> = 1,
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> Client activity represents outgoing request to the external component.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <a id="73ee8c290d080ec3" href="../R/73ee8c290d080ec3.html" target="n" data-glyph="24,2" class="i field">Client</a> = 2,
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> Producer activity represents output provided to external components.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <a id="c92f1f55b8658dc2" href="../R/c92f1f55b8658dc2.html" target="n" data-glyph="24,2" class="i field">Producer</a> = 3,
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> Consumer activity represents output received from an external component.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <a id="9dfb263d569baab3" href="../R/9dfb263d569baab3.html" target="n" data-glyph="24,2" class="i field">Consumer</a> = 4,
         }
  
         <b>private class</b> <a id="59a182597499d5de" href="../R/59a182597499d5de.html" target="n" data-glyph="4,1" class="t t">DiagnosticActivity</a> : <span class="i">Activity</span>
         {
-            <b>private</b> <span class="i">List</span>&lt;<span class="i">Activity</span>&gt;? <a id="92e1b20d0cd69260" href="../R/92e1b20d0cd69260.html" target="n" data-glyph="46,2" class="i field">_links</a>;
- 
 <span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> 109 <span class="c">// extra new modifier</span>
-            <b>public</b> <b>new</b> <span class="i">IEnumerable</span>&lt;<span class="i">Activity</span>&gt; <a id="8d26ea7acea1121c" href="../R/../../0000000000.html" target="n" data-glyph="102,2" class="i property">Links</a> =&gt; (<span class="i">IEnumerable</span>&lt;<span class="i">Activity</span>&gt;?)<a href="#92e1b20d0cd69260" class="i field">_links</a> ?? <span class="i">Array</span>.<span class="i">Empty</span>&lt;<span class="i">Activity</span>&gt;();
+            <b>public</b> <b>new</b> <span class="i">IEnumerable</span>&lt;<span class="i">Activity</span>&gt; <a id="8d26ea7acea1121c" href="../R/8d26ea7acea1121c.html" target="n" data-glyph="102,2" class="i property">Links</a> { <b>get</b>; <b>set</b>; } = <span class="i">Array</span>.<span class="i">Empty</span>&lt;<span class="i">Activity</span>&gt;();
 <span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> 109
  
-            <b>public</b> <a id="afc2a0a3e543b68a" href="../R/afc2a0a3e543b68a.html" target="n" data-glyph="72,2" class="t constructor">DiagnosticActivity</a>(<b>string</b> <span id="r17 rd" class="r17 r">operationName</span>) : <b>base</b>(<span class="r17 r">operationName</span>)
+            <b>public</b> <a id="afc2a0a3e543b68a" href="../R/afc2a0a3e543b68a.html" target="n" data-glyph="72,2" class="t constructor">DiagnosticActivity</a>(<b>string</b> <span id="r30 rd" class="r30 r">operationName</span>) : <b>base</b>(<span class="r30 r">operationName</span>)
             {
             }
+        }
  
-            <b>public void</b> <a id="b7fa8af27839a615" href="../R/b7fa8af27839a615.html" target="n" data-glyph="72,2" class="i method">AddLink</a>(<span class="i">Activity</span> <span id="r18 rd" class="r18 r">activity</span>)
+        <b>private class</b> <a id="7cf2d9e8eb4678c4" href="../R/7cf2d9e8eb4678c4.html" target="n" data-glyph="4,1" class="t t">ActivityAdapter</a> : <span class="i">IDisposable</span>
+        {
+            <b>private readonly object</b>? <a id="74325c3ac6243f3f" href="../R/74325c3ac6243f3f.html" target="n" data-glyph="46,2" class="i field">_activitySource</a>;
+            <b>private readonly</b> <span class="i">DiagnosticSource</span> <a id="82ef2af77a6655a6" href="../R/82ef2af77a6655a6.html" target="n" data-glyph="46,2" class="i field">_diagnosticSource</a>;
+            <b>private readonly string</b> <a id="3d7554230748715e" href="../R/3d7554230748715e.html" target="n" data-glyph="46,2" class="i field">_activityName</a>;
+            <b>private readonly</b> <a href="#7dc7e7e7f0f247a6" class="t t">ActivityKind</a> <a id="ef8c87806a0bb475" href="../R/ef8c87806a0bb475.html" target="n" data-glyph="46,2" class="i field">_kind</a>;
+            <b>private readonly object</b>? <a id="40a7e227c3b94df3" href="../R/40a7e227c3b94df3.html" target="n" data-glyph="46,2" class="i field">_diagnosticSourceArgs</a>;
+ 
+            <b>private</b> <span class="i">Activity</span>? <a id="b1b9bd38bfb58b31" href="../R/b1b9bd38bfb58b31.html" target="n" data-glyph="46,2" class="i field">_currentActivity</a>;
+            <b>private</b> <span class="i">ICollection</span>&lt;<span class="i">KeyValuePair</span>&lt;<b>string</b>,<b>object</b>&gt;&gt;? <a id="48c37bebd50eeb46" href="../R/48c37bebd50eeb46.html" target="n" data-glyph="46,2" class="i field">_tagCollection</a>;
+            <b>private</b> <span class="i">DateTimeOffset</span> <a id="fda2d74e774244fc" href="../R/fda2d74e774244fc.html" target="n" data-glyph="46,2" class="i field">_startTime</a>;
+            <b>private</b> <span class="i">List</span>&lt;<span class="i">Activity</span>&gt;? <a id="6b30543fc1767fa9" href="../R/6b30543fc1767fa9.html" target="n" data-glyph="46,2" class="i field">_links</a>;
+ 
+            <b>public</b> <a id="e002ff23dbe8d9f3" href="../R/../../0000000000.html" target="n" data-glyph="72,2" class="t constructor">ActivityAdapter</a>(<b>object</b>? <span id="r31 rd" class="r31 r">activitySource</span>, <span class="i">DiagnosticSource</span> <span id="r32 rd" class="r32 r">diagnosticSource</span>, <b>string</b> <span id="r33 rd" class="r33 r">activityName</span>, <a href="#7dc7e7e7f0f247a6" class="t t">ActivityKind</a> <span id="r34 rd" class="r34 r">kind</span>, <b>object</b>? <span id="r35 rd" class="r35 r">diagnosticSourceArgs</span>)
             {
-                <a href="#92e1b20d0cd69260" class="i field">_links</a> ??= <b>new</b> <span class="i">List</span>&lt;<span class="i">Activity</span>&gt;();
-                <a href="#92e1b20d0cd69260" class="i field">_links</a>.<span class="i">Add</span>(<span class="r18 r">activity</span>);
+                <a href="#74325c3ac6243f3f" class="i field">_activitySource</a> = <span class="r31 r">activitySource</span>;
+                <a href="#82ef2af77a6655a6" class="i field">_diagnosticSource</a> = <span class="r32 r">diagnosticSource</span>;
+                <a href="#3d7554230748715e" class="i field">_activityName</a> = <span class="r33 r">activityName</span>;
+                <a href="#ef8c87806a0bb475" class="i field">_kind</a> = <span class="r34 r">kind</span>;
+                <a href="#40a7e227c3b94df3" class="i field">_diagnosticSourceArgs</a> = <span class="r35 r">diagnosticSourceArgs</span>;
+ 
+                <b>switch</b> (<a href="#ef8c87806a0bb475" class="i field">_kind</a>)
+                {
+                    <b>case</b> <a href="#7dc7e7e7f0f247a6" class="t t">ActivityKind</a>.<a href="#5e0de21a29bc833e" class="i field">Internal</a>:
+                        <a href="#6e43fbbcaea563a0" class="i method">AddTag</a>(<span class="s">&quot;kind&quot;</span>, <span class="s">&quot;internal&quot;</span>);
+                        <b>break</b>;
+                    <b>case</b> <a href="#7dc7e7e7f0f247a6" class="t t">ActivityKind</a>.<a href="#3756f532434f9313" class="i field">Server</a>:
+                        <a href="#6e43fbbcaea563a0" class="i method">AddTag</a>(<span class="s">&quot;kind&quot;</span>, <span class="s">&quot;server&quot;</span>);
+                        <b>break</b>;
+                    <b>case</b> <a href="#7dc7e7e7f0f247a6" class="t t">ActivityKind</a>.<a href="#73ee8c290d080ec3" class="i field">Client</a>:
+                        <a href="#6e43fbbcaea563a0" class="i method">AddTag</a>(<span class="s">&quot;kind&quot;</span>, <span class="s">&quot;client&quot;</span>);
+                        <b>break</b>;
+                    <b>case</b> <a href="#7dc7e7e7f0f247a6" class="t t">ActivityKind</a>.<a href="#c92f1f55b8658dc2" class="i field">Producer</a>:
+                        <a href="#6e43fbbcaea563a0" class="i method">AddTag</a>(<span class="s">&quot;kind&quot;</span>, <span class="s">&quot;producer&quot;</span>);
+                        <b>break</b>;
+                    <b>case</b> <a href="#7dc7e7e7f0f247a6" class="t t">ActivityKind</a>.<a href="#9dfb263d569baab3" class="i field">Consumer</a>:
+                        <a href="#6e43fbbcaea563a0" class="i method">AddTag</a>(<span class="s">&quot;kind&quot;</span>, <span class="s">&quot;consumer&quot;</span>);
+                        <b>break</b>;
+                }
+            }
+ 
+            <b>public void</b> <a id="6e43fbbcaea563a0" href="../R/6e43fbbcaea563a0.html" target="n" data-glyph="72,2" class="i method">AddTag</a>(<b>string</b> <span id="r36 rd" class="r36 r">name</span>, <b>string</b> <span id="r37 rd" class="r37 r">value</span>)
+            {
+                <b>if</b> (<a href="#b1b9bd38bfb58b31" class="i field">_currentActivity</a> == <b>null</b>)
+                {
+                    <span class="c">// Activity is not started yet, add the value to the collection</span>
+                    <span class="c">// that is going to be passed to StartActivity</span>
+                    <a href="#48c37bebd50eeb46" class="i field">_tagCollection</a> ??= <a href="#b178cf7606d1be15" class="t t">ActivityExtensions</a>.<a href="#f47b28e96926aaf3" class="i method">CreateTagsCollection</a>() ?? <b>new</b> <span class="i">List</span>&lt;<span class="i">KeyValuePair</span>&lt;<b>string</b>, <b>object</b>&gt;&gt;();
+                    <a href="#48c37bebd50eeb46" class="i field">_tagCollection</a>?.<span class="i">Add</span>(<b>new</b> <span class="i">KeyValuePair</span>&lt;<b>string</b>, <b>object</b>&gt;(<span class="r36 r">name</span>, <span class="r37 r">value</span>!));
+                }
+                <b>else</b>
+                {
+                    <a href="#b1b9bd38bfb58b31" class="i field">_currentActivity</a>?.<span class="i">AddTag</span>(<span class="r36 r">name</span>, <span class="r37 r">value</span>!);
+                }
+            }
+ 
+            <b>private</b> <span class="i">IList</span>? <a id="ffaf74f5d3d78bf7" href="../R/ffaf74f5d3d78bf7.html" target="n" data-glyph="76,2" class="i method">GetActivitySourceLinkCollection</a>()
+            {
+                <b>if</b> (<a href="#6b30543fc1767fa9" class="i field">_links</a> == <b>null</b>)
+                {
+                    <b>return</b> <b>null</b>;
+                }
+ 
+                <b>var</b> <span id="r38 rd" class="r38 r">linkCollection</span> = <a href="#b178cf7606d1be15" class="t t">ActivityExtensions</a>.<a href="#e6b66da3b51d2b37" class="i method">CreateLinkCollection</a>();
+                <b>if</b> (<span class="r38 r">linkCollection</span> == <b>null</b>)
+                {
+                    <b>return</b> <b>null</b>;
+                }
+ 
+                <b>foreach</b> (<b>var</b> <span id="r39 rd" class="r39 r">activity</span> <b>in</b> <a href="#6b30543fc1767fa9" class="i field">_links</a>)
+                {
+                    <span class="i">ICollection</span>&lt;<span class="i">KeyValuePair</span>&lt;<b>string</b>,<b>object</b>&gt;&gt;? <span id="r40 rd" class="r40 r">linkTagsCollection</span> =  <a href="#b178cf7606d1be15" class="t t">ActivityExtensions</a>.<a href="#f47b28e96926aaf3" class="i method">CreateTagsCollection</a>();
+                    <b>if</b> (<span class="r40 r">linkTagsCollection</span> != <b>null</b>)
+                    {
+                        <b>foreach</b> (<b>var</b> <span id="r41 rd" class="r41 r">tag</span> <b>in</b> <span class="r39 r">activity</span>.<span class="i">Tags</span>)
+                        {
+                            <span class="r40 r">linkTagsCollection</span>.<span class="i">Add</span>(<b>new</b> <span class="i">KeyValuePair</span>&lt;<b>string</b>, <b>object</b>&gt;(<span class="r41 r">tag</span>.<span class="i">Key</span>, <span class="r41 r">tag</span>.<span class="i">Value</span>!));
+                        }
+                    }
+ 
+                    <b>var</b> <span id="r42 rd" class="r42 r">link</span> = <a href="#b178cf7606d1be15" class="t t">ActivityExtensions</a>.<span class="i">CreateActivityLink</span>(<span class="r39 r">activity</span>.<span class="i">ParentId</span>!, <span class="r40 r">linkTagsCollection</span>);
+                    <b>if</b> (<span class="r42 r">link</span> != <b>null</b>)
+                    {
+                        <span class="r38 r">linkCollection</span>.<span class="i">Add</span>(<span class="r42 r">link</span>);
+                    }
+                }
+ 
+                <b>return</b> <span class="r38 r">linkCollection</span>;
+            }
+ 
+            <b>public void</b> <a id="19d8a3315a4aa559" href="../R/19d8a3315a4aa559.html" target="n" data-glyph="72,2" class="i method">AddLink</a>(<b>string</b> <span id="r43 rd" class="r43 r">id</span>, <span class="i">IDictionary</span>&lt;<b>string</b>, <b>string</b>&gt;? <span id="r44 rd" class="r44 r">attributes</span>)
+            {
+                <b>var</b> <span id="r45 rd" class="r45 r">linkedActivity</span> = <b>new</b> <span class="i">Activity</span>(<span class="s">&quot;LinkedActivity&quot;</span>);
+                <span class="r45 r">linkedActivity</span>.<a href="#5ed63d98d0a56059" class="i method">SetW3CFormat</a>();
+                <span class="r45 r">linkedActivity</span>.<span class="i">SetParentId</span>(<span class="r43 r">id</span>);
+ 
+                <b>if</b> (<span class="r44 r">attributes</span> != <b>null</b>)
+                {
+                    <b>foreach</b> (<b>var</b> <span id="r46 rd" class="r46 r">kvp</span> <b>in</b> <span class="r44 r">attributes</span>)
+                    {
+                        <span class="r45 r">linkedActivity</span>.<span class="i">AddTag</span>(<span class="r46 r">kvp</span>.<span class="i">Key</span>, <span class="r46 r">kvp</span>.<span class="i">Value</span>);
+                    }
+                }
+ 
+                <a href="#6b30543fc1767fa9" class="i field">_links</a> ??= <b>new</b> <span class="i">List</span>&lt;<span class="i">Activity</span>&gt;();
+                <a href="#6b30543fc1767fa9" class="i field">_links</a>.<span class="i">Add</span>(<span class="r45 r">linkedActivity</span>);
+            }
+ 
+            <b>public void</b> <a id="076566992a6b35af" href="../R/076566992a6b35af.html" target="n" data-glyph="72,2" class="i method">Start</a>()
+            {
+                <a href="#b1b9bd38bfb58b31" class="i field">_currentActivity</a> = <a href="#5e0de1d1c3a0ab26" class="i method">StartActivitySourceActivity</a>();
+ 
+                <b>if</b> (<a href="#b1b9bd38bfb58b31" class="i field">_currentActivity</a> == <b>null</b>)
+                {
+                    <b>if</b> (!<a href="#82ef2af77a6655a6" class="i field">_diagnosticSource</a>.<span class="i">IsEnabled</span>(<a href="#3d7554230748715e" class="i field">_activityName</a>, <a href="#40a7e227c3b94df3" class="i field">_diagnosticSourceArgs</a>))
+                    {
+                        <b>return</b>;
+                    }
+ 
+                    <a href="#b1b9bd38bfb58b31" class="i field">_currentActivity</a> = <b>new</b> <a href="#afc2a0a3e543b68a" class="t constructor">DiagnosticActivity</a>(<a href="#3d7554230748715e" class="i field">_activityName</a>)
+                    {
+                        <a href="#8d26ea7acea1121c" class="i property">Links</a> = (<span class="i">IEnumerable</span>&lt;<span class="i">Activity</span>&gt;?)<a href="#6b30543fc1767fa9" class="i field">_links</a> ?? <span class="i">Array</span>.<span class="i">Empty</span>&lt;<span class="i">Activity</span>&gt;(),
+                    };
+                    <a href="#b1b9bd38bfb58b31" class="i field">_currentActivity</a>.<span class="i">SetW3CFormat</span>();
+ 
+                    <b>if</b> (<a href="#fda2d74e774244fc" class="i field">_startTime</a> != <b>default</b>)
+                    {
+                        <a href="#b1b9bd38bfb58b31" class="i field">_currentActivity</a>.<span class="i">SetStartTime</span>(<a href="#fda2d74e774244fc" class="i field">_startTime</a>.<span class="i">DateTime</span>);
+                    }
+ 
+                    <b>if</b> (<a href="#48c37bebd50eeb46" class="i field">_tagCollection</a> != <b>null</b>)
+                    {
+                        <b>foreach</b> (<b>var</b> <span id="r47 rd" class="r47 r">tag</span> <b>in</b> <a href="#48c37bebd50eeb46" class="i field">_tagCollection</a>)
+                        {
+                            <a href="#b1b9bd38bfb58b31" class="i field">_currentActivity</a>.<span class="i">AddTag</span>(<span class="r47 r">tag</span>.<span class="i">Key</span>, (<b>string</b>)<span class="r47 r">tag</span>.<span class="i">Value</span>);
+                        }
+                    }
+ 
+                    <a href="#b1b9bd38bfb58b31" class="i field">_currentActivity</a>.<span class="i">Start</span>();
+                }
+ 
+                <a href="#82ef2af77a6655a6" class="i field">_diagnosticSource</a>.<span class="i">Write</span>(<a href="#3d7554230748715e" class="i field">_activityName</a> + <span class="s">&quot;.Start&quot;</span>, <a href="#40a7e227c3b94df3" class="i field">_diagnosticSourceArgs</a> ?? <a href="#b1b9bd38bfb58b31" class="i field">_currentActivity</a>);
+            }
+ 
+            <b>private</b> <span class="i">Activity</span>? <a id="5e0de1d1c3a0ab26" href="../R/5e0de1d1c3a0ab26.html" target="n" data-glyph="76,2" class="i method">StartActivitySourceActivity</a>()
+            {
+                <b>return</b> <a href="#b178cf7606d1be15" class="t t">ActivityExtensions</a>.<a href="#f51a915f1fc1ba9c" class="i method">ActivitySourceStartActivity</a>(
+                    <a href="#74325c3ac6243f3f" class="i field">_activitySource</a>,
+                    <a href="#3d7554230748715e" class="i field">_activityName</a>,
+                    (<b>int</b>)<a href="#ef8c87806a0bb475" class="i field">_kind</a>,
+                    <span class="r48 r">startTime</span>: <a href="#fda2d74e774244fc" class="i field">_startTime</a>,
+                    <span class="r49 r">tags</span>: <a href="#48c37bebd50eeb46" class="i field">_tagCollection</a>,
+                    <span class="r50 r">links</span>: <a href="#ffaf74f5d3d78bf7" class="i method">GetActivitySourceLinkCollection</a>());
+            }
+ 
+            <b>public void</b> <a id="87ae9e4514c256db" href="../R/87ae9e4514c256db.html" target="n" data-glyph="72,2" class="i method">SetStartTime</a>(<span class="i">DateTime</span> <span id="r51 rd" class="r51 r">startTime</span>)
+            {
+                <a href="#fda2d74e774244fc" class="i field">_startTime</a> = <span class="r51 r">startTime</span>;
+                <a href="#b1b9bd38bfb58b31" class="i field">_currentActivity</a>?.<span class="i">SetStartTime</span>(<span class="r51 r">startTime</span>);
+            }
+ 
+            <b>public void</b> <a id="3b8194c4ec08f629" href="../R/3b8194c4ec08f629.html" target="n" data-glyph="72,2" class="i method">MarkFailed</a>(<span class="i">Exception</span> <span id="r52 rd" class="r52 r">exception</span>)
+            {
+                <a href="#82ef2af77a6655a6" class="i field">_diagnosticSource</a>?.<span class="i">Write</span>(<a href="#3d7554230748715e" class="i field">_activityName</a> + <span class="s">&quot;.Exception&quot;</span>, <span class="r52 r">exception</span>);
+            }
+ 
+            <b>public void</b> <a id="631650858a1a8912" href="../R/631650858a1a8912.html" target="n" data-glyph="72,2" class="i method">Dispose</a>()
+            {
+                <b>if</b> (<a href="#b1b9bd38bfb58b31" class="i field">_currentActivity</a> == <b>null</b>)
+                {
+                    <b>return</b>;
+                }
+ 
+                <b>if</b> (<a href="#b1b9bd38bfb58b31" class="i field">_currentActivity</a>.<span class="i">Duration</span> == <span class="i">TimeSpan</span>.<span class="i">Zero</span>)
+                    <a href="#b1b9bd38bfb58b31" class="i field">_currentActivity</a>.<span class="i">SetEndTime</span>(<span class="i">DateTime</span>.<span class="i">UtcNow</span>);
+ 
+                <a href="#82ef2af77a6655a6" class="i field">_diagnosticSource</a>.<span class="i">Write</span>(<a href="#3d7554230748715e" class="i field">_activityName</a> + <span class="s">&quot;.Stop&quot;</span>, <a href="#40a7e227c3b94df3" class="i field">_diagnosticSourceArgs</a>);
+ 
+                <b>if</b> (!<a href="#b1b9bd38bfb58b31" class="i field">_currentActivity</a>.<span class="i">TryDispose</span>())
+                {
+                    <a href="#b1b9bd38bfb58b31" class="i field">_currentActivity</a>.<span class="i">Stop</span>();
+                }
             }
         }
     }
  
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">SA1507</span> <span class="c">// File can not contain multiple types</span>
     <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
-    <span class="c">///</span><span class="c"> HACK HACK HACK. Some runtime environments like Azure.Functions downgrade System.Diagnostic.DiagnosticSource package version causing method not found exceptions in customer apps</span>
-    <span class="c">///</span><span class="c"> This type is a temporary workaround to avoid the issue.</span>
+    <span class="c">///</span><span class="c"> Until we can reference the 5.0 of System.Diagnostics.DiagnosticSource</span>
     <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
-    <b>internal static class</b> <a id="b178cf7606d1be15" href="../R/../../0000000000.html" target="n" data-glyph="2,0" class="t t">ActivityExtensions</a>
+    <b>internal static class</b> <a id="b178cf7606d1be15" href="../R/b178cf7606d1be15.html" target="n" data-glyph="2,0" class="t t">ActivityExtensions</a>
     {
-        <b>private static readonly</b> <span class="i">MethodInfo</span>? <a id="f2ded65322a6ca09" href="../R/f2ded65322a6ca09.html" target="n" data-glyph="46,1" class="i field">s_setIdFormatMethod</a> = <b>typeof</b>(<span class="i">Activity</span>).<span class="i">GetMethod</span>(<span class="s">&quot;SetIdFormat&quot;</span>);
-        <b>private static readonly</b> <span class="i">MethodInfo</span>? <a id="ccc8340911542e07" href="../R/ccc8340911542e07.html" target="n" data-glyph="46,1" class="i field">s_getIdFormatMethod</a> = <b>typeof</b>(<span class="i">Activity</span>).<span class="i">GetProperty</span>(<span class="s">&quot;IdFormat&quot;</span>)?.<span class="i">GetMethod</span>;
-        <b>private static readonly</b> <span class="i">MethodInfo</span>? <a id="ba3d5fe0218826b7" href="../R/ba3d5fe0218826b7.html" target="n" data-glyph="46,1" class="i field">s_getTraceStateStringMethod</a> = <b>typeof</b>(<span class="i">Activity</span>).<span class="i">GetProperty</span>(<span class="s">&quot;TraceStateString&quot;</span>)?.<span class="i">GetMethod</span>;
- 
-        <b>public static bool</b> <a id="5ed63d98d0a56059" href="../R/5ed63d98d0a56059.html" target="n" data-glyph="220,1" class="i method">SetW3CFormat</a>(<b>this</b> <span class="i">Activity</span> <span id="r19 rd" class="r19 r">activity</span>)
+        <b>static</b> <a id="2099509a014b2064" href="../R/../../0000000000.html" target="n" data-glyph="76,1" class="t method">ActivityExtensions</a>()
         {
-            <b>if</b> (<a href="#f2ded65322a6ca09" class="i field">s_setIdFormatMethod</a> == <b>null</b>) <b>return</b> <b>false</b>;
- 
-            <a href="#f2ded65322a6ca09" class="i field">s_setIdFormatMethod</a>.<span class="i">Invoke</span>(<span class="r19 r">activity</span>, <b>new</b> <b>object</b>[]{ 2 <span class="c">/* ActivityIdFormat.W3C */</span>});
- 
-            <b>return</b> <b>true</b>;
+            <a href="#5a8be14cd8ee2616" class="i method">ResetFeatureSwitch</a>();
         }
  
-        <b>public static bool</b> <a id="b8b947a5fc152472" href="../R/../../0000000000.html" target="n" data-glyph="220,1" class="i method">IsW3CFormat</a>(<b>this</b> <span class="i">Activity</span> <span id="r20 rd" class="r20 r">activity</span>)
+        <b>private static bool</b> <a id="c9d868a251562b26" href="../R/c9d868a251562b26.html" target="n" data-glyph="46,1" class="i field">SupportsActivitySourceSwitch</a>;
+ 
+        <b>private static readonly</b> <span class="i">Type</span>? <a id="cf2376fd6b7510eb" href="../R/cf2376fd6b7510eb.html" target="n" data-glyph="46,1" class="i field">ActivitySourceType</a> = <span class="i">Type</span>.<span class="i">GetType</span>(<span class="s">&quot;System.Diagnostics.ActivitySource, System.Diagnostics.DiagnosticSource&quot;</span>);
+        <b>private static readonly</b> <span class="i">Type</span>? <a id="da5201e11f4cbde3" href="../R/da5201e11f4cbde3.html" target="n" data-glyph="46,1" class="i field">ActivityKindType</a> = <span class="i">Type</span>.<span class="i">GetType</span>(<span class="s">&quot;System.Diagnostics.ActivityKind, System.Diagnostics.DiagnosticSource&quot;</span>);
+        <b>private static readonly</b> <span class="i">Type</span>? <a id="3d87520253933a0a" href="../R/3d87520253933a0a.html" target="n" data-glyph="46,1" class="i field">ActivityTagsCollectionType</a> = <span class="i">Type</span>.<span class="i">GetType</span>(<span class="s">&quot;System.Diagnostics.ActivityTagsCollection, System.Diagnostics.DiagnosticSource&quot;</span>);
+        <b>private static readonly</b> <span class="i">Type</span>? <a id="48cc7e368ab39a6d" href="../R/48cc7e368ab39a6d.html" target="n" data-glyph="46,1" class="i field">ActivityLinkType</a> = <span class="i">Type</span>.<span class="i">GetType</span>(<span class="s">&quot;System.Diagnostics.ActivityLink, System.Diagnostics.DiagnosticSource&quot;</span>);
+        <b>private static readonly</b> <span class="i">Type</span>? <a id="3a214444641b64f4" href="../R/3a214444641b64f4.html" target="n" data-glyph="46,1" class="i field">ActivityContextType</a> = <span class="i">Type</span>.<span class="i">GetType</span>(<span class="s">&quot;System.Diagnostics.ActivityContext, System.Diagnostics.DiagnosticSource&quot;</span>);
+ 
+        <b>private static</b> <span class="i">Action</span>&lt;<span class="i">Activity</span>, <b>int</b>&gt;? <a id="c246a66ab209d52d" href="../R/c246a66ab209d52d.html" target="n" data-glyph="46,1" class="i field">SetIdFormatMethod</a>;
+        <b>private static</b> <span class="i">Func</span>&lt;<span class="i">Activity</span>, <b>string</b>?&gt;? <a id="02550b252765aa65" href="../R/02550b252765aa65.html" target="n" data-glyph="46,1" class="i field">GetTraceStateStringMethod</a>;
+        <b>private static</b> <span class="i">Func</span>&lt;<span class="i">Activity</span>, <b>int</b>&gt;? <a id="e84725dd99b69367" href="../R/e84725dd99b69367.html" target="n" data-glyph="46,1" class="i field">GetIdFormatMethod</a>;
+        <b>private static</b> <span class="i">Action</span>&lt;<span class="i">Activity</span>, <b>string</b>, <b>object</b>?&gt;? <a id="0bc60d2a477777e6" href="../R/0bc60d2a477777e6.html" target="n" data-glyph="46,1" class="i field">ActivityAddTagMethod</a>;
+        <b>private static</b> <span class="i">Func</span>&lt;<b>object</b>, <b>string</b>, <b>int</b>, <span class="i">ICollection</span>&lt;<span class="i">KeyValuePair</span>&lt;<b>string</b>, <b>object</b>&gt;&gt;?, <span class="i">IList</span>?, <span class="i">DateTimeOffset</span>, <span class="i">Activity</span>?&gt;? <a id="20394754ab8eea2e" href="../R/20394754ab8eea2e.html" target="n" data-glyph="46,1" class="i field">ActivitySourceStartActivityMethod</a>;
+        <b>private static</b> <span class="i">Func</span>&lt;<b>object</b>, <b>bool</b>&gt;? <a id="a52d1606ae37cff9" href="../R/a52d1606ae37cff9.html" target="n" data-glyph="46,1" class="i field">ActivitySourceHasListenersMethod</a>;
+        <b>private static</b> <span class="i">Func</span>&lt;<b>string</b>, <span class="i">ICollection</span>&lt;<span class="i">KeyValuePair</span>&lt;<b>string</b>, <b>object</b>&gt;&gt;?, <b>object</b>?&gt;? <a id="6bd506dc54912e66" href="../R/6bd506dc54912e66.html" target="n" data-glyph="46,1" class="i field">CreateActivityLinkMethod</a>;
+        <b>private static</b> <span class="i">Func</span>&lt;<span class="i">ICollection</span>&lt;<span class="i">KeyValuePair</span>&lt;<b>string</b>,<b>object</b>&gt;&gt;?&gt;? <a id="fb25c652a759660d" href="../R/fb25c652a759660d.html" target="n" data-glyph="46,1" class="i field">CreateTagsCollectionMethod</a>;
+ 
+        <b>private static readonly</b> <span class="i">ParameterExpression</span> <a id="0419dd1fabeec7a3" href="../R/0419dd1fabeec7a3.html" target="n" data-glyph="46,1" class="i field">ActivityParameter</a> = <span class="i">Expression</span>.<span class="i">Parameter</span>(<b>typeof</b>(<span class="i">Activity</span>));
+ 
+        <b>public static void</b> <a id="5ed63d98d0a56059" href="../R/5ed63d98d0a56059.html" target="n" data-glyph="220,1" class="i method">SetW3CFormat</a>(<b>this</b> <span class="i">Activity</span> <span id="r53 rd" class="r53 r">activity</span>)
         {
-            <b>if</b> (<a href="#ccc8340911542e07" class="i field">s_getIdFormatMethod</a> == <b>null</b>) <b>return</b> <b>false</b>;
+            <b>if</b> (<a href="#c246a66ab209d52d" class="i field">SetIdFormatMethod</a> == <b>null</b>)
+            {
+                <b>var</b> <span id="r54 rd" class="r54 r">method</span> = <b>typeof</b>(<span class="i">Activity</span>).<span class="i">GetMethod</span>(<span class="s">&quot;SetIdFormat&quot;</span>);
+                <b>if</b> (<span class="r54 r">method</span> == <b>null</b>)
+                {
+                    <a href="#c246a66ab209d52d" class="i field">SetIdFormatMethod</a> = (<b>_</b>, <b>_</b>) =&gt; { };
+                }
+                <b>else</b>
+                {
+                    <b>var</b> <span id="r55 rd" class="r55 r">idParameter</span> = <span class="i">Expression</span>.<span class="i">Parameter</span>(<b>typeof</b>(<b>int</b>));
+                    <b>var</b> <span id="r56 rd" class="r56 r">convertedId</span> = <span class="i">Expression</span>.<span class="i">Convert</span>(<span class="r55 r">idParameter</span>, <span class="r54 r">method</span>.<span class="i">GetParameters</span>()[0].<span class="i">ParameterType</span>);
  
-            <b>object</b>? <span id="r21 rd" class="r21 r">result</span> = <a href="#ccc8340911542e07" class="i field">s_getIdFormatMethod</a>.<span class="i">Invoke</span>(<span class="r20 r">activity</span>, <span class="i">Array</span>.<span class="i">Empty</span>&lt;<b>object</b>&gt;());
+                    <a href="#c246a66ab209d52d" class="i field">SetIdFormatMethod</a> = <span class="i">Expression</span>.<span class="i">Lambda</span>&lt;<span class="i">Action</span>&lt;<span class="i">Activity</span>, <b>int</b>&gt;&gt;(
+                        <span class="i">Expression</span>.<span class="i">Call</span>(<a href="#0419dd1fabeec7a3" class="i field">ActivityParameter</a>, <span class="r54 r">method</span>, <span class="r56 r">convertedId</span>),
+                        <a href="#0419dd1fabeec7a3" class="i field">ActivityParameter</a>, <span class="r55 r">idParameter</span>).<span class="i">Compile</span>();
+                }
+            }
  
-            <b>return</b> <span class="r21 r">result</span> != <b>null</b> &amp;&amp; (<b>int</b>)<span class="r21 r">result</span> == 2 <span class="c">/* ActivityIdFormat.W3C */</span>;
+            <span class="i">SetIdFormatMethod</span>(<span class="r53 r">activity</span>, 2 <span class="c">/* ActivityIdFormat.W3C */</span>);
         }
  
-        <b>public static bool</b> <a id="1bbc98bbe800c3bd" href="../R/../../0000000000.html" target="n" data-glyph="220,1" class="i method">TryGetTraceState</a>(<b>this</b> <span class="i">Activity</span> <span id="r22 rd" class="r22 r">activity</span>, <b>out string</b>? <span id="r23 rd" class="r23 r">traceState</span>)
+        <b>public static bool</b> <a id="b8b947a5fc152472" href="../R/../../0000000000.html" target="n" data-glyph="220,1" class="i method">IsW3CFormat</a>(<b>this</b> <span class="i">Activity</span> <span id="r57 rd" class="r57 r">activity</span>)
         {
-            <span class="r23 r">traceState</span> = <b>null</b>;
+            <b>if</b> (<a href="#e84725dd99b69367" class="i field">GetIdFormatMethod</a> == <b>null</b>)
+            {
+                <b>var</b> <span id="r58 rd" class="r58 r">method</span> = <b>typeof</b>(<span class="i">Activity</span>).<span class="i">GetProperty</span>(<span class="s">&quot;IdFormat&quot;</span>)?.<span class="i">GetMethod</span>;
+                <b>if</b> (<span class="r58 r">method</span> == <b>null</b>)
+                {
+                    <a href="#e84725dd99b69367" class="i field">GetIdFormatMethod</a> = <span id="r59 rd" class="r59 r">_</span> =&gt; -1;
+                }
+                <b>else</b>
+                {
+                    <a href="#e84725dd99b69367" class="i field">GetIdFormatMethod</a> = <span class="i">Expression</span>.<span class="i">Lambda</span>&lt;<span class="i">Func</span>&lt;<span class="i">Activity</span>, <b>int</b>&gt;&gt;(
+                        <span class="i">Expression</span>.<span class="i">Convert</span>(<span class="i">Expression</span>.<span class="i">Call</span>(<a href="#0419dd1fabeec7a3" class="i field">ActivityParameter</a>, <span class="r58 r">method</span>), <b>typeof</b>(<b>int</b>)),
+                        <a href="#0419dd1fabeec7a3" class="i field">ActivityParameter</a>).<span class="i">Compile</span>();
+                }
+            }
  
-            <b>if</b> (<a href="#ba3d5fe0218826b7" class="i field">s_getTraceStateStringMethod</a> == <b>null</b>) <b>return</b> <b>false</b>;
  
-            <span class="r23 r">traceState</span> = <a href="#ba3d5fe0218826b7" class="i field">s_getTraceStateStringMethod</a>.<span class="i">Invoke</span>(<span class="r22 r">activity</span>, <span class="i">Array</span>.<span class="i">Empty</span>&lt;<b>object</b>&gt;()) <b>as string</b>;
+            <b>int</b> <span id="r60 rd" class="r60 r">result</span> = <span class="i">GetIdFormatMethod</span>(<span class="r57 r">activity</span>);
  
-            <b>return</b> <b>true</b>;
+            <b>return</b> <span class="r60 r">result</span> == 2 <span class="c">/* ActivityIdFormat.W3C */</span>;
+        }
+ 
+        <b>public static string</b>? <a id="4c04344d4fc9501f" href="../R/../../0000000000.html" target="n" data-glyph="220,1" class="i method">GetTraceState</a>(<b>this</b> <span class="i">Activity</span> <span id="r61 rd" class="r61 r">activity</span>)
+        {
+            <b>if</b> (<a href="#02550b252765aa65" class="i field">GetTraceStateStringMethod</a> == <b>null</b>)
+            {
+                <b>var</b> <span id="r62 rd" class="r62 r">method</span> = <b>typeof</b>(<span class="i">Activity</span>).<span class="i">GetProperty</span>(<span class="s">&quot;TraceStateString&quot;</span>)?.<span class="i">GetMethod</span>;
+                <b>if</b> (<span class="r62 r">method</span> == <b>null</b>)
+                {
+                    <a href="#02550b252765aa65" class="i field">GetTraceStateStringMethod</a> = <span id="r63 rd" class="r63 r">_</span> =&gt; <b>null</b>;
+                }
+                <b>else</b>
+                {
+                    <a href="#02550b252765aa65" class="i field">GetTraceStateStringMethod</a> = <span class="i">Expression</span>.<span class="i">Lambda</span>&lt;<span class="i">Func</span>&lt;<span class="i">Activity</span>, <b>string</b>?&gt;&gt;(
+                        <span class="i">Expression</span>.<span class="i">Call</span>(<a href="#0419dd1fabeec7a3" class="i field">ActivityParameter</a>, <span class="r62 r">method</span>),
+                        <a href="#0419dd1fabeec7a3" class="i field">ActivityParameter</a>).<span class="i">Compile</span>();
+                }
+            }
+ 
+            <b>return</b> <span class="i">GetTraceStateStringMethod</span>(<span class="r61 r">activity</span>);
+        }
+ 
+        <b>public static void</b> <a id="302309c934384f4e" href="../R/../../0000000000.html" target="n" data-glyph="220,1" class="i method">AddObjectTag</a>(<b>this</b> <span class="i">Activity</span> <span id="r64 rd" class="r64 r">activity</span>, <b>string</b> <span id="r65 rd" class="r65 r">name</span>, <b>object</b> <span id="r66 rd" class="r66 r">value</span>)
+        {
+            <b>if</b> (<a href="#0bc60d2a477777e6" class="i field">ActivityAddTagMethod</a> == <b>null</b>)
+            {
+                <b>var</b> <span id="r67 rd" class="r67 r">method</span> = <b>typeof</b>(<span class="i">Activity</span>).<span class="i">GetMethod</span>(<span class="s">&quot;AddTag&quot;</span>, <span class="i">BindingFlags</span>.<span class="i">Instance</span> | <span class="i">BindingFlags</span>.<span class="i">Public</span>, <b>null</b>, <b>new</b> <span class="i">Type</span>[]
+                {
+                    <b>typeof</b>(<b>string</b>),
+                    <b>typeof</b>(<b>object</b>)
+                }, <b>null</b>);
+ 
+                <b>if</b> (<span class="r67 r">method</span> == <b>null</b>)
+                {
+                    <a href="#0bc60d2a477777e6" class="i field">ActivityAddTagMethod</a> = (<b>_</b>, <b>_</b>, <b>_</b>) =&gt; { };
+                }
+                <b>else</b>
+                {
+                    <b>var</b> <span id="r68 rd" class="r68 r">nameParameter</span> = <span class="i">Expression</span>.<span class="i">Parameter</span>(<b>typeof</b>(<b>string</b>));
+                    <b>var</b> <span id="r69 rd" class="r69 r">valueParameter</span> = <span class="i">Expression</span>.<span class="i">Parameter</span>(<b>typeof</b>(<b>object</b>));
+ 
+                    <a href="#0bc60d2a477777e6" class="i field">ActivityAddTagMethod</a> = <span class="i">Expression</span>.<span class="i">Lambda</span>&lt;<span class="i">Action</span>&lt;<span class="i">Activity</span>, <b>string</b>, <b>object</b>?&gt;&gt;(
+                        <span class="i">Expression</span>.<span class="i">Call</span>(<a href="#0419dd1fabeec7a3" class="i field">ActivityParameter</a>, <span class="r67 r">method</span>, <span class="r68 r">nameParameter</span>, <span class="r69 r">valueParameter</span>),
+                        <a href="#0419dd1fabeec7a3" class="i field">ActivityParameter</a>, <span class="r68 r">nameParameter</span>, <span class="r69 r">valueParameter</span>).<span class="i">Compile</span>();
+                }
+            }
+ 
+            <span class="i">ActivityAddTagMethod</span>(<span class="r64 r">activity</span>, <span class="r65 r">name</span>, <span class="r66 r">value</span>);
+        }
+ 
+        <b>public static bool</b> <a id="a6a8d0ccfa6b516c" href="../R/a6a8d0ccfa6b516c.html" target="n" data-glyph="72,1" class="i method">SupportsActivitySource</a>()
+        {
+            <b>return</b> <a href="#c9d868a251562b26" class="i field">SupportsActivitySourceSwitch</a> &amp;&amp; <a href="#cf2376fd6b7510eb" class="i field">ActivitySourceType</a> != <b>null</b>;
+        }
+ 
+        <b>public static</b> <span class="i">ICollection</span>&lt;<span class="i">KeyValuePair</span>&lt;<b>string</b>,<b>object</b>&gt;&gt;? <a id="f47b28e96926aaf3" href="../R/f47b28e96926aaf3.html" target="n" data-glyph="72,1" class="i method">CreateTagsCollection</a>()
+        {
+            <b>if</b> (<a href="#fb25c652a759660d" class="i field">CreateTagsCollectionMethod</a> == <b>null</b>)
+            {
+                <b>var</b> <span id="r70 rd" class="r70 r">ctor</span> = <a href="#3d87520253933a0a" class="i field">ActivityTagsCollectionType</a>?.<span class="i">GetConstructor</span>(<span class="i">Array</span>.<span class="i">Empty</span>&lt;<span class="i">Type</span>&gt;());
+                <b>if</b> (<span class="r70 r">ctor</span> == <b>null</b>)
+                {
+                    <a href="#fb25c652a759660d" class="i field">CreateTagsCollectionMethod</a> = () =&gt; <b>null</b>;
+                }
+                <b>else</b>
+                {
+                    <a href="#fb25c652a759660d" class="i field">CreateTagsCollectionMethod</a> = <span class="i">Expression</span>.<span class="i">Lambda</span>&lt;<span class="i">Func</span>&lt;<span class="i">ICollection</span>&lt;<span class="i">KeyValuePair</span>&lt;<b>string</b>,<b>object</b>&gt;&gt;?&gt;&gt;(
+                        <span class="i">Expression</span>.<span class="i">New</span>(<span class="r70 r">ctor</span>)).<span class="i">Compile</span>();
+                }
+            }
+ 
+            <b>return</b> <span class="i">CreateTagsCollectionMethod</span>();
+        }
+ 
+        <b>public static object</b>? <a id="a44995b43f152f6b" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">CreateActivityLink</a>(<b>string</b> <span id="r71 rd" class="r71 r">id</span>, <span class="i">ICollection</span>&lt;<span class="i">KeyValuePair</span>&lt;<b>string</b>,<b>object</b>&gt;&gt;? <span id="r72 rd" class="r72 r">tags</span>)
+        {
+            <b>if</b> (<a href="#48cc7e368ab39a6d" class="i field">ActivityLinkType</a> == <b>null</b>)
+            {
+                <b>return</b> <b>null</b>;
+            }
+ 
+            <b>if</b> (<a href="#6bd506dc54912e66" class="i field">CreateActivityLinkMethod</a> == <b>null</b>)
+            {
+                <b>var</b> <span id="r73 rd" class="r73 r">parseMethod</span> = <a href="#3a214444641b64f4" class="i field">ActivityContextType</a>?.<span class="i">GetMethod</span>(<span class="s">&quot;Parse&quot;</span>, <span class="i">BindingFlags</span>.<span class="i">Static</span> | <span class="i">BindingFlags</span>.<span class="i">Public</span>);
+                <b>var</b> <span id="r74 rd" class="r74 r">ctor</span> = <a href="#48cc7e368ab39a6d" class="i field">ActivityLinkType</a>?.<span class="i">GetConstructor</span>(<b>new</b>[] { <a href="#3a214444641b64f4" class="i field">ActivityContextType</a>!, <a href="#3d87520253933a0a" class="i field">ActivityTagsCollectionType</a>! });
+ 
+                <b>if</b> (<span class="r73 r">parseMethod</span> == <b>null</b> ||
+                    <span class="r74 r">ctor</span> == <b>null</b> ||
+                    <a href="#3d87520253933a0a" class="i field">ActivityTagsCollectionType</a> == <b>null</b> ||
+                    <a href="#3a214444641b64f4" class="i field">ActivityContextType</a> == <b>null</b>)
+                {
+                    <a href="#6bd506dc54912e66" class="i field">CreateActivityLinkMethod</a> = (<b>_</b>, <b>_</b>) =&gt; <b>null</b>;
+                }
+                <b>else</b>
+                {
+                    <b>var</b> <span id="r75 rd" class="r75 r">nameParameter</span> = <span class="i">Expression</span>.<span class="i">Parameter</span>(<b>typeof</b>(<b>string</b>));
+                    <b>var</b> <span id="r76 rd" class="r76 r">tagsParameter</span> = <span class="i">Expression</span>.<span class="i">Parameter</span>(<b>typeof</b>(<span class="i">ICollection</span>&lt;<span class="i">KeyValuePair</span>&lt;<b>string</b>,<b>object</b>&gt;&gt;));
+ 
+                    <a href="#6bd506dc54912e66" class="i field">CreateActivityLinkMethod</a> = <span class="i">Expression</span>.<span class="i">Lambda</span>&lt;<span class="i">Func</span>&lt;<b>string</b>, <span class="i">ICollection</span>&lt;<span class="i">KeyValuePair</span>&lt;<b>string</b>, <b>object</b>&gt;&gt;?, <b>object</b>?&gt;&gt;(
+                        <span class="i">Expression</span>.<span class="i">TryCatch</span>(
+                                <span class="i">Expression</span>.<span class="i">Convert</span>(<span class="i">Expression</span>.<span class="i">New</span>(<span class="r74 r">ctor</span>,
+                                        <span class="i">Expression</span>.<span class="i">Call</span>(<span class="r73 r">parseMethod</span>, <span class="r75 r">nameParameter</span>, <span class="i">Expression</span>.<span class="i">Default</span>(<b>typeof</b>(<b>string</b>))),
+                                <span class="i">Expression</span>.<span class="i">Convert</span>(<span class="r76 r">tagsParameter</span>, <a href="#3d87520253933a0a" class="i field">ActivityTagsCollectionType</a>)), <b>typeof</b>(<b>object</b>)),
+                        <span class="i">Expression</span>.<span class="i">Catch</span>(<b>typeof</b>(<span class="i">Exception</span>), <span class="i">Expression</span>.<span class="i">Default</span>(<b>typeof</b>(<b>object</b>)))),
+                             <span class="r75 r">nameParameter</span>, <span class="r76 r">tagsParameter</span>).<span class="i">Compile</span>();
+                }
+            }
+ 
+            <b>return</b> <span class="i">CreateActivityLinkMethod</span>(<span class="r71 r">id</span>, <span class="r72 r">tags</span>);
+        }
+ 
+        <b>public static bool</b> <a id="81f7a0be45c9d3f6" href="../R/81f7a0be45c9d3f6.html" target="n" data-glyph="72,1" class="i method">ActivitySourceHasListeners</a>(<b>object</b>? <span id="r77 rd" class="r77 r">activitySource</span>)
+        {
+            <b>if</b> (!<a href="#a6a8d0ccfa6b516c" class="i method">SupportsActivitySource</a>())
+            {
+                <b>return</b> <b>false</b>;
+            }
+ 
+            <b>if</b> (<span class="r77 r">activitySource</span> == <b>null</b>)
+            {
+                <b>return</b> <b>false</b>;
+            }
+ 
+            <b>if</b> (<a href="#a52d1606ae37cff9" class="i field">ActivitySourceHasListenersMethod</a> == <b>null</b>)
+            {
+                <b>var</b> <span id="r78 rd" class="r78 r">method</span> = <a href="#cf2376fd6b7510eb" class="i field">ActivitySourceType</a>?.<span class="i">GetMethod</span>(<span class="s">&quot;HasListeners&quot;</span>, <span class="i">BindingFlags</span>.<span class="i">Instance</span> | <span class="i">BindingFlags</span>.<span class="i">Public</span>);
+                <b>if</b> (<span class="r78 r">method</span> == <b>null</b> ||
+                    <a href="#cf2376fd6b7510eb" class="i field">ActivitySourceType</a> == <b>null</b>)
+                {
+                    <a href="#a52d1606ae37cff9" class="i field">ActivitySourceHasListenersMethod</a> = <span id="r79 rd" class="r79 r">_</span> =&gt; <b>false</b>;
+                }
+                <b>else</b>
+                {
+                    <b>var</b> <span id="r80 rd" class="r80 r">sourceParameter</span> = <span class="i">Expression</span>.<span class="i">Parameter</span>(<b>typeof</b>(<b>object</b>));
+                    <a href="#a52d1606ae37cff9" class="i field">ActivitySourceHasListenersMethod</a> = <span class="i">Expression</span>.<span class="i">Lambda</span>&lt;<span class="i">Func</span>&lt;<b>object</b>, <b>bool</b>&gt;&gt;(
+                        <span class="i">Expression</span>.<span class="i">Call</span>(<span class="i">Expression</span>.<span class="i">Convert</span>(<span class="r80 r">sourceParameter</span>, <a href="#cf2376fd6b7510eb" class="i field">ActivitySourceType</a>), <span class="r78 r">method</span>),
+                        <span class="r80 r">sourceParameter</span>).<span class="i">Compile</span>();
+                }
+            }
+ 
+            <b>return</b> <a href="#a52d1606ae37cff9" class="i field">ActivitySourceHasListenersMethod</a>.<span class="i">Invoke</span>(<span class="r77 r">activitySource</span>);
+        }
+ 
+        <b>public static</b> <span class="i">Activity</span>? <a id="f51a915f1fc1ba9c" href="../R/f51a915f1fc1ba9c.html" target="n" data-glyph="72,1" class="i method">ActivitySourceStartActivity</a>(<b>object</b>? <span id="r81 rd" class="r81 r">activitySource</span>, <b>string</b> <span id="r82 rd" class="r82 r">activityName</span>, <b>int</b> <span id="r83 rd" class="r83 r">kind</span>, <span class="i">DateTimeOffset</span> <span id="r48 rd" class="r48 r">startTime</span>, <span class="i">ICollection</span>&lt;<span class="i">KeyValuePair</span>&lt;<b>string</b>, <b>object</b>&gt;&gt;? <span id="r49 rd" class="r49 r">tags</span>, <span class="i">IList</span>? <span id="r50 rd" class="r50 r">links</span>)
+        {
+            <b>if</b> (<span class="r81 r">activitySource</span> == <b>null</b>)
+            {
+                <b>return</b> <b>null</b>;
+            }
+ 
+            <b>if</b> (<a href="#20394754ab8eea2e" class="i field">ActivitySourceStartActivityMethod</a> == <b>null</b>)
+            {
+                <b>if</b> (<a href="#48cc7e368ab39a6d" class="i field">ActivityLinkType</a> == <b>null</b> ||
+                    <a href="#cf2376fd6b7510eb" class="i field">ActivitySourceType</a> == <b>null</b> ||
+                    <a href="#3a214444641b64f4" class="i field">ActivityContextType</a> == <b>null</b> ||
+                    <a href="#da5201e11f4cbde3" class="i field">ActivityKindType</a> == <b>null</b>)
+                {
+                    <a href="#20394754ab8eea2e" class="i field">ActivitySourceStartActivityMethod</a> = (<b>_</b>, <b>_</b>, <b>_</b>, <b>_</b>, <b>_</b>, <b>_</b>) =&gt; <b>null</b>;
+                }
+                <b>else</b>
+                {
+                    <b>var</b> <span id="r84 rd" class="r84 r">method</span> = <a href="#cf2376fd6b7510eb" class="i field">ActivitySourceType</a>?.<span class="i">GetMethod</span>(<span class="s">&quot;StartActivity&quot;</span>, <span class="i">BindingFlags</span>.<span class="i">Instance</span> | <span class="i">BindingFlags</span>.<span class="i">Public</span>, <b>null</b>, <b>new</b>[]
+                    {
+                        <b>typeof</b>(<b>string</b>),
+                        <a href="#da5201e11f4cbde3" class="i field">ActivityKindType</a>,
+                        <a href="#3a214444641b64f4" class="i field">ActivityContextType</a>,
+                        <b>typeof</b>(<span class="i">IEnumerable</span>&lt;<span class="i">KeyValuePair</span>&lt;<b>string</b>, <b>object</b>&gt;&gt;),
+                        <b>typeof</b>(<span class="i">IEnumerable</span>&lt;&gt;).<span class="i">MakeGenericType</span>(<a href="#48cc7e368ab39a6d" class="i field">ActivityLinkType</a>),
+                        <b>typeof</b>(<span class="i">DateTimeOffset</span>)
+                    }, <b>null</b>);
+ 
+                    <b>if</b> (<span class="r84 r">method</span> == <b>null</b>)
+                    {
+                        <a href="#20394754ab8eea2e" class="i field">ActivitySourceStartActivityMethod</a> = (<b>_</b>, <b>_</b>, <b>_</b>, <b>_</b>, <b>_</b>, <b>_</b>) =&gt; <b>null</b>;
+                    }
+                    <b>else</b>
+                    {
+                        <b>var</b> <span id="r85 rd" class="r85 r">sourceParameter</span> = <span class="i">Expression</span>.<span class="i">Parameter</span>(<b>typeof</b>(<b>object</b>));
+                        <b>var</b> <span id="r86 rd" class="r86 r">nameParameter</span> = <span class="i">Expression</span>.<span class="i">Parameter</span>(<b>typeof</b>(<b>string</b>));
+                        <b>var</b> <span id="r87 rd" class="r87 r">kindParameter</span> = <span class="i">Expression</span>.<span class="i">Parameter</span>(<b>typeof</b>(<b>int</b>));
+                        <b>var</b> <span id="r88 rd" class="r88 r">startTimeParameter</span> = <span class="i">Expression</span>.<span class="i">Parameter</span>(<b>typeof</b>(<span class="i">DateTimeOffset</span>));
+                        <b>var</b> <span id="r89 rd" class="r89 r">tagsParameter</span> = <span class="i">Expression</span>.<span class="i">Parameter</span>(<b>typeof</b>(<span class="i">ICollection</span>&lt;<span class="i">KeyValuePair</span>&lt;<b>string</b>, <b>object</b>&gt;&gt;));
+                        <b>var</b> <span id="r90 rd" class="r90 r">linksParameter</span> = <span class="i">Expression</span>.<span class="i">Parameter</span>(<b>typeof</b>(<span class="i">IList</span>));
+                        <b>var</b> <span id="r91 rd" class="r91 r">methodParameter</span> = <span class="r84 r">method</span>.<span class="i">GetParameters</span>();
+                        <a href="#20394754ab8eea2e" class="i field">ActivitySourceStartActivityMethod</a> = <span class="i">Expression</span>.<span class="i">Lambda</span>&lt;<span class="i">Func</span>&lt;<b>object</b>, <b>string</b>, <b>int</b>, <span class="i">ICollection</span>&lt;<span class="i">KeyValuePair</span>&lt;<b>string</b>, <b>object</b>&gt;&gt;?, <span class="i">IList</span>?, <span class="i">DateTimeOffset</span>, <span class="i">Activity</span>?&gt;&gt;(
+                            <span class="i">Expression</span>.<span class="i">Call</span>(
+                                <span class="i">Expression</span>.<span class="i">Convert</span>(<span class="r85 r">sourceParameter</span>, <span class="r84 r">method</span>.<span class="i">DeclaringType</span>!),
+                                <span class="r84 r">method</span>,
+                                <span class="r86 r">nameParameter</span>,
+                                <span class="i">Expression</span>.<span class="i">Convert</span>(<span class="r87 r">kindParameter</span>,  <span class="r91 r">methodParameter</span>[1].<span class="i">ParameterType</span>),
+                                <span class="i">Expression</span>.<span class="i">Default</span>(<a href="#3a214444641b64f4" class="i field">ActivityContextType</a>),
+                                <span class="i">Expression</span>.<span class="i">Convert</span>(<span class="r89 r">tagsParameter</span>,  <span class="r91 r">methodParameter</span>[3].<span class="i">ParameterType</span>),
+                                <span class="i">Expression</span>.<span class="i">Convert</span>(<span class="r90 r">linksParameter</span>,  <span class="r91 r">methodParameter</span>[4].<span class="i">ParameterType</span>),
+                                <span class="i">Expression</span>.<span class="i">Convert</span>(<span class="r88 r">startTimeParameter</span>,  <span class="r91 r">methodParameter</span>[5].<span class="i">ParameterType</span>)),
+                            <span class="r85 r">sourceParameter</span>, <span class="r86 r">nameParameter</span>, <span class="r87 r">kindParameter</span>, <span class="r89 r">tagsParameter</span>, <span class="r90 r">linksParameter</span>,  <span class="r88 r">startTimeParameter</span>).<span class="i">Compile</span>();
+                    }
+                }
+            }
+ 
+            <b>return</b> <a href="#20394754ab8eea2e" class="i field">ActivitySourceStartActivityMethod</a>.<span class="i">Invoke</span>(<span class="r81 r">activitySource</span>, <span class="r82 r">activityName</span>, <span class="r83 r">kind</span>, <span class="r49 r">tags</span>, <span class="r50 r">links</span>, <span class="r48 r">startTime</span>);
+        }
+ 
+        <b>public static object</b>? <a id="ee27122d5e448b5d" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">CreateActivitySource</a>(<b>string</b> <span id="r92 rd" class="r92 r">name</span>)
+        {
+            <b>if</b> (<a href="#cf2376fd6b7510eb" class="i field">ActivitySourceType</a> == <b>null</b>)
+            {
+                <b>return</b> <b>null</b>;
+            }
+            <b>return</b> <span class="i">Activator</span>.<span class="i">CreateInstance</span>(<a href="#cf2376fd6b7510eb" class="i field">ActivitySourceType</a>,
+                <span class="r92 r">name</span>, <span class="c">// name</span>
+                <b>null</b> <span class="c">// version</span>
+            );
+        }
+ 
+        <b>public static</b> <span class="i">IList</span>? <a id="e6b66da3b51d2b37" href="../R/e6b66da3b51d2b37.html" target="n" data-glyph="72,1" class="i method">CreateLinkCollection</a>()
+        {
+            <b>if</b> (<a href="#48cc7e368ab39a6d" class="i field">ActivityLinkType</a> == <b>null</b>)
+            {
+                <b>return</b> <b>null</b>;
+            }
+            <b>return</b> <span class="i">Activator</span>.<span class="i">CreateInstance</span>(<b>typeof</b>(<span class="i">List</span>&lt;&gt;).<span class="i">MakeGenericType</span>(<a href="#48cc7e368ab39a6d" class="i field">ActivityLinkType</a>)) <b>as</b> <span class="i">IList</span>;
+        }
+ 
+        <b>public static bool</b> <a id="c202eb67ab0371a6" href="../R/../../0000000000.html" target="n" data-glyph="220,1" class="i method">TryDispose</a>(<b>this</b> <span class="i">Activity</span> <span id="r93 rd" class="r93 r">activity</span>)
+        {
+            <b>if</b> (<span class="r93 r">activity</span> <b>is</b> <span class="i">IDisposable</span> <span id="r94 rd" class="r94 r">disposable</span>)
+            {
+                <span class="r94 r">disposable</span>.<span class="i">Dispose</span>();
+                <b>return</b> <b>true</b>;
+            }
+ 
+            <b>return</b> <b>false</b>;
+        }
+ 
+        <b>public static void</b> <a id="5a8be14cd8ee2616" href="../R/5a8be14cd8ee2616.html" target="n" data-glyph="72,1" class="i method">ResetFeatureSwitch</a>()
+        {
+            <a href="#c9d868a251562b26" class="i field">SupportsActivitySourceSwitch</a> = <a href="AppContextSwitchHelper.cs.html#145a99cb365c2abd" class="t t">AppContextSwitchHelper</a>.<a href="AppContextSwitchHelper.cs.html#6df74ae6e34caa95" class="i method">GetConfigValue</a>(
+                <span class="s">&quot;Azure.Experimental.EnableActivitySource&quot;</span>,
+                <span class="s">&quot;AZURE_EXPERIMENTAL_ENABLE_ACTIVITY_SOURCE&quot;</span>);
         }
     }
-}
-</pre></td></tr></table></div></body></html>
+}</pre></td></tr></table></div></body></html>

@@ -1,6 +1,6 @@
 ﻿<!DOCTYPE html>
 <html><head><title>RequestActivityPolicyTests.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
-<body class="cB" onload="i(248);"><div class="dH">
+<body class="cB" onload="i(311);"><div class="dH">
 <table style="width: 100%">
 <tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Core.Tests/RequestActivityPolicyTests.cs" target="_top">RequestActivityPolicyTests.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/core/Azure.Core/tests/RequestActivityPolicyTests.cs" target="_blank">View on GitHub</a></td></tr>
 <tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Core.Tests" target="_top">Azure.Core.Tests.csproj</a> (Azure.Core.Tests)</td><td></td></tr>
@@ -252,6 +252,69 @@
  
             <span class="t t">Assert</span>.<span class="i method">AreEqual</span>(0, <span class="r46 r">testListener</span>.<a href="/Azure.Core.TestFramework/A.html#3c2a0b824521e997" class="i property">Events</a>.<a href="@0@System/A.html#2d2504e4ca700843" class="i property">Count</a>);
         }
+ 
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">NET5_0</span>
+<span class="e">        [SetUp]
+        [TearDown]
+        public void ResetFeatureSwitch()
+        {
+            ActivityExtensions.ResetFeatureSwitch();
+        }
+ 
+        private static TestAppContextSwitch SetAppConfigSwitch()
+        {
+            var s = new TestAppContextSwitch(&quot;Azure.Experimental.EnableActivitySource&quot;, &quot;true&quot;);
+            ActivityExtensions.ResetFeatureSwitch();
+            return s;
+        }
+ 
+        [Test]
+        [NonParallelizable]
+        public async Task ActivitySourceActivityStartedOnRequest()
+        {
+            using var _ = SetAppConfigSwitch();
+ 
+            ActivityIdFormat previousFormat = Activity.DefaultIdFormat;
+            Activity.DefaultIdFormat = ActivityIdFormat.W3C;
+            try
+            {
+                Activity activity = null;
+                using var testListener = new TestActivitySourceListener(&quot;Azure.Core.Http&quot;);
+ 
+                MockTransport mockTransport = CreateMockTransport(_ =&gt;
+                {
+                    activity = Activity.Current;
+                    MockResponse mockResponse = new MockResponse(201);
+                    mockResponse.AddHeader(new HttpHeader(&quot;x-ms-request-id&quot;, &quot;server request id&quot;));
+                    return mockResponse;
+                });
+ 
+                string clientRequestId = null;
+                Task&lt;Response&gt; requestTask = SendRequestAsync(mockTransport, request =&gt;
+                {
+                    request.Method = RequestMethod.Get;
+                    request.Uri.Reset(new Uri(&quot;http://example.com&quot;));
+                    request.Headers.Add(&quot;User-Agent&quot;, &quot;agent&quot;);
+                    clientRequestId = request.ClientRequestId;
+                }, s_enabledPolicy);
+ 
+                await requestTask;
+ 
+                Assert.AreEqual(activity, testListener.Activities.Single());
+                CollectionAssert.Contains(activity.Tags, new KeyValuePair&lt;string, string&gt;(&quot;http.status_code&quot;, &quot;201&quot;));
+                CollectionAssert.Contains(activity.Tags, new KeyValuePair&lt;string, string&gt;(&quot;http.url&quot;, &quot;http://example.com/&quot;));
+                CollectionAssert.Contains(activity.Tags, new KeyValuePair&lt;string, string&gt;(&quot;http.method&quot;, &quot;GET&quot;));
+                CollectionAssert.Contains(activity.Tags, new KeyValuePair&lt;string, string&gt;(&quot;http.user_agent&quot;, &quot;agent&quot;));
+                CollectionAssert.Contains(activity.Tags, new KeyValuePair&lt;string, string&gt;(&quot;requestId&quot;, clientRequestId));
+                CollectionAssert.Contains(activity.Tags, new KeyValuePair&lt;string, string&gt;(&quot;serviceRequestId&quot;, &quot;server request id&quot;));
+                CollectionAssert.Contains(activity.Tags, new KeyValuePair&lt;string, string&gt;(&quot;az.namespace&quot;, &quot;Microsoft.Azure.Core.Cool.Tests&quot;));
+            }
+            finally
+            {
+                Activity.DefaultIdFormat = previousFormat;
+            }
+        }
+</span><span class="k preprocess">#</span><span class="k preprocess">endif</span>
     }
 }
 </pre></td></tr></table></div></body></html>

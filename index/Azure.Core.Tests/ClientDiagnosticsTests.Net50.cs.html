@@ -1,0 +1,195 @@
+﻿<!DOCTYPE html>
+<html><head><title>ClientDiagnosticsTests.Net50.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(186);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Core.Tests/ClientDiagnosticsTests.Net50.cs" target="_top">ClientDiagnosticsTests.Net50.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/core/Azure.Core/tests/ClientDiagnosticsTests.Net50.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Core.Tests" target="_top">Azure.Core.Tests.csproj</a> (Azure.Core.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">TestFramework</span>;
+<b>using</b> <span class="i n">NUnit</span>.<span class="i n">Framework</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Tests</span>
+{
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">NET5_0</span>
+<span class="e">    public partial class ClientDiagnosticsTests
+    {
+        [SetUp]
+        [TearDown]
+        public void ResetFeatureSwitch()
+        {
+            ActivityExtensions.ResetFeatureSwitch();
+        }
+ 
+        private static TestAppContextSwitch SetAppConfigSwitch()
+        {
+            var s = new TestAppContextSwitch(&quot;Azure.Experimental.EnableActivitySource&quot;, &quot;true&quot;);
+            ActivityExtensions.ResetFeatureSwitch();
+            return s;
+        }
+ 
+        [Test]
+        [NonParallelizable]
+        public void StartActivityNoOpsWithoutSwitch()
+        {
+            using var activityListener = new TestActivitySourceListener(&quot;Azure.Clients.ClientName&quot;);
+ 
+            DiagnosticScopeFactory clientDiagnostics = new DiagnosticScopeFactory(&quot;Azure.Clients&quot;, &quot;Microsoft.Azure.Core.Cool.Tests&quot;, true);
+ 
+            DiagnosticScope scope = clientDiagnostics.CreateScope(&quot;ClientName.ActivityName&quot;);
+ 
+            scope.Start();
+            scope.Dispose();
+ 
+            Assert.AreEqual(0, activityListener.Activities.Count);
+        }
+ 
+        [Test]
+        [NonParallelizable]
+        public void StartsActivitySourceActivity()
+        {
+            using var _ = SetAppConfigSwitch();
+ 
+            // Bug: there is no way to set activity type to W3C
+            // https://github.com/dotnet/runtime/issues/43853
+            var oldDefault = Activity.DefaultIdFormat;
+ 
+            Activity.DefaultIdFormat = ActivityIdFormat.W3C;
+ 
+            try
+            {
+                using var activityListener = new TestActivitySourceListener(&quot;Azure.Clients.ClientName&quot;);
+ 
+                DiagnosticScopeFactory clientDiagnostics = new DiagnosticScopeFactory(&quot;Azure.Clients&quot;, &quot;Microsoft.Azure.Core.Cool.Tests&quot;, true);
+ 
+                DiagnosticScope scope = clientDiagnostics.CreateScope(&quot;ClientName.ActivityName&quot;);
+                scope.AddAttribute(&quot;Attribute1&quot;, &quot;Value1&quot;);
+                scope.AddAttribute(&quot;Attribute2&quot;, 2, i =&gt; i.ToString());
+                scope.AddAttribute(&quot;Attribute3&quot;, 3);
+ 
+                scope.AddLink(&quot;00-6e76af18746bae4eadc3581338bbe8b1-2899ebfdbdce904b-00&quot;);
+                scope.AddLink(&quot;00-6e76af18746bae4eadc3581338bbe8b2-2899ebfdbdce904b-00&quot;, new Dictionary&lt;string, string&gt;()
+                {
+                    {&quot;linkAttribute&quot;, &quot;linkAttributeValue&quot;}
+                });
+ 
+                Assert.IsTrue(scope.IsEnabled);
+ 
+                scope.Start();
+                scope.Dispose();
+ 
+                Assert.AreEqual(1, activityListener.Activities.Count);
+                var activity = activityListener.Activities.Dequeue();
+ 
+                Assert.AreEqual(&quot;ClientName.ActivityName&quot;, activity.DisplayName);
+                Assert.AreEqual(&quot;Value1&quot;, activity.TagObjects.Single(o =&gt; o.Key == &quot;Attribute1&quot;).Value);
+                Assert.AreEqual(&quot;2&quot;, activity.TagObjects.Single(o =&gt; o.Key == &quot;Attribute2&quot;).Value);
+                Assert.AreEqual(&quot;3&quot;, activity.TagObjects.Single(o =&gt; o.Key == &quot;Attribute3&quot;).Value);
+ 
+                var links = activity.Links.ToArray();
+                Assert.AreEqual(2, links.Length);
+                Assert.AreEqual(ActivityContext.Parse(&quot;00-6e76af18746bae4eadc3581338bbe8b1-2899ebfdbdce904b-00&quot;, null), links[0].Context);
+                Assert.AreEqual(ActivityContext.Parse(&quot;00-6e76af18746bae4eadc3581338bbe8b2-2899ebfdbdce904b-00&quot;, null), links[1].Context);
+ 
+                Assert.AreEqual(ActivityIdFormat.W3C, activity.IdFormat);
+            }
+            finally
+            {
+                Activity.DefaultIdFormat = oldDefault;
+            }
+        }
+ 
+        [Test]
+        public void CanSetActivitySourceAndDiagnosticSourceActivitiesTogether()
+        {
+            using var _ = SetAppConfigSwitch();
+ 
+            using var testListener = new TestDiagnosticListener(&quot;Azure.Clients&quot;);
+            using var activityListener = new TestActivitySourceListener(&quot;Azure.Clients.ClientName&quot;);
+ 
+            DiagnosticScopeFactory clientDiagnostics = new DiagnosticScopeFactory(&quot;Azure.Clients&quot;, &quot;Microsoft.Azure.Core.Cool.Tests&quot;, true);
+ 
+            DiagnosticScope scope = clientDiagnostics.CreateScope(&quot;ClientName.ActivityName&quot;);
+            scope.Start();
+ 
+            (string Key, object Value, DiagnosticListener) startEvent = testListener.Events.Dequeue();
+ 
+            Activity activityAfterStart = Activity.Current;
+ 
+            scope.AddAttribute(&quot;Attribute1&quot;, &quot;Value1&quot;);
+            scope.AddAttribute(&quot;Attribute2&quot;, 2, i =&gt; i.ToString());
+            scope.AddAttribute(&quot;Attribute3&quot;, 3);
+            scope.Dispose();
+ 
+            (string Key, object Value, DiagnosticListener) stopEvent = testListener.Events.Dequeue();
+ 
+            Assert.AreEqual(1, activityListener.Activities.Count);
+ 
+            var activitySourceActivity = activityListener.Activities.Dequeue();
+            Assert.AreEqual(&quot;Value1&quot;, activitySourceActivity.TagObjects.Single(o =&gt; o.Key == &quot;Attribute1&quot;).Value);
+            Assert.AreEqual(&quot;2&quot;, activitySourceActivity.TagObjects.Single(o =&gt; o.Key == &quot;Attribute2&quot;).Value);
+            Assert.AreEqual(&quot;3&quot;, activitySourceActivity.TagObjects.Single(o =&gt; o.Key == &quot;Attribute3&quot;).Value);
+ 
+            Assert.Null(Activity.Current);
+            Assert.AreEqual(&quot;ClientName.ActivityName.Start&quot;, startEvent.Key);
+            Assert.AreEqual(&quot;ClientName.ActivityName.Stop&quot;, stopEvent.Key);
+ 
+            var diagnosticSourceActivity = (Activity) startEvent.Value;
+            Assert.AreEqual(ActivityIdFormat.W3C, diagnosticSourceActivity.IdFormat);
+            CollectionAssert.Contains(diagnosticSourceActivity.Tags, new KeyValuePair&lt;string, string&gt;(&quot;Attribute1&quot;, &quot;Value1&quot;));
+            CollectionAssert.Contains(diagnosticSourceActivity.Tags, new KeyValuePair&lt;string, string&gt;(&quot;Attribute2&quot;, &quot;2&quot;));
+            CollectionAssert.Contains(diagnosticSourceActivity.Tags, new KeyValuePair&lt;string, string&gt;(&quot;Attribute3&quot;, &quot;3&quot;));
+ 
+            Assert.AreEqual(activityAfterStart, diagnosticSourceActivity);
+        }
+ 
+        [Test]
+        public void CanSetActivitySourceAttributesAfterStarting()
+        {
+            using var _ = SetAppConfigSwitch();
+ 
+            using var activityListener = new TestActivitySourceListener(&quot;Azure.Clients.ClientName&quot;);
+ 
+            DiagnosticScopeFactory clientDiagnostics = new DiagnosticScopeFactory(&quot;Azure.Clients&quot;, &quot;Microsoft.Azure.Core.Cool.Tests&quot;, true);
+ 
+            DiagnosticScope scope = clientDiagnostics.CreateScope(&quot;ClientName.ActivityName&quot;);
+            scope.Start();
+            scope.AddAttribute(&quot;name&quot;, &quot;value&quot;);
+            scope.Dispose();
+ 
+            Assert.AreEqual(1, activityListener.Activities.Count);
+            var activity = activityListener.Activities.Dequeue();
+            Assert.AreEqual(&quot;value&quot;, activity.TagObjects.Single(o =&gt; o.Key == &quot;name&quot;).Value);
+        }
+ 
+        [Test]
+        [NonParallelizable]
+        public void StartActivitySourceActivityIgnoresInvalidLinkParent()
+        {
+            using var _ = SetAppConfigSwitch();
+ 
+            using var activityListener = new TestActivitySourceListener(&quot;Azure.Clients.ClientName&quot;);
+ 
+            DiagnosticScopeFactory clientDiagnostics = new DiagnosticScopeFactory(&quot;Azure.Clients&quot;, &quot;Microsoft.Azure.Core.Cool.Tests&quot;, true);
+ 
+            DiagnosticScope scope = clientDiagnostics.CreateScope(&quot;ClientName.ActivityName&quot;);
+ 
+            scope.AddLink(&quot;LALALA&quot;);
+ 
+            scope.Start();
+            scope.Dispose();
+ 
+            Assert.AreEqual(0, activityListener.Activities.Single().Links.Count());
+        }
+    }
+</span><span class="k preprocess">#</span><span class="k preprocess">endif</span>
+}</pre></td></tr></table></div></body></html>
