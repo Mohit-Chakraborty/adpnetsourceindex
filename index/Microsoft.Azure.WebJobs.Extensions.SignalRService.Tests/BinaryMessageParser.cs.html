@@ -1,0 +1,95 @@
+﻿<!DOCTYPE html>
+<html><head><title>BinaryMessageParser.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(86);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.SignalRService.Tests/BinaryMessageParser.cs" target="_top">BinaryMessageParser.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/signalr/Microsoft.Azure.WebJobs.Extensions.SignalRService/tests/BinaryMessageParser.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.SignalRService.Tests" target="_top">Microsoft.Azure.WebJobs.Extensions.SignalRService.Tests.csproj</a> (Microsoft.Azure.WebJobs.Extensions.SignalRService.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Buffers</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">SignalRService</span>.<span class="i n">Tests</span>.<span class="i n">Common</span>
+{
+    <b>internal static class</b> <a id="c25f2d567a645084" href="R/c25f2d567a645084.html" target="n" data-glyph="2,0" class="t t">BinaryMessageParser</a>
+    {
+        <b>internal const int</b> <a id="6c2ecfa99cabf85d" href="R/6c2ecfa99cabf85d.html" target="n" data-glyph="8,1" class="i field">MaxLengthPrefixSize</a> = 5;
+ 
+        <b>public static bool</b> <a id="d43dc8df6895411d" href="R/d43dc8df6895411d.html" target="n" data-glyph="72,1" class="i method">TryParseMessage</a>(<b>ref</b> <span class="t t">ReadOnlySequence</span>&lt;<b>byte</b>&gt; <span id="r0 rd" class="r0 r">buffer</span>, <b>out</b> <span class="t t">ReadOnlySequence</span>&lt;<b>byte</b>&gt; <span id="r1 rd" class="r1 r">payload</span>)
+        {
+            <b>if</b> (<span class="r0 r">buffer</span>.<span class="i property">IsEmpty</span>)
+            {
+                <span class="r1 r">payload</span> = <b>default</b>;
+                <b>return</b> <b>false</b>;
+            }
+ 
+            <span class="c">// The payload starts with a length prefix encoded as a VarInt. VarInts use the most significant bit</span>
+            <span class="c">// as a marker whether the byte is the last byte of the VarInt or if it spans to the next byte. Bytes</span>
+            <span class="c">// appear in the reverse order - i.e. the first byte contains the least significant bits of the value</span>
+            <span class="c">// Examples:</span>
+            <span class="c">// VarInt: 0x35 - %00110101 - the most significant bit is 0 so the value is %x0110101 i.e. 0x35 (53)</span>
+            <span class="c">// VarInt: 0x80 0x25 - %10000000 %00101001 - the most significant bit of the first byte is 1 so the</span>
+            <span class="c">// remaining bits (%x0000000) are the lowest bits of the value. The most significant bit of the second</span>
+            <span class="c">// byte is 0 meaning this is last byte of the VarInt. The actual value bits (%x0101001) need to be</span>
+            <span class="c">// prepended to the bits we already read so the values is %01010010000000 i.e. 0x1480 (5248)</span>
+            <span class="c">// We support paylads up to 2GB so the biggest number we support is 7fffffff which when encoded as</span>
+            <span class="c">// VarInt is 0xFF 0xFF 0xFF 0xFF 0x07 - hence the maximum length prefix is 5 bytes.</span>
+ 
+            <a href="@0@mscorlib/A.html#0cd3c987eff5ef85" class="k">var</a> <span id="r2 rd" class="r2 r">length</span> = 0U;
+            <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r3 rd" class="r3 r">numBytes</span> = 0;
+ 
+            <b>var</b> <span id="r4 rd" class="r4 r">lengthPrefixBuffer</span> = <span class="r0 r">buffer</span>.<span class="i method">Slice</span>(0, <a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#8cf0c6d1543ff08d" class="i method">Min</a>(<a href="#6c2ecfa99cabf85d" class="i field">MaxLengthPrefixSize</a>, <span class="r0 r">buffer</span>.<span class="i property">Length</span>));
+            <b>var</b> <span id="r5 rd" class="r5 r">span</span> = <a href="#9d2d3bf021b181dc" class="i method">GetSpan</a>(<span class="r4 r">lengthPrefixBuffer</span>);
+ 
+            <b>byte</b> <span id="r6 rd" class="r6 r">byteRead</span>;
+            <b>do</b>
+            {
+                <span class="r6 r">byteRead</span> = <span class="r5 r">span</span>[<span class="r3 r">numBytes</span>];
+                <span class="r2 r">length</span> = <span class="r2 r">length</span> | (((<b>uint</b>)(<span class="r6 r">byteRead</span> &amp; 0x7f)) &lt;&lt; (<span class="r3 r">numBytes</span> * 7));
+                <span class="r3 r">numBytes</span>++;
+            }
+            <b>while</b> (<span class="r3 r">numBytes</span> &lt; <span class="r4 r">lengthPrefixBuffer</span>.<span class="i property">Length</span> &amp;&amp; ((<span class="r6 r">byteRead</span> &amp; 0x80) != 0));
+ 
+            <span class="c">// size bytes are missing</span>
+            <b>if</b> ((<span class="r6 r">byteRead</span> &amp; 0x80) != 0 &amp;&amp; (<span class="r3 r">numBytes</span> &lt; <a href="#6c2ecfa99cabf85d" class="i field">MaxLengthPrefixSize</a>))
+            {
+                <span class="r1 r">payload</span> = <b>default</b>;
+                <b>return</b> <b>false</b>;
+            }
+ 
+            <b>if</b> ((<span class="r6 r">byteRead</span> &amp; 0x80) != 0 || (<span class="r3 r">numBytes</span> == <a href="#6c2ecfa99cabf85d" class="i field">MaxLengthPrefixSize</a> &amp;&amp; <span class="r6 r">byteRead</span> &gt; 7))
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#172972c225b16e44" class="t constructor">FormatException</a>(<span class="s">&quot;Messages over 2GB in size are not supported.&quot;</span>);
+            }
+ 
+            <span class="c">// We don&#39;t have enough data</span>
+            <b>if</b> (<span class="r0 r">buffer</span>.<span class="i property">Length</span> &lt; <span class="r2 r">length</span> + <span class="r3 r">numBytes</span>)
+            {
+                <span class="r1 r">payload</span> = <b>default</b>;
+                <b>return</b> <b>false</b>;
+            }
+ 
+            <span class="c">// Get the payload</span>
+            <span class="r1 r">payload</span> = <span class="r0 r">buffer</span>.<span class="i method">Slice</span>(<span class="r3 r">numBytes</span>, (<b>int</b>)<span class="r2 r">length</span>);
+ 
+            <span class="c">// Skip the payload</span>
+            <span class="r0 r">buffer</span> = <span class="r0 r">buffer</span>.<span class="i method">Slice</span>(<span class="r3 r">numBytes</span> + (<b>int</b>)<span class="r2 r">length</span>);
+            <b>return</b> <b>true</b>;
+        }
+ 
+        <b>private static</b> <span class="t t">ReadOnlySpan</span>&lt;<b>byte</b>&gt; <a id="9d2d3bf021b181dc" href="R/9d2d3bf021b181dc.html" target="n" data-glyph="76,1" class="i method">GetSpan</a>(<b>in</b> <span class="t t">ReadOnlySequence</span>&lt;<b>byte</b>&gt; <span id="r7 rd" class="r7 r">lengthPrefixBuffer</span>)
+        {
+            <b>if</b> (<span class="r7 r">lengthPrefixBuffer</span>.<span class="i property">IsSingleSegment</span>)
+            {
+                <b>return</b> <span class="r7 r">lengthPrefixBuffer</span>.<span class="i property">First</span>.<span class="i property">Span</span>;
+            }
+ 
+            <span class="c">// Should be rare</span>
+            <b>return</b> <span class="r7 r">lengthPrefixBuffer</span>.<span class="i method">ToArray</span>();
+        }
+    }
+}</pre></td></tr></table></div></body></html>

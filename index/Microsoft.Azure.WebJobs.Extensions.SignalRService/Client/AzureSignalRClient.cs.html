@@ -1,0 +1,213 @@
+﻿<!DOCTYPE html>
+<html><head><title>AzureSignalRClient.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(204);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.SignalRService/Client/AzureSignalRClient.cs" target="_top">Client\AzureSignalRClient.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/signalr/Microsoft.Azure.WebJobs.Extensions.SignalRService/src/Client/AzureSignalRClient.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.SignalRService" target="_top">Microsoft.Azure.WebJobs.Extensions.SignalRService.csproj</a> (Microsoft.Azure.WebJobs.Extensions.SignalRService)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IdentityModel</span>.<span class="i n">Tokens</span>.<span class="i n">Jwt</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Security</span>.<span class="i n">Claims</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">AspNetCore</span>.<span class="i n">Http</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">SignalR</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">SignalR</span>.<span class="i n">Management</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">SignalRService</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> AzureSignalRClient used for negotiation, publishing messages and managing group membership.</span>
+    <span class="c">///</span><span class="c"> It will be created for each function request.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="b2c1e79a38c58453" href="../R/b2c1e79a38c58453.html" target="n" data-glyph="2,0" class="t t">AzureSignalRClient</a> : <a href="IAzureSignalRSender.cs.html#2cab8d6a3d4b1f0f" class="t t">IAzureSignalRSender</a>
+    {
+        <b>public const string</b> <a id="f21d78585d939838" href="../R/f21d78585d939838.html" target="n" data-glyph="6,1" class="i field">AzureSignalRUserPrefix</a> = <span class="s">&quot;asrs.u.&quot;</span>;
+ 
+        <b>private static readonly string</b>[] <a id="a15790f70f511f9f" href="../R/a15790f70f511f9f.html" target="n" data-glyph="46,1" class="i field">SystemClaims</a> =
+        {
+            <span class="s">&quot;aud&quot;</span>, <span class="c">// Audience claim, used by service to make sure token is matched with target resource.</span>
+            <span class="s">&quot;exp&quot;</span>, <span class="c">// Expiration time claims. A token is valid only before its expiration time.</span>
+            <span class="s">&quot;iat&quot;</span>, <span class="c">// Issued At claim. Added by default. It is not validated by service.</span>
+            <span class="s">&quot;nbf&quot;</span>  <span class="c">// Not Before claim. Added by default. It is not validated by service.</span>
+        };
+ 
+        <b>private readonly</b> <span class="t t">ServiceHubContext</span> <a id="4379c0d95e40b27f" href="../R/4379c0d95e40b27f.html" target="n" data-glyph="46,1" class="i field">_serviceHubContext</a>;
+ 
+        <b>public</b> <a id="423108c856c82dd3" href="../R/423108c856c82dd3.html" target="n" data-glyph="72,1" class="t constructor">AzureSignalRClient</a>(<span class="t t">ServiceHubContext</span> <span id="r0 rd" class="r0 r">serviceHubContext</span>)
+        {
+            <a href="#4379c0d95e40b27f" class="i field">_serviceHubContext</a> = <span class="r0 r">serviceHubContext</span>;
+        }
+ 
+        <b>public</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="../Bindings/SignalRConnectionInfo.cs.html#eb822a02cdd4471e" class="t t">SignalRConnectionInfo</a>&gt; <a id="70cd2092a4e8bc65" href="../R/70cd2092a4e8bc65.html" target="n" data-glyph="72,1" class="i method">GetClientConnectionInfoAsync</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r1 rd" class="r1 r">userId</span>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r2 rd" class="r2 r">idToken</span>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>[] <span id="r3 rd" class="r3 r">claimTypeList</span>, <span class="t t">HttpContext</span> <span id="r4 rd" class="r4 r">httpContext</span>)
+        {
+            <a href="@1@netstandard/A.html#b19f71a84062554b" class="k">var</a> <span id="r5 rd" class="r5 r">customerClaims</span> = <a href="#3e52c56766018d74" class="i method">GetCustomClaims</a>(<span class="r2 r">idToken</span>, <span class="r3 r">claimTypeList</span>);
+            <b>return</b> <a href="#a91ad34a680043b8" class="i method">GetClientConnectionInfoAsync</a>(<span class="r1 r">userId</span>, <span class="r5 r">customerClaims</span>, <span class="r4 r">httpContext</span>);
+        }
+ 
+        <b>public async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="../Bindings/SignalRConnectionInfo.cs.html#eb822a02cdd4471e" class="t t">SignalRConnectionInfo</a>&gt; <a id="a91ad34a680043b8" href="../R/a91ad34a680043b8.html" target="n" data-glyph="72,1" class="i method">GetClientConnectionInfoAsync</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r6 rd" class="r6 r">userId</span>, <a href="@1@netstandard/A.html#b19f71a84062554b" class="t t">IList</a>&lt;<a href="@1@netstandard/A.html#52a2b29224ad0a58" class="t t">Claim</a>&gt; <span id="r7 rd" class="r7 r">claims</span>, <span class="t t">HttpContext</span> <span id="r8 rd" class="r8 r">httpContext</span>)
+        {
+            <b>var</b> <span id="r9 rd" class="r9 r">negotiateResponse</span> = <b>await</b> <a href="#4379c0d95e40b27f" class="i field">_serviceHubContext</a>.<span class="i method">NegotiateAsync</span>(<b>new</b> <span class="t constructor">NegotiationOptions</span>()
+            {
+                <span class="i property">UserId</span> = <span class="r6 r">userId</span>,
+                <span class="i property">Claims</span> = <a href="#73d182be5900f8fa" class="i method">BuildJwtClaims</a>(<span class="r7 r">claims</span>, <a href="#f21d78585d939838" class="i field">AzureSignalRUserPrefix</a>).<a href="@1@netstandard/A.html#e276d6892241255b" class="i method">ToList</a>(),
+                <span class="i property">HttpContext</span> = <span class="r8 r">httpContext</span>
+            }).<span class="i method">ConfigureAwait</span>(<b>false</b>);
+            <b>return</b> <b>new</b> <a href="../Bindings/SignalRConnectionInfo.cs.html#eb822a02cdd4471e" class="t constructor">SignalRConnectionInfo</a>
+            {
+                <a href="../Bindings/SignalRConnectionInfo.cs.html#1bf1a245f4887200" class="i property">Url</a> = <span class="r9 r">negotiateResponse</span>.<span class="i property">Url</span>,
+                <a href="../Bindings/SignalRConnectionInfo.cs.html#4f3ad75dabd7a995" class="i property">AccessToken</a> = <span class="r9 r">negotiateResponse</span>.<span class="i property">AccessToken</span>
+            };
+        }
+ 
+        [<span class="i n">System</span>.<span class="i n">Diagnostics</span>.<span class="i n">CodeAnalysis</span>.<a href="@1@netstandard/A.html#5e00de6576fb9ce7" class="t constructor">SuppressMessage</a>(<span class="s">&quot;Performance&quot;</span>, <span class="s">&quot;CA1822:Mark members as static&quot;</span>, <a href="@1@netstandard/A.html#ce02a652a479502a" class="i property">Justification</a> = <span class="s">&quot;Breaking change&quot;</span>)]
+        <b>public</b> <a href="@1@netstandard/A.html#b19f71a84062554b" class="t t">IList</a>&lt;<a href="@1@netstandard/A.html#52a2b29224ad0a58" class="t t">Claim</a>&gt; <a id="3e52c56766018d74" href="../R/3e52c56766018d74.html" target="n" data-glyph="72,1" class="i method">GetCustomClaims</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r10 rd" class="r10 r">idToken</span>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>[] <span id="r11 rd" class="r11 r">claimTypeList</span>)
+        {
+            <a href="@1@netstandard/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r12 rd" class="r12 r">customClaims</span> = <b>new</b> <a href="@1@netstandard/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="@1@netstandard/A.html#52a2b29224ad0a58" class="t t">Claim</a>&gt;();
+ 
+            <b>if</b> (<span class="r10 r">idToken</span> != <b>null</b> &amp;&amp; <span class="r11 r">claimTypeList</span> != <b>null</b> &amp;&amp; <span class="r11 r">claimTypeList</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a> &gt; 0)
+            {
+                <b>var</b> <span id="r13 rd" class="r13 r">jwtToken</span> = <b>new</b> <span class="t constructor">JwtSecurityTokenHandler</span>().<span class="i method">ReadJwtToken</span>(<span class="r10 r">idToken</span>);
+                <b>foreach</b> (<a href="@1@netstandard/A.html#52a2b29224ad0a58" class="k">var</a> <span id="r14 rd" class="r14 r">claim</span> <b>in</b> <span class="r13 r">jwtToken</span>.<span class="i property">Claims</span>)
+                {
+                    <b>if</b> (<span class="r11 r">claimTypeList</span>.<a href="@1@netstandard/A.html#f60bab4c5e27a849" class="i method">Contains</a>(<span class="r14 r">claim</span>.<a href="@1@netstandard/A.html#6101d19bc0c38f87" class="i property">Type</a>))
+                    {
+                        <span class="r12 r">customClaims</span>.<a href="@1@netstandard/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r14 r">claim</span>);
+                    }
+                }
+            }
+ 
+            <b>return</b> <span class="r12 r">customClaims</span>;
+        }
+ 
+        <b>public</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="c4aebcf4d37da764" href="../R/c4aebcf4d37da764.html" target="n" data-glyph="72,1" class="i method">SendToAll</a>(<a href="../Bindings/SignalRData.cs.html#f31d347eddc89f84" class="t t">SignalRData</a> <span id="r15 rd" class="r15 r">data</span>)
+        {
+            <b>return</b> <a href="#78cf4630fe279469" class="i method">InvokeAsync</a>(<span class="r15 r">data</span>.<a href="../Bindings/SignalRData.cs.html#33b0d7dc7fdcfebc" class="i property">Endpoints</a>, <span id="r16 rd" class="r16 r">hubContext</span> =&gt; <span class="r16 r">hubContext</span>.<span class="i property">Clients</span>.<span class="i property">All</span>.<span class="i method">SendCoreAsync</span>(<span class="r15 r">data</span>.<a href="../Bindings/SignalRData.cs.html#e05bc3d598b8ba27" class="i property">Target</a>, <span class="r15 r">data</span>.<a href="../Bindings/SignalRData.cs.html#a9352147e901ef14" class="i property">Arguments</a>));
+        }
+ 
+        <b>public</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="9657ea1fd83de3bb" href="../R/9657ea1fd83de3bb.html" target="n" data-glyph="72,1" class="i method">SendToConnection</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r17 rd" class="r17 r">connectionId</span>, <a href="../Bindings/SignalRData.cs.html#f31d347eddc89f84" class="t t">SignalRData</a> <span id="r18 rd" class="r18 r">data</span>)
+        {
+            <b>return</b> <a href="#78cf4630fe279469" class="i method">InvokeAsync</a>(<span class="r18 r">data</span>.<a href="../Bindings/SignalRData.cs.html#33b0d7dc7fdcfebc" class="i property">Endpoints</a>, <span id="r19 rd" class="r19 r">hubContext</span> =&gt; <span class="r19 r">hubContext</span>.<span class="i property">Clients</span>.<span class="i method">Client</span>(<span class="r17 r">connectionId</span>).<span class="i method">SendCoreAsync</span>(<span class="r18 r">data</span>.<a href="../Bindings/SignalRData.cs.html#e05bc3d598b8ba27" class="i property">Target</a>, <span class="r18 r">data</span>.<a href="../Bindings/SignalRData.cs.html#a9352147e901ef14" class="i property">Arguments</a>));
+        }
+ 
+        <b>public</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="f65cc6d4f1c558bc" href="../R/f65cc6d4f1c558bc.html" target="n" data-glyph="72,1" class="i method">SendToUser</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r20 rd" class="r20 r">userId</span>, <a href="../Bindings/SignalRData.cs.html#f31d347eddc89f84" class="t t">SignalRData</a> <span id="r21 rd" class="r21 r">data</span>)
+        {
+            <b>if</b> (<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@netstandard/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r20 r">userId</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="r20 r">userId</span>)}<span class="s"> cannot be null or empty</span><span class="s">&quot;</span>);
+            }
+            <b>return</b> <a href="#78cf4630fe279469" class="i method">InvokeAsync</a>(<span class="r21 r">data</span>.<a href="../Bindings/SignalRData.cs.html#33b0d7dc7fdcfebc" class="i property">Endpoints</a>, <span id="r22 rd" class="r22 r">hubContext</span> =&gt; <span class="r22 r">hubContext</span>.<span class="i property">Clients</span>.<span class="i method">User</span>(<span class="r20 r">userId</span>).<span class="i method">SendCoreAsync</span>(<span class="r21 r">data</span>.<a href="../Bindings/SignalRData.cs.html#e05bc3d598b8ba27" class="i property">Target</a>, <span class="r21 r">data</span>.<a href="../Bindings/SignalRData.cs.html#a9352147e901ef14" class="i property">Arguments</a>));
+        }
+ 
+        <b>public</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="3ede14a352442f18" href="../R/3ede14a352442f18.html" target="n" data-glyph="72,1" class="i method">SendToGroup</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r23 rd" class="r23 r">groupName</span>, <a href="../Bindings/SignalRData.cs.html#f31d347eddc89f84" class="t t">SignalRData</a> <span id="r24 rd" class="r24 r">data</span>)
+        {
+            <b>if</b> (<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@netstandard/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r23 r">groupName</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="r23 r">groupName</span>)}<span class="s"> cannot be null or empty</span><span class="s">&quot;</span>);
+            }
+            <b>return</b> <a href="#78cf4630fe279469" class="i method">InvokeAsync</a>(<span class="r24 r">data</span>.<a href="../Bindings/SignalRData.cs.html#33b0d7dc7fdcfebc" class="i property">Endpoints</a>, <span id="r25 rd" class="r25 r">hubContext</span> =&gt; <span class="r25 r">hubContext</span>.<span class="i property">Clients</span>.<span class="i method">Group</span>(<span class="r23 r">groupName</span>).<span class="i method">SendCoreAsync</span>(<span class="r24 r">data</span>.<a href="../Bindings/SignalRData.cs.html#e05bc3d598b8ba27" class="i property">Target</a>, <span class="r24 r">data</span>.<a href="../Bindings/SignalRData.cs.html#a9352147e901ef14" class="i property">Arguments</a>));
+        }
+ 
+        <b>public</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="b83d9c876c539c96" href="../R/b83d9c876c539c96.html" target="n" data-glyph="72,1" class="i method">AddUserToGroup</a>(<a href="../Bindings/SignalRGroupAction.cs.html#16a384a3ea74609a" class="t t">SignalRGroupAction</a> <span id="r26 rd" class="r26 r">action</span>)
+        {
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r27 rd" class="r27 r">userId</span> = <span class="r26 r">action</span>.<a href="../Bindings/SignalRGroupAction.cs.html#d6754436a5468e37" class="i property">UserId</a>;
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r28 rd" class="r28 r">groupName</span> = <span class="r26 r">action</span>.<a href="../Bindings/SignalRGroupAction.cs.html#0f3b24bf1883930b" class="i property">GroupName</a>;
+            <b>if</b> (<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@netstandard/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r27 r">userId</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="r27 r">userId</span>)}<span class="s"> cannot be null or empty</span><span class="s">&quot;</span>);
+            }
+            <b>if</b> (<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@netstandard/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r28 r">groupName</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="r28 r">groupName</span>)}<span class="s"> cannot be null or empty</span><span class="s">&quot;</span>);
+            }
+            <b>return</b> <a href="#78cf4630fe279469" class="i method">InvokeAsync</a>(<span class="r26 r">action</span>.<a href="../Bindings/SignalRGroupAction.cs.html#738af4eb6cf4f082" class="i property">Endpoints</a>, <span id="r29 rd" class="r29 r">hubContext</span> =&gt; <span class="r29 r">hubContext</span>.<span class="i property">UserGroups</span>.<span class="i method">AddToGroupAsync</span>(<span class="r27 r">userId</span>, <span class="r28 r">groupName</span>));
+        }
+ 
+        <b>public</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="6dfcacb9ef2d7fec" href="../R/6dfcacb9ef2d7fec.html" target="n" data-glyph="72,1" class="i method">RemoveUserFromGroup</a>(<a href="../Bindings/SignalRGroupAction.cs.html#16a384a3ea74609a" class="t t">SignalRGroupAction</a> <span id="r30 rd" class="r30 r">action</span>)
+        {
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r31 rd" class="r31 r">userId</span> = <span class="r30 r">action</span>.<a href="../Bindings/SignalRGroupAction.cs.html#d6754436a5468e37" class="i property">UserId</a>;
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r32 rd" class="r32 r">groupName</span> = <span class="r30 r">action</span>.<a href="../Bindings/SignalRGroupAction.cs.html#0f3b24bf1883930b" class="i property">GroupName</a>;
+            <b>if</b> (<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@netstandard/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r31 r">userId</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="r31 r">userId</span>)}<span class="s"> cannot be null or empty</span><span class="s">&quot;</span>);
+            }
+            <b>if</b> (<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@netstandard/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r32 r">groupName</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="r32 r">groupName</span>)}<span class="s"> cannot be null or empty</span><span class="s">&quot;</span>);
+            }
+            <b>return</b> <a href="#78cf4630fe279469" class="i method">InvokeAsync</a>(<span class="r30 r">action</span>.<a href="../Bindings/SignalRGroupAction.cs.html#738af4eb6cf4f082" class="i property">Endpoints</a>, <span id="r33 rd" class="r33 r">hubContext</span> =&gt; <span class="r33 r">hubContext</span>.<span class="i property">UserGroups</span>.<span class="i method">RemoveFromGroupAsync</span>(<span class="r31 r">userId</span>, <span class="r32 r">groupName</span>));
+        }
+ 
+        <b>public</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="ba7bac10c27a768f" href="../R/ba7bac10c27a768f.html" target="n" data-glyph="72,1" class="i method">RemoveUserFromAllGroups</a>(<a href="../Bindings/SignalRGroupAction.cs.html#16a384a3ea74609a" class="t t">SignalRGroupAction</a> <span id="r34 rd" class="r34 r">action</span>)
+        {
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r35 rd" class="r35 r">userId</span> = <span class="r34 r">action</span>.<a href="../Bindings/SignalRGroupAction.cs.html#d6754436a5468e37" class="i property">UserId</a>;
+            <b>if</b> (<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@netstandard/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r35 r">userId</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="r35 r">userId</span>)}<span class="s"> cannot be null or empty</span><span class="s">&quot;</span>);
+            }
+            <b>return</b> <a href="#78cf4630fe279469" class="i method">InvokeAsync</a>(<span class="r34 r">action</span>.<a href="../Bindings/SignalRGroupAction.cs.html#738af4eb6cf4f082" class="i property">Endpoints</a>, <span id="r36 rd" class="r36 r">hubContext</span> =&gt; <span class="r36 r">hubContext</span>.<span class="i property">UserGroups</span>.<span class="i method">RemoveFromAllGroupsAsync</span>(<span class="r35 r">userId</span>));
+        }
+ 
+        <b>public</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="d87aecb10c2b181a" href="../R/d87aecb10c2b181a.html" target="n" data-glyph="72,1" class="i method">AddConnectionToGroup</a>(<a href="../Bindings/SignalRGroupAction.cs.html#16a384a3ea74609a" class="t t">SignalRGroupAction</a> <span id="r37 rd" class="r37 r">action</span>)
+        {
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r38 rd" class="r38 r">connectionId</span> = <span class="r37 r">action</span>.<a href="../Bindings/SignalRGroupAction.cs.html#c53d78c6ce40cbb7" class="i property">ConnectionId</a>;
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r39 rd" class="r39 r">groupName</span> = <span class="r37 r">action</span>.<a href="../Bindings/SignalRGroupAction.cs.html#0f3b24bf1883930b" class="i property">GroupName</a>;
+            <b>if</b> (<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@netstandard/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r38 r">connectionId</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="r38 r">connectionId</span>)}<span class="s"> cannot be null or empty</span><span class="s">&quot;</span>);
+            }
+            <b>if</b> (<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@netstandard/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r39 r">groupName</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="r39 r">groupName</span>)}<span class="s"> cannot be null or empty</span><span class="s">&quot;</span>);
+            }
+            <b>return</b> <a href="#78cf4630fe279469" class="i method">InvokeAsync</a>(<span class="r37 r">action</span>.<a href="../Bindings/SignalRGroupAction.cs.html#738af4eb6cf4f082" class="i property">Endpoints</a>, <span id="r40 rd" class="r40 r">hubContext</span> =&gt; <span class="r40 r">hubContext</span>.<span class="i property">Groups</span>.<span class="i method">AddToGroupAsync</span>(<span class="r38 r">connectionId</span>, <span class="r39 r">groupName</span>));
+        }
+ 
+        <b>public</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="692c62fe7a91c703" href="../R/692c62fe7a91c703.html" target="n" data-glyph="72,1" class="i method">RemoveConnectionFromGroup</a>(<a href="../Bindings/SignalRGroupAction.cs.html#16a384a3ea74609a" class="t t">SignalRGroupAction</a> <span id="r41 rd" class="r41 r">action</span>)
+        {
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r42 rd" class="r42 r">connectionId</span> = <span class="r41 r">action</span>.<a href="../Bindings/SignalRGroupAction.cs.html#c53d78c6ce40cbb7" class="i property">ConnectionId</a>;
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r43 rd" class="r43 r">groupName</span> = <span class="r41 r">action</span>.<a href="../Bindings/SignalRGroupAction.cs.html#0f3b24bf1883930b" class="i property">GroupName</a>;
+            <b>if</b> (<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@netstandard/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r42 r">connectionId</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="r42 r">connectionId</span>)}<span class="s"> cannot be null or empty</span><span class="s">&quot;</span>);
+            }
+            <b>if</b> (<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@1@netstandard/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r43 r">groupName</span>))
+            {
+                <b>throw</b> <b>new</b> <a href="@1@netstandard/A.html#eb98012a74461437" class="t constructor">ArgumentException</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<span class="r43 r">groupName</span>)}<span class="s"> cannot be null or empty</span><span class="s">&quot;</span>);
+            }
+            <b>return</b> <a href="#78cf4630fe279469" class="i method">InvokeAsync</a>(<span class="r41 r">action</span>.<a href="../Bindings/SignalRGroupAction.cs.html#738af4eb6cf4f082" class="i property">Endpoints</a>, <span id="r44 rd" class="r44 r">hubContext</span> =&gt; <span class="r44 r">hubContext</span>.<span class="i property">Groups</span>.<span class="i method">RemoveFromGroupAsync</span>(<span class="r42 r">connectionId</span>, <span class="r43 r">groupName</span>));
+        }
+ 
+        <b>private static</b> <a href="@1@netstandard/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="@1@netstandard/A.html#52a2b29224ad0a58" class="t t">Claim</a>&gt; <a id="73d182be5900f8fa" href="../R/73d182be5900f8fa.html" target="n" data-glyph="76,1" class="i method">BuildJwtClaims</a>(<a href="@1@netstandard/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="@1@netstandard/A.html#52a2b29224ad0a58" class="t t">Claim</a>&gt; <span id="r45 rd" class="r45 r">customerClaims</span>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r46 rd" class="r46 r">prefix</span>)
+        {
+            <b>if</b> (<span class="r45 r">customerClaims</span> != <b>null</b>)
+            {
+                <b>foreach</b> (<a href="@1@netstandard/A.html#52a2b29224ad0a58" class="k">var</a> <span id="r47 rd" class="r47 r">claim</span> <b>in</b> <span class="r45 r">customerClaims</span>)
+                {
+                    <span class="c">// Add AzureSignalRUserPrefix if customer&#39;s claim name is duplicated with SignalR system claims.</span>
+                    <span class="c">// And split it when return from SignalR Service.</span>
+                    <b>if</b> (<a href="#a15790f70f511f9f" class="i field">SystemClaims</a>.<a href="@1@netstandard/A.html#f60bab4c5e27a849" class="i method">Contains</a>(<span class="r47 r">claim</span>.<a href="@1@netstandard/A.html#6101d19bc0c38f87" class="i property">Type</a>))
+                    {
+                        <b>yield</b> <b>return</b> <b>new</b> <a href="@1@netstandard/A.html#b7311240f0bfbd6c" class="t constructor">Claim</a>(<span class="r46 r">prefix</span> + <span class="r47 r">claim</span>.<a href="@1@netstandard/A.html#6101d19bc0c38f87" class="i property">Type</a>, <span class="r47 r">claim</span>.<a href="@1@netstandard/A.html#e59d9c6449e9902c" class="i property">Value</a>);
+                    }
+                    <b>else</b>
+                    {
+                        <b>yield</b> <b>return</b> <span class="r47 r">claim</span>;
+                    }
+                }
+            }
+        }
+ 
+        <b>private async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="78cf4630fe279469" href="../R/78cf4630fe279469.html" target="n" data-glyph="76,1" class="i method">InvokeAsync</a>(<span class="t t">ServiceEndpoint</span>[] <span id="r48 rd" class="r48 r">endpoints</span>, <a href="@1@netstandard/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<span class="t t">ServiceHubContext</span>, <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a>&gt; <span id="r49 rd" class="r49 r">func</span>)
+        {
+            <b>var</b> <span id="r50 rd" class="r50 r">targetHubContext</span> = <span class="r48 r">endpoints</span> == <b>null</b> ? <a href="#4379c0d95e40b27f" class="i field">_serviceHubContext</a> : (<a href="#4379c0d95e40b27f" class="i field">_serviceHubContext</a> <b>as</b> <span class="t t">IInternalServiceHubContext</span>).<span class="i method">WithEndpoints</span>(<span class="r48 r">endpoints</span>);
+            <b>await</b> <span class="r49 r">func</span>.<a href="@1@netstandard/A.html#3c17e52b9e2c8f81" class="i method">Invoke</a>(<span class="r50 r">targetHubContext</span>).<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
+        }
+    }
+}</pre></td></tr></table></div></body></html>
