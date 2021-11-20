@@ -1,0 +1,371 @@
+﻿<!DOCTYPE html>
+<html><head><title>WebPubSubEventRequestTests.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(362);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebPubSub.AspNetCore.Tests/WebPubSubEventRequestTests.cs" target="_top">WebPubSubEventRequestTests.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/webpubsub/Microsoft.Azure.WebPubSub.AspNetCore/tests/WebPubSubEventRequestTests.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebPubSub.AspNetCore.Tests" target="_top">Microsoft.Azure.WebPubSub.AspNetCore.Tests.csproj</a> (Microsoft.Azure.WebPubSub.AspNetCore.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">NETCOREAPP3_1_OR_GREATER</span>
+<span class="e">using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.Azure.WebPubSub.Common;
+using Microsoft.Extensions.DependencyInjection;
+using NUnit.Framework;
+ 
+namespace Microsoft.Azure.WebPubSub.AspNetCore.Tests
+{
+    [TestFixture]
+    public class WebPubSubEventRequestTests
+    {
+        private static readonly Uri TestUri = new Uri(&quot;https://my-host.com&quot;);
+ 
+        [Test]
+        public void TestUpdateConnectionState()
+        {
+            var exist = new Dictionary&lt;string, object&gt;
+            {
+                { &quot;aaa&quot;, &quot;aaa&quot; },
+                { &quot;bbb&quot;, &quot;bbb&quot; }
+            };
+            var connectionContext = new WebPubSubConnectionContext(eventType: WebPubSubEventType.System, null, null, null, states: exist);
+ 
+            var response = new ConnectEventResponse
+            {
+                UserId = &quot;aaa&quot;
+            };
+            response.SetState(&quot;test&quot;, &quot;ddd&quot;);
+            response.SetState(&quot;bbb&quot;, &quot;bbb1&quot;);
+            var updated = connectionContext.UpdateStates(response.States);
+ 
+            // new
+            Assert.AreEqual(&quot;ddd&quot;, updated[&quot;test&quot;]);
+            // no change
+            Assert.AreEqual(&quot;aaa&quot;, updated[&quot;aaa&quot;]);
+            // update
+            Assert.AreEqual(&quot;bbb1&quot;, updated[&quot;bbb&quot;]);
+ 
+            response.ClearStates();
+            updated = connectionContext.UpdateStates(response.States);
+ 
+            // After clear is null.
+            Assert.IsNull(updated);
+        }
+ 
+        [Test]
+        public void TestEncodeAndDecodeState()
+        {
+            var state = new Dictionary&lt;string, object&gt;
+            {
+                { &quot;aaa&quot;, &quot;aaa&quot; },
+                { &quot;bbb&quot;, &quot;bbb&quot; }
+            };
+ 
+            var encoded = state.EncodeConnectionStates();
+ 
+            var decoded = encoded.DecodeConnectionStates();
+ 
+            Assert.AreEqual(state, decoded);
+        }
+ 
+        [Test]
+        public void TestConnectEventDeserialize()
+        {
+            var request = &quot;{\&quot;claims\&quot;:{\&quot;http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier\&quot;:[\&quot;ddd\&quot;],\&quot;nbf\&quot;:[\&quot;1629183374\&quot;],\&quot;exp\&quot;:[\&quot;1629186974\&quot;],\&quot;iat\&quot;:[\&quot;1629183374\&quot;],\&quot;aud\&quot;:[\&quot;http://localhost:8080/client/hubs/chat\&quot;],\&quot;sub\&quot;:[\&quot;ddd\&quot;]},\&quot;query\&quot;:{\&quot;access_token\&quot;:[\&quot;eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZGQiLCJuYmYiOjE2MjkxODMzNzQsImV4cCI6MTYyOTE4Njk3NCwiaWF0IjoxNjI5MTgzMzc0LCJhdWQiOiJodHRwOi8vbG9jYWxob3N0OjgwODAvY2xpZW50L2h1YnMvY2hhdCJ9.tqD8ykjv5NmYw6gzLKglUAv-c-AVWu-KNZOptRKkgMM\&quot;]},\&quot;subprotocols\&quot;:[\&quot;protocol1\&quot;,\&quot;protocol2\&quot;],\&quot;clientCertificates\&quot;:[]}&quot;;
+ 
+            var converted = JsonSerializer.Deserialize&lt;ConnectEventRequest&gt;(request);
+ 
+            Assert.AreEqual(6, converted.Claims.Count);
+            Assert.AreEqual(1, converted.Query.Count);
+            Assert.AreEqual(2, converted.Subprotocols.Count);
+            Assert.AreEqual(new string[] { &quot;protocol1&quot;, &quot;protocol2&quot; }, converted.Subprotocols);
+            Assert.NotNull(converted.ClientCertificates);
+            Assert.AreEqual(0, converted.ClientCertificates.Count);
+        }
+ 
+        [Test]
+        public void TestConnectEventRequestSerialize()
+        {
+            var connectionContext = new WebPubSubConnectionContext(
+                WebPubSubEventType.System,
+                null, null, &quot;0f9c97a2f0bf4706afe87a14e0797b11&quot;,
+                signature: &quot;sha256=7767effcb3946f3e1de039df4b986ef02c110b1469d02c0a06f41b3b727ab561&quot;,
+                origin: TestUri.Host);
+ 
+            var claims = new Dictionary&lt;string, string[]&gt;
+            {
+                {&quot;aaa&quot;, new string[]{&quot;a1&quot;, &quot;a2&quot;} },
+                {&quot;bbb&quot;, new string[]{&quot;b1&quot;, &quot;b2&quot;} },
+                {&quot;ccc&quot;, new string[]{&quot;c1&quot;, &quot;c2&quot;} },
+            };
+            var query = new Dictionary&lt;string, string[]&gt;
+            {
+                {&quot;query1&quot;, new string[]{&quot;a1&quot;, &quot;a2&quot;} },
+                {&quot;query2&quot;, new string[]{&quot;b1&quot;} },
+            };
+            var certs = new List&lt;WebPubSubClientCertificate&gt;
+            {
+                new WebPubSubClientCertificate(&quot;111&quot;),
+                new WebPubSubClientCertificate(&quot;222&quot;)
+            };
+            var request = new ConnectEventRequest(connectionContext, claims, query, new string[] { &quot;protocol1&quot;, &quot;protocol2&quot; }, certs);
+ 
+            var serilized = JsonSerializer.Serialize(request);
+ 
+            var converted = JsonSerializer.Deserialize&lt;ConnectEventRequest&gt;(serilized);
+ 
+            Assert.AreEqual(3, converted.Claims.Count);
+            Assert.AreEqual(2, converted.Query.Count);
+            Assert.AreEqual(2, converted.Subprotocols.Count);
+            Assert.AreEqual(new string[] { &quot;protocol1&quot;, &quot;protocol2&quot; }, converted.Subprotocols);
+            Assert.NotNull(converted.ClientCertificates);
+            Assert.AreEqual(2, converted.ClientCertificates.Count);
+        }
+ 
+        [Test]
+        public void TestUserEventRequestSerialize()
+        {
+            var connectionContext = new WebPubSubConnectionContext(
+                WebPubSubEventType.System,
+                null, null, &quot;0f9c97a2f0bf4706afe87a14e0797b11&quot;,
+                signature: &quot;sha256=7767effcb3946f3e1de039df4b986ef02c110b1469d02c0a06f41b3b727ab561&quot;,
+                origin: TestUri.Host);
+ 
+            var request = new UserEventRequest(connectionContext, BinaryData.FromString(&quot;Hello World&quot;), WebPubSubDataType.Text);
+ 
+            var serialized = JsonSerializer.Serialize(request);
+        }
+ 
+        [Test]
+        public void TestDisconnectedEventDeserialize()
+        {
+            var request = &quot;{\&quot;reason\&quot;:\&quot;invalid\&quot;}&quot;;
+ 
+            var converted = JsonSerializer.Deserialize&lt;DisconnectedEventRequest&gt;(request);
+ 
+            Assert.AreEqual(&quot;invalid&quot;, converted.Reason);
+        }
+ 
+        [Test]
+        public async Task TestParseConnectRequest()
+        {
+            var body = &quot;{\&quot;claims\&quot;:{\&quot;http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier\&quot;:[\&quot;ddd\&quot;],\&quot;nbf\&quot;:[\&quot;1629183374\&quot;],\&quot;exp\&quot;:[\&quot;1629186974\&quot;],\&quot;iat\&quot;:[\&quot;1629183374\&quot;],\&quot;aud\&quot;:[\&quot;http://localhost:8080/client/hubs/chat\&quot;],\&quot;sub\&quot;:[\&quot;ddd\&quot;]},\&quot;query\&quot;:{\&quot;access_token\&quot;:[\&quot;eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZGQiLCJuYmYiOjE2MjkxODMzNzQsImV4cCI6MTYyOTE4Njk3NCwiaWF0IjoxNjI5MTgzMzc0LCJhdWQiOiJodHRwOi8vbG9jYWxob3N0OjgwODAvY2xpZW50L2h1YnMvY2hhdCJ9.tqD8ykjv5NmYw6gzLKglUAv-c-AVWu-KNZOptRKkgMM\&quot;]},\&quot;subprotocols\&quot;:[\&quot;protocol1\&quot;, \&quot;protocol2\&quot;],\&quot;clientCertificates\&quot;:[]}&quot;;
+            var context = PrepareHttpContext(TestUri, WebPubSubEventType.System, Constants.Events.ConnectEvent, body: body);
+ 
+            var request = await context.Request.ReadWebPubSubEventAsync(null);
+ 
+            Assert.AreEqual(typeof(ConnectEventRequest), request.GetType());
+ 
+            var connectRequest = request as ConnectEventRequest;
+ 
+            Assert.NotNull(connectRequest.ConnectionContext);
+            Assert.AreEqual(TestUri.Host, connectRequest.ConnectionContext.Origin);
+        }
+ 
+        [Test]
+        public async Task TestParseConnectedRequest()
+        {
+            var context = PrepareHttpContext(TestUri, WebPubSubEventType.System, Constants.Events.ConnectedEvent);
+ 
+            var request = await context.Request.ReadWebPubSubEventAsync(null);
+ 
+            Assert.AreEqual(typeof(ConnectedEventRequest), request.GetType());
+ 
+            var connectedRequest = request as ConnectedEventRequest;
+ 
+            Assert.NotNull(connectedRequest.ConnectionContext);
+            Assert.AreEqual(TestUri.Host, connectedRequest.ConnectionContext.Origin);
+        }
+ 
+        [Test]
+        public async Task TestParseUserRequest()
+        {
+            var text = &quot;hello world&quot;;
+            var context = PrepareHttpContext(TestUri, WebPubSubEventType.User, &quot;message&quot;, body: text);
+ 
+            var request = await context.Request.ReadWebPubSubEventAsync(null);
+ 
+            Assert.AreEqual(typeof(UserEventRequest), request.GetType());
+ 
+            var userRequest = request as UserEventRequest;
+ 
+            Assert.NotNull(userRequest.ConnectionContext);
+            Assert.AreEqual(TestUri.Host, userRequest.ConnectionContext.Origin);
+            Assert.AreEqual(text, userRequest.Data.ToString());
+        }
+ 
+        [TestCase(&quot;7aab239577fd4f24bc919802fb629f5f&quot;, true)]
+        [TestCase(&quot;ccc&quot;, false)]
+        public void TestSignatureCheck(string accessKey, bool valid)
+        {
+            var connectionContext = new WebPubSubConnectionContext(
+                WebPubSubEventType.System,
+                null, null, &quot;0f9c97a2f0bf4706afe87a14e0797b11&quot;,
+                signature: &quot;sha256=7767effcb3946f3e1de039df4b986ef02c110b1469d02c0a06f41b3b727ab561&quot;,
+                origin: TestUri.Host);
+            var options = new WebPubSubValidationOptions($&quot;Endpoint={TestUri};AccessKey={accessKey};Version=1.0;&quot;);
+            var result = connectionContext.IsValidSignature(options);
+            Assert.AreEqual(valid, result);
+        }
+ 
+        [Test]
+        public void TestSignatureCheck_OptionsNullSuccess()
+        {
+            var connectionContext = new WebPubSubConnectionContext(
+                WebPubSubEventType.System,
+                null, null, &quot;0f9c97a2f0bf4706afe87a14e0797b11&quot;,
+                signature: &quot;sha256=7767effcb3946f3e1de039df4b986ef02c110b1469d02c0a06f41b3b727ab561&quot;,
+                origin: TestUri.Host);
+            var result = connectionContext.IsValidSignature(null);
+            Assert.True(result);
+        }
+ 
+        [Test]
+        public void TestSignatureCheck_OptionsEmptySuccess()
+        {
+            var connectionContext = new WebPubSubConnectionContext(
+                WebPubSubEventType.System,
+                null, null, &quot;0f9c97a2f0bf4706afe87a14e0797b11&quot;,
+                signature: &quot;sha256=7767effcb3946f3e1de039df4b986ef02c110b1469d02c0a06f41b3b727ab561&quot;,
+                origin: TestUri.Host);
+            var result = connectionContext.IsValidSignature(null);
+            Assert.True(result);
+        }
+ 
+        [Test]
+        public void TestSignatureCheck_AccessKeyEmptySuccess()
+        {
+            var connectionContext = new WebPubSubConnectionContext(
+                WebPubSubEventType.System,
+                null, null, &quot;0f9c97a2f0bf4706afe87a14e0797b11&quot;,
+                signature: &quot;sha256=7767effcb3946f3e1de039df4b986ef02c110b1469d02c0a06f41b3b727ab561&quot;,
+                origin: TestUri.Host);
+            var options = new WebPubSubValidationOptions($&quot;Endpoint={TestUri};Version=1.0;&quot;);
+            var result = connectionContext.IsValidSignature(options);
+            Assert.True(result);
+        }
+ 
+        [Test]
+        public void TestSignatureCheck_SignatureNullFail()
+        {
+            var connectionContext = new WebPubSubConnectionContext(
+                WebPubSubEventType.System,
+                null, null, &quot;0f9c97a2f0bf4706afe87a14e0797b11&quot;,
+                origin: TestUri.Host);
+            var options = new WebPubSubValidationOptions($&quot;Endpoint={TestUri};AccessKey=7aab239577fd4f24bc919802fb629f5f;Version=1.0;&quot;);
+            var result = connectionContext.IsValidSignature(options);
+            Assert.False(result);
+        }
+ 
+        [TestCase(&quot;OPTIONS&quot;, true)]
+        [TestCase(&quot;DELETE&quot;, false)]
+        public void TestAbuseProtection(string httpMethod, bool valid)
+        {
+            var context = PrepareHttpContext(TestUri, WebPubSubEventType.System, Constants.Events.ConnectEvent, httpMethod: httpMethod);
+ 
+            var result = context.Request.IsPreflightRequest(out var requestHosts);
+ 
+            Assert.AreEqual(valid, result);
+ 
+            if (valid)
+            {
+                Assert.NotNull(requestHosts);
+                Assert.AreEqual(TestUri.Host, requestHosts[0]);
+            }
+        }
+ 
+        [TestCase(&quot;my-host.com&quot;, true)]
+        [TestCase(&quot;my-host1.com&quot;, false)]
+        [TestCase(&quot;localhost&quot;, false)]
+        [TestCase(&quot;http://localhost&quot;, false)]
+        public void TestAbuseProtectionCompare(string requestHost, bool expected)
+        {
+            var options = new WebPubSubValidationOptions($&quot;Endpoint=https://my-host.com;AccessKey=7aab239577fd4f24bc919802fb629f5f;Version=1.0;&quot;);
+ 
+            var result = false;
+            if (options.ContainsHost(requestHost))
+            {
+                result = true;
+            }
+            Assert.AreEqual(expected, result);
+        }
+ 
+        private static HttpContext PrepareHttpContext(
+            Uri uri,
+            WebPubSubEventType type,
+            string eventName,
+            string connectionId = &quot;0f9c97a2f0bf4706afe87a14e0797b11&quot;,
+            string signatures = &quot;sha256=7767effcb3946f3e1de039df4b986ef02c110b1469d02c0a06f41b3b727ab561&quot;,
+            string hub = &quot;testhub&quot;,
+            string httpMethod = &quot;POST&quot;,
+            string userId = &quot;testuser&quot;,
+            string body = null,
+            string contentType = Constants.ContentTypes.PlainTextContentType)
+        {
+            var context = new DefaultHttpContext();
+            var services = new ServiceCollection();
+            var sp = services.BuildServiceProvider();
+            context.RequestServices = sp;
+ 
+            var request = context.Request;
+            var requestFeature = request.HttpContext.Features.Get&lt;IHttpRequestFeature&gt;();
+            requestFeature.Method = httpMethod;
+            requestFeature.Scheme = uri.Scheme;
+            requestFeature.PathBase = uri.Host;
+            requestFeature.Path = uri.GetComponents(UriComponents.KeepDelimiter | UriComponents.Path, UriFormat.Unescaped);
+            requestFeature.PathBase = &quot;/&quot;;
+            requestFeature.QueryString = uri.GetComponents(UriComponents.KeepDelimiter | UriComponents.Query, UriFormat.Unescaped);
+ 
+            var headers = new HeaderDictionary
+            {
+                { Constants.Headers.CloudEvents.Hub, hub },
+                { Constants.Headers.CloudEvents.Type, GetFormedType(type, eventName) },
+                { Constants.Headers.CloudEvents.EventName, eventName },
+                { Constants.Headers.CloudEvents.ConnectionId, connectionId },
+                { Constants.Headers.CloudEvents.Signature, signatures }
+            };
+ 
+            if (!string.IsNullOrEmpty(uri.Host))
+            {
+                headers.Add(&quot;Host&quot;, uri.Host);
+                headers.Add(Constants.Headers.WebHookRequestOrigin, uri.Host);
+            }
+ 
+            if (userId != null)
+            {
+                headers.Add(Constants.Headers.CloudEvents.UserId, userId);
+            }
+ 
+            if (body != null)
+            {
+                requestFeature.Body = new MemoryStream(Encoding.UTF8.GetBytes(body));
+                request.ContentLength = request.Body.Length;
+                headers.Add(&quot;Content-Length&quot;, request.Body.Length.ToString());
+                request.ContentType = contentType;
+                headers.Add(&quot;Content-Type&quot;, contentType);
+            }
+ 
+            requestFeature.Headers = headers;
+ 
+            return context;
+        }
+ 
+        private static string GetFormedType(WebPubSubEventType type, string eventName)
+        {
+            return type == WebPubSubEventType.User ?
+                $&quot;{Constants.Headers.CloudEvents.TypeUserPrefix}{eventName}&quot; :
+                $&quot;{Constants.Headers.CloudEvents.TypeSystemPrefix}{eventName}&quot;;
+        }
+    }
+}
+</span><span class="k preprocess">#</span><span class="k preprocess">endif</span></pre></td></tr></table></div></body></html>

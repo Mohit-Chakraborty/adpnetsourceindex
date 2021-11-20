@@ -1,0 +1,365 @@
+﻿<!DOCTYPE html>
+<html><head><title>ServiceRequestHandlerTests.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(356);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebPubSub.AspNetCore.Tests/ServiceRequestHandlerTests.cs" target="_top">ServiceRequestHandlerTests.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/webpubsub/Microsoft.Azure.WebPubSub.AspNetCore/tests/ServiceRequestHandlerTests.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebPubSub.AspNetCore.Tests" target="_top">Microsoft.Azure.WebPubSub.AspNetCore.Tests.csproj</a> (Microsoft.Azure.WebPubSub.AspNetCore.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <span class="i">NETCOREAPP3_1_OR_GREATER</span>
+<span class="e">using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.Azure.WebPubSub.Common;
+using Microsoft.Extensions.DependencyInjection;
+using NUnit.Framework;
+ 
+namespace Microsoft.Azure.WebPubSub.AspNetCore.Tests
+{
+    [TestFixture]
+    public class ServiceRequestHandlerTests
+    {
+        private const string TestEndpoint = &quot;https://my-host.webpubsub.net&quot;;
+        private readonly ServiceRequestHandlerAdapter _adaptor;
+ 
+        public ServiceRequestHandlerTests()
+        {
+            var provider = new ServiceCollection()
+                .AddLogging()
+                .AddWebPubSub(x =&gt; x.ValidationOptions.Add($&quot;Endpoint={TestEndpoint};AccessKey=7aab239577fd4f24bc919802fb629f5f;Version=1.0;&quot;))
+                .BuildServiceProvider();
+            _adaptor = provider.GetRequiredService&lt;ServiceRequestHandlerAdapter&gt;();
+        }
+ 
+        [Test]
+        public async Task TestHandleAbuseProtection()
+        {
+            _adaptor.RegisterHub&lt;TestHub&gt;();
+            var context = PrepareHttpContext(httpMethod: HttpMethods.Options);
+ 
+            await _adaptor.HandleRequest(context);
+ 
+            context.Response.Headers.TryGetValue(Constants.Headers.WebHookAllowedOrigin, out var allowedOrigin);
+            Assert.AreEqual(StatusCodes.Status200OK, context.Response.StatusCode);
+            Assert.AreEqual(&quot;*&quot;, allowedOrigin.SingleOrDefault());
+        }
+ 
+        [Test]
+        public async Task TestHandleAbuseProtection_Invalid()
+        {
+            _adaptor.RegisterHub&lt;TestHub&gt;();
+            var context = PrepareHttpContext(httpMethod: HttpMethods.Options, uriStr: &quot;https://attacker.com&quot;);
+ 
+            await _adaptor.HandleRequest(context);
+ 
+            Assert.AreEqual(StatusCodes.Status400BadRequest, context.Response.StatusCode);
+        }
+ 
+        [Test]
+        public async Task TestHandleConnect()
+        {
+            _adaptor.RegisterHub&lt;TestHub&gt;();
+            var connectBody = &quot;{\&quot;claims\&quot;:{\&quot;http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier\&quot;:[\&quot;ddd\&quot;],\&quot;nbf\&quot;:[\&quot;1629183374\&quot;],\&quot;exp\&quot;:[\&quot;1629186974\&quot;],\&quot;iat\&quot;:[\&quot;1629183374\&quot;],\&quot;aud\&quot;:[\&quot;http://localhost:8080/client/hubs/chat\&quot;],\&quot;sub\&quot;:[\&quot;ddd\&quot;]},\&quot;query\&quot;:{\&quot;access_token\&quot;:[\&quot;eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZGQiLCJuYmYiOjE2MjkxODMzNzQsImV4cCI6MTYyOTE4Njk3NCwiaWF0IjoxNjI5MTgzMzc0LCJhdWQiOiJodHRwOi8vbG9jYWxob3N0OjgwODAvY2xpZW50L2h1YnMvY2hhdCJ9.tqD8ykjv5NmYw6gzLKglUAv-c-AVWu-KNZOptRKkgMM\&quot;]},\&quot;subprotocols\&quot;:[\&quot;protocol1\&quot;, \&quot;protocol2\&quot;],\&quot;clientCertificates\&quot;:[]}&quot;;
+            var context = PrepareHttpContext(httpMethod: HttpMethods.Post, eventName: &quot;connect&quot;, body: connectBody);
+ 
+            await _adaptor.HandleRequest(context);
+ 
+            Assert.AreEqual(StatusCodes.Status200OK, context.Response.StatusCode);
+            context.Response.Body.Seek(0, SeekOrigin.Begin);
+            var response = await new StreamReader(context.Response.Body).ReadToEndAsync();
+            var converted = JsonSerializer.Deserialize&lt;ConnectEventResponse&gt;(response);
+            Assert.AreEqual(&quot;testuser&quot;, converted.UserId);
+        }
+ 
+        [Test]
+        public async Task TestHandleMessage()
+        {
+            _adaptor.RegisterHub&lt;TestHub&gt;();
+            var context = PrepareHttpContext(httpMethod: HttpMethods.Post, type: WebPubSubEventType.User, eventName: &quot;message&quot;, body: &quot;hello world&quot;);
+ 
+            await _adaptor.HandleRequest(context);
+ 
+            Assert.AreEqual(StatusCodes.Status200OK, context.Response.StatusCode);
+            context.Response.Body.Seek(0, SeekOrigin.Begin);
+            var response = await new StreamReader(context.Response.Body).ReadToEndAsync();
+            // validate message response matched it&#39;s defined in TestHub.Message()
+            Assert.AreEqual(&quot;ACK&quot;, response);
+        }
+ 
+        [Test]
+        public async Task TestStateChanges()
+        {
+            _adaptor.RegisterHub&lt;TestHub&gt;();
+            var initState = new Dictionary&lt;string, object&gt;
+            {
+                { &quot;counter&quot;, 2 }
+            };
+            var context = PrepareHttpContext(httpMethod: HttpMethods.Post, type: WebPubSubEventType.User, eventName: &quot;message&quot;, body: &quot;1&quot;, connectionState: initState);
+ 
+            // 1 to update counter to 10.
+            await _adaptor.HandleRequest(context);
+ 
+            context.Response.Headers.TryGetValue(Constants.Headers.CloudEvents.State, out var states);
+            Assert.NotNull(states);
+            var updated = states[0].DecodeConnectionStates();
+            Assert.AreEqual(1, updated.Count);
+            Assert.AreEqual(&quot;10&quot;, updated[&quot;counter&quot;]);
+ 
+            // 2 to add a new state.
+            context = PrepareHttpContext(httpMethod: HttpMethods.Post, type: WebPubSubEventType.User, eventName: &quot;message&quot;, body: &quot;2&quot;, connectionState: initState);
+            _adaptor.RegisterHub&lt;TestHub&gt;();
+            await _adaptor.HandleRequest(context);
+ 
+            context.Response.Headers.TryGetValue(Constants.Headers.CloudEvents.State, out states);
+            Assert.NotNull(states);
+            updated = states[0].DecodeConnectionStates();
+            Assert.AreEqual(2, updated.Count);
+            Assert.AreEqual(&quot;new&quot;, updated[&quot;new&quot;]);
+ 
+            // 3 to clear states
+            context = PrepareHttpContext(httpMethod: HttpMethods.Post, type: WebPubSubEventType.User, eventName: &quot;message&quot;, body: &quot;3&quot;, connectionState: initState);
+            await _adaptor.HandleRequest(context);
+ 
+            var exist = context.Response.Headers.TryGetValue(Constants.Headers.CloudEvents.State, out _);
+            Assert.False(exist);
+ 
+            // 4 clar and add
+            context = PrepareHttpContext(httpMethod: HttpMethods.Post, type: WebPubSubEventType.User, eventName: &quot;message&quot;, body: &quot;4&quot;, connectionState: initState);
+            await _adaptor.HandleRequest(context);
+ 
+            context.Response.Headers.TryGetValue(Constants.Headers.CloudEvents.State, out states);
+            Assert.NotNull(states);
+            updated = states[0].DecodeConnectionStates();
+            Assert.AreEqual(2, updated.Count);
+            Assert.AreEqual(&quot;new1&quot;, updated[&quot;new1&quot;]);
+        }
+ 
+        [Test]
+        public async Task TestHubBaseReturns()
+        {
+            _adaptor.RegisterHub&lt;TestDefaultHub&gt;();
+            var connectBody = &quot;{\&quot;claims\&quot;:{\&quot;http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier\&quot;:[\&quot;ddd\&quot;],\&quot;nbf\&quot;:[\&quot;1629183374\&quot;],\&quot;exp\&quot;:[\&quot;1629186974\&quot;],\&quot;iat\&quot;:[\&quot;1629183374\&quot;],\&quot;aud\&quot;:[\&quot;http://localhost:8080/client/hubs/chat\&quot;],\&quot;sub\&quot;:[\&quot;ddd\&quot;]},\&quot;query\&quot;:{\&quot;access_token\&quot;:[\&quot;eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZGQiLCJuYmYiOjE2MjkxODMzNzQsImV4cCI6MTYyOTE4Njk3NCwiaWF0IjoxNjI5MTgzMzc0LCJhdWQiOiJodHRwOi8vbG9jYWxob3N0OjgwODAvY2xpZW50L2h1YnMvY2hhdCJ9.tqD8ykjv5NmYw6gzLKglUAv-c-AVWu-KNZOptRKkgMM\&quot;]},\&quot;subprotocols\&quot;:[\&quot;protocol1\&quot;, \&quot;protocol2\&quot;],\&quot;clientCertificates\&quot;:[]}&quot;;
+            var context = PrepareHttpContext(httpMethod: HttpMethods.Post, eventName: &quot;connect&quot;, body: connectBody, hub: nameof(TestDefaultHub));
+ 
+            await _adaptor.HandleRequest(context);
+ 
+            Assert.AreEqual(StatusCodes.Status200OK, context.Response.StatusCode);
+            Assert.Null(context.Response.ContentLength);
+        }
+ 
+        [Test]
+        public async Task TestHubExceptions()
+        {
+            _adaptor.RegisterHub&lt;TestCornerHub&gt;();
+            var context = PrepareHttpContext(httpMethod: HttpMethods.Post, type: WebPubSubEventType.System, eventName: &quot;connected&quot;, hub: nameof(TestCornerHub));
+ 
+            await _adaptor.HandleRequest(context);
+ 
+            Assert.AreEqual(StatusCodes.Status500InternalServerError, context.Response.StatusCode);
+            context.Response.Body.Seek(0, SeekOrigin.Begin);
+            var response = await new StreamReader(context.Response.Body).ReadToEndAsync();
+            // validate response matches exception
+            Assert.AreEqual(&quot;Test Exception&quot;, response);
+        }
+ 
+        [Test]
+        public async Task TestUserErrorReturns()
+        {
+            _adaptor.RegisterHub&lt;TestCornerHub&gt;();
+            var context = PrepareHttpContext(httpMethod: HttpMethods.Post, type: WebPubSubEventType.User, eventName: &quot;message&quot;, body: &quot;hello world&quot;, hub: nameof(TestCornerHub));
+ 
+            await _adaptor.HandleRequest(context);
+ 
+            Assert.AreEqual(StatusCodes.Status500InternalServerError, context.Response.StatusCode);
+            context.Response.Body.Seek(0, SeekOrigin.Begin);
+            var response = await new StreamReader(context.Response.Body).ReadToEndAsync();
+            // validate response matches exception
+            Assert.AreEqual(&quot;Test Exception&quot;, response);
+        }
+ 
+        [Test]
+        public async Task TestWrongTypeReturns()
+        {
+            _adaptor.RegisterHub&lt;TestCornerHub&gt;();
+            var connectBody = &quot;{\&quot;claims\&quot;:{\&quot;http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier\&quot;:[\&quot;ddd\&quot;],\&quot;nbf\&quot;:[\&quot;1629183374\&quot;],\&quot;exp\&quot;:[\&quot;1629186974\&quot;],\&quot;iat\&quot;:[\&quot;1629183374\&quot;],\&quot;aud\&quot;:[\&quot;http://localhost:8080/client/hubs/chat\&quot;],\&quot;sub\&quot;:[\&quot;ddd\&quot;]},\&quot;query\&quot;:{\&quot;access_token\&quot;:[\&quot;eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZGQiLCJuYmYiOjE2MjkxODMzNzQsImV4cCI6MTYyOTE4Njk3NCwiaWF0IjoxNjI5MTgzMzc0LCJhdWQiOiJodHRwOi8vbG9jYWxob3N0OjgwODAvY2xpZW50L2h1YnMvY2hhdCJ9.tqD8ykjv5NmYw6gzLKglUAv-c-AVWu-KNZOptRKkgMM\&quot;]},\&quot;subprotocols\&quot;:[\&quot;protocol1\&quot;, \&quot;protocol2\&quot;],\&quot;clientCertificates\&quot;:[]}&quot;;
+            var context = PrepareHttpContext(httpMethod: HttpMethods.Post, eventName: &quot;connect&quot;, body: connectBody, hub: nameof(TestCornerHub));
+ 
+            await _adaptor.HandleRequest(context);
+ 
+            Assert.AreEqual(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
+            context.Response.Body.Seek(0, SeekOrigin.Begin);
+            var response = await new StreamReader(context.Response.Body).ReadToEndAsync();
+            // validate response matches exception
+            Assert.AreEqual(&quot;Invalid user&quot;, response);
+        }
+ 
+        private static HttpContext PrepareHttpContext(
+            WebPubSubEventType type = WebPubSubEventType.System,
+            string eventName = &quot;connect&quot;,
+            string uriStr = TestEndpoint,
+            string connectionId = &quot;0f9c97a2f0bf4706afe87a14e0797b11&quot;,
+            string signatures = &quot;sha256=7767effcb3946f3e1de039df4b986ef02c110b1469d02c0a06f41b3b727ab561&quot;,
+            string hub = &quot;testhub&quot;,
+            string httpMethod = &quot;POST&quot;,
+            string userId = &quot;testuser&quot;,
+            string body = null,
+            string contentType = Constants.ContentTypes.PlainTextContentType,
+            Dictionary&lt;string, object&gt; connectionState = null)
+        {
+            var context = new DefaultHttpContext();
+            var services = new ServiceCollection();
+            var sp = services.BuildServiceProvider();
+            context.RequestServices = sp;
+ 
+            var uri = new Uri(uriStr);
+            var request = context.Request;
+            var requestFeature = request.HttpContext.Features.Get&lt;IHttpRequestFeature&gt;();
+            requestFeature.Method = httpMethod;
+            requestFeature.Scheme = uri.Scheme;
+            requestFeature.PathBase = uri.Host;
+            requestFeature.Path = uri.GetComponents(UriComponents.KeepDelimiter | UriComponents.Path, UriFormat.Unescaped);
+            requestFeature.PathBase = &quot;/&quot;;
+            requestFeature.QueryString = uri.GetComponents(UriComponents.KeepDelimiter | UriComponents.Query, UriFormat.Unescaped);
+ 
+            var headers = new HeaderDictionary
+            {
+                { Constants.Headers.CloudEvents.Hub, hub },
+                { Constants.Headers.CloudEvents.Type, GetFormedType(type, eventName) },
+                { Constants.Headers.CloudEvents.EventName, eventName },
+                { Constants.Headers.CloudEvents.ConnectionId, connectionId },
+                { Constants.Headers.CloudEvents.Signature, signatures },
+                { Constants.Headers.CloudEvents.WebPubSubVersion, &quot;1.0&quot; },
+            };
+ 
+            if (!string.IsNullOrEmpty(uri.Host))
+            {
+                headers.Add(&quot;Host&quot;, uri.Host);
+                headers.Add(Constants.Headers.WebHookRequestOrigin, uri.Host);
+            }
+ 
+            if (userId != null)
+            {
+                headers.Add(Constants.Headers.CloudEvents.UserId, userId);
+            }
+ 
+            if (connectionState != null)
+            {
+                headers.Add(Constants.Headers.CloudEvents.State, connectionState.EncodeConnectionStates());
+            }
+ 
+            if (body != null)
+            {
+                requestFeature.Body = new MemoryStream(Encoding.UTF8.GetBytes(body));
+                request.ContentLength = request.Body.Length;
+                headers.Add(&quot;Content-Length&quot;, request.Body.Length.ToString());
+                request.ContentType = contentType;
+                headers.Add(&quot;Content-Type&quot;, contentType);
+            }
+ 
+            requestFeature.Headers = headers;
+            context.Response.Body = new MemoryStream();
+ 
+            return context;
+        }
+ 
+        private static string GetFormedType(WebPubSubEventType type, string eventName)
+        {
+            return type == WebPubSubEventType.User ?
+                $&quot;{Constants.Headers.CloudEvents.TypeUserPrefix}{eventName}&quot; :
+                $&quot;{Constants.Headers.CloudEvents.TypeSystemPrefix}{eventName}&quot;;
+        }
+ 
+        private sealed class TestHub : WebPubSubHub
+        {
+            public override ValueTask&lt;ConnectEventResponse&gt; OnConnectAsync(ConnectEventRequest request, CancellationToken cancellationToken)
+            {
+                Assert.NotNull(request);
+                Assert.AreEqual(&quot;my-host.webpubsub.net&quot;, request.ConnectionContext.Origin);
+ 
+                return new ValueTask&lt;ConnectEventResponse&gt;(new ConnectEventResponse
+                {
+                    UserId = request.ConnectionContext.UserId
+                });
+            }
+ 
+            public override ValueTask&lt;UserEventResponse&gt; OnMessageReceivedAsync(UserEventRequest request, CancellationToken cancellationToken)
+            {
+                Assert.NotNull(request);
+                Assert.AreEqual(&quot;my-host.webpubsub.net&quot;, request.ConnectionContext.Origin);
+                var response = new UserEventResponse(&quot;ACK&quot;);
+                // simple tests.
+                switch (request.Data.ToString())
+                {
+                    case &quot;1&quot;: response.SetState(&quot;counter&quot;, 10);
+                        break;
+                    case &quot;2&quot;: response.SetState(&quot;new&quot;, &quot;new&quot;);
+                        break;
+                    case &quot;3&quot;:
+                        response.ClearStates();
+                        break;
+                    case &quot;4&quot;:
+                        response.ClearStates();
+                        response.SetState(&quot;new1&quot;, &quot;new1&quot;);
+                        break;
+                    default:
+                        break;
+                };
+                return new ValueTask&lt;UserEventResponse&gt;(response);
+            }
+ 
+            // test exceptions
+            public override Task OnConnectedAsync(ConnectedEventRequest request)
+            {
+                Assert.NotNull(request);
+                Assert.AreEqual(&quot;my-host.webpubsub.net&quot;, request.ConnectionContext.Origin);
+                return Task.CompletedTask;
+            }
+ 
+            public override Task OnDisconnectedAsync(DisconnectedEventRequest request)
+            {
+                Assert.NotNull(request);
+                Assert.AreEqual(&quot;my-host.webpubsub.net&quot;, request.ConnectionContext.Origin);
+                return Task.CompletedTask;
+            }
+        }
+ 
+        // Test default return correct
+        private sealed class TestDefaultHub : WebPubSubHub
+        {
+        }
+ 
+        // Test error cases.
+        private sealed class TestCornerHub : WebPubSubHub
+        {
+            // Test invalid type return 401
+            public override ValueTask&lt;ConnectEventResponse&gt; OnConnectAsync(ConnectEventRequest request, CancellationToken cancellationToken)
+            {
+                throw new UnauthorizedAccessException(&quot;Invalid user&quot;);
+            }
+ 
+            // Test error return correct 500
+            public override ValueTask&lt;UserEventResponse&gt; OnMessageReceivedAsync(UserEventRequest request, CancellationToken cancellationToken)
+            {
+                throw new Exception(&quot;Test Exception&quot;);
+            }
+ 
+            // Test exception return correct 500
+            public override Task OnConnectedAsync(ConnectedEventRequest request)
+            {
+                throw new Exception(&quot;Test Exception&quot;);
+            }
+        }
+    }
+}
+</span><span class="k preprocess">#</span><span class="k preprocess">endif</span></pre></td></tr></table></div></body></html>

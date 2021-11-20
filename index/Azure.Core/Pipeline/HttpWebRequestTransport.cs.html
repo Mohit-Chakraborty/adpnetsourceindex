@@ -1,6 +1,6 @@
 ﻿<!DOCTYPE html>
 <html><head><title>HttpWebRequestTransport.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
-<body class="cB" onload="i(353);"><div class="dH">
+<body class="cB" onload="i(396);"><div class="dH">
 <table style="width: 100%">
 <tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Core/Pipeline/HttpWebRequestTransport.cs" target="_top">Pipeline\HttpWebRequestTransport.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/core/Azure.Core/src/Pipeline/HttpWebRequestTransport.cs" target="_blank">View on GitHub</a></td></tr>
 <tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Core" target="_top">Azure.Core.csproj</a> (Azure.Core)</td><td></td></tr>
@@ -17,7 +17,10 @@
 <b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
 <b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
 <b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>.<span class="i n">Http</span>;
 <b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>.<span class="i n">Http</span>.<span class="i n">Headers</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Runtime</span>.<span class="i n">InteropServices</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Security</span>.<span class="i n">Cryptography</span>.<span class="i n">X509Certificates</span>;
 <b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
 <b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
  
@@ -39,6 +42,10 @@
         public HttpWebRequestTransport() : this(_ =&gt; { })
         {
         }
+ 
+        internal HttpWebRequestTransport(HttpPipelineTransportOptions options)
+            : this(req =&gt; ApplyOptionsToRequest(req, options))
+        { }
  
         internal HttpWebRequestTransport(Action&lt;HttpWebRequest&gt; configureRequest)
         {
@@ -85,7 +92,15 @@
                 }
                 else
                 {
-                    request.ContentLength = 0;
+                    // match the behavior of HttpClient
+                    if (message.Request.Method != RequestMethod.Head &amp;&amp;
+                         message.Request.Method != RequestMethod.Get &amp;&amp;
+                         message.Request.Method != RequestMethod.Delete)
+                    {
+                        request.ContentLength = 0;
+                    }
+ 
+                    request.ContentType = null;
                 }
  
                 WebResponse webResponse;
@@ -110,7 +125,7 @@
             {
                 // WebException is thrown in the case of .Abort() call
                 CancellationHelper.ThrowIfCancellationRequested(message.CancellationToken);
-                throw new RequestFailedException(0, webException.Message);
+                throw new RequestFailedException(0, webException.Message, webException);
             }
         }
  
@@ -130,6 +145,8 @@
             {
                 request.Proxy = _environmentProxy;
             }
+ 
+            request.ServicePoint.Expect100Continue = false;
  
             _configureRequest(request);
  
@@ -186,7 +203,14 @@
  
                 if (string.Equals(messageRequestHeader.Name, &quot;Expect&quot;, StringComparison.OrdinalIgnoreCase))
                 {
-                    request.Expect = messageRequestHeader.Value;
+                    if (messageRequestHeader.Value == &quot;100-continue&quot;)
+                    {
+                        request.ServicePoint.Expect100Continue = true;
+                    }
+                    else
+                    {
+                        request.Expect = messageRequestHeader.Value;
+                    }
                     continue;
                 }
  
@@ -354,6 +378,25 @@
             public override void Dispose()
             {
                 Content?.Dispose();
+            }
+        }
+ 
+        private static void ApplyOptionsToRequest(HttpWebRequest request, HttpPipelineTransportOptions options)
+        {
+            if (options == null)
+            {
+                return;
+            }
+ 
+            // ServerCertificateCustomValidationCallback
+            if (options.ServerCertificateCustomValidationCallback != null)
+            {
+                request.ServerCertificateValidationCallback =
+                    (request, certificate, x509Chain, sslPolicyErrors) =&gt; options.ServerCertificateCustomValidationCallback(
+                        new ServerCertificateCustomValidationArgs(
+                            new X509Certificate2(certificate),
+                            x509Chain,
+                            sslPolicyErrors));
             }
         }
     }

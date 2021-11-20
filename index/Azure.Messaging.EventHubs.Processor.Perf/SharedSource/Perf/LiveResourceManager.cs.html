@@ -1,0 +1,280 @@
+﻿<!DOCTYPE html>
+<html><head><title>LiveResourceManager.cs</title><link rel="stylesheet" href="../../../styles.css"><script src="../../../scripts.js"></script></head>
+<body class="cB" onload="i(271);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Messaging.EventHubs.Processor.Perf/SharedSource/Perf/LiveResourceManager.cs" target="_top">SharedSource\Perf\LiveResourceManager.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/eventhub/Azure.Messaging.EventHubs.Shared/src/Testing/LiveResourceManager.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Messaging.EventHubs.Processor.Perf" target="_top">Azure.Messaging.EventHubs.Processor.Perf.csproj</a> (Azure.Messaging.EventHubs.Processor.Perf)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>.<span class="i n">Http</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>.<span class="i n">Sockets</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Security</span>.<span class="i n">Authentication</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Management</span>.<span class="i n">EventHub</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Management</span>.<span class="i n">EventHub</span>.<span class="i n">Models</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Management</span>.<span class="i n">ResourceManager</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">Management</span>.<span class="i n">ResourceManager</span>.<span class="i n">Models</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">IdentityModel</span>.<span class="i n">Clients</span>.<span class="i n">ActiveDirectory</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Rest</span>;
+<b>using</b> <span class="i n">Microsoft</span>.<span class="i n">Rest</span>.<span class="i n">Azure</span>;
+<b>using</b> <span class="i n">Polly</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Tests</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">  Provides common operations for managing resources used for Live tests.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <b>public sealed class</b> <a id="6376f6bae32a5cf9" href="../../R/6376f6bae32a5cf9.html" target="n" data-glyph="0,0" class="t t"><span id="ba83280b20a779a9">LiveResourceManager</span></a>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The maximum number of attempts to retry a management operation.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public const int</b> <a id="959c4588736842c5" href="../../R/959c4588736842c5.html" target="n" data-glyph="6,1" class="i field">RetryMaximumAttempts</a> = 20;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The number of seconds to use as the basis for backing off on retry attempts.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const double</b> <a id="50ed466033bd9e07" href="../../R/50ed466033bd9e07.html" target="n" data-glyph="10,1" class="i field">RetryExponentialBackoffSeconds</a> = 3.0;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The number of seconds to use as the basis for applying jitter to retry back-off calculations.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private const double</b> <a id="9ceb754268c6962f" href="../../R/9ceb754268c6962f.html" target="n" data-glyph="10,1" class="i field">RetryBaseJitterSeconds</a> = 60.0;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The buffer to apply when considering refreshing; credentials that expire less than this duration will be refreshed.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static readonly</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="3734c5b3d5490ac7" href="../../R/3734c5b3d5490ac7.html" target="n" data-glyph="46,1" class="i field">CredentialRefreshBuffer</a> = <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#ae74be5264df78d8" class="i method">FromMinutes</a>(5);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The random number generator to use for each requesting thread.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static readonly</b> <a href="@0@mscorlib/A.html#42021806b924c5cd" class="t t">ThreadLocal</a>&lt;<a href="@0@mscorlib/A.html#bb77e610694e64ca" class="t t">Random</a>&gt; <a id="9ef7a07fee9503a6" href="../../R/9ef7a07fee9503a6.html" target="n" data-glyph="46,1" class="i field">RandomNumberGenerator</a> = <b>new</b> <a href="@0@mscorlib/A.html#28dd4e60dd02f687" class="t constructor">ThreadLocal</a>&lt;<a href="@0@mscorlib/A.html#bb77e610694e64ca" class="t t">Random</a>&gt;(() =&gt; <b>new</b> <a href="@0@mscorlib/A.html#92e3cf6e56571d5a" class="t constructor">Random</a>(<a href="@0@mscorlib/A.html#8792520ddc6dadcb" class="t t">Interlocked</a>.<a href="@0@mscorlib/A.html#09bb1e21afd76cf2" class="i method">Increment</a>(<b>ref</b> <a href="#6480110e7890d083" class="i field">s_randomSeed</a>)), <b>false</b>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The seed to use for random number generation.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static int</b> <a id="6480110e7890d083" href="../../R/6480110e7890d083.html" target="n" data-glyph="46,1" class="i field">s_randomSeed</a> = <a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#39a839e5e9ca1f3f" class="i property">TickCount</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The token credential to be used with the Event Hubs management client.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private static</b> <a href="#e1ce7d5441032153" class="t t">ManagementToken</a> <a id="3d84f2c94f137338" href="../../R/3d84f2c94f137338.html" target="n" data-glyph="46,1" class="i field">s_managementToken</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Queries the location for the requested Azure Resource Group.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">accessToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The access token to use for the query request.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">resourceGroupName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the resource group to query the location of.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">subscriptionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The identifier of the Azure subscription in which the resource group resides.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The location code for the requested </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">resourceGroupName</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="e2a2282cb4d19dfe" href="../../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">QueryResourceGroupLocationAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r0 rd" class="r0 r">accessToken</span>,
+                                                                  <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r1 rd" class="r1 r">resourceGroupName</span>,
+                                                                  <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r2 rd" class="r2 r">subscriptionId</span>)
+        {
+            <b>using</b> (<a href="/Microsoft.Azure.Management.ResourceManager/A.html#cea218319900f974" class="k">var</a> <span id="r3 rd" class="r3 r">client</span> = <b>new</b> <a href="/Microsoft.Azure.Management.ResourceManager/A.html#1a6c867a4a98e2e4" class="t constructor">ResourceManagementClient</a>(<b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<a href="EventHubsTestEnvironment.cs.html#2eb9434a1448d776" class="t t">EventHubsTestEnvironment</a>.<a href="EventHubsTestEnvironment.cs.html#71524bf9ff4cebd2" class="i property">Instance</a>.<a href="EventHubsTestEnvironment.cs.html#d39b1b36a5efe804" class="i property">ResourceManagerUrl</a>), <b>new</b> <a href="/Microsoft.Rest.ClientRuntime/A.html#7760d207e8a5d05e" class="t constructor">TokenCredentials</a>(<span class="r0 r">accessToken</span>)) { <a href="/Microsoft.Azure.Management.ResourceManager/A.html#9513606a748b3701" class="i property">SubscriptionId</a> = <span class="r2 r">subscriptionId</span> })
+            {
+                <a href="/Microsoft.Azure.Management.ResourceManager/A.html#02976872e1e92fca" class="t t">ResourceGroup</a> <span id="r4 rd" class="r4 r">resourceGroup</span> = <b>await</b> <a href="#8884f497b140aaab" class="i method">CreateRetryPolicy</a>&lt;<a href="/Microsoft.Azure.Management.ResourceManager/A.html#02976872e1e92fca" class="t t">ResourceGroup</a>&gt;().<span class="i method">ExecuteAsync</span>(() =&gt; <span class="r3 r">client</span>.<a href="/Microsoft.Azure.Management.ResourceManager/A.html#3fd1e1b90ff08138" class="i property">ResourceGroups</a>.<a href="/Microsoft.Azure.Management.ResourceManager/A.html#d431a922fc997c72" class="i method">GetAsync</a>(<span class="r1 r">resourceGroupName</span>)).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                <b>return</b> <span class="r4 r">resourceGroup</span>.<a href="/Microsoft.Azure.Management.ResourceManager/A.html#6f35752e0efa468c" class="i property">Location</a>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Acquires a JWT token for use with the Event Hubs management client.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The token to use for management operations against the Event Hubs Live test namespace.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public async</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="0217fd38db349c74" href="../../R/0217fd38db349c74.html" target="n" data-glyph="72,1" class="i method">AcquireManagementTokenAsync</a>()
+        {
+            <a href="#e1ce7d5441032153" class="k">var</a> <span id="r5 rd" class="r5 r">token</span> = <a href="#3d84f2c94f137338" class="i field">s_managementToken</a>;
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r6 rd" class="r6 r">authority</span> = <b>new</b> <a href="@0@System/A.html#67d3260816440b78" class="t constructor">Uri</a>(<b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<a href="EventHubsTestEnvironment.cs.html#2eb9434a1448d776" class="t t">EventHubsTestEnvironment</a>.<a href="EventHubsTestEnvironment.cs.html#71524bf9ff4cebd2" class="i property">Instance</a>.<a href="/Azure.Core.TestFramework/A.html#a97d05f1a459eabb" class="i property">AuthorityHostUrl</a>), <a href="EventHubsTestEnvironment.cs.html#2eb9434a1448d776" class="t t">EventHubsTestEnvironment</a>.<a href="EventHubsTestEnvironment.cs.html#71524bf9ff4cebd2" class="i property">Instance</a>.<a href="/Azure.Core.TestFramework/A.html#ab050f0e55126952" class="i property">TenantId</a>).<a href="@0@System/A.html#bf3caa11ab73e433" class="i method">ToString</a>();
+ 
+            <span class="c">// If there was no current token, or it is within the buffer for expiration, request a new token.</span>
+            <span class="c">// There is a benign race condition here, where there may be multiple requests in-flight for a new token.  Since</span>
+            <span class="c">// this is test infrastructure, just allow the acquired token to replace the current one without attempting to</span>
+            <span class="c">// coordinate or ensure that the most recent is kept.</span>
+ 
+            <b>if</b> ((<span class="r5 r">token</span> == <b>null</b>) || (<span class="r5 r">token</span>.<a href="#0a023564a1eb8493" class="i field">ExpiresOn</a> &lt;= <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@0@mscorlib/A.html#04abe0cac293ebd0" class="i property">UtcNow</a>.<a href="@0@mscorlib/A.html#5cff8f26f5c7c095" class="i method">Add</a>(<a href="#3734c5b3d5490ac7" class="i field">CredentialRefreshBuffer</a>)))
+            {
+                <b>var</b> <span id="r7 rd" class="r7 r">context</span> = <b>new</b> <span class="t constructor">AuthenticationContext</span>(<span class="r6 r">authority</span>);
+                <b>var</b> <span id="r8 rd" class="r8 r">credential</span> = <b>new</b> <span class="t constructor">ClientCredential</span>(<a href="EventHubsTestEnvironment.cs.html#2eb9434a1448d776" class="t t">EventHubsTestEnvironment</a>.<a href="EventHubsTestEnvironment.cs.html#71524bf9ff4cebd2" class="i property">Instance</a>.<a href="/Azure.Core.TestFramework/A.html#50081c441f6f88a4" class="i property">ClientId</a>, <a href="EventHubsTestEnvironment.cs.html#2eb9434a1448d776" class="t t">EventHubsTestEnvironment</a>.<a href="EventHubsTestEnvironment.cs.html#71524bf9ff4cebd2" class="i property">Instance</a>.<a href="/Azure.Core.TestFramework/A.html#e314809ba7ea5ea8" class="i property">ClientSecret</a>);
+                <b>var</b> <span id="r9 rd" class="r9 r">result</span> = <b>await</b> <span class="r7 r">context</span>.<span class="i method">AcquireTokenAsync</span>(<a href="EventHubsTestEnvironment.cs.html#2eb9434a1448d776" class="t t">EventHubsTestEnvironment</a>.<a href="EventHubsTestEnvironment.cs.html#71524bf9ff4cebd2" class="i property">Instance</a>.<a href="EventHubsTestEnvironment.cs.html#5c34413ec633e8da" class="i property">ServiceManagementUrl</a>, <span class="r8 r">credential</span>).<a href="@0@mscorlib/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+ 
+                <b>if</b> ((<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#23a8597f842071f4" class="i method">IsNullOrEmpty</a>(<span class="r9 r">result</span>?.<span class="i property">AccessToken</span>)))
+                {
+                    <b>throw</b> <b>new</b> <a href="@0@System/A.html#6749b117ae40d22c" class="t constructor">AuthenticationException</a>(<span class="s">&quot;Unable to acquire an Active Directory token for the Event Hubs management client.&quot;</span>);
+                }
+ 
+                <span class="r5 r">token</span> = <b>new</b> <a href="#6471a7a986bb7258" class="t constructor">ManagementToken</a>(<span class="r9 r">result</span>.<span class="i property">AccessToken</span>, <span class="r9 r">result</span>.<span class="i property">ExpiresOn</span>);
+                <a href="@0@mscorlib/A.html#8792520ddc6dadcb" class="t t">Interlocked</a>.<a href="@0@mscorlib/A.html#19d00939423c949f" class="i method">Exchange</a>(<b>ref</b> <a href="#3d84f2c94f137338" class="i field">s_managementToken</a>, <span class="r5 r">token</span>);
+            }
+ 
+            <b>return</b> <span class="r5 r">token</span>.<a href="#3aa0d70cfc466f7e" class="i field">Token</a>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Generates the set of common metadata tags to apply to an ephemeral cloud resource</span>
+        <span class="c">///</span><span class="c">   used for test purposes.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The set of metadata tags to apply.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a href="@0@mscorlib/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="c1cad6735b3659d5" href="../../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GenerateTags</a>() =&gt;
+            <b>new</b> <a href="@0@mscorlib/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;
+            {
+                { <span class="s">&quot;source&quot;</span>, <b>typeof</b>(<a href="#6376f6bae32a5cf9" class="t t">LiveResourceManager</a>).<a href="@0@mscorlib/A.html#e87d536bd07fab01" class="i property">Assembly</a>.<a href="@0@mscorlib/A.html#1fd23b897ffa9a75" class="i method">GetName</a>().<a href="@0@mscorlib/A.html#917bceeed23fe2ae" class="i property">Name</a> },
+                { <span class="s">&quot;platform&quot;</span>, <span class="i n">System</span>.<span class="i n">Runtime</span>.<span class="i n">InteropServices</span>.<span class="t t">RuntimeInformation</span>.<span class="i property">OSDescription</span> },
+                { <span class="s">&quot;framework&quot;</span>, <span class="i n">System</span>.<span class="i n">Runtime</span>.<span class="i n">InteropServices</span>.<span class="t t">RuntimeInformation</span>.<span class="i property">FrameworkDescription</span> },
+                { <span class="s">&quot;created&quot;</span>, <span class="s">$&quot;</span>{ <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@0@mscorlib/A.html#04abe0cac293ebd0" class="i property">UtcNow</a>.<a href="@0@mscorlib/A.html#85b407cde54cb34e" class="i method">ToString</a>(<span class="s">&quot;s&quot;</span>) }<span class="s">Z</span><span class="s">&quot;</span> },
+                { <span class="s">&quot;cleanup-after&quot;</span>, <span class="s">$&quot;</span>{ <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@0@mscorlib/A.html#04abe0cac293ebd0" class="i property">UtcNow</a>.<a href="@0@mscorlib/A.html#3e8c965efd4d9021" class="i method">AddDays</a>(1).<a href="@0@mscorlib/A.html#85b407cde54cb34e" class="i method">ToString</a>(<span class="s">&quot;s&quot;</span>) }<span class="s">Z</span><span class="s">&quot;</span> }
+            };
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Creates the retry policy to apply to a management operation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">typeparam</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r10 r t">T</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The expected type of response from the management operation.</span><span class="c">&lt;/</span><span class="c">typeparam</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r11 r">maxRetryAttempts</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The maximum retry attempts to allow.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">exponentialBackoffSeconds</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The number of seconds to use as the basis for backing off on retry attempts.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">baseJitterSeconds</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">TThe number of seconds to use as the basis for applying jitter to retry back-off calculations.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The retry policy in which to execute the management operation.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <span class="t t">IAsyncPolicy</span>&lt;<span class="r10 r t">T</span>&gt; <a id="8884f497b140aaab" href="../../R/8884f497b140aaab.html" target="n" data-glyph="72,1" class="i method">CreateRetryPolicy</a>&lt;<span id="r10 rd t" class="r10 r t">T</span>&gt;(<b>int</b> <span id="r11 rd" class="r11 r">maxRetryAttempts</span> = <a href="#959c4588736842c5" class="i field">RetryMaximumAttempts</a>,
+                                                    <b>double</b> <span id="r12 rd" class="r12 r">exponentialBackoffSeconds</span> = <a href="#50ed466033bd9e07" class="i field">RetryExponentialBackoffSeconds</a>,
+                                                    <b>double</b> <span id="r13 rd" class="r13 r">baseJitterSeconds</span> = <a href="#9ceb754268c6962f" class="i field">RetryBaseJitterSeconds</a>) =&gt;
+           <span class="t t">Policy</span>&lt;<span class="r10 r t">T</span>&gt;
+               .<span class="i method">Handle</span>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt;(<span id="r14 rd" class="r14 r">ex</span> =&gt; <a href="#f609339df4be111b" class="i method">ShouldRetry</a>(<span class="r14 r">ex</span>))
+               .<span class="i method">WaitAndRetryAsync</span>(<span class="r11 r">maxRetryAttempts</span>, <span id="r15 rd" class="r15 r">attempt</span> =&gt; <a href="#f1dcd99719dcc9bd" class="i method">CalculateRetryDelay</a>(<span class="r15 r">attempt</span>, <span class="r12 r">exponentialBackoffSeconds</span>, <span class="r13 r">baseJitterSeconds</span>));
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Creates the retry policy to apply to a management operation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r16 r">maxRetryAttempts</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The maximum retry attempts to allow.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r17 r">exponentialBackoffSeconds</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The number of seconds to use as the basis for backing off on retry attempts.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r18 r">baseJitterSeconds</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">TThe number of seconds to use as the basis for applying jitter to retry back-off calculations.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The retry policy in which to execute the management operation.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <span class="t t">IAsyncPolicy</span> <a id="339998688ec12d27" href="../../R/339998688ec12d27.html" target="n" data-glyph="72,1" class="i method">CreateRetryPolicy</a>(<b>int</b> <span id="r16 rd" class="r16 r">maxRetryAttempts</span> = <a href="#959c4588736842c5" class="i field">RetryMaximumAttempts</a>,
+                                              <b>double</b> <span id="r17 rd" class="r17 r">exponentialBackoffSeconds</span> = <a href="#50ed466033bd9e07" class="i field">RetryExponentialBackoffSeconds</a>,
+                                              <b>double</b> <span id="r18 rd" class="r18 r">baseJitterSeconds</span> = <a href="#9ceb754268c6962f" class="i field">RetryBaseJitterSeconds</a>) =&gt;
+            <span class="t t">Policy</span>
+                .<span class="i method">Handle</span>&lt;<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a>&gt;(<span id="r19 rd" class="r19 r">ex</span> =&gt; <a href="#f609339df4be111b" class="i method">ShouldRetry</a>(<span class="r19 r">ex</span>))
+                .<span class="i method">WaitAndRetryAsync</span>(<span class="r16 r">maxRetryAttempts</span>, <span id="r20 rd" class="r20 r">attempt</span> =&gt; <a href="#f1dcd99719dcc9bd" class="i method">CalculateRetryDelay</a>(<span class="r20 r">attempt</span>, <span class="r17 r">exponentialBackoffSeconds</span>, <span class="r18 r">baseJitterSeconds</span>));
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Determines whether the specified HTTP status code is considered eligible to retry</span>
+        <span class="c">///</span><span class="c">   the associated operation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r21 r">statusCode</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The status code to consider.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the status code is eligible for retries; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static bool</b> <a id="4f2077b257a244fe" href="../../R/4f2077b257a244fe.html" target="n" data-glyph="76,1" class="i method">IsRetriableStatus</a>(<a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a> <span id="r21 rd" class="r21 r">statusCode</span>) =&gt;
+            ((<span class="r21 r">statusCode</span> == <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#ba154261719bd41b" class="i field">Unauthorized</a>)
+                || (<span class="r21 r">statusCode</span> == ((<a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>)408))
+                || (<span class="r21 r">statusCode</span> == <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#a387765e716ffb3c" class="i field">Conflict</a>)
+                || (<span class="r21 r">statusCode</span> == ((<a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>)429))
+                || (<span class="r21 r">statusCode</span> == <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#f48e04e95b08331a" class="i field">InternalServerError</a>)
+                || (<span class="r21 r">statusCode</span> == <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#8eec2c06c869e523" class="i field">ServiceUnavailable</a>)
+                || (<span class="r21 r">statusCode</span> == <a href="@0@System/A.html#9b95c882b40ef96e" class="t t">HttpStatusCode</a>.<a href="@0@System/A.html#78abb6c689d101ad" class="i field">GatewayTimeout</a>));
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Determines whether the specified exception is considered eligible to retry the associated</span>
+        <span class="c">///</span><span class="c">   operation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r22 r">ex</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The exception to consider.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the exception is eligible for retries; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static bool</b> <a id="f609339df4be111b" href="../../R/f609339df4be111b.html" target="n" data-glyph="76,1" class="i method">ShouldRetry</a>(<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r22 rd" class="r22 r">ex</span>) =&gt;
+            ((<a href="#99194ca5ddbf3f85" class="i method">IsRetriableException</a>(<span class="r22 r">ex</span>)) || (<a href="#99194ca5ddbf3f85" class="i method">IsRetriableException</a>(<span class="r22 r">ex</span>?.<a href="@0@mscorlib/A.html#89c20b39fb04108b" class="i property">InnerException</a>)));
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Determines whether the type of the specified exception is considered eligible to retry</span>
+        <span class="c">///</span><span class="c">   the associated operation.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r23 r">ex</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The exception to consider.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">true</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c"> if the exception type is eligible for retries; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">false</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static bool</b> <a id="99194ca5ddbf3f85" href="../../R/99194ca5ddbf3f85.html" target="n" data-glyph="76,1" class="i method">IsRetriableException</a>(<a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r23 rd" class="r23 r">ex</span>)
+        {
+            <b>if</b> (<span class="r23 r">ex</span> == <b>null</b>)
+            {
+                <b>return</b> <b>false</b>;
+            }
+ 
+            <b>switch</b> (<span class="r23 r">ex</span>)
+            {
+                <b>case</b> <a href="/Microsoft.Azure.Management.EventHub/A.html#62dd764b0fca23ec" class="t t">ErrorResponseException</a> <span id="r24 rd" class="r24 r">erEx</span>:
+                    <b>return</b> <a href="#4f2077b257a244fe" class="i method">IsRetriableStatus</a>(<span class="r24 r">erEx</span>.<a href="/Microsoft.Azure.Management.EventHub/A.html#d67e702a4b099161" class="i property">Response</a>.<a href="/Microsoft.Rest.ClientRuntime/A.html#8160e7ac2a8f7438" class="i property">StatusCode</a>);
+ 
+                <b>case</b> <a href="/Microsoft.Rest.ClientRuntime.Azure/A.html#7e20c5a8d8f75583" class="t t">CloudException</a> <span id="r25 rd" class="r25 r">clEx</span>:
+                    <b>return</b> <a href="#4f2077b257a244fe" class="i method">IsRetriableStatus</a>(<span class="r25 r">clEx</span>.<a href="/Microsoft.Rest.ClientRuntime.Azure/A.html#1d884b39f454cd9b" class="i property">Response</a>.<a href="/Microsoft.Rest.ClientRuntime/A.html#8160e7ac2a8f7438" class="i property">StatusCode</a>);
+ 
+                <b>case</b> <a href="@0@mscorlib/A.html#43e40a96805cc4df" class="t t">TimeoutException</a> <b>_</b>:
+                <b>case</b> <a href="@0@mscorlib/A.html#30edb7a318d221fa" class="t t">TaskCanceledException</a> <b>_</b>:
+                <b>case</b> <a href="@0@mscorlib/A.html#a0a8b79c277cf327" class="t t">OperationCanceledException</a> <b>_</b>:
+                <b>case</b> <span class="t t">HttpRequestException</span> <b>_</b>:
+                <b>case</b> <a href="@0@System/A.html#47e37066345d8b7c" class="t t">WebException</a> <b>_</b>:
+                <b>case</b> <a href="@0@System/A.html#feed9e8ed7f20227" class="t t">SocketException</a> <b>_</b>:
+                <b>case</b> <a href="@0@mscorlib/A.html#bf546e435199e83c" class="t t">IOException</a> <b>_</b>:
+                    <b>return</b> <b>true</b>;
+ 
+                <b>default</b>:
+                    <b>return</b> <b>false</b>;
+            };
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Calculates the retry delay to use for management-related operations.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r26 r">attempt</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The current attempt number.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r27 r">exponentialBackoffSeconds</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The exponential back-off amount,, in seconds.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r28 r">baseJitterSeconds</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The amount of base jitter to include, in seconds.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The interval to wait before retrying the attempted operation.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private static</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a> <a id="f1dcd99719dcc9bd" href="../../R/f1dcd99719dcc9bd.html" target="n" data-glyph="76,1" class="i method">CalculateRetryDelay</a>(<b>int</b> <span id="r26 rd" class="r26 r">attempt</span>,
+                                                    <b>double</b> <span id="r27 rd" class="r27 r">exponentialBackoffSeconds</span>,
+                                                    <b>double</b> <span id="r28 rd" class="r28 r">baseJitterSeconds</span>) =&gt;
+            <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>((<a href="@0@mscorlib/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@0@mscorlib/A.html#95354113fadc3083" class="i method">Pow</a>(2, <span class="r26 r">attempt</span>) * <span class="r27 r">exponentialBackoffSeconds</span>) + (<a href="#9ef7a07fee9503a6" class="i field">RandomNumberGenerator</a>.<a href="@0@mscorlib/A.html#bf5157f54273c48c" class="i property">Value</a>.<a href="@0@mscorlib/A.html#c467f2953a8d2207" class="i method">NextDouble</a>() * <span class="r28 r">baseJitterSeconds</span>));
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   An internal type for tracking the management access token and</span>
+        <span class="c">///</span><span class="c">   its associated expiration.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private class</b> <a id="e1ce7d5441032153" href="../../R/e1ce7d5441032153.html" target="n" data-glyph="4,1" class="t t">ManagementToken</a>
+        {
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The value bearer token to use for authorization.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <b>public readonly string</b> <a id="3aa0d70cfc466f7e" href="../../R/3aa0d70cfc466f7e.html" target="n" data-glyph="42,2" class="i field">Token</a>;
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The date and time, in UTC, that the token expires.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <b>public readonly</b> <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a> <a id="0a023564a1eb8493" href="../../R/0a023564a1eb8493.html" target="n" data-glyph="42,2" class="i field">ExpiresOn</a>;
+ 
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#e1ce7d5441032153" class="t t">ManagementToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r29 r">token</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The value of the bearer token.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+            <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r30 r">expiresOn</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The date and time, in UTC, that the token expires on.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+            <span class="c">///</span>
+            <b>public</b> <a id="6471a7a986bb7258" href="../../R/6471a7a986bb7258.html" target="n" data-glyph="72,2" class="t constructor">ManagementToken</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r29 rd" class="r29 r">token</span>,
+                                   <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a> <span id="r30 rd" class="r30 r">expiresOn</span>)
+            {
+                <a href="#3aa0d70cfc466f7e" class="i field">Token</a> = <span class="r29 r">token</span>;
+                <a href="#0a023564a1eb8493" class="i field">ExpiresOn</a> = <span class="r30 r">expiresOn</span>;
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

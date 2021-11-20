@@ -1,0 +1,150 @@
+﻿<!DOCTYPE html>
+<html><head><title>MockEventProcessor.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(141);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Sample.Perf/Event/MockEventProcessor.cs" target="_top">Event\MockEventProcessor.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/common/Perf/Azure.Sample.Perf/Event/MockEventProcessor.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Sample.Perf" target="_top">Azure.Sample.Perf.csproj</a> (Azure.Sample.Perf)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Sample</span>.<span class="i n">Perf</span>.<span class="i n">Event</span>
+{
+    <b>public class</b> <a id="641a8c388e763fcb" href="../R/641a8c388e763fcb.html" target="n" data-glyph="0,0" class="t t">MockEventProcessor</a>
+    {
+        <b>public int</b> <a id="e314c7cee84b2a13" href="../R/e314c7cee84b2a13.html" target="n" data-glyph="102,1" class="i property">Partitions</a> { <b>get</b>; }
+        <b>public int</b>? <a id="1d4e4563409ff5dd" href="../R/1d4e4563409ff5dd.html" target="n" data-glyph="102,1" class="i property">MaxEventsPerSecond</a> { <b>get</b>; }
+        <b>private double</b> <a id="ca445364926ab5a0" href="../R/ca445364926ab5a0.html" target="n" data-glyph="106,1" class="i property">MaxEventsPerSecondPerPartition</a> =&gt; ((<b>double</b>)<a href="#1d4e4563409ff5dd" class="i property">MaxEventsPerSecond</a>) / <a href="#e314c7cee84b2a13" class="i property">Partitions</a>;
+ 
+        <b>public</b> <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>? <a id="e706aaf3c6f42f94" href="../R/e706aaf3c6f42f94.html" target="n" data-glyph="102,1" class="i property">ErrorAfter</a> { <b>get</b>; }
+        <b>private bool</b> <a id="134d439491d780d8" href="../R/134d439491d780d8.html" target="n" data-glyph="46,1" class="i field">_errorRaised</a>;
+        <b>private object</b> <a id="88667e69e64efe11" href="../R/88667e69e64efe11.html" target="n" data-glyph="46,1" class="i field">_errorLock</a> = <b>new</b> <b>object</b>();
+ 
+        <b>private readonly</b> <a href="MockEventArgs.cs.html#5b5ce6ed444093e7" class="t t">MockEventArgs</a>[] <a id="a070e596d5e538cf" href="../R/a070e596d5e538cf.html" target="n" data-glyph="46,1" class="i field">_eventArgs</a>;
+        <b>private readonly int</b>[] <a id="d3ef5e10bd3a7438" href="../R/d3ef5e10bd3a7438.html" target="n" data-glyph="46,1" class="i field">_eventsRaised</a>;
+        <b>private readonly</b> <a href="@0@System/A.html#ceb0ba9cc88de82e" class="t t">Stopwatch</a> <a id="47d9bb74f75c8b78" href="../R/47d9bb74f75c8b78.html" target="n" data-glyph="46,1" class="i field">_sw</a> = <b>new</b> <a href="@0@System/A.html#e0a8bcc83e66a717" class="t constructor">Stopwatch</a>();
+ 
+        <b>private</b> <a href="@0@mscorlib/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<a href="MockEventArgs.cs.html#5b5ce6ed444093e7" class="t t">MockEventArgs</a>, <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>&gt; <a id="ca329cc9471916bd" href="../R/ca329cc9471916bd.html" target="n" data-glyph="46,1" class="i field">_processEventAsync</a>;
+        <b>private</b> <a href="@0@mscorlib/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<a href="MockErrorEventArgs.cs.html#39e9ee4307173d35" class="t t">MockErrorEventArgs</a>, <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>&gt; <a id="994b2cf87f45d288" href="../R/994b2cf87f45d288.html" target="n" data-glyph="46,1" class="i field">_processErrorAsync</a>;
+ 
+        <b>public</b> <a id="314f3e97c346f5aa" href="../R/314f3e97c346f5aa.html" target="n" data-glyph="72,1" class="t constructor">MockEventProcessor</a>(<b>int</b> <span id="r0 rd" class="r0 r">partitions</span>, <b>int</b>? <span id="r1 rd" class="r1 r">maxEventsPerSecond</span>, <a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>? <span id="r2 rd" class="r2 r">errorAfter</span>)
+        {
+            <a href="#e314c7cee84b2a13" class="i property">Partitions</a> = <span class="r0 r">partitions</span>;
+            <a href="#1d4e4563409ff5dd" class="i property">MaxEventsPerSecond</a> = <span class="r1 r">maxEventsPerSecond</span>;
+            <a href="#e706aaf3c6f42f94" class="i property">ErrorAfter</a> = <span class="r2 r">errorAfter</span>;
+ 
+            <a href="#a070e596d5e538cf" class="i field">_eventArgs</a> = <b>new</b> <a href="MockEventArgs.cs.html#5b5ce6ed444093e7" class="t t">MockEventArgs</a>[<span class="r0 r">partitions</span>];
+            <b>for</b> (<a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r3 rd" class="r3 r">i</span>=0; <span class="r3 r">i</span> &lt; <span class="r0 r">partitions</span>; <span class="r3 r">i</span>++)
+            {
+                <a href="#a070e596d5e538cf" class="i field">_eventArgs</a>[<span class="r3 r">i</span>] = <b>new</b> <a href="MockEventArgs.cs.html#aa98b674d245a5b9" class="t constructor">MockEventArgs</a>(<span class="r4 r">partition</span>: <span class="r3 r">i</span>, <span class="r5 r">data</span>: <span class="s">&quot;hello&quot;</span>);
+            }
+ 
+            <a href="#d3ef5e10bd3a7438" class="i field">_eventsRaised</a> = <b>new</b> <b>int</b>[<span class="r0 r">partitions</span>];
+        }
+ 
+        <b>public event</b> <a href="@0@mscorlib/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<a href="MockEventArgs.cs.html#5b5ce6ed444093e7" class="t t">MockEventArgs</a>, <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>&gt; <a id="42a6728c9bac6603" href="../R/42a6728c9bac6603.html" target="n" data-glyph="30,1" class="i">ProcessEventAsync</a>
+        {
+            <b>add</b>
+            {
+                <a href="#ca329cc9471916bd" class="i field">_processEventAsync</a> = <b>value</b>;
+            }
+            <b>remove</b>
+            {
+                <a href="#ca329cc9471916bd" class="i field">_processEventAsync</a> = <b>default</b>;
+            }
+        }
+ 
+        <b>public event</b> <a href="@0@mscorlib/A.html#7a86aba051da82dd" class="t t">Func</a>&lt;<a href="MockErrorEventArgs.cs.html#39e9ee4307173d35" class="t t">MockErrorEventArgs</a>, <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>&gt; <a id="32be36e5260f4628" href="../R/32be36e5260f4628.html" target="n" data-glyph="30,1" class="i">ProcessErrorAsync</a>
+        {
+            <b>add</b>
+            {
+                <a href="#994b2cf87f45d288" class="i field">_processErrorAsync</a> = <b>value</b>;
+            }
+            <b>remove</b>
+            {
+                <a href="#994b2cf87f45d288" class="i field">_processErrorAsync</a> = <b>default</b>;
+            }
+        }
+ 
+        <b>public</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="b17f9814d5c147e5" href="../R/b17f9814d5c147e5.html" target="n" data-glyph="72,1" class="i method">StartProcessingAsync</a>()
+        {
+            <a href="#47d9bb74f75c8b78" class="i field">_sw</a>.<a href="@0@System/A.html#f56fda03f3c59486" class="i method">Start</a>();
+ 
+            <b>for</b> (<a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r6 rd" class="r6 r">i</span>=0; <span class="r6 r">i</span> &lt; <a href="#e314c7cee84b2a13" class="i property">Partitions</a>; <span class="r6 r">i</span>++)
+            {
+                <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r7 rd" class="r7 r">j</span> = <span class="r6 r">i</span>;
+                <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#89fc01f3bb88eed9" class="i method">Run</a>(() =&gt; <a href="#cd24864a3b8382cd" class="i method">Process</a>(<span class="r7 r">j</span>));
+            }
+ 
+            <b>return</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>;
+        }
+ 
+        <b>private void</b> <a id="cd24864a3b8382cd" href="../R/cd24864a3b8382cd.html" target="n" data-glyph="76,1" class="i method">Process</a>(<b>int</b> <span id="r8 rd" class="r8 r">partition</span>)
+        {
+            <a href="MockEventArgs.cs.html#5b5ce6ed444093e7" class="k">var</a> <span id="r9 rd" class="r9 r">eventArgs</span> = <a href="#a070e596d5e538cf" class="i field">_eventArgs</a>[<span class="r8 r">partition</span>];
+ 
+            <b>if</b> (<a href="#1d4e4563409ff5dd" class="i property">MaxEventsPerSecond</a>.<a href="@0@mscorlib/A.html#7bbe60e33e857298" class="i property">HasValue</a>)
+            {
+                <b>while</b> (<b>true</b>)
+                {
+                    <b>if</b> (<a href="#e706aaf3c6f42f94" class="i property">ErrorAfter</a>.<a href="@0@mscorlib/A.html#7bbe60e33e857298" class="i property">HasValue</a> &amp;&amp; !<a href="#134d439491d780d8" class="i field">_errorRaised</a> &amp;&amp; <a href="#47d9bb74f75c8b78" class="i field">_sw</a>.<a href="@0@System/A.html#60e03fb80c10ec79" class="i property">Elapsed</a> &gt; <a href="#e706aaf3c6f42f94" class="i property">ErrorAfter</a>)
+                    {
+                        <b>lock</b> (<a href="#88667e69e64efe11" class="i field">_errorLock</a>)
+                        {
+                            <b>if</b> (!<a href="#134d439491d780d8" class="i field">_errorRaised</a>)
+                            {
+                                <a href="#994b2cf87f45d288" class="i field">_processErrorAsync</a>(<b>new</b> <a href="MockErrorEventArgs.cs.html#886a169c5af7dd2e" class="t constructor">MockErrorEventArgs</a>(<span class="r8 r">partition</span>, <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;test exception&quot;</span>)));
+                                <a href="#134d439491d780d8" class="i field">_errorRaised</a> = <b>true</b>;
+                            }
+                        }
+                    }
+                    <b>else</b>
+                    {
+                        <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r10 rd" class="r10 r">eventsRaised</span> = <a href="#d3ef5e10bd3a7438" class="i field">_eventsRaised</a>[<span class="r8 r">partition</span>];
+                        <a href="@0@mscorlib/A.html#1a65cbdb09544ba1" class="k">var</a> <span id="r11 rd" class="r11 r">targetEventsRaised</span> = <a href="#47d9bb74f75c8b78" class="i field">_sw</a>.<a href="@0@System/A.html#60e03fb80c10ec79" class="i property">Elapsed</a>.<a href="@0@mscorlib/A.html#061d7498e3227cfb" class="i property">TotalSeconds</a> * <a href="#ca445364926ab5a0" class="i property">MaxEventsPerSecondPerPartition</a>;
+ 
+                        <b>if</b> (<span class="r10 r">eventsRaised</span> &lt; <span class="r11 r">targetEventsRaised</span>)
+                        {
+                            <a href="#ca329cc9471916bd" class="i field">_processEventAsync</a>(<span class="r9 r">eventArgs</span>).<a href="@0@mscorlib/A.html#1bfe9e19e44f4cfa" class="i method">Wait</a>();
+                            <a href="#d3ef5e10bd3a7438" class="i field">_eventsRaised</a>[<span class="r8 r">partition</span>]++;
+                        }
+                        <b>else</b>
+                        {
+                            <a href="@0@mscorlib/A.html#3980e012bae82e96" class="t t">Thread</a>.<a href="@0@mscorlib/A.html#82aedb56cecde82c" class="i method">Sleep</a>(<a href="@0@mscorlib/A.html#865ef7b89f41b632" class="t t">TimeSpan</a>.<a href="@0@mscorlib/A.html#c24437e069f958f9" class="i method">FromSeconds</a>(1 / <a href="#ca445364926ab5a0" class="i property">MaxEventsPerSecondPerPartition</a>));
+                        }
+                    }
+                }
+            }
+            <b>else</b>
+            {
+                <b>while</b> (<b>true</b>)
+                {
+                    <b>if</b> (<a href="#e706aaf3c6f42f94" class="i property">ErrorAfter</a>.<a href="@0@mscorlib/A.html#7bbe60e33e857298" class="i property">HasValue</a> &amp;&amp; !<a href="#134d439491d780d8" class="i field">_errorRaised</a> &amp;&amp; <a href="#47d9bb74f75c8b78" class="i field">_sw</a>.<a href="@0@System/A.html#60e03fb80c10ec79" class="i property">Elapsed</a> &gt; <a href="#e706aaf3c6f42f94" class="i property">ErrorAfter</a>)
+                    {
+                        <b>lock</b> (<a href="#88667e69e64efe11" class="i field">_errorLock</a>)
+                        {
+                            <b>if</b> (!<a href="#134d439491d780d8" class="i field">_errorRaised</a>)
+                            {
+                                <a href="#994b2cf87f45d288" class="i field">_processErrorAsync</a>(<b>new</b> <a href="MockErrorEventArgs.cs.html#886a169c5af7dd2e" class="t constructor">MockErrorEventArgs</a>(<span class="r8 r">partition</span>, <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;test exception&quot;</span>)));
+                                <a href="#134d439491d780d8" class="i field">_errorRaised</a> = <b>true</b>;
+                            }
+                        }
+                    }
+                    <b>else</b>
+                    {
+                        <a href="#ca329cc9471916bd" class="i field">_processEventAsync</a>(<span class="r9 r">eventArgs</span>).<a href="@0@mscorlib/A.html#1bfe9e19e44f4cfa" class="i method">Wait</a>();
+                        <a href="#d3ef5e10bd3a7438" class="i field">_eventsRaised</a>[<span class="r8 r">partition</span>]++;
+                    }
+                }
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>
