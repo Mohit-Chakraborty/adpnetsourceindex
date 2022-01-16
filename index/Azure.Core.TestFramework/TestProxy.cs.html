@@ -1,0 +1,219 @@
+﻿<!DOCTYPE html>
+<html><head><title>TestProxy.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
+<body class="cB" onload="i(210);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Core.TestFramework/TestProxy.cs" target="_top">TestProxy.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/core/Azure.Core.TestFramework/src/TestProxy.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Core.TestFramework" target="_top">Azure.Core.TestFramework.csproj</a> (Azure.Core.TestFramework)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Net</span>.<span class="i n">Http</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Reflection</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Runtime</span>.<span class="i n">InteropServices</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>;
+<b>using</b> <span class="i n">NUnit</span>.<span class="i n">Framework</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">TestFramework</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Encapsulates a process running an instance of the Test Proxy as well as providing access to the Test Proxy administration actions</span>
+    <span class="c">///</span><span class="c"> via the TestProxyRestClient.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">seealso</span> <span class="c">href</span><span class="c">=</span><span class="c">&quot;</span><span class="c">https://github.com/Azure/azure-sdk-tools/tree/main/tools/test-proxy</span><span class="c">&quot;</span><span class="c">/&gt;</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>public class</b> <a id="8aca39759c068821" href="R/8aca39759c068821.html" target="n" data-glyph="0,0" class="t t">TestProxy</a>
+    {
+        <b>private static readonly string</b> <a id="4eef618f42098646" href="R/4eef618f42098646.html" target="n" data-glyph="46,1" class="i field">s_dotNetExe</a>;
+ 
+        <b>public const string</b> <a id="0265c477452c7b2c" href="R/0265c477452c7b2c.html" target="n" data-glyph="6,1" class="i field">DevCertIssuer</a> = <span class="s">&quot;CN=localhost&quot;</span>;
+ 
+        <b>public const string</b> <a id="b96c2cac3ca9a662" href="R/b96c2cac3ca9a662.html" target="n" data-glyph="6,1" class="i field">IpAddress</a> = <span class="s">&quot;127.0.0.1&quot;</span>;
+ 
+        <b>public int</b>? <a id="17d26d5bc7805493" href="R/17d26d5bc7805493.html" target="n" data-glyph="102,1" class="i property">ProxyPortHttp</a> =&gt; <a href="#d9f29ca254d0da9d" class="i field">_proxyPortHttp</a>;
+ 
+        <b>public int</b>? <a id="2fca2a778156c6a2" href="R/2fca2a778156c6a2.html" target="n" data-glyph="102,1" class="i property">ProxyPortHttps</a> =&gt; <a href="#8dd93bdb47d1815e" class="i field">_proxyPortHttps</a>;
+ 
+        <b>private readonly int</b>? <a id="d9f29ca254d0da9d" href="R/d9f29ca254d0da9d.html" target="n" data-glyph="46,1" class="i field">_proxyPortHttp</a>;
+        <b>private readonly int</b>? <a id="8dd93bdb47d1815e" href="R/8dd93bdb47d1815e.html" target="n" data-glyph="46,1" class="i field">_proxyPortHttps</a>;
+        <b>private readonly</b> <a href="@0@System/A.html#f8b2e604d6f1fe04" class="t t">Process</a> <a id="a5ee882d14992e73" href="R/a5ee882d14992e73.html" target="n" data-glyph="46,1" class="i field">_testProxyProcess</a>;
+        <b>internal</b> <a href="Generated/TestProxyRestClient.cs.html#57d993b7053a8a9f" class="t t">TestProxyRestClient</a> <a id="453332a7dffa47e1" href="R/453332a7dffa47e1.html" target="n" data-glyph="104,1" class="i property">Client</a> { <b>get</b>; }
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#adf60ee46ebd299f" class="t t">StringBuilder</a> <a id="2e9a774d383d22f2" href="R/2e9a774d383d22f2.html" target="n" data-glyph="46,1" class="i field">_errorBuffer</a> = <b>new</b>();
+        <b>private static readonly object</b> <a id="e2b31464bec1606a" href="R/e2b31464bec1606a.html" target="n" data-glyph="46,1" class="i field">_lock</a> = <b>new</b>();
+        <b>private static</b> <a href="#8aca39759c068821" class="t t">TestProxy</a> <a id="9cb3c268b42474b2" href="R/9cb3c268b42474b2.html" target="n" data-glyph="46,1" class="i field">_shared</a>;
+ 
+        <b>static</b> <a id="b7a1445c70e33371" href="R/../../0000000000.html" target="n" data-glyph="76,1" class="t method">TestProxy</a>()
+        {
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r0 rd" class="r0 r">installDir</span> = <a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#3956c71d4fc09576" class="i method">GetEnvironmentVariable</a>(<span class="s">&quot;DOTNET_INSTALL_DIR&quot;</span>);
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r1 rd" class="r1 r">dotNetExeName</span> = <span class="s">&quot;dotnet&quot;</span> + (<span class="t t">RuntimeInformation</span>.<span class="i method">IsOSPlatform</span>(<span class="t t">OSPlatform</span>.<span class="i property">Windows</span>) ? <span class="s">&quot;.exe&quot;</span> : <span class="s">&quot;&quot;</span>);
+            <b>if</b> (!<a href="#8aea3b69301b21a2" class="i method">HasDotNetExe</a>(<span class="r0 r">installDir</span>))
+            {
+                <span class="r0 r">installDir</span> = <a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#3956c71d4fc09576" class="i method">GetEnvironmentVariable</a>(<span class="s">&quot;PATH&quot;</span>)?.<a href="@0@mscorlib/A.html#1c4a9dc78ba38999" class="i method">Split</a>(<a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#0ae164d0af9349ef" class="i field">PathSeparator</a>).<a href="@0@System.Core/A.html#b7e5965cab68b1cf" class="i method">FirstOrDefault</a>(<a href="#8aea3b69301b21a2" class="i method">HasDotNetExe</a>);
+            }
+ 
+            <b>if</b> (<span class="r0 r">installDir</span> == <b>null</b>)
+            {
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;DOTNET install directory was not found&quot;</span>);
+            }
+ 
+            <a href="#4eef618f42098646" class="i field">s_dotNetExe</a> = <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#2d7263f86a526264" class="i method">Combine</a>(<span class="r0 r">installDir</span>, <span class="r1 r">dotNetExeName</span>);
+ 
+            <b>bool</b> <a id="8aea3b69301b21a2" href="R/8aea3b69301b21a2.html" target="n" data-glyph="76,2" class="i method">HasDotNetExe</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r2 rd" class="r2 r">dotnetDir</span>) =&gt; <span class="r2 r">dotnetDir</span> != <b>null</b> &amp;&amp; <a href="@0@mscorlib/A.html#1c7421e464f67b7e" class="t t">File</a>.<a href="@0@mscorlib/A.html#3360368484a9f131" class="i method">Exists</a>(<a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#2d7263f86a526264" class="i method">Combine</a>(<span class="r2 r">dotnetDir</span>, <span class="r1 r">dotNetExeName</span>));
+        }
+ 
+        <b>private</b> <a id="d3f45215b5457c56" href="R/d3f45215b5457c56.html" target="n" data-glyph="76,1" class="t constructor">TestProxy</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r3 rd" class="r3 r">proxyPath</span>)
+        {
+            <a href="@0@System/A.html#7caf1ab108119a18" class="t t">ProcessStartInfo</a> <span id="r4 rd" class="r4 r">testProxyProcessInfo</span> = <b>new</b> <a href="@0@System/A.html#2909828ffbfb6859" class="t constructor">ProcessStartInfo</a>(
+                <a href="#4eef618f42098646" class="i field">s_dotNetExe</a>,
+                <span class="r3 r">proxyPath</span>)
+            {
+                <a href="@0@System/A.html#0e85c2ea7cbdedbe" class="i property">UseShellExecute</a> = <b>false</b>,
+                <a href="@0@System/A.html#7d08cff61e290062" class="i property">RedirectStandardOutput</a> = <b>true</b>,
+                <a href="@0@System/A.html#032d12b416e9d73e" class="i property">RedirectStandardError</a> = <b>true</b>,
+                <a href="@0@System/A.html#5611ad13d0b7376e" class="i property">EnvironmentVariables</a> =
+                {
+                    [<span class="s">&quot;ASPNETCORE_URLS&quot;</span>] = <span class="s">$&quot;</span><span class="s">http://</span>{<a href="#b96c2cac3ca9a662" class="i field">IpAddress</a>}<span class="s">:0;https://</span>{<a href="#b96c2cac3ca9a662" class="i field">IpAddress</a>}<span class="s">:0</span><span class="s">&quot;</span>,
+                    [<span class="s">&quot;Logging__LogLevel__Default&quot;</span>] = <span class="s">&quot;Error&quot;</span>,
+                    [<span class="s">&quot;Logging__LogLevel__Microsoft.Hosting.Lifetime&quot;</span>] = <span class="s">&quot;Information&quot;</span>,
+                    [<span class="s">&quot;ASPNETCORE_Kestrel__Certificates__Default__Path&quot;</span>] = <a href="@0@mscorlib/A.html#090eca8621a248ee" class="t t">Path</a>.<a href="@0@mscorlib/A.html#65c63f5b94b2ac9b" class="i method">Combine</a>(
+                        <a href="TestEnvironment.cs.html#e657e3c675f27c43" class="t t">TestEnvironment</a>.<a href="TestEnvironment.cs.html#8def07bf25f8a176" class="i property">RepositoryRoot</a>,
+                        <span class="s">&quot;eng&quot;</span>,
+                        <span class="s">&quot;common&quot;</span>,
+                        <span class="s">&quot;testproxy&quot;</span>,
+                        <span class="s">&quot;dotnet-devcert.pfx&quot;</span>),
+                    [<span class="s">&quot;ASPNETCORE_Kestrel__Certificates__Default__Password&quot;</span>] = <span class="s">&quot;password&quot;</span>
+                }
+            };
+ 
+            <a href="#a5ee882d14992e73" class="i field">_testProxyProcess</a> = <a href="@0@System/A.html#f8b2e604d6f1fe04" class="t t">Process</a>.<a href="@0@System/A.html#167d5a5080426d50" class="i method">Start</a>(<span class="r4 r">testProxyProcessInfo</span>);
+ 
+            <a href="ProcessTracker.cs.html#f4c7ff76a7610cc5" class="t t">ProcessTracker</a>.<a href="ProcessTracker.cs.html#b095369f513ccd70" class="i method">Add</a>(<a href="#a5ee882d14992e73" class="i field">_testProxyProcess</a>);
+            <b>_</b> = <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#89fc01f3bb88eed9" class="i method">Run</a>(
+                () =&gt;
+                {
+                    <b>while</b> (!<a href="#a5ee882d14992e73" class="i field">_testProxyProcess</a>.<a href="@0@System/A.html#4ee55b27a25daffb" class="i property">HasExited</a> &amp;&amp; !<a href="#a5ee882d14992e73" class="i field">_testProxyProcess</a>.<a href="@0@System/A.html#3ccd897ec0ec0b4f" class="i property">StandardError</a>.<a href="@0@mscorlib/A.html#27a804c872881c54" class="i property">EndOfStream</a>)
+                    {
+                        <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r5 rd" class="r5 r">error</span> = <a href="#a5ee882d14992e73" class="i field">_testProxyProcess</a>.<a href="@0@System/A.html#3ccd897ec0ec0b4f" class="i property">StandardError</a>.<a href="@0@mscorlib/A.html#a4ada5f765646068" class="i method">ReadLine</a>();
+                        <span class="c">// output to console in case another error in the test causes the exception to not be propagated</span>
+                        <span class="t t">TestContext</span>.<span class="i field">Progress</span>.<a href="@0@mscorlib/A.html#5238cceaebfeaa74" class="i method">WriteLine</a>(<span class="r5 r">error</span>);
+                        <a href="#2e9a774d383d22f2" class="i field">_errorBuffer</a>.<a href="@0@mscorlib/A.html#73bc75596acbac77" class="i method">AppendLine</a>(<span class="r5 r">error</span>);
+                    }
+                });
+ 
+            <b>int</b> <span id="r6 rd" class="r6 r">lines</span> = 0;
+            <b>while</b> ((<a href="#d9f29ca254d0da9d" class="i field">_proxyPortHttp</a> == <b>null</b> || <a href="#8dd93bdb47d1815e" class="i field">_proxyPortHttps</a> == <b>null</b>) &amp;&amp; <span class="r6 r">lines</span>++ &lt; 50)
+            {
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r7 rd" class="r7 r">outputLine</span> = <a href="#a5ee882d14992e73" class="i field">_testProxyProcess</a>.<a href="@0@System/A.html#7b00fe2b27d4b60c" class="i property">StandardOutput</a>.<a href="@0@mscorlib/A.html#a4ada5f765646068" class="i method">ReadLine</a>();
+                <span class="c">// useful for debugging</span>
+                <span class="t t">TestContext</span>.<span class="i field">Progress</span>.<a href="@0@mscorlib/A.html#5238cceaebfeaa74" class="i method">WriteLine</a>(<span class="r7 r">outputLine</span>);
+ 
+                <b>if</b> (<a href="#17d26d5bc7805493" class="i property">ProxyPortHttp</a> == <b>null</b> &amp;&amp; <a href="#47a49cf29b3a668a" class="i method">TryParsePort</a>(<span class="r7 r">outputLine</span>, <span class="s">&quot;http&quot;</span>, <b>out</b> <a href="#d9f29ca254d0da9d" class="i field">_proxyPortHttp</a>))
+                {
+                    <b>continue</b>;
+                }
+ 
+                <b>if</b> (<a href="#8dd93bdb47d1815e" class="i field">_proxyPortHttps</a> == <b>null</b> &amp;&amp; <a href="#47a49cf29b3a668a" class="i method">TryParsePort</a>(<span class="r7 r">outputLine</span>, <span class="s">&quot;https&quot;</span>, <b>out</b> <a href="#8dd93bdb47d1815e" class="i field">_proxyPortHttps</a>))
+                {
+                    <b>continue</b>;
+                }
+            }
+ 
+            <b>if</b> (<a href="#d9f29ca254d0da9d" class="i field">_proxyPortHttp</a> == <b>null</b> || <a href="#8dd93bdb47d1815e" class="i field">_proxyPortHttps</a> == <b>null</b>)
+            {
+                <a href="#9e73e68bd8caeddb" class="i method">CheckForErrors</a>();
+                <span class="c">// if no errors, fallback to this exception</span>
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">&quot;Failed to start the test proxy. One or both of the ports was not populated.&quot;</span> + <a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a> +
+                                                    <span class="s">$&quot;</span><span class="s">http: </span>{<a href="#d9f29ca254d0da9d" class="i field">_proxyPortHttp</a>}<span class="s">&quot;</span> + <a href="@0@mscorlib/A.html#7d2f1469d916fc63" class="t t">Environment</a>.<a href="@0@mscorlib/A.html#63a04833d43dd9d3" class="i property">NewLine</a> +
+                                                    <span class="s">$&quot;</span><span class="s">https: </span>{<a href="#8dd93bdb47d1815e" class="i field">_proxyPortHttps</a>}<span class="s">&quot;</span>);
+            }
+ 
+            <a href="TestProxyClientOptions.cs.html#d06b01a1911eabde" class="k">var</a> <span id="r8 rd" class="r8 r">options</span> = <b>new</b> <a href="TestProxyClientOptions.cs.html#d06b01a1911eabde" class="t constructor">TestProxyClientOptions</a>();
+            <a href="#453332a7dffa47e1" class="i property">Client</a> = <b>new</b> <a href="Generated/TestProxyRestClient.cs.html#015da04432a389fe" class="t constructor">TestProxyRestClient</a>(
+                <b>new</b> <a href="Shared/ClientDiagnostics.cs.html#4399d236463c3dac" class="t constructor">ClientDiagnostics</a>(<b>new</b> <a href="TestProxyClientOptions.cs.html#d06b01a1911eabde" class="t constructor">TestProxyClientOptions</a>()),
+                <a href="/Azure.Core/A.html#caf101e059b27790" class="t t">HttpPipelineBuilder</a>.<a href="/Azure.Core/A.html#e4c688f935b020a5" class="i method">Build</a>(<span class="r8 r">options</span>),
+                <b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<span class="s">$&quot;</span><span class="s">http://</span>{<a href="#b96c2cac3ca9a662" class="i field">IpAddress</a>}<span class="s">:</span>{<a href="#d9f29ca254d0da9d" class="i field">_proxyPortHttp</a>}<span class="s">&quot;</span>));
+ 
+            <span class="c">// For some reason draining the standard output stream is necessary to keep the test-proxy process healthy. Otherwise requests</span>
+            <span class="c">// start timing out. This only seems to happen when not specifying a port.</span>
+            <b>_</b> = <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#89fc01f3bb88eed9" class="i method">Run</a>(
+                () =&gt;
+                {
+                    <b>while</b> (!<a href="#a5ee882d14992e73" class="i field">_testProxyProcess</a>.<a href="@0@System/A.html#4ee55b27a25daffb" class="i property">HasExited</a> &amp;&amp; !<a href="#a5ee882d14992e73" class="i field">_testProxyProcess</a>.<a href="@0@System/A.html#7b00fe2b27d4b60c" class="i property">StandardOutput</a>.<a href="@0@mscorlib/A.html#27a804c872881c54" class="i property">EndOfStream</a>)
+                    {
+                        <a href="#a5ee882d14992e73" class="i field">_testProxyProcess</a>.<a href="@0@System/A.html#7b00fe2b27d4b60c" class="i property">StandardOutput</a>.<a href="@0@mscorlib/A.html#a4ada5f765646068" class="i method">ReadLine</a>();
+                    }
+                });
+        }
+ 
+        <b>public static</b> <a href="#8aca39759c068821" class="t t">TestProxy</a> <a id="11758b44324e968b" href="R/11758b44324e968b.html" target="n" data-glyph="72,1" class="i method">Start</a>()
+        {
+            <b>if</b> (<a href="#9cb3c268b42474b2" class="i field">_shared</a> != <b>null</b>)
+            {
+                <b>return</b> <a href="#9cb3c268b42474b2" class="i field">_shared</a>;
+            }
+ 
+            <b>lock</b> (<a href="#e2b31464bec1606a" class="i field">_lock</a>)
+            {
+                <a href="#8aca39759c068821" class="k">var</a> <span id="r9 rd" class="r9 r">shared</span> = <a href="#9cb3c268b42474b2" class="i field">_shared</a>;
+                <b>if</b> (<span class="r9 r">shared</span> == <b>null</b>)
+                {
+                    <span class="r9 r">shared</span> = <b>new</b> <a href="#d3f45215b5457c56" class="t constructor">TestProxy</a>(<b>typeof</b>(<a href="#8aca39759c068821" class="t t">TestProxy</a>)
+                        .<a href="@0@mscorlib/A.html#e87d536bd07fab01" class="i property">Assembly</a>
+                        .<a href="@0@mscorlib/A.html#7d3ef2191d8b2078" class="i method">GetCustomAttributes</a>&lt;<a href="@0@mscorlib/A.html#46279c5d2075a006" class="t t">AssemblyMetadataAttribute</a>&gt;()
+                        .<a href="@0@System.Core/A.html#226beadd4e521229" class="i method">Single</a>(<span id="r10 rd" class="r10 r">a</span> =&gt; <span class="r10 r">a</span>.<a href="@0@mscorlib/A.html#e097783d28e1ffd2" class="i property">Key</a> == <span class="s">&quot;TestProxyPath&quot;</span>)
+                        .<a href="@0@mscorlib/A.html#e3d10b089aa19b4a" class="i property">Value</a>);
+ 
+                    <a href="@0@mscorlib/A.html#2e9e7922eace2be8" class="t t">AppDomain</a>.<a href="@0@mscorlib/A.html#0f1cf66beffbb219" class="i property">CurrentDomain</a>.<a href="@0@mscorlib/A.html#a678192b9d65df83" class="i">DomainUnload</a> += (<b>_</b>, <b>_</b>) =&gt;
+                    {
+                        <span class="r9 r">shared</span>.<a href="#a5ee882d14992e73" class="i field">_testProxyProcess</a>?.<a href="@0@System/A.html#4bfdd089d4e52d08" class="i method">Kill</a>();
+                    };
+ 
+                    <a href="#9cb3c268b42474b2" class="i field">_shared</a> = <span class="r9 r">shared</span>;
+                }
+ 
+                <b>return</b> <span class="r9 r">shared</span>;
+            }
+        }
+ 
+        <b>private static bool</b> <a id="47a49cf29b3a668a" href="R/47a49cf29b3a668a.html" target="n" data-glyph="76,1" class="i method">TryParsePort</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r11 rd" class="r11 r">output</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r12 rd" class="r12 r">scheme</span>, <b>out int</b>? <span id="r13 rd" class="r13 r">port</span>)
+        {
+            <b>if</b> (<span class="r11 r">output</span> == <b>null</b>)
+            {
+                <span class="t t">TestContext</span>.<span class="i field">Progress</span>.<a href="@0@mscorlib/A.html#5238cceaebfeaa74" class="i method">WriteLine</a>(<span class="s">&quot;output was null&quot;</span>);
+                <span class="r13 r">port</span> = <b>null</b>;
+                <b>return</b> <b>false</b>;
+            }
+            <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r14 rd" class="r14 r">nowListeningOn</span> = <span class="s">&quot;Now listening on: &quot;</span>;
+            <b>int</b> <span id="r15 rd" class="r15 r">nowListeningOnLength</span> = <span class="r14 r">nowListeningOn</span>.<a href="@0@mscorlib/A.html#e13f5829ef28aa07" class="i property">Length</a>;
+            <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r16 rd" class="r16 r">index</span> = <span class="r11 r">output</span>.<a href="@0@mscorlib/A.html#7d6aed52d875ec59" class="i method">IndexOf</a>(<span class="s">$&quot;</span>{<span class="r14 r">nowListeningOn</span>}{<span class="r12 r">scheme</span>}<span class="s">:</span><span class="s">&quot;</span>, <a href="@0@mscorlib/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@0@mscorlib/A.html#d5bf14b8521bd423" class="i field">CurrentCultureIgnoreCase</a>);
+            <b>if</b> (<span class="r16 r">index</span> &gt; -1)
+            {
+                <a href="@0@mscorlib/A.html#225942ed7b7a3252" class="k">var</a> <span id="r17 rd" class="r17 r">start</span> = <span class="r16 r">index</span> + <span class="r15 r">nowListeningOnLength</span>;
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r18 rd" class="r18 r">uri</span> = <span class="r11 r">output</span>.<a href="@0@mscorlib/A.html#8124961f027d9ac9" class="i method">Substring</a>(<span class="r17 r">start</span>, <span class="r11 r">output</span>.<a href="@0@mscorlib/A.html#e13f5829ef28aa07" class="i property">Length</a> - <span class="r17 r">start</span>).<a href="@0@mscorlib/A.html#06a5f7c688e69307" class="i method">Trim</a>();
+                <span class="r13 r">port</span> = <b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<span class="r18 r">uri</span>).<a href="@0@System/A.html#8d40fee6fe43f1d3" class="i property">Port</a>;
+                <b>return</b> <b>true</b>;
+            }
+ 
+            <span class="r13 r">port</span> = <b>null</b>;
+            <b>return</b> <b>false</b>;
+        }
+ 
+        <b>public void</b> <a id="9e73e68bd8caeddb" href="R/9e73e68bd8caeddb.html" target="n" data-glyph="72,1" class="i method">CheckForErrors</a>()
+        {
+            <b>if</b> (<a href="#2e9a774d383d22f2" class="i field">_errorBuffer</a>.<a href="@0@mscorlib/A.html#7d7729bd88adac53" class="i property">Length</a> &gt; 0)
+            {
+                <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r19 rd" class="r19 r">error</span> = <a href="#2e9a774d383d22f2" class="i field">_errorBuffer</a>.<a href="@0@mscorlib/A.html#5a97da49a158a3c9" class="i method">ToString</a>();
+                <a href="#2e9a774d383d22f2" class="i field">_errorBuffer</a>.<a href="@0@mscorlib/A.html#12bafac7fd9481fd" class="i method">Clear</a>();
+                <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#265d72f49e915224" class="t constructor">InvalidOperationException</a>(<span class="s">$&quot;</span><span class="s">An error occurred in the test proxy: </span>{<span class="r19 r">error</span>}<span class="s">&quot;</span>);
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

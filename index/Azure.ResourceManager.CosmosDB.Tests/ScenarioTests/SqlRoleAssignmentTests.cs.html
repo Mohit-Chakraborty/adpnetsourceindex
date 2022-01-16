@@ -1,0 +1,163 @@
+﻿<!DOCTYPE html>
+<html><head><title>SqlRoleAssignmentTests.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(154);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.ResourceManager.CosmosDB.Tests/ScenarioTests/SqlRoleAssignmentTests.cs" target="_top">ScenarioTests\SqlRoleAssignmentTests.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/cosmosdb/Azure.ResourceManager.CosmosDB/tests/ScenarioTests/SqlRoleAssignmentTests.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.ResourceManager.CosmosDB.Tests" target="_top">Azure.ResourceManager.CosmosDB.Tests.csproj</a> (Azure.ResourceManager.CosmosDB.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <b>false</b>
+<span class="e">// enable the test after https://github.com/Azure/azure-rest-api-specs/issues/16560 is resolved
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using Azure.Core.TestFramework;
+using Azure.ResourceManager.CosmosDB.Models;
+using NUnit.Framework;
+ 
+namespace Azure.ResourceManager.CosmosDB.Tests
+{
+    [Ignore(&quot;https://github.com/Azure/azure-rest-api-specs/issues/16560&quot;)]
+    public class SqlRoleAssignmentTests : CosmosDBManagementClientBase
+    {
+        private const string RoleAssignmentId = &quot;adcb35e1-e104-41c2-b76d-70a8b03e6463&quot;;
+        private const string PrincipalId = &quot;ed4c2395-a18c-4018-afb3-6e521e7534d2&quot;;
+        private const string PrincipalId2 = &quot;d60019b0-c5a8-4e38-beb9-fb80daa3ce90&quot;;
+ 
+        private DatabaseAccount _databaseAccount;
+        private SqlDatabase _sqlDatabase;
+        private ResourceIdentifier _roleDefinitionId;
+        private SqlRoleDefinition _roleDefinition;
+ 
+        private string SqlRoleAssignmentScope { get =&gt; $&quot;{_databaseAccount.Id}/dbs/{_sqlDatabase.Data.Name}&quot;; }
+ 
+        public SqlRoleAssignmentTests(bool isAsync) : base(isAsync)
+        {
+        }
+ 
+        protected SqlRoleAssignmentCollection SqlRoleAssignmentCollection { get =&gt; _databaseAccount.GetSqlRoleAssignments(); }
+ 
+        [OneTimeSetUp]
+        public async Task GlobalSetup()
+        {
+            _resourceGroup = await GlobalClient.GetResourceGroup(_resourceGroupIdentifier).GetAsync();
+ 
+            _databaseAccount = await CreateDatabaseAccount(SessionRecording.GenerateAssetName(&quot;dbaccount-&quot;), DatabaseAccountKind.GlobalDocumentDB, new Capability(&quot;EnableGremlin&quot;));
+ 
+            _sqlDatabase = await SqlDatabaseTests.CreateSqlDatabase(SessionRecording.GenerateAssetName(&quot;sql-db-&quot;), null, _databaseAccount.GetSqlDatabases());
+ 
+            _roleDefinitionId = (await SqlRoleDefinitionTests.CreateSqlRoleDefinition($&quot;{_databaseAccount.Id}/dbs/{_sqlDatabase.Data.Name}&quot;, _databaseAccount.GetSqlRoleDefinitions())).Id;
+ 
+            await StopSessionRecordingAsync();
+        }
+ 
+        [OneTimeTearDown]
+        public virtual void GlobalTeardown()
+        {
+            _roleDefinition.Delete();
+            _sqlDatabase.Delete();
+            _databaseAccount.Delete();
+        }
+ 
+        [SetUp]
+        public async Task SetUp()
+        {
+            _roleDefinition = await ArmClient.GetSqlRoleDefinition(_roleDefinitionId).GetAsync();
+        }
+ 
+        [TearDown]
+        public async Task TearDown()
+        {
+            SqlRoleAssignment assignment = await SqlRoleAssignmentCollection.GetIfExistsAsync(RoleAssignmentId);
+            if (assignment != null)
+            {
+                await assignment.DeleteAsync();
+            }
+        }
+ 
+        [Test]
+        [RecordedTest]
+        public async Task SqlRoleAssignmentCreateAndUpdate()
+        {
+            var assignment = await CreateSqlRoleAssignment();
+            Assert.AreEqual(RoleAssignmentId, assignment.Data.Name);
+            Assert.AreEqual(_roleDefinitionId, assignment.Data.RoleDefinitionId);
+            Assert.AreEqual(SqlRoleAssignmentScope, assignment.Data.Scope);
+            Assert.AreEqual(PrincipalId, assignment.Data.PrincipalId);
+ 
+            bool ifExists = await SqlRoleAssignmentCollection.CheckIfExistsAsync(RoleAssignmentId);
+            Assert.True(ifExists);
+ 
+            SqlRoleAssignment assignment2 = await SqlRoleAssignmentCollection.GetAsync(RoleAssignmentId);
+            Assert.AreEqual(RoleAssignmentId, assignment2.Data.Name);
+            VerifySqlRoleAssignments(assignment, assignment2);
+ 
+            var updateParameters = new SqlRoleAssignmentCreateUpdateParameters
+            {
+                RoleDefinitionId = _roleDefinitionId,
+                Scope = $&quot;{SqlRoleAssignmentScope}/colls&quot;,
+                PrincipalId = PrincipalId2,
+            };
+            assignment = await (await SqlRoleAssignmentCollection.CreateOrUpdateAsync(RoleAssignmentId, updateParameters)).WaitForCompletionAsync();
+            Assert.AreEqual(RoleAssignmentId, assignment.Data.Name);
+            Assert.AreEqual(_roleDefinitionId, assignment.Data.RoleDefinitionId);
+            Assert.AreEqual($&quot;{SqlRoleAssignmentScope}/colls&quot;, assignment.Data.Scope);
+            Assert.AreEqual(PrincipalId2, assignment.Data.PrincipalId);
+ 
+            assignment2 = await SqlRoleAssignmentCollection.GetAsync(RoleAssignmentId);
+            VerifySqlRoleAssignments(assignment, assignment2);
+        }
+ 
+        [Test]
+        [RecordedTest]
+        public async Task SqlRoleAssignmentList()
+        {
+            var assignment = await CreateSqlRoleAssignment();
+ 
+            var assignments = await SqlRoleAssignmentCollection.GetAllAsync().ToEnumerableAsync();
+            Assert.That(assignments, Has.Count.EqualTo(1));
+            Assert.AreEqual(assignment.Data.Name, assignments[0].Data.Name);
+ 
+            VerifySqlRoleAssignments(assignments[0], assignment);
+        }
+ 
+        [Test]
+        [RecordedTest]
+        public async Task SqlRoleAssignmentDelete()
+        {
+            var assignment = await CreateSqlRoleAssignment();
+            await assignment.DeleteAsync();
+ 
+            assignment = await SqlRoleAssignmentCollection.GetIfExistsAsync(RoleAssignmentId);
+            Assert.Null(assignment);
+        }
+ 
+        protected async Task&lt;SqlRoleAssignment&gt; CreateSqlRoleAssignment()
+        {
+            var parameters = new SqlRoleAssignmentCreateUpdateParameters
+            {
+                RoleDefinitionId = _roleDefinitionId,
+                Scope = SqlRoleAssignmentScope,
+                PrincipalId = PrincipalId,
+            };
+            var assignmentLro = await SqlRoleAssignmentCollection.CreateOrUpdateAsync(RoleAssignmentId, parameters);
+            return assignmentLro.Value;
+        }
+ 
+        private void VerifySqlRoleAssignments(SqlRoleAssignment expectedValue, SqlRoleAssignment actualValue)
+        {
+            Assert.AreEqual(expectedValue.Id, actualValue.Id);
+            Assert.AreEqual(expectedValue.Data.Name, actualValue.Data.Name);
+            Assert.AreEqual(expectedValue.Data.Type, actualValue.Data.Type);
+ 
+            Assert.AreEqual(expectedValue.Data.RoleDefinitionId, actualValue.Data.RoleDefinitionId);
+ 
+            Assert.AreEqual(expectedValue.Data.Scope, actualValue.Data.Scope);
+            Assert.AreEqual(expectedValue.Data.PrincipalId, actualValue.Data.PrincipalId);
+        }
+    }
+}
+</span><span class="k preprocess">#</span><span class="k preprocess">endif</span>
+</pre></td></tr></table></div></body></html>

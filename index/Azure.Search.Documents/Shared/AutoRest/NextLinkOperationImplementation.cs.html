@@ -1,0 +1,299 @@
+﻿<!DOCTYPE html>
+<html><head><title>NextLinkOperationImplementation.cs</title><link rel="stylesheet" href="../../../styles.css"><script src="../../../scripts.js"></script></head>
+<body class="cB" onload="i(290);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Search.Documents/Shared/AutoRest/NextLinkOperationImplementation.cs" target="_top">Shared\AutoRest\NextLinkOperationImplementation.cs</a><br/></td><td></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Search.Documents" target="_top">Azure.Search.Documents.csproj</a> (Azure.Search.Documents)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<span class="k preprocess">#</span><span class="k preprocess">nullable</span> <span class="k preprocess">enable</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>.<span class="i n">Json</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Core</span>
+{
+    <b>internal class</b> <a id="98aa319ea89e54b4" href="../../R/98aa319ea89e54b4.html" target="n" data-glyph="2,0" class="t t">NextLinkOperationImplementation</a> : <a href="../OperationInternal.cs.html#dd24bfabfb9d9294" class="t t">IOperation</a>
+    {
+        <b>private static readonly string</b>[] <a id="e6b34d4f7c088ab8" href="../../R/e6b34d4f7c088ab8.html" target="n" data-glyph="46,1" class="i field">FailureStates</a> = { <span class="s">&quot;failed&quot;</span>, <span class="s">&quot;canceled&quot;</span> };
+        <b>private static readonly string</b>[] <a id="cf61e609aa176663" href="../../R/cf61e609aa176663.html" target="n" data-glyph="46,1" class="i field">SuccessStates</a> = { <span class="s">&quot;succeeded&quot;</span> };
+ 
+        <b>private readonly</b> <a href="#d078266ea0e5a045" class="t t">HeaderSource</a> <a id="71f486b5d7a4eecb" href="../../R/71f486b5d7a4eecb.html" target="n" data-glyph="46,1" class="i field">_headerSource</a>;
+        <b>private readonly bool</b> <a id="78f4dcb20fea2cb5" href="../../R/78f4dcb20fea2cb5.html" target="n" data-glyph="46,1" class="i field">_originalResponseHasLocation</a>;
+        <b>private readonly</b> <a href="@1@netstandard/A.html#991565dd25f47c90" class="t t">Uri</a> <a id="2695787acadcac0e" href="../../R/2695787acadcac0e.html" target="n" data-glyph="46,1" class="i field">_startRequestUri</a>;
+        <b>private readonly</b> <a href="OperationFinalStateVia.cs.html#bdc5d86267f2c963" class="t t">OperationFinalStateVia</a> <a id="954a4d42de8f6b2e" href="../../R/954a4d42de8f6b2e.html" target="n" data-glyph="46,1" class="i field">_finalStateVia</a>;
+        <b>private readonly</b> <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a> <a id="b3e9dba3a1400577" href="../../R/b3e9dba3a1400577.html" target="n" data-glyph="46,1" class="i field">_requestMethod</a>;
+        <b>private readonly</b> <a href="/Azure.Core/A.html#ce2f2fae396f36c5" class="t t">HttpPipeline</a> <a id="4edda0984fff087d" href="../../R/4edda0984fff087d.html" target="n" data-glyph="46,1" class="i field">_pipeline</a>;
+ 
+        <b>private string</b>? <a id="16f1f07230b0e9b7" href="../../R/16f1f07230b0e9b7.html" target="n" data-glyph="46,1" class="i field">_lastKnownLocation</a>;
+        <b>private string</b> <a id="14b9c361ee52c833" href="../../R/14b9c361ee52c833.html" target="n" data-glyph="46,1" class="i field">_nextRequestUri</a>;
+ 
+        <b>public static</b> <a href="../OperationInternal.cs.html#dd24bfabfb9d9294" class="t t">IOperation</a> <a id="8370a23dff0a452f" href="../../R/8370a23dff0a452f.html" target="n" data-glyph="72,1" class="i method">Create</a>(<a href="/Azure.Core/A.html#ce2f2fae396f36c5" class="t t">HttpPipeline</a> <span id="r0 rd" class="r0 r">pipeline</span>, <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a> <span id="r1 rd" class="r1 r">requestMethod</span>, <a href="@1@netstandard/A.html#991565dd25f47c90" class="t t">Uri</a> <span id="r2 rd" class="r2 r">startRequestUri</span>, <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a> <span id="r3 rd" class="r3 r">response</span>, <a href="OperationFinalStateVia.cs.html#bdc5d86267f2c963" class="t t">OperationFinalStateVia</a> <span id="r4 rd" class="r4 r">finalStateVia</span>)
+        {
+            <a href="#d078266ea0e5a045" class="k">var</a> <span id="r5 rd" class="r5 r">headerSource</span> = <a href="#cb4787ba60555885" class="i method">GetHeaderSource</a>(<span class="r1 r">requestMethod</span>, <span class="r2 r">startRequestUri</span>, <span class="r3 r">response</span>, <b>out</b> <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r6 rd" class="r6 r">nextRequestUri</span>);
+            <b>if</b> (<span class="r5 r">headerSource</span> == <a href="#d078266ea0e5a045" class="t t">HeaderSource</a>.<a href="#13b8b1ae2809374f" class="i field">None</a> &amp;&amp; <a href="#5886559207fa5f90" class="i method">IsFinalState</a>(<span class="r3 r">response</span>, <span class="r5 r">headerSource</span>, <b>out</b> <a href="@1@netstandard/A.html#ffebe438fd9cbf0e" class="k">var</a> <span id="r7 rd" class="r7 r">failureState</span>))
+            {
+                <b>return</b> <b>new</b> <a href="#2cf7400bcb4eaeaa" class="t constructor">CompletedOperation</a>(<span class="r7 r">failureState</span> ?? <a href="#52c166c02075bb81" class="i method">GetOperationStateFromFinalResponse</a>(<span class="r1 r">requestMethod</span>, <span class="r3 r">response</span>));
+            }
+ 
+            <b>var</b> (<span id="r8 rd" class="r8 r">originalResponseHasLocation</span>, <span id="r9 rd" class="r9 r">lastKnownLocation</span>) = <span class="r5 r">headerSource</span> == <a href="#d078266ea0e5a045" class="t t">HeaderSource</a>.<a href="#0d4eabdcf570d9da" class="i field">Location</a>
+                ? (<b>true</b>, <span class="r6 r">nextRequestUri</span>)
+                : <span class="r3 r">response</span>.<a href="/Azure.Core/A.html#9f6adbd7e81f8000" class="i property">Headers</a>.<a href="/Azure.Core/A.html#b9e2782d1af92ede" class="i method">TryGetValue</a>(<span class="s">&quot;Location&quot;</span>, <b>out</b> <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r10 rd" class="r10 r">locationUri</span>)
+                    ? (<b>true</b>, <span class="r10 r">locationUri</span>)
+                    : (<b>false</b>, <b>null</b>);
+ 
+            <b>return</b> <b>new</b> <a href="#63e383e2fb8d1c44" class="t constructor">NextLinkOperationImplementation</a>(<span class="r0 r">pipeline</span>, <span class="r1 r">requestMethod</span>, <span class="r2 r">startRequestUri</span>, <span class="r6 r">nextRequestUri</span>, <span class="r5 r">headerSource</span>, <span class="r8 r">originalResponseHasLocation</span>, <span class="r9 r">lastKnownLocation</span>, <span class="r4 r">finalStateVia</span>);
+        }
+ 
+        <b>private</b> <a id="63e383e2fb8d1c44" href="../../R/63e383e2fb8d1c44.html" target="n" data-glyph="76,1" class="t constructor">NextLinkOperationImplementation</a>(<a href="/Azure.Core/A.html#ce2f2fae396f36c5" class="t t">HttpPipeline</a> <span id="r11 rd" class="r11 r">pipeline</span>, <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a> <span id="r12 rd" class="r12 r">requestMethod</span>, <a href="@1@netstandard/A.html#991565dd25f47c90" class="t t">Uri</a> <span id="r13 rd" class="r13 r">startRequestUri</span>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r14 rd" class="r14 r">nextRequestUri</span>, <a href="#d078266ea0e5a045" class="t t">HeaderSource</a> <span id="r15 rd" class="r15 r">headerSource</span>, <b>bool</b> <span id="r16 rd" class="r16 r">originalResponseHasLocation</span>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>? <span id="r17 rd" class="r17 r">lastKnownLocation</span>, <a href="OperationFinalStateVia.cs.html#bdc5d86267f2c963" class="t t">OperationFinalStateVia</a> <span id="r18 rd" class="r18 r">finalStateVia</span>)
+        {
+            <a href="#b3e9dba3a1400577" class="i field">_requestMethod</a> = <span class="r12 r">requestMethod</span>;
+            <a href="#71f486b5d7a4eecb" class="i field">_headerSource</a> = <span class="r15 r">headerSource</span>;
+            <a href="#2695787acadcac0e" class="i field">_startRequestUri</a> = <span class="r13 r">startRequestUri</span>;
+            <a href="#14b9c361ee52c833" class="i field">_nextRequestUri</a> = <span class="r14 r">nextRequestUri</span>;
+            <a href="#78f4dcb20fea2cb5" class="i field">_originalResponseHasLocation</a> = <span class="r16 r">originalResponseHasLocation</span>;
+            <a href="#16f1f07230b0e9b7" class="i field">_lastKnownLocation</a> = <span class="r17 r">lastKnownLocation</span>;
+            <a href="#954a4d42de8f6b2e" class="i field">_finalStateVia</a> = <span class="r18 r">finalStateVia</span>;
+            <a href="#4edda0984fff087d" class="i field">_pipeline</a> = <span class="r11 r">pipeline</span>;
+        }
+ 
+        <b>public async</b> <span class="t t">ValueTask</span>&lt;<a href="../OperationInternal.cs.html#e16bbac48d3e387e" class="t t">OperationState</a>&gt; <a id="7197656d2877919f" href="../../R/7197656d2877919f.html" target="n" data-glyph="72,1" class="i method">UpdateStateAsync</a>(<b>bool</b> <span id="r19 rd" class="r19 r">async</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r20 rd" class="r20 r">cancellationToken</span>)
+        {
+            <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a> <span id="r21 rd" class="r21 r">response</span> = <b>await</b> <a href="#1887c05c6f2f54e8" class="i method">GetResponseAsync</a>(<span class="r19 r">async</span>, <a href="#14b9c361ee52c833" class="i field">_nextRequestUri</a>, <span class="r20 r">cancellationToken</span>).<span class="i method">ConfigureAwait</span>(<b>false</b>);
+ 
+            <a href="@1@netstandard/A.html#f1b135ff6c380b37" class="k">var</a> <span id="r22 rd" class="r22 r">hasCompleted</span> = <a href="#5886559207fa5f90" class="i method">IsFinalState</a>(<span class="r21 r">response</span>, <a href="#71f486b5d7a4eecb" class="i field">_headerSource</a>, <b>out</b> <a href="@1@netstandard/A.html#ffebe438fd9cbf0e" class="k">var</a> <span id="r23 rd" class="r23 r">failureState</span>);
+            <b>if</b> (<span class="r23 r">failureState</span> != <b>null</b>)
+            {
+                <b>return</b> <span class="r23 r">failureState</span>.<a href="@1@netstandard/A.html#7b38d1fa76071c95" class="i property">Value</a>;
+            }
+ 
+            <b>if</b> (<span class="r22 r">hasCompleted</span>)
+            {
+                <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a>? <span id="r24 rd" class="r24 r">finalUri</span> = <a href="#294a432651903101" class="i method">GetFinalUri</a>();
+                <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="k">var</a> <span id="r25 rd" class="r25 r">finalResponse</span> = <span class="r24 r">finalUri</span> != <b>null</b>
+                    ? <b>await</b> <a href="#1887c05c6f2f54e8" class="i method">GetResponseAsync</a>(<span class="r19 r">async</span>, <span class="r24 r">finalUri</span>, <span class="r20 r">cancellationToken</span>).<span class="i method">ConfigureAwait</span>(<b>false</b>)
+                    : <span class="r21 r">response</span>;
+ 
+                <b>return</b> <a href="#52c166c02075bb81" class="i method">GetOperationStateFromFinalResponse</a>(<a href="#b3e9dba3a1400577" class="i field">_requestMethod</a>, <span class="r25 r">finalResponse</span>);
+            }
+ 
+            <a href="#2ce3d2d520ca48b9" class="i method">UpdateNextRequestUri</a>(<span class="r21 r">response</span>.<a href="/Azure.Core/A.html#9f6adbd7e81f8000" class="i property">Headers</a>);
+            <b>return</b> <a href="../OperationInternal.cs.html#e16bbac48d3e387e" class="t t">OperationState</a>.<a href="../OperationInternal.cs.html#6f37a4cfa3d807de" class="i method">Pending</a>(<span class="r21 r">response</span>);
+        }
+ 
+        <b>private static</b> <a href="../OperationInternal.cs.html#e16bbac48d3e387e" class="t t">OperationState</a> <a id="52c166c02075bb81" href="../../R/52c166c02075bb81.html" target="n" data-glyph="76,1" class="i method">GetOperationStateFromFinalResponse</a>(<a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a> <span id="r26 rd" class="r26 r">requestMethod</span>, <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a> <span id="r27 rd" class="r27 r">response</span>)
+        {
+            <b>switch</b> (<span class="r27 r">response</span>.<a href="/Azure.Core/A.html#53e6401c580f9719" class="i property">Status</a>)
+            {
+                <b>case</b> 200:
+                <b>case</b> 201 <b>when</b> <span class="r26 r">requestMethod</span> == <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#e8de8f17e6d623af" class="i property">Put</a>:
+                <b>case</b> 204 <b>when</b> <span class="r26 r">requestMethod</span> != <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#e8de8f17e6d623af" class="i property">Put</a> &amp;&amp; <span class="r26 r">requestMethod</span> != <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#581e56600093eda3" class="i property">Patch</a>:
+                    <b>return</b> <a href="../OperationInternal.cs.html#e16bbac48d3e387e" class="t t">OperationState</a>.<a href="../OperationInternal.cs.html#e4f4be52c3ed321e" class="i method">Success</a>(<span class="r27 r">response</span>);
+                <b>default</b>:
+                    <b>return</b> <a href="../OperationInternal.cs.html#e16bbac48d3e387e" class="t t">OperationState</a>.<a href="../OperationInternal.cs.html#3166fe1eceeeb8de" class="i method">Failure</a>(<span class="r27 r">response</span>);
+            }
+        }
+ 
+        <b>private void</b> <a id="2ce3d2d520ca48b9" href="../../R/2ce3d2d520ca48b9.html" target="n" data-glyph="76,1" class="i method">UpdateNextRequestUri</a>(<a href="/Azure.Core/A.html#91fcc907630628a5" class="t t">ResponseHeaders</a> <span id="r28 rd" class="r28 r">headers</span>)
+        {
+            <a href="@1@netstandard/A.html#f1b135ff6c380b37" class="k">var</a> <span id="r29 rd" class="r29 r">hasLocation</span> = <span class="r28 r">headers</span>.<a href="/Azure.Core/A.html#b9e2782d1af92ede" class="i method">TryGetValue</a>(<span class="s">&quot;Location&quot;</span>, <b>out string</b>? <span id="r30 rd" class="r30 r">location</span>);
+            <b>if</b> (<span class="r29 r">hasLocation</span>)
+            {
+                <a href="#16f1f07230b0e9b7" class="i field">_lastKnownLocation</a> = <span class="r30 r">location</span>;
+            }
+ 
+            <b>switch</b> (<a href="#71f486b5d7a4eecb" class="i field">_headerSource</a>)
+            {
+                <b>case</b> <a href="#d078266ea0e5a045" class="t t">HeaderSource</a>.<a href="#6af524e94def824f" class="i field">OperationLocation</a> <b>when</b> <span class="r28 r">headers</span>.<a href="/Azure.Core/A.html#b9e2782d1af92ede" class="i method">TryGetValue</a>(<span class="s">&quot;Operation-Location&quot;</span>, <b>out string</b>? <span id="r31 rd" class="r31 r">operationLocation</span>):
+                    <a href="#14b9c361ee52c833" class="i field">_nextRequestUri</a> = <span class="r31 r">operationLocation</span>;
+                    <b>return</b>;
+                <b>case</b> <a href="#d078266ea0e5a045" class="t t">HeaderSource</a>.<a href="#b0604e32b4dce181" class="i field">AzureAsyncOperation</a> <b>when</b> <span class="r28 r">headers</span>.<a href="/Azure.Core/A.html#b9e2782d1af92ede" class="i method">TryGetValue</a>(<span class="s">&quot;Azure-AsyncOperation&quot;</span>, <b>out string</b>? <span id="r32 rd" class="r32 r">azureAsyncOperation</span>):
+                    <a href="#14b9c361ee52c833" class="i field">_nextRequestUri</a> = <span class="r32 r">azureAsyncOperation</span>;
+                    <b>return</b>;
+                <b>case</b> <a href="#d078266ea0e5a045" class="t t">HeaderSource</a>.<a href="#0d4eabdcf570d9da" class="i field">Location</a> <b>when</b> <span class="r29 r">hasLocation</span>:
+                    <a href="#14b9c361ee52c833" class="i field">_nextRequestUri</a> = <span class="r30 r">location</span>!;
+                    <b>return</b>;
+            }
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> This function is used to get the final request uri after the lro has completed.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private string</b>? <a id="294a432651903101" href="../../R/294a432651903101.html" target="n" data-glyph="76,1" class="i method">GetFinalUri</a>()
+        {
+            <span class="c">// Set final uri as null if the response header doesn&#39;t contain &quot;Operation-Location&quot; or &quot;Azure-AsyncOperation&quot;.</span>
+            <b>if</b> (<a href="#71f486b5d7a4eecb" class="i field">_headerSource</a> <b>is not</b> (<a href="#d078266ea0e5a045" class="t t">HeaderSource</a>.<a href="#6af524e94def824f" class="i field">OperationLocation</a> <b>or</b> <a href="#d078266ea0e5a045" class="t t">HeaderSource</a>.<a href="#b0604e32b4dce181" class="i field">AzureAsyncOperation</a>))
+            {
+                <b>return</b> <b>null</b>;
+            }
+ 
+            <span class="c">// Set final uri as null if original request is a delete method.</span>
+            <b>if</b> (<a href="#b3e9dba3a1400577" class="i field">_requestMethod</a> == <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#5e525e5211e26722" class="i property">Delete</a>)
+            {
+                <b>return</b> <b>null</b>;
+            }
+ 
+            <span class="c">// Set final uri as original request&#39;s uri if one of these requirements are met:</span>
+            <span class="c">// 1.Original request is a put method;</span>
+            <span class="c">// 2.Original request is a management plane patch method. For data plane patch method, the final uri will be determinned by the original response header and &quot;_finalStateVia&quot;;</span>
+            <span class="c">// 3.Original response header contains &quot;Location&quot; and FinalStateVia is configured to OriginalUri.</span>
+            <b>if</b> (<a href="#b3e9dba3a1400577" class="i field">_requestMethod</a> == <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#e8de8f17e6d623af" class="i property">Put</a> || <a href="#b3e9dba3a1400577" class="i field">_requestMethod</a> == <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#581e56600093eda3" class="i property">Patch</a> &amp;&amp; <a href="#2695787acadcac0e" class="i field">_startRequestUri</a>.<a href="@1@netstandard/A.html#e73925be401b9bcb" class="i property">Scheme</a> == <span class="s">&quot;https&quot;</span> &amp;&amp; <a href="#2695787acadcac0e" class="i field">_startRequestUri</a>.<a href="@1@netstandard/A.html#c230833968da7179" class="i property">Host</a> == <span class="s">&quot;management.azure.com&quot;</span> || <a href="#78f4dcb20fea2cb5" class="i field">_originalResponseHasLocation</a> &amp;&amp; <a href="#954a4d42de8f6b2e" class="i field">_finalStateVia</a> == <a href="OperationFinalStateVia.cs.html#bdc5d86267f2c963" class="t t">OperationFinalStateVia</a>.<a href="OperationFinalStateVia.cs.html#bd3bdee11d6c2b8e" class="i field">OriginalUri</a>)
+            {
+                <b>return</b> <a href="#2695787acadcac0e" class="i field">_startRequestUri</a>.<a href="@1@netstandard/A.html#e335fec0022465e6" class="i property">AbsoluteUri</a>;
+            }
+ 
+            <span class="c">// Set final uri as last known location header if original response header contains &quot;Location&quot; and FinalStateVia is configured to Location.</span>
+            <b>if</b> (<a href="#78f4dcb20fea2cb5" class="i field">_originalResponseHasLocation</a> &amp;&amp; <a href="#954a4d42de8f6b2e" class="i field">_finalStateVia</a> == <a href="OperationFinalStateVia.cs.html#bdc5d86267f2c963" class="t t">OperationFinalStateVia</a>.<a href="OperationFinalStateVia.cs.html#b26ecf1f67f9f18a" class="i field">Location</a>)
+            {
+                <b>return</b> <a href="#16f1f07230b0e9b7" class="i field">_lastKnownLocation</a>;
+            }
+            <b>return</b> <b>null</b>;
+        }
+ 
+        <b>private async</b> <span class="t t">ValueTask</span>&lt;<a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a>&gt; <a id="1887c05c6f2f54e8" href="../../R/1887c05c6f2f54e8.html" target="n" data-glyph="76,1" class="i method">GetResponseAsync</a>(<b>bool</b> <span id="r33 rd" class="r33 r">async</span>, <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r34 rd" class="r34 r">uri</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r35 rd" class="r35 r">cancellationToken</span>)
+        {
+            <b>using</b> <a href="/Azure.Core/A.html#0d3a69186ac45549" class="t t">HttpMessage</a> <span id="r36 rd" class="r36 r">message</span> = <a href="#19a9794af835940f" class="i method">CreateRequest</a>(<span class="r34 r">uri</span>);
+            <b>if</b> (<span class="r33 r">async</span>)
+            {
+                <b>await</b> <a href="#4edda0984fff087d" class="i field">_pipeline</a>.<a href="/Azure.Core/A.html#da0c121c12008f78" class="i method">SendAsync</a>(<span class="r36 r">message</span>, <span class="r35 r">cancellationToken</span>).<span class="i method">ConfigureAwait</span>(<b>false</b>);
+            }
+            <b>else</b>
+            {
+                <a href="#4edda0984fff087d" class="i field">_pipeline</a>.<a href="/Azure.Core/A.html#7b93c5bac78df9e0" class="i method">Send</a>(<span class="r36 r">message</span>, <span class="r35 r">cancellationToken</span>);
+            }
+            <b>return</b> <span class="r36 r">message</span>.<a href="/Azure.Core/A.html#0bc18a223263c879" class="i property">Response</a>;
+        }
+ 
+        <b>private</b> <a href="/Azure.Core/A.html#0d3a69186ac45549" class="t t">HttpMessage</a> <a id="19a9794af835940f" href="../../R/19a9794af835940f.html" target="n" data-glyph="76,1" class="i method">CreateRequest</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r37 rd" class="r37 r">uri</span>)
+        {
+            <a href="/Azure.Core/A.html#0d3a69186ac45549" class="t t">HttpMessage</a> <span id="r38 rd" class="r38 r">message</span> = <a href="#4edda0984fff087d" class="i field">_pipeline</a>.<a href="/Azure.Core/A.html#ac1290a6f2dbc4da" class="i method">CreateMessage</a>();
+            <a href="/Azure.Core/A.html#a519adbefba2e288" class="t t">Request</a> <span id="r39 rd" class="r39 r">request</span> = <span class="r38 r">message</span>.<a href="/Azure.Core/A.html#34fe7bc5cf4f67d5" class="i property">Request</a>;
+            <span class="r39 r">request</span>.<a href="/Azure.Core/A.html#38781a2f20c88339" class="i property">Method</a> = <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#c1939eaa5920682f" class="i property">Get</a>;
+ 
+            <b>if</b> (<a href="@1@netstandard/A.html#991565dd25f47c90" class="t t">Uri</a>.<a href="@1@netstandard/A.html#49754736d6982eb6" class="i method">TryCreate</a>(<span class="r37 r">uri</span>, <a href="@1@netstandard/A.html#ac43655101ad74be" class="t t">UriKind</a>.<a href="@1@netstandard/A.html#d734108197254429" class="i field">Absolute</a>, <b>out</b> <a href="@1@netstandard/A.html#991565dd25f47c90" class="k">var</a> <span id="r40 rd" class="r40 r">nextLink</span>) &amp;&amp; <span class="r40 r">nextLink</span>.<a href="@1@netstandard/A.html#e73925be401b9bcb" class="i property">Scheme</a> != <span class="s">&quot;file&quot;</span>)
+            {
+                <span class="r39 r">request</span>.<a href="/Azure.Core/A.html#a3954f29cb1a883c" class="i property">Uri</a>.<a href="/Azure.Core/A.html#79e001a52a92afbe" class="i method">Reset</a>(<span class="r40 r">nextLink</span>);
+            }
+            <b>else</b>
+            {
+                <span class="r39 r">request</span>.<a href="/Azure.Core/A.html#a3954f29cb1a883c" class="i property">Uri</a>.<a href="/Azure.Core/A.html#79e001a52a92afbe" class="i method">Reset</a>(<b>new</b> <a href="@1@netstandard/A.html#67d3260816440b78" class="t constructor">Uri</a>(<a href="#2695787acadcac0e" class="i field">_startRequestUri</a>, <span class="r37 r">uri</span>));
+            }
+ 
+            <b>return</b> <span class="r38 r">message</span>;
+        }
+ 
+        <b>private static bool</b> <a id="5886559207fa5f90" href="../../R/5886559207fa5f90.html" target="n" data-glyph="76,1" class="i method">IsFinalState</a>(<a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a> <span id="r41 rd" class="r41 r">response</span>, <a href="#d078266ea0e5a045" class="t t">HeaderSource</a> <span id="r42 rd" class="r42 r">headerSource</span>, <b>out</b> <a href="../OperationInternal.cs.html#e16bbac48d3e387e" class="t t">OperationState</a>? <span id="r43 rd" class="r43 r">failureState</span>)
+        {
+            <span class="r43 r">failureState</span> = <b>null</b>;
+            <b>if</b> (<span class="r42 r">headerSource</span> == <a href="#d078266ea0e5a045" class="t t">HeaderSource</a>.<a href="#0d4eabdcf570d9da" class="i field">Location</a>)
+            {
+                <b>return</b> <span class="r41 r">response</span>.<a href="/Azure.Core/A.html#53e6401c580f9719" class="i property">Status</a> != 202;
+            }
+ 
+            <b>if</b> (<span class="r41 r">response</span>.<a href="/Azure.Core/A.html#53e6401c580f9719" class="i property">Status</a> <b>is</b> &gt;= 200 <b>and</b> &lt;= 204)
+            {
+                <b>if</b> (<span class="r41 r">response</span>.<a href="/Azure.Core/A.html#e05b388d35abae58" class="i property">ContentStream</a>?.<a href="@1@netstandard/A.html#48b7e39cfd844dc5" class="i property">Length</a> &gt; 0)
+                {
+                    <b>try</b>
+                    {
+                        <b>using</b> <span class="t t">JsonDocument</span> <span id="r44 rd" class="r44 r">document</span> = <span class="t t">JsonDocument</span>.<span class="i method">Parse</span>(<span class="r41 r">response</span>.<a href="/Azure.Core/A.html#e05b388d35abae58" class="i property">ContentStream</a>);
+                        <b>var</b> <span id="r45 rd" class="r45 r">root</span> = <span class="r44 r">document</span>.<span class="i property">RootElement</span>;
+                        <b>switch</b> (<span class="r42 r">headerSource</span>)
+                        {
+                            <b>case</b> <a href="#d078266ea0e5a045" class="t t">HeaderSource</a>.<a href="#13b8b1ae2809374f" class="i field">None</a> <b>when</b> <span class="r45 r">root</span>.<span class="i method">TryGetProperty</span>(<span class="s">&quot;properties&quot;</span>, <b>out</b> <b>var</b> <span id="r46 rd" class="r46 r">properties</span>) &amp;&amp; <span class="r46 r">properties</span>.<span class="i method">TryGetProperty</span>(<span class="s">&quot;provisioningState&quot;</span>, <b>out</b> <span class="t t">JsonElement</span> <span id="r47 rd" class="r47 r">property</span>):
+                            <b>case</b> <a href="#d078266ea0e5a045" class="t t">HeaderSource</a>.<a href="#6af524e94def824f" class="i field">OperationLocation</a> <b>when</b> <span class="r45 r">root</span>.<span class="i method">TryGetProperty</span>(<span class="s">&quot;status&quot;</span>, <b>out</b> <span class="r47 r">property</span>):
+                            <b>case</b> <a href="#d078266ea0e5a045" class="t t">HeaderSource</a>.<a href="#b0604e32b4dce181" class="i field">AzureAsyncOperation</a> <b>when</b> <span class="r45 r">root</span>.<span class="i method">TryGetProperty</span>(<span class="s">&quot;status&quot;</span>, <b>out</b> <span class="r47 r">property</span>):
+                                <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r48 rd" class="r48 r">state</span> = <span class="r47 r">property</span>.<a href="JsonElementExtensions.cs.html#ef37893bed371b85" class="i method">GetRequiredString</a>().<a href="@1@netstandard/A.html#2d51c212cb09178e" class="i method">ToLowerInvariant</a>();
+                                <b>if</b> (<a href="#e6b34d4f7c088ab8" class="i field">FailureStates</a>.<a href="@1@netstandard/A.html#f60bab4c5e27a849" class="i method">Contains</a>(<span class="r48 r">state</span>))
+                                {
+                                    <span class="r43 r">failureState</span> = <a href="../OperationInternal.cs.html#e16bbac48d3e387e" class="t t">OperationState</a>.<a href="../OperationInternal.cs.html#3166fe1eceeeb8de" class="i method">Failure</a>(<span class="r41 r">response</span>);
+                                    <b>return</b> <b>true</b>;
+                                }
+                                <b>else</b>
+                                {
+                                    <b>return</b> <a href="#cf61e609aa176663" class="i field">SuccessStates</a>.<a href="@1@netstandard/A.html#f60bab4c5e27a849" class="i method">Contains</a>(<span class="r48 r">state</span>);
+                                }
+                        }
+                    }
+                    <b>finally</b>
+                    {
+                        <span class="c">// It is required to reset the position of the content after reading as this response may be used for deserialization.</span>
+                        <span class="r41 r">response</span>.<a href="/Azure.Core/A.html#e05b388d35abae58" class="i property">ContentStream</a>.<a href="@1@netstandard/A.html#35112b2a53fb536a" class="i property">Position</a> = 0;
+                    }
+                }
+ 
+                <span class="c">// If provisioningState was not found, it defaults to Succeeded.</span>
+                <b>if</b> (<span class="r42 r">headerSource</span> == <a href="#d078266ea0e5a045" class="t t">HeaderSource</a>.<a href="#13b8b1ae2809374f" class="i field">None</a>)
+                {
+                    <b>return</b> <b>true</b>;
+                }
+            }
+ 
+            <span class="r43 r">failureState</span> = <a href="../OperationInternal.cs.html#e16bbac48d3e387e" class="t t">OperationState</a>.<a href="../OperationInternal.cs.html#3166fe1eceeeb8de" class="i method">Failure</a>(<span class="r41 r">response</span>);
+            <b>return</b> <b>true</b>;
+        }
+ 
+        <b>private static bool</b> <a id="f3e39de7bd071bd3" href="../../R/f3e39de7bd071bd3.html" target="n" data-glyph="76,1" class="i method">ShouldIgnoreHeader</a>(<a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a> <span id="r49 rd" class="r49 r">method</span>, <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a> <span id="r50 rd" class="r50 r">response</span>)
+            =&gt; <span class="r49 r">method</span>.<a href="/Azure.Core/A.html#7cea773d2e0aed67" class="i property">Method</a> == <a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a>.<a href="/Azure.Core/A.html#581e56600093eda3" class="i property">Patch</a>.<a href="/Azure.Core/A.html#7cea773d2e0aed67" class="i property">Method</a> &amp;&amp; <span class="r50 r">response</span>.<a href="/Azure.Core/A.html#53e6401c580f9719" class="i property">Status</a> == 200;
+ 
+        <b>private static</b> <a href="#d078266ea0e5a045" class="t t">HeaderSource</a> <a id="cb4787ba60555885" href="../../R/cb4787ba60555885.html" target="n" data-glyph="76,1" class="i method">GetHeaderSource</a>(<a href="/Azure.Core/A.html#fccfde0a4ed3b2c2" class="t t">RequestMethod</a> <span id="r51 rd" class="r51 r">requestMethod</span>, <a href="@1@netstandard/A.html#991565dd25f47c90" class="t t">Uri</a> <span id="r52 rd" class="r52 r">requestUri</span>, <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a> <span id="r53 rd" class="r53 r">response</span>, <b>out string</b> <span id="r54 rd" class="r54 r">nextRequestUri</span>)
+        {
+            <b>if</b> (<a href="#f3e39de7bd071bd3" class="i method">ShouldIgnoreHeader</a>(<span class="r51 r">requestMethod</span>, <span class="r53 r">response</span>))
+            {
+                <span class="r54 r">nextRequestUri</span> = <span class="r52 r">requestUri</span>.<a href="@1@netstandard/A.html#e335fec0022465e6" class="i property">AbsoluteUri</a>;
+                <b>return</b> <a href="#d078266ea0e5a045" class="t t">HeaderSource</a>.<a href="#13b8b1ae2809374f" class="i field">None</a>;
+            }
+ 
+            <a href="/Azure.Core/A.html#91fcc907630628a5" class="k">var</a> <span id="r55 rd" class="r55 r">headers</span> = <span class="r53 r">response</span>.<a href="/Azure.Core/A.html#9f6adbd7e81f8000" class="i property">Headers</a>;
+            <b>if</b> (<span class="r55 r">headers</span>.<a href="/Azure.Core/A.html#b9e2782d1af92ede" class="i method">TryGetValue</a>(<span class="s">&quot;Operation-Location&quot;</span>, <b>out</b> <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r56 rd" class="r56 r">operationLocationUri</span>))
+            {
+                <span class="r54 r">nextRequestUri</span> = <span class="r56 r">operationLocationUri</span>;
+                <b>return</b> <a href="#d078266ea0e5a045" class="t t">HeaderSource</a>.<a href="#6af524e94def824f" class="i field">OperationLocation</a>;
+            }
+ 
+            <b>if</b> (<span class="r55 r">headers</span>.<a href="/Azure.Core/A.html#b9e2782d1af92ede" class="i method">TryGetValue</a>(<span class="s">&quot;Azure-AsyncOperation&quot;</span>, <b>out</b> <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r57 rd" class="r57 r">azureAsyncOperationUri</span>))
+            {
+                <span class="r54 r">nextRequestUri</span> = <span class="r57 r">azureAsyncOperationUri</span>;
+                <b>return</b> <a href="#d078266ea0e5a045" class="t t">HeaderSource</a>.<a href="#b0604e32b4dce181" class="i field">AzureAsyncOperation</a>;
+            }
+ 
+            <b>if</b> (<span class="r55 r">headers</span>.<a href="/Azure.Core/A.html#b9e2782d1af92ede" class="i method">TryGetValue</a>(<span class="s">&quot;Location&quot;</span>, <b>out</b> <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">var</a> <span id="r58 rd" class="r58 r">locationUri</span>))
+            {
+                <span class="r54 r">nextRequestUri</span> = <span class="r58 r">locationUri</span>;
+                <b>return</b> <a href="#d078266ea0e5a045" class="t t">HeaderSource</a>.<a href="#0d4eabdcf570d9da" class="i field">Location</a>;
+            }
+ 
+            <span class="r54 r">nextRequestUri</span> = <span class="r52 r">requestUri</span>.<a href="@1@netstandard/A.html#e335fec0022465e6" class="i property">AbsoluteUri</a>;
+            <b>return</b> <a href="#d078266ea0e5a045" class="t t">HeaderSource</a>.<a href="#13b8b1ae2809374f" class="i field">None</a>;
+        }
+ 
+        <b>private enum</b> <a id="d078266ea0e5a045" href="../../R/d078266ea0e5a045.html" target="n" data-glyph="22,1" class="t t"><span id="9ddcc27d210c97b7">HeaderSource</span></a>
+        {
+            <a id="13b8b1ae2809374f" href="../../R/13b8b1ae2809374f.html" target="n" data-glyph="24,2" class="i field">None</a>,
+            <a id="6af524e94def824f" href="../../R/6af524e94def824f.html" target="n" data-glyph="24,2" class="i field">OperationLocation</a>,
+            <a id="b0604e32b4dce181" href="../../R/b0604e32b4dce181.html" target="n" data-glyph="24,2" class="i field">AzureAsyncOperation</a>,
+            <a id="0d4eabdcf570d9da" href="../../R/0d4eabdcf570d9da.html" target="n" data-glyph="24,2" class="i field">Location</a>
+        }
+ 
+        <b>private class</b> <a id="351afd6533c1a7ff" href="../../R/351afd6533c1a7ff.html" target="n" data-glyph="4,1" class="t t">CompletedOperation</a> : <a href="../OperationInternal.cs.html#dd24bfabfb9d9294" class="t t">IOperation</a>
+        {
+            <b>private readonly</b> <a href="../OperationInternal.cs.html#e16bbac48d3e387e" class="t t">OperationState</a> <a id="de4b4023919b0b3c" href="../../R/de4b4023919b0b3c.html" target="n" data-glyph="46,2" class="i field">_operationState</a>;
+ 
+            <b>public</b> <a id="2cf7400bcb4eaeaa" href="../../R/2cf7400bcb4eaeaa.html" target="n" data-glyph="72,2" class="t constructor">CompletedOperation</a>(<a href="../OperationInternal.cs.html#e16bbac48d3e387e" class="t t">OperationState</a> <span id="r59 rd" class="r59 r">operationState</span>)
+            {
+                <a href="#de4b4023919b0b3c" class="i field">_operationState</a> = <span class="r59 r">operationState</span>;
+            }
+ 
+            <b>public</b> <span class="t t">ValueTask</span>&lt;<a href="../OperationInternal.cs.html#e16bbac48d3e387e" class="t t">OperationState</a>&gt; <a id="17a9ad12cfdf5d40" href="../../R/17a9ad12cfdf5d40.html" target="n" data-glyph="72,2" class="i method">UpdateStateAsync</a>(<b>bool</b> <span id="r60 rd" class="r60 r">async</span>, <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r61 rd" class="r61 r">cancellationToken</span>) =&gt; <b>new</b>(<a href="#de4b4023919b0b3c" class="i field">_operationState</a>);
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

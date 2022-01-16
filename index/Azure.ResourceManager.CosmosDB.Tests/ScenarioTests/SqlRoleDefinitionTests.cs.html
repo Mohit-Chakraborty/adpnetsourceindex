@@ -1,0 +1,168 @@
+﻿<!DOCTYPE html>
+<html><head><title>SqlRoleDefinitionTests.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(159);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.ResourceManager.CosmosDB.Tests/ScenarioTests/SqlRoleDefinitionTests.cs" target="_top">ScenarioTests\SqlRoleDefinitionTests.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/cosmosdb/Azure.ResourceManager.CosmosDB/tests/ScenarioTests/SqlRoleDefinitionTests.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.ResourceManager.CosmosDB.Tests" target="_top">Azure.ResourceManager.CosmosDB.Tests.csproj</a> (Azure.ResourceManager.CosmosDB.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+<span class="k preprocess">#</span><span class="k preprocess">if</span> <b>false</b>
+<span class="e">// enable the test after https://github.com/Azure/azure-rest-api-specs/issues/16560 is resolved
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using Azure.Core.TestFramework;
+using Azure.ResourceManager.CosmosDB.Models;
+using NUnit.Framework;
+ 
+namespace Azure.ResourceManager.CosmosDB.Tests
+{
+    [Ignore(&quot;https://github.com/Azure/azure-rest-api-specs/issues/16560&quot;)]
+    public class SqlRoleDefinitionTests : CosmosDBManagementClientBase
+    {
+        private const string RoleDefinitionId = &quot;70580ac3-cd0b-4549-8336-2f0d55df111e&quot;;
+ 
+        private const string PermissionDataActionCreate = &quot;Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/create&quot;;
+        private const string PermissionDataActionRead = &quot;Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/read&quot;;
+ 
+        private DatabaseAccount _databaseAccount;
+        private ResourceIdentifier _sqlDatabaseId;
+        private SqlDatabase _sqlDatabase;
+ 
+        public SqlRoleDefinitionTests(bool isAsync) : base(isAsync)
+        {
+        }
+ 
+        private SqlRoleDefinitionCollection SqlRoleDefinitionCollection { get =&gt; _databaseAccount.GetSqlRoleDefinitions(); }
+        private string SqlDatabaseActionScope { get =&gt; $&quot;{_databaseAccount.Id}/dbs/{_sqlDatabase.Data.Name}&quot;; }
+ 
+        [OneTimeSetUp]
+        public async Task GlobalSetup()
+        {
+            _resourceGroup = await GlobalClient.GetResourceGroup(_resourceGroupIdentifier).GetAsync();
+ 
+            _databaseAccount = await CreateDatabaseAccount(SessionRecording.GenerateAssetName(&quot;dbaccount-&quot;), DatabaseAccountKind.GlobalDocumentDB);
+ 
+            _sqlDatabaseId = (await SqlDatabaseTests.CreateSqlDatabase(SessionRecording.GenerateAssetName(&quot;sql-db-&quot;), null, _databaseAccount.GetSqlDatabases())).Id;
+ 
+            await StopSessionRecordingAsync();
+        }
+ 
+        [OneTimeTearDown]
+        public virtual void GlobalTeardown()
+        {
+            _sqlDatabase.Delete();
+            _databaseAccount.Delete();
+        }
+ 
+        [SetUp]
+        public async Task SetUp()
+        {
+            _sqlDatabase = await ArmClient.GetSqlDatabase(_sqlDatabaseId).GetAsync();
+        }
+ 
+        [TearDown]
+        public async Task TearDown()
+        {
+            SqlRoleDefinition definition = await SqlRoleDefinitionCollection.GetIfExistsAsync(RoleDefinitionId);
+            if (definition != null)
+            {
+                await definition.DeleteAsync();
+            }
+        }
+ 
+        [Test]
+        [RecordedTest]
+        public async Task SqlRoleDefinitionCreateAndUpdate()
+        {
+            var definition = await CreateSqlRoleDefinition(SqlDatabaseActionScope, SqlRoleDefinitionCollection);
+            Assert.AreEqual(RoleDefinitionId, definition.Data.Name);
+            Assert.That(definition.Data.AssignableScopes, Has.Count.EqualTo(1));
+            Assert.AreEqual(SqlDatabaseActionScope, definition.Data.AssignableScopes[0]);
+            Assert.That(definition.Data.Permissions, Has.Count.EqualTo(1));
+            Assert.That(definition.Data.Permissions[0].DataActions, Has.Count.EqualTo(1));
+            Assert.IsEmpty(definition.Data.Permissions[0].NotDataActions);
+            Assert.AreEqual(PermissionDataActionCreate, definition.Data.Permissions[0].DataActions[0]);
+ 
+            bool ifExists = await SqlRoleDefinitionCollection.CheckIfExistsAsync(RoleDefinitionId);
+            Assert.True(ifExists);
+ 
+            SqlRoleDefinition definition2 = await SqlRoleDefinitionCollection.GetAsync(RoleDefinitionId);
+            Assert.AreEqual(RoleDefinitionId, definition2.Data.Name);
+            VerifySqlRoleDefinitions(definition, definition2);
+ 
+            var updateParameters = new SqlRoleDefinitionCreateUpdateParameters
+            {
+                RoleName = RoleDefinitionId,
+                Type = RoleDefinitionType.CustomRole,
+                AssignableScopes = { SqlDatabaseActionScope },
+                Permissions = { new Permission { DataActions = { PermissionDataActionRead } } },
+            };
+            definition = await (await SqlRoleDefinitionCollection.CreateOrUpdateAsync(RoleDefinitionId, updateParameters)).WaitForCompletionAsync();
+            Assert.AreEqual(RoleDefinitionId, definition.Data.Name);
+            Assert.That(definition.Data.AssignableScopes, Has.Count.EqualTo(2));
+            Assert.AreEqual(SqlDatabaseActionScope, definition.Data.AssignableScopes[0]);
+            Assert.That(definition.Data.Permissions, Has.Count.EqualTo(1));
+            Assert.That(definition.Data.Permissions[0].DataActions, Has.Count.EqualTo(1));
+            Assert.IsEmpty(definition.Data.Permissions[0].NotDataActions);
+            Assert.AreEqual(PermissionDataActionRead, definition.Data.Permissions[0].DataActions[0]);
+ 
+            definition2 = await SqlRoleDefinitionCollection.GetAsync(RoleDefinitionId);
+            VerifySqlRoleDefinitions(definition, definition2);
+        }
+ 
+        [Test]
+        [RecordedTest]
+        public async Task SqlRoleDefinitionList()
+        {
+            var definition = await CreateSqlRoleDefinition(SqlDatabaseActionScope, SqlRoleDefinitionCollection);
+ 
+            var definitions = await SqlRoleDefinitionCollection.GetAllAsync().ToEnumerableAsync();
+            Assert.That(definitions, Has.Count.EqualTo(1));
+            Assert.AreEqual(definition.Data.Name, definitions[0].Data.Name);
+ 
+            VerifySqlRoleDefinitions(definitions[0], definition);
+        }
+ 
+        [Test]
+        [RecordedTest]
+        public async Task SqlRoleDefinitionDelete()
+        {
+            var definition = await CreateSqlRoleDefinition(SqlDatabaseActionScope, SqlRoleDefinitionCollection);
+            await definition.DeleteAsync();
+ 
+            definition = await SqlRoleDefinitionCollection.GetIfExistsAsync(RoleDefinitionId);
+            Assert.Null(definition);
+        }
+ 
+        internal static async Task&lt;SqlRoleDefinition&gt; CreateSqlRoleDefinition(string assignableScope, SqlRoleDefinitionCollection definitionCollection)
+        {
+            //RoleDefinitionId = Recording.GenerateAssetName(&quot;sql-role-&quot;);
+            var parameters = new SqlRoleDefinitionCreateUpdateParameters
+            {
+                RoleName = RoleDefinitionId,
+                Type = RoleDefinitionType.CustomRole,
+                AssignableScopes = { assignableScope },
+                Permissions = { new Permission { DataActions = { PermissionDataActionCreate } } },
+            };
+            var definitionLro = await definitionCollection.CreateOrUpdateAsync(RoleDefinitionId, parameters);
+            return definitionLro.Value;
+        }
+ 
+        private void VerifySqlRoleDefinitions(SqlRoleDefinition expectedValue, SqlRoleDefinition actualValue)
+        {
+            Assert.AreEqual(expectedValue.Id, actualValue.Id);
+            Assert.AreEqual(expectedValue.Data.Name, actualValue.Data.Name);
+            Assert.AreEqual(expectedValue.Data.Type, actualValue.Data.Type);
+ 
+            Assert.AreEqual(expectedValue.Data.RoleName, actualValue.Data.RoleName);
+ 
+            Assert.AreEqual(expectedValue.Data.AssignableScopes, actualValue.Data.AssignableScopes);
+            Assert.AreEqual(expectedValue.Data.Permissions, actualValue.Data.Permissions);
+        }
+    }
+}
+</span><span class="k preprocess">#</span><span class="k preprocess">endif</span>
+</pre></td></tr></table></div></body></html>
