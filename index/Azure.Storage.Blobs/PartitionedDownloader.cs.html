@@ -1,6 +1,6 @@
 ﻿<!DOCTYPE html>
 <html><head><title>PartitionedDownloader.cs</title><link rel="stylesheet" href="../styles.css"><script src="../scripts.js"></script></head>
-<body class="cB" onload="i(385);"><div class="dH">
+<body class="cB" onload="i(408);"><div class="dH">
 <table style="width: 100%">
 <tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Storage.Blobs/PartitionedDownloader.cs" target="_top">PartitionedDownloader.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/storage/Azure.Storage.Blobs/src/PartitionedDownloader.cs" target="_blank">View on GitHub</a></td></tr>
 <tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Storage.Blobs" target="_top">Azure.Storage.Blobs.csproj</a> (Azure.Storage.Blobs)</td><td></td></tr>
@@ -17,6 +17,7 @@
 <b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
 <b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
 <b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>;
 <b>using</b> <span class="i n">Azure</span>.<span class="i n">Core</span>.<span class="i n">Pipeline</span>;
 <b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>.<span class="i n">Models</span>;
 <b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>.<span class="i n">Specialized</span>;
@@ -48,10 +49,13 @@
  
         <b>private readonly</b> <a href="/Azure.Storage.Common/A.html#73cd37b24a10f6d5" class="t t">DownloadTransactionalHashingOptions</a> <a id="b5cc25a3d5782d10" href="R/b5cc25a3d5782d10.html" target="n" data-glyph="46,1" class="i field">_hashingOptions</a>;
  
-        <b>public</b> <a id="4d68c577f47a8113" href="R/4d68c577f47a8113.html" target="n" data-glyph="72,1" class="t constructor">PartitionedDownloader</a>(
+        <b>private readonly</b> <a href="@1@netstandard/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<b>long</b>&gt; <a id="83fa81c5ee1ecd9f" href="R/83fa81c5ee1ecd9f.html" target="n" data-glyph="46,1" class="i field">_progress</a>;
+ 
+        <b>public</b> <a id="b0d0059ca5abca05" href="R/b0d0059ca5abca05.html" target="n" data-glyph="72,1" class="t constructor">PartitionedDownloader</a>(
             <a href="BlobBaseClient.cs.html#853236f95f48385e" class="t t">BlobBaseClient</a> <span id="r0 rd" class="r0 r">client</span>,
             <a href="/Azure.Storage.Common/A.html#5906346a5aaad27d" class="t t">StorageTransferOptions</a> <span id="r1 rd" class="r1 r">transferOptions</span> = <b>default</b>,
-            <a href="/Azure.Storage.Common/A.html#73cd37b24a10f6d5" class="t t">DownloadTransactionalHashingOptions</a> <span id="r2 rd" class="r2 r">hashingOptions</span> = <b>default</b>)
+            <a href="/Azure.Storage.Common/A.html#73cd37b24a10f6d5" class="t t">DownloadTransactionalHashingOptions</a> <span id="r2 rd" class="r2 r">hashingOptions</span> = <b>default</b>,
+            <a href="@1@netstandard/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<b>long</b>&gt; <span id="r3 rd" class="r3 r">progress</span> = <b>default</b>)
         {
             <a href="#31526a7788158815" class="i field">_client</a> = <span class="r0 r">client</span>;
  
@@ -91,90 +95,101 @@
             <span class="c">// the caller to this stream cannot defer validation, as they cannot access a returned hash</span>
             <b>if</b> (!(<span class="r2 r">hashingOptions</span>?.<a href="/Azure.Storage.Common/A.html#1043ac07103a717f" class="i property">Validate</a> ?? <b>true</b>))
             {
-                <b>throw</b> <a href="P/5ed86f0799b000b6.html#5ed86f0799b000b6" class="t t">Errors</a>.<a href="Shared/Errors.Clients.cs.html#227f91016e7ded64" class="i method">CannotDeferTransactionalHashVerification</a>();
+                <b>throw</b> <a href="P/5ed86f0799b000b6.html#5ed86f0799b000b6" class="t t">Errors</a>.<a href="Shared/Errors.cs.html#227f91016e7ded64" class="i method">CannotDeferTransactionalHashVerification</a>();
             }
  
             <a href="#b5cc25a3d5782d10" class="i field">_hashingOptions</a> = <span class="r2 r">hashingOptions</span>;
+            <a href="#83fa81c5ee1ecd9f" class="i field">_progress</a> = <span class="r3 r">progress</span>;
+ 
+            <span class="c">/* Unlike partitioned upload, download cannot tell ahead of time if it will split and/or parallelize
+             * after first call. Instead of applying progress handling to initial download stream after-the-fact,
+             * wrap a given progress handler in an aggregator upfront and accept the overhead. */</span>
+            <b>if</b> (<a href="#83fa81c5ee1ecd9f" class="i field">_progress</a> != <b>null</b> &amp;&amp; <a href="#83fa81c5ee1ecd9f" class="i field">_progress</a> <b>is not</b> <a href="Shared/AggregatingProgressIncrementer.cs.html#9de934a92d301bc7" class="t t">AggregatingProgressIncrementer</a>)
+            {
+                <a href="#83fa81c5ee1ecd9f" class="i field">_progress</a> = <b>new</b> <a href="Shared/AggregatingProgressIncrementer.cs.html#63dd31008ce64717" class="t constructor">AggregatingProgressIncrementer</a>(<a href="#83fa81c5ee1ecd9f" class="i field">_progress</a>);
+            }
         }
  
         <b>public async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a>&gt; <a id="c8ce59ca9186d58f" href="R/c8ce59ca9186d58f.html" target="n" data-glyph="72,1" class="i method">DownloadToAsync</a>(
-            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r3 rd" class="r3 r">destination</span>,
-            <a href="Models/BlobRequestConditions.cs.html#340adb54d55c6c34" class="t t">BlobRequestConditions</a> <span id="r4 rd" class="r4 r">conditions</span>,
-            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r5 rd" class="r5 r">cancellationToken</span>)
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r4 rd" class="r4 r">destination</span>,
+            <a href="Models/BlobRequestConditions.cs.html#340adb54d55c6c34" class="t t">BlobRequestConditions</a> <span id="r5 rd" class="r5 r">conditions</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r6 rd" class="r6 r">cancellationToken</span>)
         {
             <span class="c">// Wrap the download range calls in a Download span for distributed</span>
             <span class="c">// tracing</span>
-            <a href="SharedCore/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r6 rd" class="r6 r">scope</span> = <a href="#31526a7788158815" class="i field">_client</a>.<a href="BlobBaseClient.cs.html#7ea0c7bfa9864c36" class="i property">ClientConfiguration</a>.<a href="Shared/StorageClientConfiguration.cs.html#f8e8941a5db2fb62" class="i property">ClientDiagnostics</a>.<a href="SharedCore/DiagnosticScopeFactory.cs.html#8aeed3185eccadf4" class="i method">CreateScope</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="BlobBaseClient.cs.html#853236f95f48385e" class="t t">BlobBaseClient</a>)}<span class="s">.</span>{<b>nameof</b>(<a href="BlobBaseClient.cs.html#853236f95f48385e" class="t t">BlobBaseClient</a>.<span class="i">DownloadTo</span>)}<span class="s">&quot;</span>);
+            <a href="SharedCore/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r7 rd" class="r7 r">scope</span> = <a href="#31526a7788158815" class="i field">_client</a>.<a href="BlobBaseClient.cs.html#7ea0c7bfa9864c36" class="i property">ClientConfiguration</a>.<a href="Shared/StorageClientConfiguration.cs.html#f8e8941a5db2fb62" class="i property">ClientDiagnostics</a>.<a href="SharedCore/DiagnosticScopeFactory.cs.html#8aeed3185eccadf4" class="i method">CreateScope</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="BlobBaseClient.cs.html#853236f95f48385e" class="t t">BlobBaseClient</a>)}<span class="s">.</span>{<b>nameof</b>(<a href="BlobBaseClient.cs.html#853236f95f48385e" class="t t">BlobBaseClient</a>.<span class="i">DownloadTo</span>)}<span class="s">&quot;</span>);
             <b>try</b>
             {
-                <span class="r6 r">scope</span>.<a href="SharedCore/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
+                <span class="r7 r">scope</span>.<a href="SharedCore/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
  
                 <span class="c">// Just start downloading using an initial range.  If it&#39;s a</span>
                 <span class="c">// small blob, we&#39;ll get the whole thing in one shot.  If it&#39;s</span>
                 <span class="c">// a large blob, we&#39;ll get its full size in Content-Range and</span>
                 <span class="c">// can keep downloading it in segments.</span>
-                <a href="/Azure.Core/A.html#d6f9b3aba6783671" class="k">var</a> <span id="r7 rd" class="r7 r">initialRange</span> = <b>new</b> <a href="/Azure.Core/A.html#6ed33a49a04456b8" class="t constructor">HttpRange</a>(0, <a href="#9f35394654ab994a" class="i field">_initialRangeSize</a>);
-                <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;<a href="Models/BlobDownloadStreamingResult.cs.html#17d7ce05ae2ed5a8" class="t t">BlobDownloadStreamingResult</a>&gt;&gt; <span id="r8 rd" class="r8 r">initialResponseTask</span> =
+                <a href="/Azure.Core/A.html#d6f9b3aba6783671" class="k">var</a> <span id="r8 rd" class="r8 r">initialRange</span> = <b>new</b> <a href="/Azure.Core/A.html#6ed33a49a04456b8" class="t constructor">HttpRange</a>(0, <a href="#9f35394654ab994a" class="i field">_initialRangeSize</a>);
+                <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;<a href="Models/BlobDownloadStreamingResult.cs.html#17d7ce05ae2ed5a8" class="t t">BlobDownloadStreamingResult</a>&gt;&gt; <span id="r9 rd" class="r9 r">initialResponseTask</span> =
                     <a href="#31526a7788158815" class="i field">_client</a>.<a href="BlobBaseClient.cs.html#9587656a3d5c1446" class="i method">DownloadStreamingAsync</a>(
                         <b>new</b> <a href="Models/BlobDownloadOptions.cs.html#2551f00fdf204415" class="t constructor">BlobDownloadOptions</a>
                         {
-                            <a href="Models/BlobDownloadOptions.cs.html#dcf094f56e45260a" class="i property">Range</a> = <span class="r7 r">initialRange</span>,
-                            <a href="Models/BlobDownloadOptions.cs.html#2312ec2a5fdbd782" class="i property">Conditions</a> = <span class="r4 r">conditions</span>,
-                            <a href="Models/BlobDownloadOptions.cs.html#1f34103afbf1d957" class="i property">TransactionalHashingOptions</a> = <a href="#b5cc25a3d5782d10" class="i field">_hashingOptions</a>
+                            <a href="Models/BlobDownloadOptions.cs.html#dcf094f56e45260a" class="i property">Range</a> = <span class="r8 r">initialRange</span>,
+                            <a href="Models/BlobDownloadOptions.cs.html#2312ec2a5fdbd782" class="i property">Conditions</a> = <span class="r5 r">conditions</span>,
+                            <a href="Models/BlobDownloadOptions.cs.html#1f34103afbf1d957" class="i property">TransactionalHashingOptions</a> = <a href="#b5cc25a3d5782d10" class="i field">_hashingOptions</a>,
+                            <a href="Models/BlobDownloadOptions.cs.html#3b94f4727df8ed7b" class="i property">ProgressHandler</a> = <a href="#83fa81c5ee1ecd9f" class="i field">_progress</a>,
                         },
-                        <span class="r5 r">cancellationToken</span>);
+                        <span class="r6 r">cancellationToken</span>);
  
-                <a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;<a href="Models/BlobDownloadStreamingResult.cs.html#17d7ce05ae2ed5a8" class="t t">BlobDownloadStreamingResult</a>&gt; <span id="r9 rd" class="r9 r">initialResponse</span> = <b>null</b>;
+                <a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;<a href="Models/BlobDownloadStreamingResult.cs.html#17d7ce05ae2ed5a8" class="t t">BlobDownloadStreamingResult</a>&gt; <span id="r10 rd" class="r10 r">initialResponse</span> = <b>null</b>;
                 <b>try</b>
                 {
-                    <span class="r9 r">initialResponse</span> = <b>await</b> <span class="r8 r">initialResponseTask</span>.<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                    <span class="r10 r">initialResponse</span> = <b>await</b> <span class="r9 r">initialResponseTask</span>.<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
                 }
-                <b>catch</b> (<a href="/Azure.Core/A.html#253c51f73f5cd67d" class="t t">RequestFailedException</a> <span id="r10 rd" class="r10 r">ex</span>) <b>when</b> (<span class="r10 r">ex</span>.<a href="/Azure.Core/A.html#0f8d8760e8ec9460" class="i property">ErrorCode</a> == <a href="P/e0d947616d6aba70.html#e0d947616d6aba70" class="t t">BlobErrorCode</a>.<a href="Generated/Models/BlobErrorCode.cs.html#ad814869d43de925" class="i property">InvalidRange</a>)
+                <b>catch</b> (<a href="/Azure.Core/A.html#253c51f73f5cd67d" class="t t">RequestFailedException</a> <span id="r11 rd" class="r11 r">ex</span>) <b>when</b> (<span class="r11 r">ex</span>.<a href="/Azure.Core/A.html#0f8d8760e8ec9460" class="i property">ErrorCode</a> == <a href="P/e0d947616d6aba70.html#e0d947616d6aba70" class="t t">BlobErrorCode</a>.<a href="Generated/Models/BlobErrorCode.cs.html#ad814869d43de925" class="i property">InvalidRange</a>)
                 {
-                    <span class="r9 r">initialResponse</span> = <b>await</b> <a href="#31526a7788158815" class="i field">_client</a>.<a href="BlobBaseClient.cs.html#9587656a3d5c1446" class="i method">DownloadStreamingAsync</a>(
+                    <span class="r10 r">initialResponse</span> = <b>await</b> <a href="#31526a7788158815" class="i field">_client</a>.<a href="BlobBaseClient.cs.html#9587656a3d5c1446" class="i method">DownloadStreamingAsync</a>(
                         <b>new</b> <a href="Models/BlobDownloadOptions.cs.html#2551f00fdf204415" class="t constructor">BlobDownloadOptions</a>
                         {
                             <a href="Models/BlobDownloadOptions.cs.html#dcf094f56e45260a" class="i property">Range</a> = <b>default</b>,
-                            <a href="Models/BlobDownloadOptions.cs.html#2312ec2a5fdbd782" class="i property">Conditions</a> = <span class="r4 r">conditions</span>,
-                            <a href="Models/BlobDownloadOptions.cs.html#1f34103afbf1d957" class="i property">TransactionalHashingOptions</a> = <a href="#b5cc25a3d5782d10" class="i field">_hashingOptions</a>
+                            <a href="Models/BlobDownloadOptions.cs.html#2312ec2a5fdbd782" class="i property">Conditions</a> = <span class="r5 r">conditions</span>,
+                            <a href="Models/BlobDownloadOptions.cs.html#1f34103afbf1d957" class="i property">TransactionalHashingOptions</a> = <a href="#b5cc25a3d5782d10" class="i field">_hashingOptions</a>,
+                            <a href="Models/BlobDownloadOptions.cs.html#3b94f4727df8ed7b" class="i property">ProgressHandler</a> = <a href="#83fa81c5ee1ecd9f" class="i field">_progress</a>,
                         },
-                        <span class="r5 r">cancellationToken</span>)
+                        <span class="r6 r">cancellationToken</span>)
                         .<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
                 }
  
                 <span class="c">// If the initial request returned no content (i.e., a 304),</span>
                 <span class="c">// we&#39;ll pass that back to the user immediately</span>
-                <b>if</b> (<span class="r9 r">initialResponse</span>.<a href="Shared/StorageExceptionExtensions.cs.html#e6145af0ac446781" class="i method">IsUnavailable</a>())
+                <b>if</b> (<span class="r10 r">initialResponse</span>.<a href="Shared/StorageExceptionExtensions.cs.html#e6145af0ac446781" class="i method">IsUnavailable</a>())
                 {
-                    <b>return</b> <span class="r9 r">initialResponse</span>.<a href="/Azure.Core/A.html#959994a72d6ef38a" class="i method">GetRawResponse</a>();
+                    <b>return</b> <span class="r10 r">initialResponse</span>.<a href="/Azure.Core/A.html#959994a72d6ef38a" class="i method">GetRawResponse</a>();
                 }
  
                 <span class="c">// If the first segment was the entire blob, we&#39;ll copy that to</span>
                 <span class="c">// the output stream and finish now</span>
-                <b>long</b> <span id="r11 rd" class="r11 r">initialLength</span> = <span class="r9 r">initialResponse</span>.<a href="/Azure.Core/A.html#26af68e791f2f80a" class="i property">Value</a>.<a href="Models/BlobDownloadStreamingResult.cs.html#11972a51ed7547d7" class="i property">Details</a>.<a href="Models/BlobDownloadDetails.cs.html#f201c7780503f6f4" class="i property">ContentLength</a>;
-                <b>long</b> <span id="r12 rd" class="r12 r">totalLength</span> = <a href="#14f025d8c348bd35" class="i method">ParseRangeTotalLength</a>(<span class="r9 r">initialResponse</span>.<a href="/Azure.Core/A.html#26af68e791f2f80a" class="i property">Value</a>.<a href="Models/BlobDownloadStreamingResult.cs.html#11972a51ed7547d7" class="i property">Details</a>.<a href="Models/BlobDownloadDetails.cs.html#619a26cca5b0e5c4" class="i property">ContentRange</a>);
-                <b>if</b> (<span class="r11 r">initialLength</span> == <span class="r12 r">totalLength</span>)
+                <b>long</b> <span id="r12 rd" class="r12 r">initialLength</span> = <span class="r10 r">initialResponse</span>.<a href="/Azure.Core/A.html#26af68e791f2f80a" class="i property">Value</a>.<a href="Models/BlobDownloadStreamingResult.cs.html#11972a51ed7547d7" class="i property">Details</a>.<a href="Models/BlobDownloadDetails.cs.html#f201c7780503f6f4" class="i property">ContentLength</a>;
+                <b>long</b> <span id="r13 rd" class="r13 r">totalLength</span> = <a href="#14f025d8c348bd35" class="i method">ParseRangeTotalLength</a>(<span class="r10 r">initialResponse</span>.<a href="/Azure.Core/A.html#26af68e791f2f80a" class="i property">Value</a>.<a href="Models/BlobDownloadStreamingResult.cs.html#11972a51ed7547d7" class="i property">Details</a>.<a href="Models/BlobDownloadDetails.cs.html#619a26cca5b0e5c4" class="i property">ContentRange</a>);
+                <b>if</b> (<span class="r12 r">initialLength</span> == <span class="r13 r">totalLength</span>)
                 {
                     <b>await</b> <a href="#4e4e93512d22b92e" class="i method">CopyToAsync</a>(
-                        <span class="r9 r">initialResponse</span>,
-                        <span class="r3 r">destination</span>,
-                        <span class="r5 r">cancellationToken</span>)
+                        <span class="r10 r">initialResponse</span>,
+                        <span class="r4 r">destination</span>,
+                        <span class="r6 r">cancellationToken</span>)
                         .<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
-                    <b>return</b> <span class="r9 r">initialResponse</span>.<a href="/Azure.Core/A.html#959994a72d6ef38a" class="i method">GetRawResponse</a>();
+                    <b>return</b> <span class="r10 r">initialResponse</span>.<a href="/Azure.Core/A.html#959994a72d6ef38a" class="i method">GetRawResponse</a>();
                 }
  
                 <span class="c">// Capture the etag from the first segment and construct</span>
                 <span class="c">// conditions to ensure the blob doesn&#39;t change while we&#39;re</span>
                 <span class="c">// downloading the remaining segments</span>
-                <a href="/Azure.Core/A.html#69017d8593c3f0de" class="t t">ETag</a> <span id="r13 rd" class="r13 r">etag</span> = <span class="r9 r">initialResponse</span>.<a href="/Azure.Core/A.html#26af68e791f2f80a" class="i property">Value</a>.<a href="Models/BlobDownloadStreamingResult.cs.html#11972a51ed7547d7" class="i property">Details</a>.<a href="Models/BlobDownloadDetails.cs.html#c9cdc23d88d1d5a3" class="i property">ETag</a>;
-                <a href="Models/BlobRequestConditions.cs.html#340adb54d55c6c34" class="t t">BlobRequestConditions</a> <span id="r14 rd" class="r14 r">conditionsWithEtag</span> = <span class="r4 r">conditions</span>?.<a href="Models/BlobRequestConditions.cs.html#45af307f0d9eda2e" class="i method">WithIfMatch</a>(<span class="r13 r">etag</span>) ?? <b>new</b> <a href="Models/BlobRequestConditions.cs.html#5fe01134b7f5b183" class="t constructor">BlobRequestConditions</a> { <a href="/Azure.Core/A.html#c0640f9cb69488b5" class="i property">IfMatch</a> = <span class="r13 r">etag</span> };
+                <a href="/Azure.Core/A.html#69017d8593c3f0de" class="t t">ETag</a> <span id="r14 rd" class="r14 r">etag</span> = <span class="r10 r">initialResponse</span>.<a href="/Azure.Core/A.html#26af68e791f2f80a" class="i property">Value</a>.<a href="Models/BlobDownloadStreamingResult.cs.html#11972a51ed7547d7" class="i property">Details</a>.<a href="Models/BlobDownloadDetails.cs.html#c9cdc23d88d1d5a3" class="i property">ETag</a>;
+                <a href="Models/BlobRequestConditions.cs.html#340adb54d55c6c34" class="t t">BlobRequestConditions</a> <span id="r15 rd" class="r15 r">conditionsWithEtag</span> = <span class="r5 r">conditions</span>?.<a href="Models/BlobRequestConditions.cs.html#45af307f0d9eda2e" class="i method">WithIfMatch</a>(<span class="r14 r">etag</span>) ?? <b>new</b> <a href="Models/BlobRequestConditions.cs.html#5fe01134b7f5b183" class="t constructor">BlobRequestConditions</a> { <a href="/Azure.Core/A.html#c0640f9cb69488b5" class="i property">IfMatch</a> = <span class="r14 r">etag</span> };
  
                 <span class="c">// Create a queue of tasks that will each download one segment</span>
                 <span class="c">// of the blob.  The queue maintains the order of the segments</span>
                 <span class="c">// so we can keep appending to the end of the destination</span>
                 <span class="c">// stream when each segment finishes.</span>
-                <a href="@1@netstandard/A.html#aa3beab99b2e0db2" class="k">var</a> <span id="r15 rd" class="r15 r">runningTasks</span> = <b>new</b> <a href="@1@netstandard/A.html#a09109def640b7b1" class="t constructor">Queue</a>&lt;<a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;<a href="Models/BlobDownloadStreamingResult.cs.html#17d7ce05ae2ed5a8" class="t t">BlobDownloadStreamingResult</a>&gt;&gt;&gt;();
-                <span class="r15 r">runningTasks</span>.<a href="@1@netstandard/A.html#14c3cc45ceaf1566" class="i method">Enqueue</a>(<span class="r8 r">initialResponseTask</span>);
+                <a href="@1@netstandard/A.html#aa3beab99b2e0db2" class="k">var</a> <span id="r16 rd" class="r16 r">runningTasks</span> = <b>new</b> <a href="@1@netstandard/A.html#a09109def640b7b1" class="t constructor">Queue</a>&lt;<a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;<a href="Models/BlobDownloadStreamingResult.cs.html#17d7ce05ae2ed5a8" class="t t">BlobDownloadStreamingResult</a>&gt;&gt;&gt;();
+                <span class="r16 r">runningTasks</span>.<a href="@1@netstandard/A.html#14c3cc45ceaf1566" class="i method">Enqueue</a>(<span class="r9 r">initialResponseTask</span>);
                 <b>if</b> (<a href="#b5957cbc26caa319" class="i field">_maxWorkerCount</a> &lt;= 1)
                 {
                     <span class="c">// consume initial task immediately if _maxWorkerCount is 1 (or less to be safe). Otherwise loop below would have 2 concurrent tasks.</span>
@@ -183,23 +198,24 @@
  
                 <span class="c">// Fill the queue with tasks to download each of the remaining</span>
                 <span class="c">// ranges in the blob</span>
-                <b>foreach</b> (<a href="/Azure.Core/A.html#d6f9b3aba6783671" class="t t">HttpRange</a> <span id="r16 rd" class="r16 r">httpRange</span> <b>in</b> <a href="#3106b3d0e4779844" class="i method">GetRanges</a>(<span class="r11 r">initialLength</span>, <span class="r12 r">totalLength</span>))
+                <b>foreach</b> (<a href="/Azure.Core/A.html#d6f9b3aba6783671" class="t t">HttpRange</a> <span id="r17 rd" class="r17 r">httpRange</span> <b>in</b> <a href="#3106b3d0e4779844" class="i method">GetRanges</a>(<span class="r12 r">initialLength</span>, <span class="r13 r">totalLength</span>))
                 {
                     <span class="c">// Add the next Task (which will start the download but</span>
                     <span class="c">// return before it&#39;s completed downloading)</span>
-                    <span class="r15 r">runningTasks</span>.<a href="@1@netstandard/A.html#14c3cc45ceaf1566" class="i method">Enqueue</a>(<a href="#31526a7788158815" class="i field">_client</a>.<a href="BlobBaseClient.cs.html#9587656a3d5c1446" class="i method">DownloadStreamingAsync</a>(
+                    <span class="r16 r">runningTasks</span>.<a href="@1@netstandard/A.html#14c3cc45ceaf1566" class="i method">Enqueue</a>(<a href="#31526a7788158815" class="i field">_client</a>.<a href="BlobBaseClient.cs.html#9587656a3d5c1446" class="i method">DownloadStreamingAsync</a>(
                         <b>new</b> <a href="Models/BlobDownloadOptions.cs.html#2551f00fdf204415" class="t constructor">BlobDownloadOptions</a>
                         {
-                            <a href="Models/BlobDownloadOptions.cs.html#dcf094f56e45260a" class="i property">Range</a> = <span class="r16 r">httpRange</span>,
-                            <a href="Models/BlobDownloadOptions.cs.html#2312ec2a5fdbd782" class="i property">Conditions</a> = <span class="r14 r">conditionsWithEtag</span>,
-                            <a href="Models/BlobDownloadOptions.cs.html#1f34103afbf1d957" class="i property">TransactionalHashingOptions</a> = <a href="#b5cc25a3d5782d10" class="i field">_hashingOptions</a>
+                            <a href="Models/BlobDownloadOptions.cs.html#dcf094f56e45260a" class="i property">Range</a> = <span class="r17 r">httpRange</span>,
+                            <a href="Models/BlobDownloadOptions.cs.html#2312ec2a5fdbd782" class="i property">Conditions</a> = <span class="r15 r">conditionsWithEtag</span>,
+                            <a href="Models/BlobDownloadOptions.cs.html#1f34103afbf1d957" class="i property">TransactionalHashingOptions</a> = <a href="#b5cc25a3d5782d10" class="i field">_hashingOptions</a>,
+                            <a href="Models/BlobDownloadOptions.cs.html#3b94f4727df8ed7b" class="i property">ProgressHandler</a> = <a href="#83fa81c5ee1ecd9f" class="i field">_progress</a>,
                         },
-                        <span class="r5 r">cancellationToken</span>));
+                        <span class="r6 r">cancellationToken</span>));
  
                     <span class="c">// If we have fewer tasks than alotted workers, then just</span>
                     <span class="c">// continue adding tasks until we have _maxWorkerCount</span>
                     <span class="c">// running in parallel</span>
-                    <b>if</b> (<span class="r15 r">runningTasks</span>.<a href="@1@netstandard/A.html#2d2504e4ca700843" class="i property">Count</a> &lt; <a href="#b5957cbc26caa319" class="i field">_maxWorkerCount</a>)
+                    <b>if</b> (<span class="r16 r">runningTasks</span>.<a href="@1@netstandard/A.html#2d2504e4ca700843" class="i property">Count</a> &lt; <a href="#b5957cbc26caa319" class="i field">_maxWorkerCount</a>)
                     {
                         <b>continue</b>;
                     }
@@ -210,12 +226,12 @@
                 }
  
                 <span class="c">// Wait for all of the remaining segments to download</span>
-                <b>while</b> (<span class="r15 r">runningTasks</span>.<a href="@1@netstandard/A.html#2d2504e4ca700843" class="i property">Count</a> &gt; 0)
+                <b>while</b> (<span class="r16 r">runningTasks</span>.<a href="@1@netstandard/A.html#2d2504e4ca700843" class="i property">Count</a> &gt; 0)
                 {
                     <b>await</b> <a href="#eb25417e6e3a889e" class="i method">ConsumeQueuedTask</a>().<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
                 }
  
-                <b>return</b> <span class="r9 r">initialResponse</span>.<a href="/Azure.Core/A.html#959994a72d6ef38a" class="i method">GetRawResponse</a>();
+                <b>return</b> <span class="r10 r">initialResponse</span>.<a href="/Azure.Core/A.html#959994a72d6ef38a" class="i method">GetRawResponse</a>();
  
                 <span class="c">// Wait for the first segment in the queue of tasks to complete</span>
                 <span class="c">// downloading and copy it to the destination stream</span>
@@ -224,169 +240,176 @@
                     <span class="c">// Don&#39;t need to worry about 304s here because the ETag</span>
                     <span class="c">// condition will turn into a 412 and throw a proper</span>
                     <span class="c">// RequestFailedException</span>
-                    <b>using</b> <a href="Models/BlobDownloadStreamingResult.cs.html#17d7ce05ae2ed5a8" class="t t">BlobDownloadStreamingResult</a> <span id="r17 rd" class="r17 r">result</span> =
-                        <b>await</b> <span class="r15 r">runningTasks</span>.<a href="@1@netstandard/A.html#e68caf2d91344411" class="i method">Dequeue</a>().<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+                    <b>using</b> <a href="Models/BlobDownloadStreamingResult.cs.html#17d7ce05ae2ed5a8" class="t t">BlobDownloadStreamingResult</a> <span id="r18 rd" class="r18 r">result</span> =
+                        <b>await</b> <span class="r16 r">runningTasks</span>.<a href="@1@netstandard/A.html#e68caf2d91344411" class="i method">Dequeue</a>().<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
  
                     <span class="c">// Even though the BlobDownloadInfo is returned immediately,</span>
                     <span class="c">// CopyToAsync causes ConsumeQueuedTask to wait until the</span>
                     <span class="c">// download is complete</span>
                     <b>await</b> <a href="#4e4e93512d22b92e" class="i method">CopyToAsync</a>(
-                        <span class="r17 r">result</span>,
-                        <span class="r3 r">destination</span>,
-                        <span class="r5 r">cancellationToken</span>)
+                        <span class="r18 r">result</span>,
+                        <span class="r4 r">destination</span>,
+                        <span class="r6 r">cancellationToken</span>)
                         .<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
                 }
             }
-            <b>catch</b> (<a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r18 rd" class="r18 r">ex</span>)
+            <b>catch</b> (<a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r19 rd" class="r19 r">ex</span>)
             {
-                <span class="r6 r">scope</span>.<a href="SharedCore/DiagnosticScope.cs.html#3d6de3437ae4c961" class="i method">Failed</a>(<span class="r18 r">ex</span>);
+                <span class="r7 r">scope</span>.<a href="SharedCore/DiagnosticScope.cs.html#3d6de3437ae4c961" class="i method">Failed</a>(<span class="r19 r">ex</span>);
                 <b>throw</b>;
             }
             <b>finally</b>
             {
-                <span class="r6 r">scope</span>.<a href="SharedCore/DiagnosticScope.cs.html#499ad84145f6c35d" class="i method">Dispose</a>();
+                <span class="r7 r">scope</span>.<a href="SharedCore/DiagnosticScope.cs.html#499ad84145f6c35d" class="i method">Dispose</a>();
             }
         }
  
         <b>public</b> <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a> <a id="7ba0519e0a524fdb" href="R/7ba0519e0a524fdb.html" target="n" data-glyph="72,1" class="i method">DownloadTo</a>(
-            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r19 rd" class="r19 r">destination</span>,
-            <a href="Models/BlobRequestConditions.cs.html#340adb54d55c6c34" class="t t">BlobRequestConditions</a> <span id="r20 rd" class="r20 r">conditions</span>,
-            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r21 rd" class="r21 r">cancellationToken</span>)
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r20 rd" class="r20 r">destination</span>,
+            <a href="Models/BlobRequestConditions.cs.html#340adb54d55c6c34" class="t t">BlobRequestConditions</a> <span id="r21 rd" class="r21 r">conditions</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r22 rd" class="r22 r">cancellationToken</span>)
         {
             <span class="c">// Wrap the download range calls in a Download span for distributed</span>
             <span class="c">// tracing</span>
-            <a href="SharedCore/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r22 rd" class="r22 r">scope</span> = <a href="#31526a7788158815" class="i field">_client</a>.<a href="BlobBaseClient.cs.html#7ea0c7bfa9864c36" class="i property">ClientConfiguration</a>.<a href="Shared/StorageClientConfiguration.cs.html#f8e8941a5db2fb62" class="i property">ClientDiagnostics</a>.<a href="SharedCore/DiagnosticScopeFactory.cs.html#8aeed3185eccadf4" class="i method">CreateScope</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="BlobBaseClient.cs.html#853236f95f48385e" class="t t">BlobBaseClient</a>)}<span class="s">.</span>{<b>nameof</b>(<a href="BlobBaseClient.cs.html#853236f95f48385e" class="t t">BlobBaseClient</a>.<span class="i">DownloadTo</span>)}<span class="s">&quot;</span>);
+            <a href="SharedCore/DiagnosticScope.cs.html#df3fc9a09421f052" class="t t">DiagnosticScope</a> <span id="r23 rd" class="r23 r">scope</span> = <a href="#31526a7788158815" class="i field">_client</a>.<a href="BlobBaseClient.cs.html#7ea0c7bfa9864c36" class="i property">ClientConfiguration</a>.<a href="Shared/StorageClientConfiguration.cs.html#f8e8941a5db2fb62" class="i property">ClientDiagnostics</a>.<a href="SharedCore/DiagnosticScopeFactory.cs.html#8aeed3185eccadf4" class="i method">CreateScope</a>(<span class="s">$&quot;</span>{<b>nameof</b>(<a href="BlobBaseClient.cs.html#853236f95f48385e" class="t t">BlobBaseClient</a>)}<span class="s">.</span>{<b>nameof</b>(<a href="BlobBaseClient.cs.html#853236f95f48385e" class="t t">BlobBaseClient</a>.<span class="i">DownloadTo</span>)}<span class="s">&quot;</span>);
             <b>try</b>
             {
-                <span class="r22 r">scope</span>.<a href="SharedCore/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
+                <span class="r23 r">scope</span>.<a href="SharedCore/DiagnosticScope.cs.html#687cad18b595ff81" class="i method">Start</a>();
  
                 <span class="c">// Just start downloading using an initial range.  If it&#39;s a</span>
                 <span class="c">// small blob, we&#39;ll get the whole thing in one shot.  If it&#39;s</span>
                 <span class="c">// a large blob, we&#39;ll get its full size in Content-Range and</span>
                 <span class="c">// can keep downloading it in segments.</span>
-                <a href="/Azure.Core/A.html#d6f9b3aba6783671" class="k">var</a> <span id="r23 rd" class="r23 r">initialRange</span> = <b>new</b> <a href="/Azure.Core/A.html#6ed33a49a04456b8" class="t constructor">HttpRange</a>(0, <a href="#9f35394654ab994a" class="i field">_initialRangeSize</a>);
-                <a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;<a href="Models/BlobDownloadStreamingResult.cs.html#17d7ce05ae2ed5a8" class="t t">BlobDownloadStreamingResult</a>&gt; <span id="r24 rd" class="r24 r">initialResponse</span>;
+                <a href="/Azure.Core/A.html#d6f9b3aba6783671" class="k">var</a> <span id="r24 rd" class="r24 r">initialRange</span> = <b>new</b> <a href="/Azure.Core/A.html#6ed33a49a04456b8" class="t constructor">HttpRange</a>(0, <a href="#9f35394654ab994a" class="i field">_initialRangeSize</a>);
+                <a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;<a href="Models/BlobDownloadStreamingResult.cs.html#17d7ce05ae2ed5a8" class="t t">BlobDownloadStreamingResult</a>&gt; <span id="r25 rd" class="r25 r">initialResponse</span>;
  
                 <b>try</b>
                 {
-                    <span class="r24 r">initialResponse</span> = <a href="#31526a7788158815" class="i field">_client</a>.<a href="BlobBaseClient.cs.html#ef3e97acd583f69c" class="i method">DownloadStreaming</a>(
+                    <span class="r25 r">initialResponse</span> = <a href="#31526a7788158815" class="i field">_client</a>.<a href="BlobBaseClient.cs.html#ef3e97acd583f69c" class="i method">DownloadStreaming</a>(
                         <b>new</b> <a href="Models/BlobDownloadOptions.cs.html#2551f00fdf204415" class="t constructor">BlobDownloadOptions</a>
                         {
-                            <a href="Models/BlobDownloadOptions.cs.html#dcf094f56e45260a" class="i property">Range</a> = <span class="r23 r">initialRange</span>,
-                            <a href="Models/BlobDownloadOptions.cs.html#2312ec2a5fdbd782" class="i property">Conditions</a> = <span class="r20 r">conditions</span>,
-                            <a href="Models/BlobDownloadOptions.cs.html#1f34103afbf1d957" class="i property">TransactionalHashingOptions</a> = <a href="#b5cc25a3d5782d10" class="i field">_hashingOptions</a>
+                            <a href="Models/BlobDownloadOptions.cs.html#dcf094f56e45260a" class="i property">Range</a> = <span class="r24 r">initialRange</span>,
+                            <a href="Models/BlobDownloadOptions.cs.html#2312ec2a5fdbd782" class="i property">Conditions</a> = <span class="r21 r">conditions</span>,
+                            <a href="Models/BlobDownloadOptions.cs.html#1f34103afbf1d957" class="i property">TransactionalHashingOptions</a> = <a href="#b5cc25a3d5782d10" class="i field">_hashingOptions</a>,
+                            <a href="Models/BlobDownloadOptions.cs.html#3b94f4727df8ed7b" class="i property">ProgressHandler</a> = <a href="#83fa81c5ee1ecd9f" class="i field">_progress</a>,
                         },
-                        <span class="r21 r">cancellationToken</span>);
+                        <span class="r22 r">cancellationToken</span>);
                 }
-                <b>catch</b> (<a href="/Azure.Core/A.html#253c51f73f5cd67d" class="t t">RequestFailedException</a> <span id="r25 rd" class="r25 r">ex</span>) <b>when</b> (<span class="r25 r">ex</span>.<a href="/Azure.Core/A.html#0f8d8760e8ec9460" class="i property">ErrorCode</a> == <a href="P/e0d947616d6aba70.html#e0d947616d6aba70" class="t t">BlobErrorCode</a>.<a href="Generated/Models/BlobErrorCode.cs.html#ad814869d43de925" class="i property">InvalidRange</a>)
+                <b>catch</b> (<a href="/Azure.Core/A.html#253c51f73f5cd67d" class="t t">RequestFailedException</a> <span id="r26 rd" class="r26 r">ex</span>) <b>when</b> (<span class="r26 r">ex</span>.<a href="/Azure.Core/A.html#0f8d8760e8ec9460" class="i property">ErrorCode</a> == <a href="P/e0d947616d6aba70.html#e0d947616d6aba70" class="t t">BlobErrorCode</a>.<a href="Generated/Models/BlobErrorCode.cs.html#ad814869d43de925" class="i property">InvalidRange</a>)
                 {
-                    <span class="r24 r">initialResponse</span> = <a href="#31526a7788158815" class="i field">_client</a>.<a href="BlobBaseClient.cs.html#ef3e97acd583f69c" class="i method">DownloadStreaming</a>(
+                    <span class="r25 r">initialResponse</span> = <a href="#31526a7788158815" class="i field">_client</a>.<a href="BlobBaseClient.cs.html#ef3e97acd583f69c" class="i method">DownloadStreaming</a>(
                     <b>new</b> <a href="Models/BlobDownloadOptions.cs.html#2551f00fdf204415" class="t constructor">BlobDownloadOptions</a>
                     {
                         <a href="Models/BlobDownloadOptions.cs.html#dcf094f56e45260a" class="i property">Range</a> = <b>default</b>,
-                        <a href="Models/BlobDownloadOptions.cs.html#2312ec2a5fdbd782" class="i property">Conditions</a> = <span class="r20 r">conditions</span>,
-                        <a href="Models/BlobDownloadOptions.cs.html#1f34103afbf1d957" class="i property">TransactionalHashingOptions</a> = <a href="#b5cc25a3d5782d10" class="i field">_hashingOptions</a>
+                        <a href="Models/BlobDownloadOptions.cs.html#2312ec2a5fdbd782" class="i property">Conditions</a> = <span class="r21 r">conditions</span>,
+                        <a href="Models/BlobDownloadOptions.cs.html#1f34103afbf1d957" class="i property">TransactionalHashingOptions</a> = <a href="#b5cc25a3d5782d10" class="i field">_hashingOptions</a>,
+                        <a href="Models/BlobDownloadOptions.cs.html#3b94f4727df8ed7b" class="i property">ProgressHandler</a> = <a href="#83fa81c5ee1ecd9f" class="i field">_progress</a>,
                     },
-                    <span class="r21 r">cancellationToken</span>);
+                    <span class="r22 r">cancellationToken</span>);
                 }
  
                 <span class="c">// If the initial request returned no content (i.e., a 304),</span>
                 <span class="c">// we&#39;ll pass that back to the user immediately</span>
-                <b>if</b> (<span class="r24 r">initialResponse</span>.<a href="Shared/StorageExceptionExtensions.cs.html#e6145af0ac446781" class="i method">IsUnavailable</a>())
+                <b>if</b> (<span class="r25 r">initialResponse</span>.<a href="Shared/StorageExceptionExtensions.cs.html#e6145af0ac446781" class="i method">IsUnavailable</a>())
                 {
-                    <b>return</b> <span class="r24 r">initialResponse</span>.<a href="/Azure.Core/A.html#959994a72d6ef38a" class="i method">GetRawResponse</a>();
+                    <b>return</b> <span class="r25 r">initialResponse</span>.<a href="/Azure.Core/A.html#959994a72d6ef38a" class="i method">GetRawResponse</a>();
                 }
  
                 <span class="c">// Copy the first segment to the destination stream</span>
-                <a href="#6a09867dcea7a2e6" class="i method">CopyTo</a>(<span class="r24 r">initialResponse</span>, <span class="r19 r">destination</span>, <span class="r21 r">cancellationToken</span>);
+                <a href="#6a09867dcea7a2e6" class="i method">CopyTo</a>(<span class="r25 r">initialResponse</span>, <span class="r20 r">destination</span>, <span class="r22 r">cancellationToken</span>);
  
                 <span class="c">// If the first segment was the entire blob, we&#39;re finished now</span>
-                <b>long</b> <span id="r26 rd" class="r26 r">initialLength</span> = <span class="r24 r">initialResponse</span>.<a href="/Azure.Core/A.html#26af68e791f2f80a" class="i property">Value</a>.<a href="Models/BlobDownloadStreamingResult.cs.html#11972a51ed7547d7" class="i property">Details</a>.<a href="Models/BlobDownloadDetails.cs.html#f201c7780503f6f4" class="i property">ContentLength</a>;
-                <b>long</b> <span id="r27 rd" class="r27 r">totalLength</span> = <a href="#14f025d8c348bd35" class="i method">ParseRangeTotalLength</a>(<span class="r24 r">initialResponse</span>.<a href="/Azure.Core/A.html#26af68e791f2f80a" class="i property">Value</a>.<a href="Models/BlobDownloadStreamingResult.cs.html#11972a51ed7547d7" class="i property">Details</a>.<a href="Models/BlobDownloadDetails.cs.html#619a26cca5b0e5c4" class="i property">ContentRange</a>);
-                <b>if</b> (<span class="r26 r">initialLength</span> == <span class="r27 r">totalLength</span>)
+                <b>long</b> <span id="r27 rd" class="r27 r">initialLength</span> = <span class="r25 r">initialResponse</span>.<a href="/Azure.Core/A.html#26af68e791f2f80a" class="i property">Value</a>.<a href="Models/BlobDownloadStreamingResult.cs.html#11972a51ed7547d7" class="i property">Details</a>.<a href="Models/BlobDownloadDetails.cs.html#f201c7780503f6f4" class="i property">ContentLength</a>;
+                <b>long</b> <span id="r28 rd" class="r28 r">totalLength</span> = <a href="#14f025d8c348bd35" class="i method">ParseRangeTotalLength</a>(<span class="r25 r">initialResponse</span>.<a href="/Azure.Core/A.html#26af68e791f2f80a" class="i property">Value</a>.<a href="Models/BlobDownloadStreamingResult.cs.html#11972a51ed7547d7" class="i property">Details</a>.<a href="Models/BlobDownloadDetails.cs.html#619a26cca5b0e5c4" class="i property">ContentRange</a>);
+                <b>if</b> (<span class="r27 r">initialLength</span> == <span class="r28 r">totalLength</span>)
                 {
-                    <b>return</b> <span class="r24 r">initialResponse</span>.<a href="/Azure.Core/A.html#959994a72d6ef38a" class="i method">GetRawResponse</a>();
+                    <b>return</b> <span class="r25 r">initialResponse</span>.<a href="/Azure.Core/A.html#959994a72d6ef38a" class="i method">GetRawResponse</a>();
                 }
  
                 <span class="c">// Capture the etag from the first segment and construct</span>
                 <span class="c">// conditions to ensure the blob doesn&#39;t change while we&#39;re</span>
                 <span class="c">// downloading the remaining segments</span>
-                <a href="/Azure.Core/A.html#69017d8593c3f0de" class="t t">ETag</a> <span id="r28 rd" class="r28 r">etag</span> = <span class="r24 r">initialResponse</span>.<a href="/Azure.Core/A.html#26af68e791f2f80a" class="i property">Value</a>.<a href="Models/BlobDownloadStreamingResult.cs.html#11972a51ed7547d7" class="i property">Details</a>.<a href="Models/BlobDownloadDetails.cs.html#c9cdc23d88d1d5a3" class="i property">ETag</a>;
-                <a href="Models/BlobRequestConditions.cs.html#340adb54d55c6c34" class="t t">BlobRequestConditions</a> <span id="r29 rd" class="r29 r">conditionsWithEtag</span> = <span class="r20 r">conditions</span>?.<a href="Models/BlobRequestConditions.cs.html#45af307f0d9eda2e" class="i method">WithIfMatch</a>(<span class="r28 r">etag</span>) ?? <b>new</b> <a href="Models/BlobRequestConditions.cs.html#5fe01134b7f5b183" class="t constructor">BlobRequestConditions</a> { <a href="/Azure.Core/A.html#c0640f9cb69488b5" class="i property">IfMatch</a> = <span class="r28 r">etag</span> };
+                <a href="/Azure.Core/A.html#69017d8593c3f0de" class="t t">ETag</a> <span id="r29 rd" class="r29 r">etag</span> = <span class="r25 r">initialResponse</span>.<a href="/Azure.Core/A.html#26af68e791f2f80a" class="i property">Value</a>.<a href="Models/BlobDownloadStreamingResult.cs.html#11972a51ed7547d7" class="i property">Details</a>.<a href="Models/BlobDownloadDetails.cs.html#c9cdc23d88d1d5a3" class="i property">ETag</a>;
+                <a href="Models/BlobRequestConditions.cs.html#340adb54d55c6c34" class="t t">BlobRequestConditions</a> <span id="r30 rd" class="r30 r">conditionsWithEtag</span> = <span class="r21 r">conditions</span>?.<a href="Models/BlobRequestConditions.cs.html#45af307f0d9eda2e" class="i method">WithIfMatch</a>(<span class="r29 r">etag</span>) ?? <b>new</b> <a href="Models/BlobRequestConditions.cs.html#5fe01134b7f5b183" class="t constructor">BlobRequestConditions</a> { <a href="/Azure.Core/A.html#c0640f9cb69488b5" class="i property">IfMatch</a> = <span class="r29 r">etag</span> };
  
                 <span class="c">// Download each of the remaining ranges in the blob</span>
-                <b>foreach</b> (<a href="/Azure.Core/A.html#d6f9b3aba6783671" class="t t">HttpRange</a> <span id="r30 rd" class="r30 r">httpRange</span> <b>in</b> <a href="#3106b3d0e4779844" class="i method">GetRanges</a>(<span class="r26 r">initialLength</span>, <span class="r27 r">totalLength</span>))
+                <b>foreach</b> (<a href="/Azure.Core/A.html#d6f9b3aba6783671" class="t t">HttpRange</a> <span id="r31 rd" class="r31 r">httpRange</span> <b>in</b> <a href="#3106b3d0e4779844" class="i method">GetRanges</a>(<span class="r27 r">initialLength</span>, <span class="r28 r">totalLength</span>))
                 {
                     <span class="c">// Don&#39;t need to worry about 304s here because the ETag</span>
                     <span class="c">// condition will turn into a 412 and throw a proper</span>
                     <span class="c">// RequestFailedException</span>
-                    <a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;<a href="Models/BlobDownloadStreamingResult.cs.html#17d7ce05ae2ed5a8" class="t t">BlobDownloadStreamingResult</a>&gt; <span id="r31 rd" class="r31 r">result</span> = <a href="#31526a7788158815" class="i field">_client</a>.<a href="BlobBaseClient.cs.html#ef3e97acd583f69c" class="i method">DownloadStreaming</a>(
+                    <a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;<a href="Models/BlobDownloadStreamingResult.cs.html#17d7ce05ae2ed5a8" class="t t">BlobDownloadStreamingResult</a>&gt; <span id="r32 rd" class="r32 r">result</span> = <a href="#31526a7788158815" class="i field">_client</a>.<a href="BlobBaseClient.cs.html#ef3e97acd583f69c" class="i method">DownloadStreaming</a>(
                         <b>new</b> <a href="Models/BlobDownloadOptions.cs.html#2551f00fdf204415" class="t constructor">BlobDownloadOptions</a>
                         {
-                            <a href="Models/BlobDownloadOptions.cs.html#dcf094f56e45260a" class="i property">Range</a> = <span class="r30 r">httpRange</span>,
-                            <a href="Models/BlobDownloadOptions.cs.html#2312ec2a5fdbd782" class="i property">Conditions</a> = <span class="r29 r">conditionsWithEtag</span>,
-                            <a href="Models/BlobDownloadOptions.cs.html#1f34103afbf1d957" class="i property">TransactionalHashingOptions</a> = <a href="#b5cc25a3d5782d10" class="i field">_hashingOptions</a>
+                            <a href="Models/BlobDownloadOptions.cs.html#dcf094f56e45260a" class="i property">Range</a> = <span class="r31 r">httpRange</span>,
+                            <a href="Models/BlobDownloadOptions.cs.html#2312ec2a5fdbd782" class="i property">Conditions</a> = <span class="r30 r">conditionsWithEtag</span>,
+                            <a href="Models/BlobDownloadOptions.cs.html#1f34103afbf1d957" class="i property">TransactionalHashingOptions</a> = <a href="#b5cc25a3d5782d10" class="i field">_hashingOptions</a>,
+                            <a href="Models/BlobDownloadOptions.cs.html#3b94f4727df8ed7b" class="i property">ProgressHandler</a> = <a href="#83fa81c5ee1ecd9f" class="i field">_progress</a>,
                         },
-                        <span class="r21 r">cancellationToken</span>);
-                    <a href="#6a09867dcea7a2e6" class="i method">CopyTo</a>(<span class="r31 r">result</span>.<a href="/Azure.Core/A.html#26af68e791f2f80a" class="i property">Value</a>, <span class="r19 r">destination</span>, <span class="r21 r">cancellationToken</span>);
+                        <span class="r22 r">cancellationToken</span>);
+                    <a href="#6a09867dcea7a2e6" class="i method">CopyTo</a>(<span class="r32 r">result</span>.<a href="/Azure.Core/A.html#26af68e791f2f80a" class="i property">Value</a>, <span class="r20 r">destination</span>, <span class="r22 r">cancellationToken</span>);
                 }
  
-                <b>return</b> <span class="r24 r">initialResponse</span>.<a href="/Azure.Core/A.html#959994a72d6ef38a" class="i method">GetRawResponse</a>();
+                <b>return</b> <span class="r25 r">initialResponse</span>.<a href="/Azure.Core/A.html#959994a72d6ef38a" class="i method">GetRawResponse</a>();
             }
-            <b>catch</b> (<a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r32 rd" class="r32 r">ex</span>)
+            <b>catch</b> (<a href="@1@netstandard/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r33 rd" class="r33 r">ex</span>)
             {
-                <span class="r22 r">scope</span>.<a href="SharedCore/DiagnosticScope.cs.html#3d6de3437ae4c961" class="i method">Failed</a>(<span class="r32 r">ex</span>);
+                <span class="r23 r">scope</span>.<a href="SharedCore/DiagnosticScope.cs.html#3d6de3437ae4c961" class="i method">Failed</a>(<span class="r33 r">ex</span>);
                 <b>throw</b>;
             }
             <b>finally</b>
             {
-                <span class="r22 r">scope</span>.<a href="SharedCore/DiagnosticScope.cs.html#499ad84145f6c35d" class="i method">Dispose</a>();
+                <span class="r23 r">scope</span>.<a href="SharedCore/DiagnosticScope.cs.html#499ad84145f6c35d" class="i method">Dispose</a>();
             }
         }
  
-        <b>private static long</b> <a id="14f025d8c348bd35" href="R/14f025d8c348bd35.html" target="n" data-glyph="76,1" class="i method">ParseRangeTotalLength</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r33 rd" class="r33 r">range</span>)
+        <b>private static long</b> <a id="14f025d8c348bd35" href="R/14f025d8c348bd35.html" target="n" data-glyph="76,1" class="i method">ParseRangeTotalLength</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r34 rd" class="r34 r">range</span>)
         {
-            <b>if</b> (<span class="r33 r">range</span> == <b>null</b>)
+            <b>if</b> (<span class="r34 r">range</span> == <b>null</b>)
             {
                 <b>return</b> 0;
             }
-            <b>int</b> <span id="r34 rd" class="r34 r">lengthSeparator</span> = <span class="r33 r">range</span>.<a href="@1@netstandard/A.html#7d6aed52d875ec59" class="i method">IndexOf</a>(<span class="s">&quot;/&quot;</span>, <a href="@1@netstandard/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@1@netstandard/A.html#eabf4db5f5c52b6a" class="i field">InvariantCultureIgnoreCase</a>);
-            <b>if</b> (<span class="r34 r">lengthSeparator</span> == -1)
+            <b>int</b> <span id="r35 rd" class="r35 r">lengthSeparator</span> = <span class="r34 r">range</span>.<a href="@1@netstandard/A.html#7d6aed52d875ec59" class="i method">IndexOf</a>(<span class="s">&quot;/&quot;</span>, <a href="@1@netstandard/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@1@netstandard/A.html#eabf4db5f5c52b6a" class="i field">InvariantCultureIgnoreCase</a>);
+            <b>if</b> (<span class="r35 r">lengthSeparator</span> == -1)
             {
-                <b>throw</b> <a href="BlobErrors.cs.html#9725043d45cf5909" class="t t">BlobErrors</a>.<a href="BlobErrors.cs.html#984f8c75450b251e" class="i method">ParsingFullHttpRangeFailed</a>(<span class="r33 r">range</span>);
+                <b>throw</b> <a href="BlobErrors.cs.html#9725043d45cf5909" class="t t">BlobErrors</a>.<a href="BlobErrors.cs.html#984f8c75450b251e" class="i method">ParsingFullHttpRangeFailed</a>(<span class="r34 r">range</span>);
             }
-            <b>return</b> <b>long</b>.<a href="@1@netstandard/A.html#aa76bf9458630289" class="i method">Parse</a>(<span class="r33 r">range</span>.<a href="@1@netstandard/A.html#882fa7998d6ca35a" class="i method">Substring</a>(<span class="r34 r">lengthSeparator</span> + 1), <a href="@1@netstandard/A.html#e319c6636909012f" class="t t">CultureInfo</a>.<a href="@1@netstandard/A.html#26ef1c020f0dbb7a" class="i property">InvariantCulture</a>);
+            <b>return</b> <b>long</b>.<a href="@1@netstandard/A.html#aa76bf9458630289" class="i method">Parse</a>(<span class="r34 r">range</span>.<a href="@1@netstandard/A.html#882fa7998d6ca35a" class="i method">Substring</a>(<span class="r35 r">lengthSeparator</span> + 1), <a href="@1@netstandard/A.html#e319c6636909012f" class="t t">CultureInfo</a>.<a href="@1@netstandard/A.html#26ef1c020f0dbb7a" class="i property">InvariantCulture</a>);
         }
  
         <b>private static async</b> <a href="@1@netstandard/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="4e4e93512d22b92e" href="R/4e4e93512d22b92e.html" target="n" data-glyph="76,1" class="i method">CopyToAsync</a>(
-            <a href="Models/BlobDownloadStreamingResult.cs.html#17d7ce05ae2ed5a8" class="t t">BlobDownloadStreamingResult</a> <span id="r35 rd" class="r35 r">result</span>,
-            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r36 rd" class="r36 r">destination</span>,
-            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r37 rd" class="r37 r">cancellationToken</span>)
+            <a href="Models/BlobDownloadStreamingResult.cs.html#17d7ce05ae2ed5a8" class="t t">BlobDownloadStreamingResult</a> <span id="r36 rd" class="r36 r">result</span>,
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r37 rd" class="r37 r">destination</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r38 rd" class="r38 r">cancellationToken</span>)
         {
-            <b>using</b> <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r38 rd" class="r38 r">source</span> = <span class="r35 r">result</span>.<a href="Models/BlobDownloadStreamingResult.cs.html#65882b6dfc5bedb7" class="i property">Content</a>;
+            <a href="SharedCore/CancellationHelper.cs.html#24a755c7382a6326" class="t t">CancellationHelper</a>.<a href="SharedCore/CancellationHelper.cs.html#ef45c5920ff58b7f" class="i method">ThrowIfCancellationRequested</a>(<span class="r38 r">cancellationToken</span>);
+            <b>using</b> <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r39 rd" class="r39 r">source</span> = <span class="r36 r">result</span>.<a href="Models/BlobDownloadStreamingResult.cs.html#65882b6dfc5bedb7" class="i property">Content</a>;
  
-            <b>await</b> <span class="r38 r">source</span>.<a href="@1@netstandard/A.html#8048a9680abdd13b" class="i method">CopyToAsync</a>(
-                <span class="r36 r">destination</span>,
+            <b>await</b> <span class="r39 r">source</span>.<a href="@1@netstandard/A.html#8048a9680abdd13b" class="i method">CopyToAsync</a>(
+                <span class="r37 r">destination</span>,
                 <a href="Shared/Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Shared/Constants.cs.html#5629726a282adf69" class="i field">DefaultDownloadCopyBufferSize</a>,
-                <span class="r37 r">cancellationToken</span>)
+                <span class="r38 r">cancellationToken</span>)
                 .<a href="@1@netstandard/A.html#9ca6b2f012ce7587" class="i method">ConfigureAwait</a>(<b>false</b>);
         }
  
         <b>private static void</b> <a id="6a09867dcea7a2e6" href="R/6a09867dcea7a2e6.html" target="n" data-glyph="76,1" class="i method">CopyTo</a>(
-            <a href="Models/BlobDownloadStreamingResult.cs.html#17d7ce05ae2ed5a8" class="t t">BlobDownloadStreamingResult</a> <span id="r39 rd" class="r39 r">result</span>,
-            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r40 rd" class="r40 r">destination</span>,
-            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r41 rd" class="r41 r">cancellationToken</span>)
+            <a href="Models/BlobDownloadStreamingResult.cs.html#17d7ce05ae2ed5a8" class="t t">BlobDownloadStreamingResult</a> <span id="r40 rd" class="r40 r">result</span>,
+            <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r41 rd" class="r41 r">destination</span>,
+            <a href="@1@netstandard/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r42 rd" class="r42 r">cancellationToken</span>)
         {
-            <span class="r41 r">cancellationToken</span>.<a href="@1@netstandard/A.html#d2864d73804288fc" class="i method">ThrowIfCancellationRequested</a>();
-            <span class="r39 r">result</span>.<a href="Models/BlobDownloadStreamingResult.cs.html#65882b6dfc5bedb7" class="i property">Content</a>.<a href="@1@netstandard/A.html#471cfae262c3528c" class="i method">CopyTo</a>(<span class="r40 r">destination</span>, <a href="Shared/Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Shared/Constants.cs.html#5629726a282adf69" class="i field">DefaultDownloadCopyBufferSize</a>);
-            <span class="r39 r">result</span>.<a href="Models/BlobDownloadStreamingResult.cs.html#65882b6dfc5bedb7" class="i property">Content</a>.<a href="@1@netstandard/A.html#f1b4285950a82354" class="i method">Dispose</a>();
+            <a href="SharedCore/CancellationHelper.cs.html#24a755c7382a6326" class="t t">CancellationHelper</a>.<a href="SharedCore/CancellationHelper.cs.html#ef45c5920ff58b7f" class="i method">ThrowIfCancellationRequested</a>(<span class="r42 r">cancellationToken</span>);
+            <b>using</b> <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r43 rd" class="r43 r">source</span> = <span class="r40 r">result</span>.<a href="Models/BlobDownloadStreamingResult.cs.html#65882b6dfc5bedb7" class="i property">Content</a>;
+ 
+            <span class="r43 r">source</span>.<a href="@1@netstandard/A.html#471cfae262c3528c" class="i method">CopyTo</a>(
+                <span class="r41 r">destination</span>,
+                <a href="Shared/Constants.cs.html#732c01506b3b1b85" class="t t">Constants</a>.<a href="Shared/Constants.cs.html#5629726a282adf69" class="i field">DefaultDownloadCopyBufferSize</a>);
         }
  
-        <b>private</b> <a href="@1@netstandard/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="/Azure.Core/A.html#d6f9b3aba6783671" class="t t">HttpRange</a>&gt; <a id="3106b3d0e4779844" href="R/3106b3d0e4779844.html" target="n" data-glyph="76,1" class="i method">GetRanges</a>(<b>long</b> <span id="r42 rd" class="r42 r">initialLength</span>, <b>long</b> <span id="r43 rd" class="r43 r">totalLength</span>)
+        <b>private</b> <a href="@1@netstandard/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="/Azure.Core/A.html#d6f9b3aba6783671" class="t t">HttpRange</a>&gt; <a id="3106b3d0e4779844" href="R/3106b3d0e4779844.html" target="n" data-glyph="76,1" class="i method">GetRanges</a>(<b>long</b> <span id="r44 rd" class="r44 r">initialLength</span>, <b>long</b> <span id="r45 rd" class="r45 r">totalLength</span>)
         {
-            <b>for</b> (<b>long</b> <span id="r44 rd" class="r44 r">offset</span> = <span class="r42 r">initialLength</span>; <span class="r44 r">offset</span> &lt; <span class="r43 r">totalLength</span>; <span class="r44 r">offset</span> += <a href="#47064a24334a7531" class="i field">_rangeSize</a>)
+            <b>for</b> (<b>long</b> <span id="r46 rd" class="r46 r">offset</span> = <span class="r44 r">initialLength</span>; <span class="r46 r">offset</span> &lt; <span class="r45 r">totalLength</span>; <span class="r46 r">offset</span> += <a href="#47064a24334a7531" class="i field">_rangeSize</a>)
             {
-                <b>yield</b> <b>return</b> <b>new</b> <a href="/Azure.Core/A.html#6ed33a49a04456b8" class="t constructor">HttpRange</a>(<span class="r44 r">offset</span>, <a href="@1@netstandard/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@1@netstandard/A.html#8cf0c6d1543ff08d" class="i method">Min</a>(<span class="r43 r">totalLength</span> - <span class="r44 r">offset</span>, <a href="#47064a24334a7531" class="i field">_rangeSize</a>));
+                <b>yield</b> <b>return</b> <b>new</b> <a href="/Azure.Core/A.html#6ed33a49a04456b8" class="t constructor">HttpRange</a>(<span class="r46 r">offset</span>, <a href="@1@netstandard/A.html#a4407e67b9a5afad" class="t t">Math</a>.<a href="@1@netstandard/A.html#8cf0c6d1543ff08d" class="i method">Min</a>(<span class="r45 r">totalLength</span> - <span class="r46 r">offset</span>, <a href="#47064a24334a7531" class="i field">_rangeSize</a>));
             }
         }
     }

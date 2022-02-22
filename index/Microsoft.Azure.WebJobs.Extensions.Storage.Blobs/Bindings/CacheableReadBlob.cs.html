@@ -1,0 +1,148 @@
+﻿<!DOCTYPE html>
+<html><head><title>CacheableReadBlob.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(139);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs/Bindings/CacheableReadBlob.cs" target="_top">Bindings\CacheableReadBlob.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/storage/Microsoft.Azure.WebJobs.Extensions.Storage.Blobs/src/Bindings/CacheableReadBlob.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs" target="_top">Microsoft.Azure.WebJobs.Extensions.Storage.Blobs.csproj</a> (Microsoft.Azure.WebJobs.Extensions.Storage.Blobs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>.<span class="i n">Bindings</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Class representing an object that could be either read from the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="t t">IFunctionDataCache</span><span class="c">&quot;</span><span class="c">/&gt;</span>
+    <span class="c">///</span><span class="c"> if it exists in it or from storage.</span>
+    <span class="c">///</span><span class="c"> If the object was found in the cache, then the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#e9d58e66872e005d" class="i property">IsCacheHit</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> property will be set to</span>
+    <span class="c">///</span><span class="c"> true and the object can be read from shared memory using the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#616129c374f8853c" class="i property">CacheObject</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> property.</span>
+    <span class="c">///</span><span class="c"> Otherwise, the object can be read from storage using the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#edd58b2f71fe7843" class="i property">BlobStream</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> property.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="eb3ba88fa76ba8c3" href="../R/eb3ba88fa76ba8c3.html" target="n" data-glyph="2,0" class="t t">CacheableReadBlob</a> : <span class="t t">ICacheAwareReadObject</span>
+    {
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">disable</span> <span class="i">CA2213</span> <span class="c">// Disposable fields should be disposed</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Cache in which to put this object when required.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly</b> <span class="t t">IFunctionDataCache</span> <a id="316a0215cdd1b162" href="../R/316a0215cdd1b162.html" target="n" data-glyph="46,1" class="i field">_functionDataCache</a>;
+<span class="k preprocess">#</span><span class="k preprocess">pragma</span> <span class="k preprocess">warning</span> <span class="k preprocess">restore</span> <span class="i">CA2213</span> <span class="c">// Disposable fields should be disposed</span>
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Indicates if this object has been disposed</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private bool</b> <a id="f13255f6e06a6cfa" href="../R/f13255f6e06a6cfa.html" target="n" data-glyph="46,1" class="i field">_isDisposed</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Indicates if the reference count of this object was incremented when it was written into the cache and that it should be</span>
+        <span class="c">///</span><span class="c"> decremented upon disposing this object.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private bool</b> <a id="d73d6f175a6c25f8" href="../R/d73d6f175a6c25f8.html" target="n" data-glyph="46,1" class="i field">_decrementRefCountInCacheOnDispose</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Used when the object was found in the cache.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">cacheKey</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Key associated to this object to address it in the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="t t">IFunctionDataCache</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">cacheObject</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Describes the shared memory region containing this object.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">functionDataCache</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Cache in which to put this object when required.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="da7fbfc9fdd3ed90" href="../R/da7fbfc9fdd3ed90.html" target="n" data-glyph="72,1" class="t constructor">CacheableReadBlob</a>(<span class="t t">FunctionDataCacheKey</span> <span id="r0 rd" class="r0 r">cacheKey</span>, <span class="t t">SharedMemoryMetadata</span> <span id="r1 rd" class="r1 r">cacheObject</span>, <span class="t t">IFunctionDataCache</span> <span id="r2 rd" class="r2 r">functionDataCache</span>)
+        {
+            <a href="#e9d58e66872e005d" class="i property">IsCacheHit</a> = <b>true</b>;
+            <a href="#0489a2b4baa12c98" class="i property">CacheKey</a> = <span class="r0 r">cacheKey</span>;
+            <a href="#616129c374f8853c" class="i property">CacheObject</a> = <span class="r1 r">cacheObject</span>;
+            <a href="#316a0215cdd1b162" class="i field">_functionDataCache</a> = <span class="r2 r">functionDataCache</span>;
+            <a href="#f13255f6e06a6cfa" class="i field">_isDisposed</a> = <b>false</b>;
+            <a href="#d73d6f175a6c25f8" class="i field">_decrementRefCountInCacheOnDispose</a> = <b>true</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Used when the object was not found in the cache and will be retrieved from storage.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">cacheKey</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Key associated to this object to address it in the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="t t">IFunctionDataCache</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">blobStream</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Stream to use for writing this object to storage.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r5 r">functionDataCache</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Cache in which to put this object when required.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="fb3eb52636c9210e" href="../R/fb3eb52636c9210e.html" target="n" data-glyph="72,1" class="t constructor">CacheableReadBlob</a>(<span class="t t">FunctionDataCacheKey</span> <span id="r3 rd" class="r3 r">cacheKey</span>, <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r4 rd" class="r4 r">blobStream</span>, <span class="t t">IFunctionDataCache</span> <span id="r5 rd" class="r5 r">functionDataCache</span>)
+        {
+            <a href="#e9d58e66872e005d" class="i property">IsCacheHit</a> = <b>false</b>;
+            <a href="#0489a2b4baa12c98" class="i property">CacheKey</a> = <span class="r3 r">cacheKey</span>;
+            <a href="#edd58b2f71fe7843" class="i property">BlobStream</a> = <span class="r4 r">blobStream</span>;
+            <a href="#316a0215cdd1b162" class="i field">_functionDataCache</a> = <span class="r5 r">functionDataCache</span>;
+            <a href="#f13255f6e06a6cfa" class="i field">_isDisposed</a> = <b>false</b>;
+            <a href="#d73d6f175a6c25f8" class="i field">_decrementRefCountInCacheOnDispose</a> = <b>false</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets a value indicating if the object was found from the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="t t">IFunctionDataCache</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> or not.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public bool</b> <a id="e9d58e66872e005d" href="../R/e9d58e66872e005d.html" target="n" data-glyph="102,1" class="i property">IsCacheHit</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets the unique key for this object used to address it in the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="t t">IFunctionDataCache</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <span class="t t">FunctionDataCacheKey</span> <a id="0489a2b4baa12c98" href="../R/0489a2b4baa12c98.html" target="n" data-glyph="102,1" class="i property">CacheKey</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets the details about where this object can be read from in shared memory if it was present in </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="t t">IFunctionDataCache</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <span class="t t">SharedMemoryMetadata</span> <a id="616129c374f8853c" href="../R/616129c374f8853c.html" target="n" data-glyph="102,1" class="i property">CacheObject</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets the Stream using which this object can be read from storage if it was not present in </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="t t">IFunctionDataCache</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <a id="edd58b2f71fe7843" href="../R/edd58b2f71fe7843.html" target="n" data-glyph="102,1" class="i property">BlobStream</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Put this object in the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="t t">IFunctionDataCache</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">cacheObject</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Details about the shared memory region where this object exists.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">isIncrementActiveReference</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">If true, increases the reference counter for this object in the</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="t t">IFunctionDataCache</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">True if the object was successfully put into the cache, false otherwise.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public bool</b> <a id="61886c018b906999" href="../R/61886c018b906999.html" target="n" data-glyph="72,1" class="i method">TryPutToCache</a>(<span class="t t">SharedMemoryMetadata</span> <span id="r6 rd" class="r6 r">cacheObject</span>, <b>bool</b> <span id="r7 rd" class="r7 r">isIncrementActiveReference</span>)
+        {
+            <b>if</b> (<a href="#e9d58e66872e005d" class="i property">IsCacheHit</a>)
+            {
+                <span class="c">// The object is already cached</span>
+                <b>return</b> <b>false</b>;
+            }
+ 
+            <b>if</b> (!<a href="#316a0215cdd1b162" class="i field">_functionDataCache</a>.<span class="i method">TryPut</span>(<a href="#0489a2b4baa12c98" class="i property">CacheKey</a>, <span class="r6 r">cacheObject</span>, <span class="r8 r">isIncrementActiveReference</span>: <span class="r7 r">isIncrementActiveReference</span>, <span class="r9 r">isDeleteOnFailure</span>: <b>false</b>))
+            {
+                <b>return</b> <b>false</b>;
+            }
+ 
+            <span class="c">// If the ref-count was increased in the cache when adding, it needs to be decremented when this object is disposed</span>
+            <a href="#d73d6f175a6c25f8" class="i field">_decrementRefCountInCacheOnDispose</a> = <span class="r7 r">isIncrementActiveReference</span>;
+ 
+            <b>return</b> <b>true</b>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Disposes the resources associated with this object as appropriate.</span>
+        <span class="c">///</span><span class="c"> If the object was read from the cache, it will decrement the reference counter if appropriate.</span>
+        <span class="c">///</span><span class="c"> If the object was read from storage, it will dispose the associated Stream.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public void</b> <a id="a6a882630c0760e7" href="../R/a6a882630c0760e7.html" target="n" data-glyph="72,1" class="i method">Dispose</a>()
+        {
+            <b>if</b> (<a href="#f13255f6e06a6cfa" class="i field">_isDisposed</a>)
+            {
+                <b>return</b>;
+            }
+ 
+            <span class="c">// If the object was not retrieved from the cache, then we have a BlobStream open pointing to storage which needs to be disposed</span>
+            <b>if</b> (!<a href="#e9d58e66872e005d" class="i property">IsCacheHit</a>)
+            {
+                <a href="#edd58b2f71fe7843" class="i property">BlobStream</a>.<a href="@1@netstandard/A.html#f1b4285950a82354" class="i method">Dispose</a>();
+            }
+ 
+            <b>if</b> (<a href="#d73d6f175a6c25f8" class="i field">_decrementRefCountInCacheOnDispose</a>)
+            {
+                <a href="#316a0215cdd1b162" class="i field">_functionDataCache</a>.<span class="i method">DecrementActiveReference</span>(<a href="#0489a2b4baa12c98" class="i property">CacheKey</a>);
+            }
+ 
+            <a href="#f13255f6e06a6cfa" class="i field">_isDisposed</a> = <b>true</b>;
+        }
+    }
+}</pre></td></tr></table></div></body></html>

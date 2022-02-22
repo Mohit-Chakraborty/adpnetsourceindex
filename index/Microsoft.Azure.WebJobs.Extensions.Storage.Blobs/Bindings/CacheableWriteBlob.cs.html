@@ -1,0 +1,98 @@
+﻿<!DOCTYPE html>
+<html><head><title>CacheableWriteBlob.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(89);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs/Bindings/CacheableWriteBlob.cs" target="_top">Bindings\CacheableWriteBlob.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/storage/Microsoft.Azure.WebJobs.Extensions.Storage.Blobs/src/Bindings/CacheableWriteBlob.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.Storage.Blobs" target="_top">Microsoft.Azure.WebJobs.Extensions.Storage.Blobs.csproj</a> (Microsoft.Azure.WebJobs.Extensions.Storage.Blobs)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>.<span class="i n">Models</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>.<span class="i n">Specialized</span>;
+ 
+<b>namespace</b> <span class="i n">Microsoft</span>.<span class="i n">Azure</span>.<span class="i n">WebJobs</span>.<span class="i n">Extensions</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>.<span class="i n">Bindings</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c"> Class representing an object that exists in shared memory.</span>
+    <span class="c">///</span><span class="c"> This object needs to be persisted to storage using the associated Stream.</span>
+    <span class="c">///</span><span class="c"> Once it is persisted, it needs to be inserted into the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="t t">IFunctionDataCache</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <b>internal class</b> <a id="aabd0155dfdfcb18" href="../R/aabd0155dfdfcb18.html" target="n" data-glyph="2,0" class="t t">CacheableWriteBlob</a> : <span class="t t">ICacheAwareWriteObject</span>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Cache in which to put this object when required.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly</b> <span class="t t">IFunctionDataCache</span> <a id="3da9b5a477bd62b5" href="../R/3da9b5a477bd62b5.html" target="n" data-glyph="46,1" class="i field">_functionDataCache</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Blob for this object in storage.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly</b> <a href="../BlobWithContainer.cs.html#062f07c49edbf857" class="t t">BlobWithContainer</a>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt; <a id="9ae49cfd875207d8" href="../R/9ae49cfd875207d8.html" target="n" data-glyph="46,1" class="i field">_blob</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Describes the shared memory region containing this object.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly</b> <span class="t t">SharedMemoryMetadata</span> <a id="e603d73d3c1075a5" href="../R/e603d73d3c1075a5.html" target="n" data-glyph="46,1" class="i field">_cacheObject</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">blob</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Blob for this object in storage.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">cacheObject</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Describes the shared memory region containing this object.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">blobStream</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Stream to use for writing this object to storage.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">functionDataCache</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Cache in which to put this object when required.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <b>public</b> <a id="67795e14474b30b0" href="../R/67795e14474b30b0.html" target="n" data-glyph="72,1" class="t constructor">CacheableWriteBlob</a>(<a href="../BlobWithContainer.cs.html#062f07c49edbf857" class="t t">BlobWithContainer</a>&lt;<a href="/Azure.Storage.Blobs/A.html#853236f95f48385e" class="t t">BlobBaseClient</a>&gt; <span id="r0 rd" class="r0 r">blob</span>, <span class="t t">SharedMemoryMetadata</span> <span id="r1 rd" class="r1 r">cacheObject</span>, <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r2 rd" class="r2 r">blobStream</span>, <span class="t t">IFunctionDataCache</span> <span id="r3 rd" class="r3 r">functionDataCache</span>)
+        {
+            <a href="#1aad96d89d292793" class="i property">BlobStream</a> = <span class="r2 r">blobStream</span>;
+            <a href="#e603d73d3c1075a5" class="i field">_cacheObject</a> = <span class="r1 r">cacheObject</span>;
+            <a href="#3da9b5a477bd62b5" class="i field">_functionDataCache</a> = <span class="r3 r">functionDataCache</span>;
+            <a href="#9ae49cfd875207d8" class="i field">_blob</a> = <span class="r0 r">blob</span>;
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Gets or sets the Stream associated to this object using which it will be written to storage.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>public</b> <a href="@1@netstandard/A.html#f956b0c07e86df64" class="t t">Stream</a> <a id="1aad96d89d292793" href="../R/1aad96d89d292793.html" target="n" data-glyph="102,1" class="i property">BlobStream</a> { <b>get</b>; <b>private set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Put this object in the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="t t">IFunctionDataCache</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">isDeleteOnFailure</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">If true, in the case of failure when adding to the cache, delete the object from shared memory</span>
+        <span class="c">///</span><span class="c"> which is being added. If false, in the case of failure the object is not deleted from shared memory.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">True if the object was successfully put into the cache, false otherwise.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>public async</b> <a href="@1@netstandard/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<b>bool</b>&gt; <a id="0520086bb7fa0286" href="../R/0520086bb7fa0286.html" target="n" data-glyph="72,1" class="i method">TryPutToCacheAsync</a>(<b>bool</b> <span id="r4 rd" class="r4 r">isDeleteOnFailure</span>)
+        {
+            <b>if</b> (<a href="#e603d73d3c1075a5" class="i field">_cacheObject</a> == <b>null</b>)
+            {
+                <b>return</b> <b>false</b>;
+            }
+ 
+            <a href="/Azure.Storage.Blobs/A.html#5eac1727e6cdaafb" class="t t">BlobProperties</a> <span id="r5 rd" class="r5 r">properties</span> = <b>await</b> <a href="#9ae49cfd875207d8" class="i field">_blob</a>.<a href="../BlobWithContainer.cs.html#ddc63f43d1a50e2f" class="i property">BlobClient</a>.<a href="../BlobBaseClientExtensions.cs.html#de152e12539b2906" class="i method">FetchPropertiesOrNullIfNotExistAsync</a>().<a href="@1@netstandard/A.html#07ef75a8fa372c94" class="i method">ConfigureAwait</a>(<b>false</b>);
+            <b>if</b> (<span class="r5 r">properties</span> == <b>null</b>)
+            {
+                <b>return</b> <b>false</b>;
+            }
+ 
+            <b>return</b> <a href="#a87559cd6b26ee6f" class="i method">TryPutToFunctionDataCacheCore</a>(<span class="r5 r">properties</span>, <span class="r4 r">isDeleteOnFailure</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> Put the object into the cache by generating a key for the object based on the blob&#39;s properties.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r6 r">properties</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Properties of the blob corresponding to the object being written.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">isDeleteOnFailure</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">If True, in the case where the cache is unable to insert this object, the local resources pointed to by the Stream (which were to be cached) will be deleted.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">True if the object was written to the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="t t">IFunctionDataCache</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c">, false otherwise.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <b>private bool</b> <a id="a87559cd6b26ee6f" href="../R/a87559cd6b26ee6f.html" target="n" data-glyph="76,1" class="i method">TryPutToFunctionDataCacheCore</a>(<a href="/Azure.Storage.Blobs/A.html#5eac1727e6cdaafb" class="t t">BlobProperties</a> <span id="r6 rd" class="r6 r">properties</span>, <b>bool</b> <span id="r7 rd" class="r7 r">isDeleteOnFailure</span>)
+        {
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r8 rd" class="r8 r">eTag</span> = <span class="r6 r">properties</span>.<a href="/Azure.Storage.Blobs/A.html#8491b5521f600f18" class="i property">ETag</a>.<a href="/Azure.Core/A.html#c02596ded366f933" class="i method">ToString</a>();
+            <a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r9 rd" class="r9 r">id</span> = <a href="#9ae49cfd875207d8" class="i field">_blob</a>.<a href="../BlobWithContainer.cs.html#ddc63f43d1a50e2f" class="i property">BlobClient</a>.<a href="/Azure.Storage.Blobs/A.html#ae31d23a19240d50" class="i property">Uri</a>.<a href="@1@netstandard/A.html#e335fec0022465e6" class="i property">AbsoluteUri</a>;
+            <span class="t t">FunctionDataCacheKey</span> <span id="r10 rd" class="r10 r">cacheKey</span> = <b>new</b> <span class="t constructor">FunctionDataCacheKey</span>(<span class="r9 r">id</span>, <span class="r8 r">eTag</span>);
+            <b>return</b> <a href="#3da9b5a477bd62b5" class="i field">_functionDataCache</a>.<span class="i method">TryPut</span>(<span class="r10 r">cacheKey</span>, <a href="#e603d73d3c1075a5" class="i field">_cacheObject</a>, <span class="r11 r">isIncrementActiveReference</span>: <b>false</b>, <span class="r7 r">isDeleteOnFailure</span>);
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>
