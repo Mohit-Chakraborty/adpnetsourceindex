@@ -1,0 +1,302 @@
+﻿<!DOCTYPE html>
+<html><head><title>InMemoryCheckpointStore.cs</title><link rel="stylesheet" href="../../../styles.css"><script src="../../../scripts.js"></script></head>
+<body class="cB" onload="i(293);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.EventHubs.Tests/SharedSource/Testing/InMemoryCheckpointStore.cs" target="_top">SharedSource\Testing\InMemoryCheckpointStore.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/eventhub/Azure.Messaging.EventHubs.Shared/src/Testing/InMemoryCheckpointStore.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Microsoft.Azure.WebJobs.Extensions.EventHubs.Tests" target="_top">Microsoft.Azure.WebJobs.Extensions.EventHubs.Tests.csproj</a> (Microsoft.Azure.WebJobs.Extensions.EventHubs.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Consumer</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Primitives</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Tests</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">   The EventProcessor relies on a </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="/Azure.Messaging.EventHubs/A.html#a3c0a20ac123967e" class="t t">CheckpointStore</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> to store checkpoints and handle partition</span>
+    <span class="c">///</span><span class="c">   ownership.  </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#6f396022cd65ba9e" class="t t">InMemoryCheckpointStore</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> is simple storage manager that stores checkpoints and</span>
+    <span class="c">///</span><span class="c">   partition ownership in memory of your program.</span>
+    <span class="c">///</span>
+    <span class="c">///</span><span class="c">   You can use the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="#6f396022cd65ba9e" class="t t">InMemoryCheckpointStore</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> to get started with using the `EventProcessor`.</span>
+    <span class="c">///</span><span class="c">   But in production, you should choose an implementation of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="/Azure.Messaging.EventHubs/A.html#a3c0a20ac123967e" class="t t">CheckpointStore</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> interface that will</span>
+    <span class="c">///</span><span class="c">   store the checkpoints and partition ownership to a persistent store instead.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    <b>internal class</b> <a id="6f396022cd65ba9e" href="../../R/6f396022cd65ba9e.html" target="n" data-glyph="2,0" class="t t">InMemoryCheckpointStore</a> : <a href="/Azure.Messaging.EventHubs/A.html#a3c0a20ac123967e" class="t t">CheckpointStore</a>
+    {
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The primitive for synchronizing access during ownership update.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly object</b> <a id="9a480cd33eb60ce9" href="../../R/9a480cd33eb60ce9.html" target="n" data-glyph="46,1" class="i field">_ownershipLock</a> = <b>new</b> <b>object</b>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">The primitive for synchronizing access during checkpoint update.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly object</b> <a id="caaa2457a0581b82" href="../../R/caaa2457a0581b82.html" target="n" data-glyph="46,1" class="i field">_checkpointLock</a> = <b>new</b> <b>object</b>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span><span class="c">Logs activities performed by this storage manager.</span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <b>private readonly</b> <a href="@0@mscorlib/A.html#486d58da4553e12d" class="t t">Action</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <a id="8fe912467867dd2f" href="../../R/8fe912467867dd2f.html" target="n" data-glyph="46,1" class="i field">_logger</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The set of checkpoints held for this instance.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a href="@0@mscorlib/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <a id="81900f9888d3d09a" href="../../R/../../0000000000.html" target="n" data-glyph="42,1" class="i field">FullyQualifiedNamespace</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <a id="0ffe2ed3c6b1d756" href="../../R/../../0000000000.html" target="n" data-glyph="42,1" class="i field">EventHubName</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <a id="63ea4acf8f0e61ca" href="../../R/../../0000000000.html" target="n" data-glyph="42,1" class="i field">ConsumerGroup</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <a id="d9c1a839c1e2f396" href="../../R/../../0000000000.html" target="n" data-glyph="42,1" class="i field">PartitionId</a>), <a href="#dbde14fe833601db" class="t t">CheckpointData</a>&gt; <a id="46a2cc2a0dafbb85" href="../../R/46a2cc2a0dafbb85.html" target="n" data-glyph="102,1" class="i property">Checkpoints</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The set of stored ownership.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a href="@0@mscorlib/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span class="i field">FullyQualifiedNamespace</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span class="i field">EventHubName</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span class="i field">ConsumerGroup</span>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span class="i field">PartitionId</span>), <a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt; <a id="0900d29a34502f30" href="../../R/0900d29a34502f30.html" target="n" data-glyph="102,1" class="i property">Ownership</a> { <b>get</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">MockCheckPointStorage</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="89fdd97bf78426d6" href="../../R/../../0000000000.html" target="n" data-glyph="72,1" class="t constructor">InMemoryCheckpointStore</a>() : <a href="#2052c32c8ecfa97c" class="k">this</a>(<b>null</b>)
+        {
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Initializes a new instance of the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><span class="i">MockCheckPointStorage</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> class.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r0 r">logger</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">Logs activities performed by this storage manager.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a id="2052c32c8ecfa97c" href="../../R/2052c32c8ecfa97c.html" target="n" data-glyph="72,1" class="t constructor">InMemoryCheckpointStore</a>(<a href="@0@mscorlib/A.html#486d58da4553e12d" class="t t">Action</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <span id="r0 rd" class="r0 r">logger</span> = <b>null</b>)
+        {
+            <a href="#8fe912467867dd2f" class="i field">_logger</a> = <span class="r0 r">logger</span>;
+ 
+            <a href="#0900d29a34502f30" class="i property">Ownership</a> = <b>new</b> <a href="@0@mscorlib/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>), <a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt;();
+            <a href="#46a2cc2a0dafbb85" class="i property">Checkpoints</a> = <b>new</b> <a href="@0@mscorlib/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>), <a href="#dbde14fe833601db" class="t t">CheckpointData</a>&gt;();
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The value to set the ownership LastModifiedTime to.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public</b> <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a> <a id="8da55aa2d1a45673" href="../../R/8da55aa2d1a45673.html" target="n" data-glyph="102,1" class="i property">LastModifiedTime</a> { <b>get</b>; <b>set</b>; } = <a href="@0@mscorlib/A.html#68b4bb83ce8d1c31" class="t t">DateTimeOffset</a>.<a href="@0@mscorlib/A.html#c6573f48ac6bd630" class="i property">Now</a>;
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   The total lease renewals.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public int</b> <a id="acbbb94138870e71" href="../../R/acbbb94138870e71.html" target="n" data-glyph="102,1" class="i property">TotalRenewals</a> { <b>get</b>; <b>set</b>; }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Requests a list of the ownership assignments for partitions between each of the cooperating event processor</span>
+        <span class="c">///</span><span class="c">   instances for a given Event Hub and consumer group pairing.  This operation is used during load balancing to allow</span>
+        <span class="c">///</span><span class="c">   the processor to discover other active collaborators and to make decisions about how to best balance work</span>
+        <span class="c">///</span><span class="c">   between them.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r1 r">fullyQualifiedNamespace</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The fully qualified Event Hubs namespace the ownership are associated with.  This is likely to be similar to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">{yournamespace}.servicebus.windows.net</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r2 r">eventHubName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the specific Event Hub the ownership is associated with, relative to the Event Hubs namespace that contains it.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r3 r">consumerGroup</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the consumer group the ownership are associated with.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r4 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the processing.  This is most likely to occur when the processor is shutting down.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The set of ownership data to take into account when making load balancing decisions.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt;&gt; <a id="b82aa879b66be1fb" href="../../R/b82aa879b66be1fb.html" target="n" data-glyph="72,1" class="i method">ListOwnershipAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r1 rd" class="r1 r">fullyQualifiedNamespace</span>,
+                                                                                               <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r2 rd" class="r2 r">eventHubName</span>,
+                                                                                               <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r3 rd" class="r3 r">consumerGroup</span>,
+                                                                                               <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r4 rd" class="r4 r">cancellationToken</span> = <b>default</b>)
+        {
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="t t">List</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt; <span id="r5 rd" class="r5 r">ownershipList</span>;
+ 
+            <b>lock</b> (<a href="#9a480cd33eb60ce9" class="i field">_ownershipLock</a>)
+            {
+                <span class="r5 r">ownershipList</span> = <a href="#0900d29a34502f30" class="i property">Ownership</a>.<a href="@0@mscorlib/A.html#4367dd1e300ae797" class="i property">Values</a>
+                    .<a href="@0@System.Core/A.html#e73922753675387a" class="i method">Where</a>(<span id="r6 rd" class="r6 r">ownership</span> =&gt; <span class="r6 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#32a10c50b50b991b" class="i property">FullyQualifiedNamespace</a> == <span class="r1 r">fullyQualifiedNamespace</span>
+                        &amp;&amp; <span class="r6 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#c918efefac954f70" class="i property">EventHubName</a> == <span class="r2 r">eventHubName</span>
+                        &amp;&amp; <span class="r6 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#f020f76a29d0ee5e" class="i property">ConsumerGroup</a> == <span class="r3 r">consumerGroup</span>)
+                    .<a href="@0@System.Core/A.html#e276d6892241255b" class="i method">ToList</a>();
+            }
+ 
+            <b>return</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#11a386e7d7cae64a" class="i method">FromResult</a>((<a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt;)<span class="r5 r">ownershipList</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Attempts to claim ownership of the specified partitions for processing.  This operation is used by</span>
+        <span class="c">///</span><span class="c">   load balancing to enable distributing the responsibility for processing partitions for an</span>
+        <span class="c">///</span><span class="c">   Event Hub and consumer group pairing amongst the active event processors.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">desiredOwnership</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The set of partition ownership desired by the event processor instance; this is the set of partitions that it will attempt to request responsibility for processing.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance to signal the request to cancel the processing.  This is most likely to occur when the processor is shutting down.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">The set of ownership records for the partitions that were successfully claimed; this is expected to be the </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">desiredOwnership</span><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> or a subset of those partitions.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt;&gt; <a id="fbac623762ab193f" href="../../R/fbac623762ab193f.html" target="n" data-glyph="72,1" class="i method">ClaimOwnershipAsync</a>(<a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt; <span id="r7 rd" class="r7 r">desiredOwnership</span>,
+                                                                                                <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r8 rd" class="r8 r">cancellationToken</span> = <b>default</b>)
+        {
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r9 rd" class="r9 r">claimedOwnership</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt;();
+ 
+            <span class="c">// The following lock makes sure two different event processors won&#39;t try to claim ownership of a partition</span>
+            <span class="c">// simultaneously.  This approach prevents an ownership from being stolen just after being claimed.</span>
+ 
+            <b>lock</b> (<a href="#9a480cd33eb60ce9" class="i field">_ownershipLock</a>)
+            {
+                <b>foreach</b> (<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a> <span id="r10 rd" class="r10 r">ownership</span> <b>in</b> <span class="r7 r">desiredOwnership</span>)
+                {
+                    <a href="@0@mscorlib/A.html#f1b135ff6c380b37" class="k">var</a> <span id="r11 rd" class="r11 r">isClaimable</span> = <b>true</b>;
+                    <a href="/System.ValueTuple/A.html#560da0b7083b794c" class="k">var</a> <span id="r12 rd" class="r12 r">key</span> = (<span class="r10 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#32a10c50b50b991b" class="i property">FullyQualifiedNamespace</a>, <span class="r10 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#c918efefac954f70" class="i property">EventHubName</a>, <span class="r10 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#f020f76a29d0ee5e" class="i property">ConsumerGroup</a>, <span class="r10 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a>);
+ 
+                    <span class="c">// In case the partition already has an owner, the versions must match in order to claim it.</span>
+ 
+                    <b>if</b> (<a href="#0900d29a34502f30" class="i property">Ownership</a>.<a href="@0@mscorlib/A.html#2e5bc6d8c0f21e67" class="i method">TryGetValue</a>(<span class="r12 r">key</span>, <b>out</b> <a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a> <span id="r13 rd" class="r13 r">currentOwnership</span>))
+                    {
+                        <span class="r11 r">isClaimable</span> = <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#d47c1f57ad1e1e6e" class="i method">Equals</a>(<span class="r10 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#9b3a949192b7c6eb" class="i property">Version</a>, <span class="r13 r">currentOwnership</span>.<a href="/Azure.Messaging.EventHubs/A.html#9b3a949192b7c6eb" class="i property">Version</a>, <a href="@0@mscorlib/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@0@mscorlib/A.html#eabf4db5f5c52b6a" class="i field">InvariantCultureIgnoreCase</a>);
+                    }
+ 
+                    <b>if</b> (<span class="r11 r">isClaimable</span>)
+                    {
+                        <span class="r10 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#9b3a949192b7c6eb" class="i property">Version</a> = <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#a6547a472def7796" class="i method">ToString</a>();
+                        <span class="r10 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#316dcf4e9c1cf9ae" class="i property">LastModifiedTime</a> = <a href="#8da55aa2d1a45673" class="i property">LastModifiedTime</a>;
+                        <a href="#acbbb94138870e71" class="i property">TotalRenewals</a>++;
+                        <a href="#0900d29a34502f30" class="i property">Ownership</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="r12 r">key</span>] = <span class="r10 r">ownership</span>;
+                        <span class="r9 r">claimedOwnership</span>.<a href="@0@mscorlib/A.html#9cc11588bffd57c1" class="i method">Add</a>(<span class="r10 r">ownership</span>);
+ 
+                        <a href="#6cfbb1303ecc5327" class="i method">Log</a>(<span class="s">$&quot;</span><span class="s">Ownership with partition id = &#39;</span>{<span class="r10 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a>}<span class="s">&#39; claimed by OwnershipIdentifier = &#39;</span>{<span class="r10 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#0a2651fca459d132" class="i property">OwnerIdentifier</a>}<span class="s">&#39;.</span><span class="s">&quot;</span>);
+                    }
+                    <b>else</b>
+                    {
+                        <a href="#6cfbb1303ecc5327" class="i method">Log</a>(<span class="s">$&quot;</span><span class="s">Ownership with partition id = &#39;</span>{<span class="r10 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a>}<span class="s">&#39; is not claimable by OwnershipIdentifier = &#39;</span>{<span class="r10 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#0a2651fca459d132" class="i property">OwnerIdentifier</a>}<span class="s">&#39;.</span><span class="s">&quot;</span>);
+                    }
+                }
+            }
+ 
+            <b>return</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#11a386e7d7cae64a" class="i method">FromResult</a>((<a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt;)<span class="r9 r">claimedOwnership</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Requests checkpoint information for a specific partition, allowing an event processor to resume reading</span>
+        <span class="c">///</span><span class="c">   from the next event in the stream.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r14 r">fullyQualifiedNamespace</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The fully qualified Event Hubs namespace the ownership are associated with.  This is likely to be similar to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">{yournamespace}.servicebus.windows.net</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">eventHubName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the specific Event Hub the ownership are associated with, relative to the Event Hubs namespace that contains it.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r16 r">consumerGroup</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the consumer group the checkpoint is associated with.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r17 r">partitionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The identifier of the partition to read a checkpoint for.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r18 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> instance to signal a request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">returns</span><span class="c">&gt;</span><span class="c">An </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="/Azure.Messaging.EventHubs/A.html#a957ac02e2072bb9" class="t t">EventProcessorCheckpoint</a><span class="c">&quot;</span><span class="c">/&gt;</span><span class="c"> instance, if a checkpoint was found for the requested partition; otherwise, </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">null</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">returns</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#a957ac02e2072bb9" class="t t">EventProcessorCheckpoint</a>&gt; <a id="b54ed451a7adc569" href="../../R/b54ed451a7adc569.html" target="n" data-glyph="72,1" class="i method">GetCheckpointAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r14 rd" class="r14 r">fullyQualifiedNamespace</span>,
+                                                                          <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r15 rd" class="r15 r">eventHubName</span>,
+                                                                          <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r16 rd" class="r16 r">consumerGroup</span>,
+                                                                          <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r17 rd" class="r17 r">partitionId</span>,
+                                                                          <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r18 rd" class="r18 r">cancellationToken</span> = <b>default</b>)
+        {
+            <a href="/Azure.Messaging.EventHubs/A.html#a957ac02e2072bb9" class="t t">EventProcessorCheckpoint</a> <span id="r19 rd" class="r19 r">checkpoint</span>;
+ 
+            <a href="/Azure.Messaging.EventHubs/A.html#a957ac02e2072bb9" class="t t">EventProcessorCheckpoint</a> <a id="bab4469addcb2b59" href="../../R/bab4469addcb2b59.html" target="n" data-glyph="76,2" class="i method">TransformCheckpointData</a>(<a href="#dbde14fe833601db" class="t t">CheckpointData</a> <span id="r20 rd" class="r20 r">data</span>) =&gt;
+                <b>new</b> <a href="/Azure.Messaging.EventHubs/A.html#f0f814e1d10a319f" class="t constructor">EventProcessorCheckpoint</a>
+                {
+                    <a href="/Azure.Messaging.EventHubs/A.html#47fe22648355061c" class="i property">FullyQualifiedNamespace</a> = <span class="r20 r">data</span>.<a href="#100847c8ab780271" class="i property">FullyQualifiedNamespace</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#00530c9a988fc47c" class="i property">EventHubName</a> = <span class="r20 r">data</span>.<a href="#4fadbc273d3c6d32" class="i property">EventHubName</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#5d53404f5a979b96" class="i property">ConsumerGroup</a> = <span class="r20 r">data</span>.<a href="#cfdbd314d70ac932" class="i property">ConsumerGroup</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#145e376eab80843c" class="i property">PartitionId</a> = <span class="r20 r">data</span>.<a href="#47e56c253143a5ac" class="i property">PartitionId</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#e53fa1aec8035654" class="i property">StartingPosition</a> = <a href="/Azure.Messaging.EventHubs/A.html#97742fa7b7b6b68f" class="t t">EventPosition</a>.<a href="/Azure.Messaging.EventHubs/A.html#7bd33a697bf152f3" class="i method">FromOffset</a>(<span class="r20 r">data</span>.<a href="#8e652738f12f89d6" class="i property">Offset</a>, <b>false</b>)
+                };
+ 
+            <b>lock</b> (<a href="#caaa2457a0581b82" class="i field">_checkpointLock</a>)
+            {
+                <span class="r19 r">checkpoint</span> = <a href="#46a2cc2a0dafbb85" class="i property">Checkpoints</a>.<a href="@0@mscorlib/A.html#4367dd1e300ae797" class="i property">Values</a>
+                    .<a href="@0@System.Core/A.html#e73922753675387a" class="i method">Where</a>(<span id="r21 rd" class="r21 r">data</span> =&gt; <span class="r21 r">data</span>.<a href="#100847c8ab780271" class="i property">FullyQualifiedNamespace</a> == <span class="r14 r">fullyQualifiedNamespace</span>
+                        &amp;&amp; <span class="r21 r">data</span>.<a href="#4fadbc273d3c6d32" class="i property">EventHubName</a> == <span class="r15 r">eventHubName</span>
+                        &amp;&amp; <span class="r21 r">data</span>.<a href="#cfdbd314d70ac932" class="i property">ConsumerGroup</a> == <span class="r16 r">consumerGroup</span>
+                        &amp;&amp; <span class="r21 r">data</span>.<a href="#47e56c253143a5ac" class="i property">PartitionId</a> == <span class="r17 r">partitionId</span>)
+                    .<a href="@0@System.Core/A.html#5c652c53e80df013" class="i method">Select</a>(<span id="r22 rd" class="r22 r">data</span> =&gt; <a href="#bab4469addcb2b59" class="i method">TransformCheckpointData</a>(<span class="r22 r">data</span>))
+                    .<a href="@0@System.Core/A.html#9cd0418fc9042fbe" class="i method">SingleOrDefault</a>();
+            }
+ 
+            <b>return</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#11a386e7d7cae64a" class="i method">FromResult</a>(<span class="r19 r">checkpoint</span>);
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Creates or updates a checkpoint for a specific partition, identifying a position in the partition&#39;s event stream</span>
+        <span class="c">///</span><span class="c">   that an event processor should begin reading from.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r23 r">fullyQualifiedNamespace</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The fully qualified Event Hubs namespace the ownership are associated with.  This is likely to be similar to </span><span class="c">&lt;</span><span class="c">c</span><span class="c">&gt;</span><span class="c">{yournamespace}.servicebus.windows.net</span><span class="c">&lt;/</span><span class="c">c</span><span class="c">&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r24 r">eventHubName</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the specific Event Hub the ownership are associated with, relative to the Event Hubs namespace that contains it.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r25 r">consumerGroup</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The name of the consumer group the checkpoint is associated with.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r26 r">partitionId</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The identifier of the partition the checkpoint is for.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r27 r">offset</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The offset to associate with the checkpoint, indicating that a processor should begin reading form the next event in the stream.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r28 r">sequenceNumber</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">An optional sequence number to associate with the checkpoint, intended as informational metadata.  The </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r27 r">offset</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> will be used for positioning when events are read.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r29 r">cancellationToken</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c"> instance to signal a request to cancel the operation.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public override</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="4b004af7005bc92b" href="../../R/4b004af7005bc92b.html" target="n" data-glyph="72,1" class="i method">UpdateCheckpointAsync</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r23 rd" class="r23 r">fullyQualifiedNamespace</span>,
+                                                   <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r24 rd" class="r24 r">eventHubName</span>,
+                                                   <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r25 rd" class="r25 r">consumerGroup</span>,
+                                                   <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r26 rd" class="r26 r">partitionId</span>,
+                                                   <b>long</b> <span id="r27 rd" class="r27 r">offset</span>,
+                                                   <b>long</b>? <span id="r28 rd" class="r28 r">sequenceNumber</span>,
+                                                   <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r29 rd" class="r29 r">cancellationToken</span> = <b>default</b>)
+        {
+            <b>lock</b> (<a href="#caaa2457a0581b82" class="i field">_checkpointLock</a>)
+            {
+                <a href="/System.ValueTuple/A.html#560da0b7083b794c" class="k">var</a> <span id="r30 rd" class="r30 r">key</span> = (<span class="r23 r">fullyQualifiedNamespace</span>, <span class="r24 r">eventHubName</span>, <span class="r25 r">consumerGroup</span>, <span class="r26 r">partitionId</span>);
+                <a href="#46a2cc2a0dafbb85" class="i property">Checkpoints</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="r30 r">key</span>] = <b>new</b> <a href="#c14cfe781d489880" class="t constructor">CheckpointData</a>(<span class="r23 r">fullyQualifiedNamespace</span>, <span class="r24 r">eventHubName</span>, <span class="r25 r">consumerGroup</span>, <span class="r26 r">partitionId</span>, <span class="r27 r">offset</span>, <span class="r28 r">sequenceNumber</span>);
+ 
+                <a href="#6cfbb1303ecc5327" class="i method">Log</a>(<span class="s">$&quot;</span><span class="s">Checkpoint with partition id = &#39;</span>{<span class="r26 r">partitionId</span>}<span class="s">&#39; updated successfully.</span><span class="s">&quot;</span>);
+            }
+ 
+            <b>return</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#66f1c3e3e272f591" class="i property">CompletedTask</a>;
+        }
+ 
+        <b>public</b> <a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a> <a id="b605cd43a3eabfcb" href="../../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">TryGetLatestOwnership</a>(<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a> <span id="r31 rd" class="r31 r">ownership</span>)
+        {
+            <a href="/System.ValueTuple/A.html#560da0b7083b794c" class="k">var</a> <span id="r32 rd" class="r32 r">key</span> = (<span class="r31 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#32a10c50b50b991b" class="i property">FullyQualifiedNamespace</a>, <span class="r31 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#c918efefac954f70" class="i property">EventHubName</a>, <span class="r31 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#f020f76a29d0ee5e" class="i property">ConsumerGroup</a>, <span class="r31 r">ownership</span>.<a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a>);
+            <b>if</b> (<a href="#0900d29a34502f30" class="i property">Ownership</a>.<a href="@0@mscorlib/A.html#2e5bc6d8c0f21e67" class="i method">TryGetValue</a>(<span class="r32 r">key</span>, <b>out</b> <span class="r31 r">ownership</span>))
+            {
+                <b>return</b> <span class="r31 r">ownership</span>;
+            }
+ 
+            <b>return</b> <b>null</b>;
+        }
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Sends a log message to the current logger, if provided by the user.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r33 r">message</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The log message to send.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>private void</b> <a id="6cfbb1303ecc5327" href="../../R/6cfbb1303ecc5327.html" target="n" data-glyph="76,1" class="i method">Log</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r33 rd" class="r33 r">message</span>) =&gt; <a href="#8fe912467867dd2f" class="i field">_logger</a>?.<a href="@0@mscorlib/A.html#2d4ce5e8c3a9aa80" class="i method">Invoke</a>(<span class="r33 r">message</span>);
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Serves as a lightweight wrapper for the components that comprise the data</span>
+        <span class="c">///</span><span class="c">   observed for a checkpoint.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        <b>public struct</b> <a id="dbde14fe833601db" href="../../R/dbde14fe833601db.html" target="n" data-glyph="108,1" class="t t"><span id="da8f32931ccf9fc7">CheckpointData</span></a>
+        {
+            <b>public string</b> <a id="100847c8ab780271" href="../../R/100847c8ab780271.html" target="n" data-glyph="102,2" class="i property">FullyQualifiedNamespace</a> { <b>get</b>; }
+            <b>public string</b> <a id="4fadbc273d3c6d32" href="../../R/4fadbc273d3c6d32.html" target="n" data-glyph="102,2" class="i property">EventHubName</a> { <b>get</b>; }
+            <b>public string</b> <a id="cfdbd314d70ac932" href="../../R/cfdbd314d70ac932.html" target="n" data-glyph="102,2" class="i property">ConsumerGroup</a> { <b>get</b>; }
+            <b>public string</b> <a id="47e56c253143a5ac" href="../../R/47e56c253143a5ac.html" target="n" data-glyph="102,2" class="i property">PartitionId</a> { <b>get</b>; }
+            <b>public long</b> <a id="8e652738f12f89d6" href="../../R/8e652738f12f89d6.html" target="n" data-glyph="102,2" class="i property">Offset</a> { <b>get</b>; }
+            <b>public long</b>? <a id="8ef4e42df55c9e88" href="../../R/8ef4e42df55c9e88.html" target="n" data-glyph="102,2" class="i property">SequenceNumber</a> { <b>get</b>; }
+ 
+            <b>public</b> <a id="c14cfe781d489880" href="../../R/c14cfe781d489880.html" target="n" data-glyph="72,2" class="t constructor">CheckpointData</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r34 rd" class="r34 r">fullyQualifiedNamespace</span>,
+                                  <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r35 rd" class="r35 r">eventHubName</span>,
+                                  <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r36 rd" class="r36 r">consumerGroup</span>,
+                                  <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r37 rd" class="r37 r">partitionId</span>,
+                                  <b>long</b> <span id="r38 rd" class="r38 r">offset</span>,
+                                  <b>long</b>? <span id="r39 rd" class="r39 r">sequenceNumber</span> = <b>default</b>)
+            {
+               <a href="#100847c8ab780271" class="i property">FullyQualifiedNamespace</a> = <span class="r34 r">fullyQualifiedNamespace</span>;
+               <a href="#4fadbc273d3c6d32" class="i property">EventHubName</a> = <span class="r35 r">eventHubName</span>;
+               <a href="#cfdbd314d70ac932" class="i property">ConsumerGroup</a> = <span class="r36 r">consumerGroup</span>;
+               <a href="#47e56c253143a5ac" class="i property">PartitionId</a> = <span class="r37 r">partitionId</span>;
+               <a href="#8e652738f12f89d6" class="i property">Offset</a> = <span class="r38 r">offset</span>;
+               <a href="#8ef4e42df55c9e88" class="i property">SequenceNumber</a> = <span class="r39 r">sequenceNumber</span>;
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

@@ -1,0 +1,646 @@
+﻿<!DOCTYPE html>
+<html><head><title>BlobCheckpointStoreInternalDiagnosticsTests.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
+<body class="cB" onload="i(637);"><div class="dH">
+<table style="width: 100%">
+<tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Messaging.EventHubs.Processor.Tests/Diagnostics/BlobCheckpointStoreInternalDiagnosticsTests.cs" target="_top">Diagnostics\BlobCheckpointStoreInternalDiagnosticsTests.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/eventhub/Azure.Messaging.EventHubs.Processor/tests/Diagnostics/BlobCheckpointStoreInternalDiagnosticsTests.cs" target="_blank">View on GitHub</a></td></tr>
+<tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Messaging.EventHubs.Processor.Tests" target="_top">Azure.Messaging.EventHubs.Processor.Tests.csproj</a> (Azure.Messaging.EventHubs.Processor.Tests)</td><td></td></tr>
+</table>
+</div>
+<div class="cz"><table class="tb" cellpadding="0" cellspacing="0"><tr><td valign="top" align="right"><pre id="ln"></pre></td><td valign="top" align="left"><pre id="code">
+<span class="c">// Copyright (c) Microsoft Corporation. All rights reserved.</span>
+<span class="c">// Licensed under the MIT License.</span>
+ 
+<b>using</b> <span class="i n">System</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Collections</span>.<span class="i n">Generic</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">IO</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Linq</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>.<span class="i n">Tasks</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Core</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Primitives</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Processor</span>.<span class="i n">Diagnostics</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>;
+<b>using</b> <span class="i n">Azure</span>.<span class="i n">Storage</span>.<span class="i n">Blobs</span>.<span class="i n">Models</span>;
+<b>using</b> <span class="i n">Moq</span>;
+<b>using</b> <span class="i n">NUnit</span>.<span class="i n">Framework</span>;
+ 
+<b>namespace</b> <span class="i n">Azure</span>.<span class="i n">Messaging</span>.<span class="i n">EventHubs</span>.<span class="i n">Processor</span>.<span class="i n">Tests</span>
+{
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span><span class="c">   The suite of tests for the </span><span class="c">&lt;</span><span class="c">see</span> <span class="c">cref</span><span class="c">=</span><span class="c">&quot;</span><a href="/Azure.Messaging.EventHubs.Processor/A.html#7ef60f6955871bd6" class="t t">BlobCheckpointStoreInternal</a><span class="c">&quot;</span> <span class="c">/&gt;</span>
+    <span class="c">///</span><span class="c">   class.</span>
+    <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+    <span class="c">///</span>
+    [<span class="t constructor">TestFixture</span>]
+    <b>public class</b> <a id="e77b5eaca634f580" href="../R/../../0000000000.html" target="n" data-glyph="0,0" class="t t"><span id="165515a5450923c9">BlobCheckpointStoreInternalDiagnosticsTests</span></a>
+    {
+        <b>private const string</b> <a id="57a5b73a06d4dac7" href="../R/57a5b73a06d4dac7.html" target="n" data-glyph="10,1" class="i field">FullyQualifiedNamespace</a> = <span class="s">&quot;fqns&quot;</span>;
+        <b>private const string</b> <a id="2cb520c6178e46d4" href="../R/2cb520c6178e46d4.html" target="n" data-glyph="10,1" class="i field">EventHubName</a> = <span class="s">&quot;name&quot;</span>;
+        <b>private const string</b> <a id="15b8f515cb4ee395" href="../R/15b8f515cb4ee395.html" target="n" data-glyph="10,1" class="i field">ConsumerGroup</a> = <span class="s">&quot;group&quot;</span>;
+        <b>private const string</b> <a id="25e79e924b74e975" href="../R/25e79e924b74e975.html" target="n" data-glyph="10,1" class="i field">MatchingEtag</a> = <span class="s">&quot;etag&quot;</span>;
+        <b>private const string</b> <a id="7b802771afabcb80" href="../R/7b802771afabcb80.html" target="n" data-glyph="10,1" class="i field">WrongEtag</a> = <span class="s">&quot;wrongEtag&quot;</span>;
+        <b>private const string</b> <a id="49446eb6aa5ce6fe" href="../R/49446eb6aa5ce6fe.html" target="n" data-glyph="10,1" class="i field">PartitionId</a> = <span class="s">&quot;1&quot;</span>;
+ 
+        <b>private readonly string</b> <a id="f4f4715591d7fb02" href="../R/f4f4715591d7fb02.html" target="n" data-glyph="46,1" class="i field">OwnershipIdentifier</a> = <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#a6547a472def7796" class="i method">ToString</a>();
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Verifies basic functionality of ListOwnershipAsync and ensures the appropriate events are emitted on success.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="t constructor">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="b5a99c5e57d80db7" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ListOwnershipLogsStartAndComplete</a>()
+        {
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r0 rd" class="r0 r">blobList</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="/Azure.Storage.Blobs/A.html#8029f8268c3df23c" class="t t">BlobItem</a>&gt;
+            {
+                <a href="/Azure.Storage.Blobs/A.html#8630adc9e460bffc" class="t t">BlobsModelFactory</a>.<a href="/Azure.Storage.Blobs/A.html#861c17d184e9b33c" class="i method">BlobItem</a>(<span class="s">$&quot;</span>{<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>}<span class="s">/</span>{<a href="#2cb520c6178e46d4" class="i field">EventHubName</a>}<span class="s">/</span>{<a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>}<span class="s">/ownership/</span>{<a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#a6547a472def7796" class="i method">ToString</a>()}<span class="s">&quot;</span>,
+                                           <b>false</b>,
+                                           <a href="/Azure.Storage.Blobs/A.html#8630adc9e460bffc" class="t t">BlobsModelFactory</a>.<a href="/Azure.Storage.Blobs/A.html#5789dab366ddcced" class="i method">BlobItemProperties</a>(<b>true</b>, <span class="r1 r">lastModified</span>: <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a>.<a href="@0@mscorlib/A.html#b0d5e4c9a8d4ddac" class="i property">UtcNow</a>, <span class="r2 r">eTag</span>: <b>new</b> <a href="/Azure.Core/A.html#83878a5758faf623" class="t constructor">ETag</a>(<a href="#25e79e924b74e975" class="i field">MatchingEtag</a>)),
+                                           <span class="s">&quot;snapshot&quot;</span>,
+                                           <b>new</b> <a href="@0@mscorlib/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; {{<a href="/Azure.Messaging.EventHubs.Processor/A.html#b5b4d37ef3f2055b" class="t t">BlobMetadataKey</a>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#5aa65d0ff55e03c9" class="i field">OwnerIdentifier</a>, <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#a6547a472def7796" class="i method">ToString</a>()}})
+            };
+ 
+            <a href="/Azure.Messaging.EventHubs.Processor/A.html#7ef60f6955871bd6" class="k">var</a> <span id="r3 rd" class="r3 r">target</span> = <b>new</b> <a href="/Azure.Messaging.EventHubs.Processor/A.html#cf9794561a1e6eee" class="t constructor">BlobCheckpointStoreInternal</a>(<b>new</b> <a href="#e185d96622d97ae1" class="t constructor">MockBlobContainerClient</a>() { <a href="#2635471dbbafa7bd" class="i field">Blobs</a> = <span class="r0 r">blobList</span> });
+ 
+            <b>var</b> <span id="r4 rd" class="r4 r">mockLog</span> = <b>new</b> <span class="t constructor">Mock</span>&lt;<a href="/Azure.Messaging.EventHubs.Processor/A.html#2eca79e5321d3821" class="t t">BlobEventStoreEventSource</a>&gt;();
+            <span class="r3 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#217e6f044f2dc3a0" class="i property">Logger</a> = <span class="r4 r">mockLog</span>.<span class="i property">Object</span>;
+ 
+            <b>await</b> <span class="r3 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#81ebd06a286c8097" class="i method">ListOwnershipAsync</a>(<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>);
+ 
+            <span class="r4 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r5 rd" class="r5 r">m</span> =&gt; <span class="r5 r">m</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#64fd119da0a657ca" class="i method">ListOwnershipStart</a>(<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>));
+            <span class="r4 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r6 rd" class="r6 r">m</span> =&gt; <span class="r6 r">m</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#6b2567b9341196c9" class="i method">ListOwnershipComplete</a>(<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <span class="r0 r">blobList</span>.<a href="@0@mscorlib/A.html#78a69d857716bc68" class="i property">Count</a>));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Verifies basic functionality of ListOwnershipAsync and ensures the appropriate events are emitted on failure.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="t constructor">Test</span>]
+        <b>public void</b> <a id="b0a162f35d6da2aa" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ListOwnershipLogsErrorOnException</a>()
+        {
+            <a href="/Azure.Core/A.html#253c51f73f5cd67d" class="k">var</a> <span id="r7 rd" class="r7 r">ex</span> = <b>new</b> <a href="/Azure.Core/A.html#970e6fbff6f240c8" class="t constructor">RequestFailedException</a>(0, <span class="s">&quot;foo&quot;</span>, <a href="/Azure.Storage.Blobs/A.html#e0d947616d6aba70" class="t t">BlobErrorCode</a>.<a href="/Azure.Storage.Blobs/A.html#9beccd1bbcece43b" class="i property">ContainerNotFound</a>.<a href="/Azure.Storage.Blobs/A.html#956fff1c6f30e077" class="i method">ToString</a>(), <b>null</b>);
+            <a href="/Azure.Messaging.EventHubs.Processor/A.html#7ef60f6955871bd6" class="k">var</a> <span id="r8 rd" class="r8 r">target</span> = <b>new</b> <a href="/Azure.Messaging.EventHubs.Processor/A.html#cf9794561a1e6eee" class="t constructor">BlobCheckpointStoreInternal</a>(<b>new</b> <a href="#e185d96622d97ae1" class="t constructor">MockBlobContainerClient</a>(<span class="r9 r">getBlobsAsyncException</span>: <span class="r7 r">ex</span>));
+            <b>var</b> <span id="r10 rd" class="r10 r">mockLog</span> = <b>new</b> <span class="t constructor">Mock</span>&lt;<a href="/Azure.Messaging.EventHubs.Processor/A.html#2eca79e5321d3821" class="t t">BlobEventStoreEventSource</a>&gt;();
+            <span class="r8 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#217e6f044f2dc3a0" class="i property">Logger</a> = <span class="r10 r">mockLog</span>.<span class="i property">Object</span>;
+ 
+            <span class="t t">Assert</span>.<span class="i method">That</span>(<b>async</b> () =&gt; <b>await</b> <span class="r8 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#81ebd06a286c8097" class="i method">ListOwnershipAsync</a>(<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>), <span class="t t">Throws</span>.<span class="i method">InstanceOf</span>&lt;<a href="/Azure.Core/A.html#253c51f73f5cd67d" class="t t">RequestFailedException</a>&gt;());
+            <span class="r10 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r11 rd" class="r11 r">m</span> =&gt; <span class="r11 r">m</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#e35af38b37edba60" class="i method">ListOwnershipError</a>(<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <span class="r7 r">ex</span>.<a href="@0@mscorlib/A.html#5fba0e16215b42a3" class="i property">Message</a>));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Verifies basic functionality of ClaimOwnershipAsync and ensures the appropriate logging.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="t constructor">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="68aa7c2e1fd9bc10" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ClaimOwnershipLogsStartAndComplete</a>()
+        {
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r12 rd" class="r12 r">partitionOwnership</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt;
+            {
+                <b>new</b> <a href="/Azure.Messaging.EventHubs/A.html#93a5d743a25a763d" class="t constructor">EventProcessorPartitionOwnership</a>
+                {
+                    <a href="/Azure.Messaging.EventHubs/A.html#32a10c50b50b991b" class="i property">FullyQualifiedNamespace</a> = <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#c918efefac954f70" class="i property">EventHubName</a> = <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#f020f76a29d0ee5e" class="i property">ConsumerGroup</a> = <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#0a2651fca459d132" class="i property">OwnerIdentifier</a> = <a href="#f4f4715591d7fb02" class="i field">OwnershipIdentifier</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a> = <a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#316dcf4e9c1cf9ae" class="i property">LastModifiedTime</a> = <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a>.<a href="@0@mscorlib/A.html#b0d5e4c9a8d4ddac" class="i property">UtcNow</a>
+                }
+            };
+ 
+            <a href="#6e1a6e20400c23c0" class="k">var</a> <span id="r13 rd" class="r13 r">mockBlobContainerClient</span> = <b>new</b> <a href="#e185d96622d97ae1" class="t constructor">MockBlobContainerClient</a>().<a href="#8e95598a7dfcb666" class="i method">AddBlobClient</a>(<span class="s">$&quot;</span>{<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>}<span class="s">/</span>{<a href="#2cb520c6178e46d4" class="i field">EventHubName</a>}<span class="s">/</span>{<a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>}<span class="s">/ownership/1</span><span class="s">&quot;</span>, <span id="r14 rd" class="r14 r">_</span> =&gt; { });
+            <a href="/Azure.Messaging.EventHubs.Processor/A.html#7ef60f6955871bd6" class="k">var</a> <span id="r15 rd" class="r15 r">target</span> = <b>new</b> <a href="/Azure.Messaging.EventHubs.Processor/A.html#cf9794561a1e6eee" class="t constructor">BlobCheckpointStoreInternal</a>(<span class="r13 r">mockBlobContainerClient</span>);
+ 
+            <b>var</b> <span id="r16 rd" class="r16 r">mockLog</span> = <b>new</b> <span class="t constructor">Mock</span>&lt;<a href="/Azure.Messaging.EventHubs.Processor/A.html#2eca79e5321d3821" class="t t">BlobEventStoreEventSource</a>&gt;();
+            <span class="r15 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#217e6f044f2dc3a0" class="i property">Logger</a> = <span class="r16 r">mockLog</span>.<span class="i property">Object</span>;
+ 
+            <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="k">var</a> <span id="r17 rd" class="r17 r">result</span> = <b>await</b> <span class="r15 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#b9fa702ad9fa8ffc" class="i method">ClaimOwnershipAsync</a>(<span class="r12 r">partitionOwnership</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>);
+            <span class="r16 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r18 rd" class="r18 r">m</span> =&gt; <span class="r18 r">m</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#dbe6ed7aaadc312c" class="i method">ClaimOwnershipStart</a>(<a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>, <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <a href="#f4f4715591d7fb02" class="i field">OwnershipIdentifier</a>));
+            <span class="r16 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r19 rd" class="r19 r">m</span> =&gt; <span class="r19 r">m</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#154da4f28b674a78" class="i method">ClaimOwnershipComplete</a>(<a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>, <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <a href="#f4f4715591d7fb02" class="i field">OwnershipIdentifier</a>));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Verifies basic functionality of ClaimOwnershipAsync and ensures the appropriate logging.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="t constructor">Test</span>]
+        <b>public void</b> <a id="bf4183efa52fbea2" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ClaimOwnershipLogsErrors</a>()
+        {
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r20 rd" class="r20 r">partitionOwnership</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt;
+            {
+                <b>new</b> <a href="/Azure.Messaging.EventHubs/A.html#93a5d743a25a763d" class="t constructor">EventProcessorPartitionOwnership</a>
+                {
+                    <a href="/Azure.Messaging.EventHubs/A.html#32a10c50b50b991b" class="i property">FullyQualifiedNamespace</a> = <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#c918efefac954f70" class="i property">EventHubName</a> = <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#f020f76a29d0ee5e" class="i property">ConsumerGroup</a> = <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#0a2651fca459d132" class="i property">OwnerIdentifier</a> = <a href="#f4f4715591d7fb02" class="i field">OwnershipIdentifier</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a> = <a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#316dcf4e9c1cf9ae" class="i property">LastModifiedTime</a> = <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a>.<a href="@0@mscorlib/A.html#b0d5e4c9a8d4ddac" class="i property">UtcNow</a>
+                }
+            };
+ 
+            <a href="@0@mscorlib/A.html#f66c12b035eeb443" class="k">var</a> <span id="r21 rd" class="r21 r">expectedException</span> = <b>new</b> <a href="@0@mscorlib/A.html#f6bcc926af5b80ad" class="t constructor">DllNotFoundException</a>(<span class="s">&quot;BOOM!&quot;</span>);
+            <b>var</b> <span id="r22 rd" class="r22 r">mockLog</span> = <b>new</b> <span class="t constructor">Mock</span>&lt;<a href="/Azure.Messaging.EventHubs.Processor/A.html#2eca79e5321d3821" class="t t">BlobEventStoreEventSource</a>&gt;();
+            <a href="#6e1a6e20400c23c0" class="k">var</a> <span id="r23 rd" class="r23 r">mockContainerClient</span> = <b>new</b> <a href="#e185d96622d97ae1" class="t constructor">MockBlobContainerClient</a>().<a href="#8e95598a7dfcb666" class="i method">AddBlobClient</a>(<span class="s">$&quot;</span>{<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>}<span class="s">/</span>{<a href="#2cb520c6178e46d4" class="i field">EventHubName</a>}<span class="s">/</span>{<a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>}<span class="s">/ownership/1</span><span class="s">&quot;</span>, <span id="r24 rd" class="r24 r">client</span> =&gt; <span class="r24 r">client</span>.<a href="#21c5c6b73f94b4c3" class="i field">UploadBlobException</a> = <span class="r21 r">expectedException</span>);
+ 
+            <a href="/Azure.Messaging.EventHubs.Processor/A.html#7ef60f6955871bd6" class="k">var</a> <span id="r25 rd" class="r25 r">target</span> = <b>new</b> <a href="/Azure.Messaging.EventHubs.Processor/A.html#cf9794561a1e6eee" class="t constructor">BlobCheckpointStoreInternal</a>(<span class="r23 r">mockContainerClient</span>);
+            <span class="r25 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#217e6f044f2dc3a0" class="i property">Logger</a> = <span class="r22 r">mockLog</span>.<span class="i property">Object</span>;
+ 
+            <span class="t t">Assert</span>.<span class="i method">That</span>(<b>async</b> () =&gt; <b>await</b> <span class="r25 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#b9fa702ad9fa8ffc" class="i method">ClaimOwnershipAsync</a>(<span class="r20 r">partitionOwnership</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>), <span class="t t">Throws</span>.<span class="i property">Exception</span>.<span class="i method">EqualTo</span>(<span class="r21 r">expectedException</span>));
+            <span class="r22 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r26 rd" class="r26 r">m</span> =&gt; <span class="r26 r">m</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#3f9216902218dc56" class="i method">ClaimOwnershipError</a>(<a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>, <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <a href="#f4f4715591d7fb02" class="i field">OwnershipIdentifier</a>, <span class="r21 r">expectedException</span>.<a href="@0@mscorlib/A.html#23854dd720498168" class="i property">Message</a>));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Verifies basic functionality of ClaimOwnershipAsync and ensures the appropriate events are emitted on success.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="t constructor">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="727028f1b33e70ed" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ClaimOwnershipForNewPartitionLogsOwnershipClaimed</a>()
+        {
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r27 rd" class="r27 r">partitionOwnership</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt;
+            {
+                <b>new</b> <a href="/Azure.Messaging.EventHubs/A.html#93a5d743a25a763d" class="t constructor">EventProcessorPartitionOwnership</a>
+                {
+                    <a href="/Azure.Messaging.EventHubs/A.html#32a10c50b50b991b" class="i property">FullyQualifiedNamespace</a> = <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#c918efefac954f70" class="i property">EventHubName</a> = <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#f020f76a29d0ee5e" class="i property">ConsumerGroup</a> = <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#0a2651fca459d132" class="i property">OwnerIdentifier</a> = <a href="#f4f4715591d7fb02" class="i field">OwnershipIdentifier</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a> = <a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#316dcf4e9c1cf9ae" class="i property">LastModifiedTime</a> = <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a>.<a href="@0@mscorlib/A.html#b0d5e4c9a8d4ddac" class="i property">UtcNow</a>
+                }
+            };
+ 
+            <a href="#6e1a6e20400c23c0" class="k">var</a> <span id="r28 rd" class="r28 r">mockBlobContainerClient</span> = <b>new</b> <a href="#e185d96622d97ae1" class="t constructor">MockBlobContainerClient</a>().<a href="#8e95598a7dfcb666" class="i method">AddBlobClient</a>(<span class="s">$&quot;</span>{<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>}<span class="s">/</span>{<a href="#2cb520c6178e46d4" class="i field">EventHubName</a>}<span class="s">/</span>{<a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>}<span class="s">/ownership/1</span><span class="s">&quot;</span>, <span id="r29 rd" class="r29 r">_</span> =&gt; { });
+            <a href="/Azure.Messaging.EventHubs.Processor/A.html#7ef60f6955871bd6" class="k">var</a> <span id="r30 rd" class="r30 r">target</span> = <b>new</b> <a href="/Azure.Messaging.EventHubs.Processor/A.html#cf9794561a1e6eee" class="t constructor">BlobCheckpointStoreInternal</a>(<span class="r28 r">mockBlobContainerClient</span>);
+            <b>var</b> <span id="r31 rd" class="r31 r">mockLog</span> = <b>new</b> <span class="t constructor">Mock</span>&lt;<a href="/Azure.Messaging.EventHubs.Processor/A.html#2eca79e5321d3821" class="t t">BlobEventStoreEventSource</a>&gt;();
+            <span class="r30 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#217e6f044f2dc3a0" class="i property">Logger</a> = <span class="r31 r">mockLog</span>.<span class="i property">Object</span>;
+ 
+            <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="k">var</a> <span id="r32 rd" class="r32 r">result</span> = <b>await</b> <span class="r30 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#b9fa702ad9fa8ffc" class="i method">ClaimOwnershipAsync</a>(<span class="r27 r">partitionOwnership</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>);
+            <span class="r31 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r33 rd" class="r33 r">m</span> =&gt; <span class="r33 r">m</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#4610f955b08c09b9" class="i method">OwnershipClaimed</a>(<a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>, <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <a href="#f4f4715591d7fb02" class="i field">OwnershipIdentifier</a>));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Verifies basic functionality of ClaimOwnershipAsync and ensures the appropriate events are emitted on success.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="t constructor">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="d2a4e2b54ed2ee0a" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ClaimOwnershipForExistingPartitionLogsOwnershipClaimed</a>()
+        {
+            <a href="/Azure.Storage.Blobs/A.html#6cdb754d8a522d97" class="k">var</a> <span id="r34 rd" class="r34 r">blobInfo</span> = <a href="/Azure.Storage.Blobs/A.html#8630adc9e460bffc" class="t t">BlobsModelFactory</a>.<a href="/Azure.Storage.Blobs/A.html#7e428ec866d170db" class="i method">BlobInfo</a>(<b>new</b> <a href="/Azure.Core/A.html#83878a5758faf623" class="t constructor">ETag</a>(<span class="s">$@&quot;</span>&quot;&quot;{<a href="#25e79e924b74e975" class="i field">MatchingEtag</a>}&quot;&quot;<span class="s">&quot;</span>), <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a>.<a href="@0@mscorlib/A.html#b0d5e4c9a8d4ddac" class="i property">UtcNow</a>);
+ 
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r35 rd" class="r35 r">partitionOwnership</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt;
+            {
+                <b>new</b> <a href="/Azure.Messaging.EventHubs/A.html#93a5d743a25a763d" class="t constructor">EventProcessorPartitionOwnership</a>
+                {
+                    <a href="/Azure.Messaging.EventHubs/A.html#32a10c50b50b991b" class="i property">FullyQualifiedNamespace</a> = <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#c918efefac954f70" class="i property">EventHubName</a> = <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#f020f76a29d0ee5e" class="i property">ConsumerGroup</a> = <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#0a2651fca459d132" class="i property">OwnerIdentifier</a> = <a href="#f4f4715591d7fb02" class="i field">OwnershipIdentifier</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a> = <a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#316dcf4e9c1cf9ae" class="i property">LastModifiedTime</a> = <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a>.<a href="@0@mscorlib/A.html#b0d5e4c9a8d4ddac" class="i property">UtcNow</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#9b3a949192b7c6eb" class="i property">Version</a> = <a href="#25e79e924b74e975" class="i field">MatchingEtag</a>
+                }
+            };
+ 
+            <a href="#6e1a6e20400c23c0" class="k">var</a> <span id="r36 rd" class="r36 r">mockContainerClient</span> = <b>new</b> <a href="#e185d96622d97ae1" class="t constructor">MockBlobContainerClient</a>().<a href="#8e95598a7dfcb666" class="i method">AddBlobClient</a>(<span class="s">$&quot;</span>{<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>}<span class="s">/</span>{<a href="#2cb520c6178e46d4" class="i field">EventHubName</a>}<span class="s">/</span>{<a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>}<span class="s">/ownership/1</span><span class="s">&quot;</span>, <span id="r37 rd" class="r37 r">client</span> =&gt; <span class="r37 r">client</span>.<a href="#74d5ae13e24d1f5d" class="i field">BlobInfo</a> = <span class="r34 r">blobInfo</span>);
+            <a href="/Azure.Messaging.EventHubs.Processor/A.html#7ef60f6955871bd6" class="k">var</a> <span id="r38 rd" class="r38 r">target</span> = <b>new</b> <a href="/Azure.Messaging.EventHubs.Processor/A.html#cf9794561a1e6eee" class="t constructor">BlobCheckpointStoreInternal</a>(<span class="r36 r">mockContainerClient</span>);
+            <b>var</b> <span id="r39 rd" class="r39 r">mockLog</span> = <b>new</b> <span class="t constructor">Mock</span>&lt;<a href="/Azure.Messaging.EventHubs.Processor/A.html#2eca79e5321d3821" class="t t">BlobEventStoreEventSource</a>&gt;();
+            <span class="r38 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#217e6f044f2dc3a0" class="i property">Logger</a> = <span class="r39 r">mockLog</span>.<span class="i property">Object</span>;
+ 
+            <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="k">var</a> <span id="r40 rd" class="r40 r">result</span> = <b>await</b> <span class="r38 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#b9fa702ad9fa8ffc" class="i method">ClaimOwnershipAsync</a>(<span class="r35 r">partitionOwnership</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>);
+            <span class="r39 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r41 rd" class="r41 r">m</span> =&gt; <span class="r41 r">m</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#4610f955b08c09b9" class="i method">OwnershipClaimed</a>(<a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>, <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <a href="#f4f4715591d7fb02" class="i field">OwnershipIdentifier</a>));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Verifies basic functionality of ClaimOwnershipAsync and ensures the appropriate events are emitted on success.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="t constructor">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="3920dc7e6ce8a86c" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ClaimOwnershipForExistingPartitionWithWrongEtagLogsOwnershipNotClaimable</a>()
+        {
+            <a href="/Azure.Storage.Blobs/A.html#6cdb754d8a522d97" class="k">var</a> <span id="r42 rd" class="r42 r">blobInfo</span> = <a href="/Azure.Storage.Blobs/A.html#8630adc9e460bffc" class="t t">BlobsModelFactory</a>.<a href="/Azure.Storage.Blobs/A.html#7e428ec866d170db" class="i method">BlobInfo</a>(<b>new</b> <a href="/Azure.Core/A.html#83878a5758faf623" class="t constructor">ETag</a>(<span class="s">$@&quot;</span>&quot;&quot;{<a href="#7b802771afabcb80" class="i field">WrongEtag</a>}&quot;&quot;<span class="s">&quot;</span>), <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a>.<a href="@0@mscorlib/A.html#b0d5e4c9a8d4ddac" class="i property">UtcNow</a>);
+ 
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r43 rd" class="r43 r">partitionOwnership</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt;
+            {
+                <b>new</b> <a href="/Azure.Messaging.EventHubs/A.html#93a5d743a25a763d" class="t constructor">EventProcessorPartitionOwnership</a>
+                {
+                    <a href="/Azure.Messaging.EventHubs/A.html#32a10c50b50b991b" class="i property">FullyQualifiedNamespace</a> = <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#c918efefac954f70" class="i property">EventHubName</a> = <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#f020f76a29d0ee5e" class="i property">ConsumerGroup</a> = <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#0a2651fca459d132" class="i property">OwnerIdentifier</a> = <a href="#f4f4715591d7fb02" class="i field">OwnershipIdentifier</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a> = <a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#316dcf4e9c1cf9ae" class="i property">LastModifiedTime</a> = <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a>.<a href="@0@mscorlib/A.html#b0d5e4c9a8d4ddac" class="i property">UtcNow</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#9b3a949192b7c6eb" class="i property">Version</a> = <a href="#25e79e924b74e975" class="i field">MatchingEtag</a>
+                }
+            };
+ 
+            <a href="#6e1a6e20400c23c0" class="k">var</a> <span id="r44 rd" class="r44 r">mockContainerClient</span> = <b>new</b> <a href="#e185d96622d97ae1" class="t constructor">MockBlobContainerClient</a>().<a href="#8e95598a7dfcb666" class="i method">AddBlobClient</a>(<span class="s">$&quot;</span>{<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>}<span class="s">/</span>{<a href="#2cb520c6178e46d4" class="i field">EventHubName</a>}<span class="s">/</span>{<a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>}<span class="s">/ownership/1</span><span class="s">&quot;</span>, <span id="r45 rd" class="r45 r">client</span> =&gt; <span class="r45 r">client</span>.<a href="#74d5ae13e24d1f5d" class="i field">BlobInfo</a> = <span class="r42 r">blobInfo</span>);
+            <a href="/Azure.Messaging.EventHubs.Processor/A.html#7ef60f6955871bd6" class="k">var</a> <span id="r46 rd" class="r46 r">target</span> = <b>new</b> <a href="/Azure.Messaging.EventHubs.Processor/A.html#cf9794561a1e6eee" class="t constructor">BlobCheckpointStoreInternal</a>(<span class="r44 r">mockContainerClient</span>);
+            <b>var</b> <span id="r47 rd" class="r47 r">mockLog</span> = <b>new</b> <span class="t constructor">Mock</span>&lt;<a href="/Azure.Messaging.EventHubs.Processor/A.html#2eca79e5321d3821" class="t t">BlobEventStoreEventSource</a>&gt;();
+            <span class="r46 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#217e6f044f2dc3a0" class="i property">Logger</a> = <span class="r47 r">mockLog</span>.<span class="i property">Object</span>;
+ 
+            <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="k">var</a> <span id="r48 rd" class="r48 r">result</span> = <b>await</b> <span class="r46 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#b9fa702ad9fa8ffc" class="i method">ClaimOwnershipAsync</a>(<span class="r43 r">partitionOwnership</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>);
+            <span class="r47 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r49 rd" class="r49 r">m</span> =&gt; <span class="r49 r">m</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#cf806401b2e2eceb" class="i method">OwnershipNotClaimable</a>(<a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>, <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <a href="#f4f4715591d7fb02" class="i field">OwnershipIdentifier</a>, <span class="t t">It</span>.<span class="i method">Is</span>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span id="r50 rd" class="r50 r">e</span> =&gt; <span class="r50 r">e</span>.<a href="@0@mscorlib/A.html#428c5c9954dea844" class="i method">Contains</a>(<a href="/Azure.Storage.Blobs/A.html#e0d947616d6aba70" class="t t">BlobErrorCode</a>.<a href="/Azure.Storage.Blobs/A.html#e12b0b7714ae7485" class="i property">ConditionNotMet</a>.<a href="/Azure.Storage.Blobs/A.html#956fff1c6f30e077" class="i method">ToString</a>()))));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Verifies basic functionality of ClaimOwnershipAsync and ensures the appropriate events are emitted on failure.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="t constructor">Test</span>]
+        <b>public void</b> <a id="6481d542c1a3cfd2" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">ClaimOwnershipForMissingPartitionLogsClaimOwnershipError</a>()
+        {
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r51 rd" class="r51 r">partitionOwnership</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="/Azure.Messaging.EventHubs/A.html#9a85e4e6ad44370e" class="t t">EventProcessorPartitionOwnership</a>&gt;
+            {
+                <b>new</b> <a href="/Azure.Messaging.EventHubs/A.html#93a5d743a25a763d" class="t constructor">EventProcessorPartitionOwnership</a>
+                {
+                    <a href="/Azure.Messaging.EventHubs/A.html#32a10c50b50b991b" class="i property">FullyQualifiedNamespace</a> = <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#c918efefac954f70" class="i property">EventHubName</a> = <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#f020f76a29d0ee5e" class="i property">ConsumerGroup</a> = <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#0a2651fca459d132" class="i property">OwnerIdentifier</a> = <a href="#f4f4715591d7fb02" class="i field">OwnershipIdentifier</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#960beb22d4eb55d5" class="i property">PartitionId</a> = <a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#316dcf4e9c1cf9ae" class="i property">LastModifiedTime</a> = <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a>.<a href="@0@mscorlib/A.html#b0d5e4c9a8d4ddac" class="i property">UtcNow</a>,
+                    <a href="/Azure.Messaging.EventHubs/A.html#9b3a949192b7c6eb" class="i property">Version</a> = <a href="#25e79e924b74e975" class="i field">MatchingEtag</a>
+                }
+            };
+ 
+            <a href="#6e1a6e20400c23c0" class="k">var</a> <span id="r52 rd" class="r52 r">mockBlobContainerClient</span> = <b>new</b> <a href="#e185d96622d97ae1" class="t constructor">MockBlobContainerClient</a>().<a href="#8e95598a7dfcb666" class="i method">AddBlobClient</a>(<span class="s">$&quot;</span>{<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>}<span class="s">/</span>{<a href="#2cb520c6178e46d4" class="i field">EventHubName</a>}<span class="s">/</span>{<a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>}<span class="s">/ownership/1</span><span class="s">&quot;</span>, <span id="r53 rd" class="r53 r">_</span> =&gt; { });
+            <a href="/Azure.Messaging.EventHubs.Processor/A.html#7ef60f6955871bd6" class="k">var</a> <span id="r54 rd" class="r54 r">target</span> = <b>new</b> <a href="/Azure.Messaging.EventHubs.Processor/A.html#cf9794561a1e6eee" class="t constructor">BlobCheckpointStoreInternal</a>(<span class="r52 r">mockBlobContainerClient</span>);
+ 
+            <b>var</b> <span id="r55 rd" class="r55 r">mockLog</span> = <b>new</b> <span class="t constructor">Mock</span>&lt;<a href="/Azure.Messaging.EventHubs.Processor/A.html#2eca79e5321d3821" class="t t">BlobEventStoreEventSource</a>&gt;();
+            <span class="r54 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#217e6f044f2dc3a0" class="i property">Logger</a> = <span class="r55 r">mockLog</span>.<span class="i property">Object</span>;
+ 
+            <span class="t t">Assert</span>.<span class="i method">That</span>(<b>async</b> () =&gt; <b>await</b> <span class="r54 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#b9fa702ad9fa8ffc" class="i method">ClaimOwnershipAsync</a>(<span class="r51 r">partitionOwnership</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>), <span class="t t">Throws</span>.<span class="i method">InstanceOf</span>&lt;<a href="/Azure.Core/A.html#253c51f73f5cd67d" class="t t">RequestFailedException</a>&gt;());
+            <span class="r55 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r56 rd" class="r56 r">m</span> =&gt; <span class="r56 r">m</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#3f9216902218dc56" class="i method">ClaimOwnershipError</a>(<a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>, <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <a href="#f4f4715591d7fb02" class="i field">OwnershipIdentifier</a>, <span class="t t">It</span>.<span class="i method">Is</span>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;(<span id="r57 rd" class="r57 r">e</span> =&gt; <span class="r57 r">e</span>.<a href="@0@mscorlib/A.html#428c5c9954dea844" class="i method">Contains</a>(<a href="/Azure.Storage.Blobs/A.html#e0d947616d6aba70" class="t t">BlobErrorCode</a>.<a href="/Azure.Storage.Blobs/A.html#d09680c97545ffc1" class="i property">BlobNotFound</a>.<a href="/Azure.Storage.Blobs/A.html#956fff1c6f30e077" class="i method">ToString</a>()))));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Verifies basic functionality of UpdateCheckpointAsync and ensures the appropriate events are emitted on success.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="t constructor">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="e32c98c97c6fea64" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">UpdateCheckpointLogsStartAndCompleteWhenTheBlobExists</a>()
+        {
+            <a href="/Azure.Storage.Blobs/A.html#6cdb754d8a522d97" class="k">var</a> <span id="r58 rd" class="r58 r">blobInfo</span> = <a href="/Azure.Storage.Blobs/A.html#8630adc9e460bffc" class="t t">BlobsModelFactory</a>.<a href="/Azure.Storage.Blobs/A.html#7e428ec866d170db" class="i method">BlobInfo</a>(<b>new</b> <a href="/Azure.Core/A.html#83878a5758faf623" class="t constructor">ETag</a>(<span class="s">$@&quot;</span>&quot;&quot;{<a href="#25e79e924b74e975" class="i field">MatchingEtag</a>}&quot;&quot;<span class="s">&quot;</span>), <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a>.<a href="@0@mscorlib/A.html#b0d5e4c9a8d4ddac" class="i property">UtcNow</a>);
+ 
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r59 rd" class="r59 r">blobList</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="/Azure.Storage.Blobs/A.html#8029f8268c3df23c" class="t t">BlobItem</a>&gt;
+            {
+                <a href="/Azure.Storage.Blobs/A.html#8630adc9e460bffc" class="t t">BlobsModelFactory</a>.<a href="/Azure.Storage.Blobs/A.html#861c17d184e9b33c" class="i method">BlobItem</a>(<span class="s">$&quot;</span>{<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>}<span class="s">/</span>{<a href="#2cb520c6178e46d4" class="i field">EventHubName</a>}<span class="s">/</span>{<a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>}<span class="s">/ownership/</span>{<a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#a6547a472def7796" class="i method">ToString</a>()}<span class="s">&quot;</span>,
+                                           <b>false</b>,
+                                           <a href="/Azure.Storage.Blobs/A.html#8630adc9e460bffc" class="t t">BlobsModelFactory</a>.<a href="/Azure.Storage.Blobs/A.html#5789dab366ddcced" class="i method">BlobItemProperties</a>(<b>true</b>, <span class="r1 r">lastModified</span>: <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a>.<a href="@0@mscorlib/A.html#b0d5e4c9a8d4ddac" class="i property">UtcNow</a>, <span class="r2 r">eTag</span>: <b>new</b> <a href="/Azure.Core/A.html#83878a5758faf623" class="t constructor">ETag</a>(<a href="#25e79e924b74e975" class="i field">MatchingEtag</a>)),
+                                           <span class="s">&quot;snapshot&quot;</span>,
+                                           <b>new</b> <a href="@0@mscorlib/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; {{<a href="/Azure.Messaging.EventHubs.Processor/A.html#b5b4d37ef3f2055b" class="t t">BlobMetadataKey</a>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#5aa65d0ff55e03c9" class="i field">OwnerIdentifier</a>, <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#a6547a472def7796" class="i method">ToString</a>()}})
+            };
+ 
+            <a href="#6e1a6e20400c23c0" class="k">var</a> <span id="r60 rd" class="r60 r">mockContainerClient</span> = <b>new</b> <a href="#e185d96622d97ae1" class="t constructor">MockBlobContainerClient</a>() { <a href="#2635471dbbafa7bd" class="i field">Blobs</a> = <span class="r59 r">blobList</span> };
+ 
+            <span class="r60 r">mockContainerClient</span>.<a href="#8e95598a7dfcb666" class="i method">AddBlobClient</a>(<span class="s">$&quot;</span>{<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>}<span class="s">/</span>{<a href="#2cb520c6178e46d4" class="i field">EventHubName</a>}<span class="s">/</span>{<a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>}<span class="s">/checkpoint/1</span><span class="s">&quot;</span>, <span id="r61 rd" class="r61 r">client</span> =&gt;
+            {
+                <span class="r61 r">client</span>.<a href="#74d5ae13e24d1f5d" class="i field">BlobInfo</a> = <span class="r58 r">blobInfo</span>;
+                <span class="r61 r">client</span>.<a href="#21c5c6b73f94b4c3" class="i field">UploadBlobException</a> = <b>new</b> <a href="@0@mscorlib/A.html#df2d82d91ca29e40" class="t constructor">Exception</a>(<span class="s">&quot;Upload should not be called&quot;</span>);
+            });
+ 
+            <a href="/Azure.Messaging.EventHubs.Processor/A.html#7ef60f6955871bd6" class="k">var</a> <span id="r62 rd" class="r62 r">target</span> = <b>new</b> <a href="/Azure.Messaging.EventHubs.Processor/A.html#cf9794561a1e6eee" class="t constructor">BlobCheckpointStoreInternal</a>(<span class="r60 r">mockContainerClient</span>);
+ 
+            <b>var</b> <span id="r63 rd" class="r63 r">mockLog</span> = <b>new</b> <span class="t constructor">Mock</span>&lt;<a href="/Azure.Messaging.EventHubs.Processor/A.html#2eca79e5321d3821" class="t t">BlobEventStoreEventSource</a>&gt;();
+            <span class="r62 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#217e6f044f2dc3a0" class="i property">Logger</a> = <span class="r63 r">mockLog</span>.<span class="i property">Object</span>;
+ 
+            <b>await</b> <span class="r62 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#a5d8e2a8aa93e3e6" class="i method">UpdateCheckpointAsync</a>(<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>, 0, <b>default</b>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>);
+            <span class="r63 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r64 rd" class="r64 r">log</span> =&gt; <span class="r64 r">log</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#7018c7378716f669" class="i method">UpdateCheckpointStart</a>(<a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>, <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>));
+            <span class="r63 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r65 rd" class="r65 r">log</span> =&gt; <span class="r65 r">log</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#f5e276a4190cf124" class="i method">UpdateCheckpointComplete</a>(<a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>, <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Verifies basic functionality of UpdateCheckpointAsync and ensures the appropriate events are emitted on success.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="t constructor">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="3480fb1b8205fcd6" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">UpdateCheckpointLogsStartAndCompleteWhenTheBlobDoesNotExist</a>()
+        {
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r66 rd" class="r66 r">blobList</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="/Azure.Storage.Blobs/A.html#8029f8268c3df23c" class="t t">BlobItem</a>&gt;
+            {
+                <a href="/Azure.Storage.Blobs/A.html#8630adc9e460bffc" class="t t">BlobsModelFactory</a>.<a href="/Azure.Storage.Blobs/A.html#861c17d184e9b33c" class="i method">BlobItem</a>(<span class="s">$&quot;</span>{<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>}<span class="s">/</span>{<a href="#2cb520c6178e46d4" class="i field">EventHubName</a>}<span class="s">/</span>{<a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>}<span class="s">/ownership/</span>{<a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#a6547a472def7796" class="i method">ToString</a>()}<span class="s">&quot;</span>,
+                                           <b>false</b>,
+                                           <a href="/Azure.Storage.Blobs/A.html#8630adc9e460bffc" class="t t">BlobsModelFactory</a>.<a href="/Azure.Storage.Blobs/A.html#5789dab366ddcced" class="i method">BlobItemProperties</a>(<b>true</b>, <span class="r1 r">lastModified</span>: <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a>.<a href="@0@mscorlib/A.html#b0d5e4c9a8d4ddac" class="i property">UtcNow</a>, <span class="r2 r">eTag</span>: <b>new</b> <a href="/Azure.Core/A.html#83878a5758faf623" class="t constructor">ETag</a>(<a href="#25e79e924b74e975" class="i field">MatchingEtag</a>)),
+                                           <span class="s">&quot;snapshot&quot;</span>,
+                                           <b>new</b> <a href="@0@mscorlib/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; {{<a href="/Azure.Messaging.EventHubs.Processor/A.html#b5b4d37ef3f2055b" class="t t">BlobMetadataKey</a>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#5aa65d0ff55e03c9" class="i field">OwnerIdentifier</a>, <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#a6547a472def7796" class="i method">ToString</a>()}})
+            };
+            <a href="#6e1a6e20400c23c0" class="k">var</a> <span id="r67 rd" class="r67 r">mockBlobContainerClient</span> = <b>new</b> <a href="#e185d96622d97ae1" class="t constructor">MockBlobContainerClient</a>() { <a href="#2635471dbbafa7bd" class="i field">Blobs</a> = <span class="r66 r">blobList</span> };
+            <span class="r67 r">mockBlobContainerClient</span>.<a href="#8e95598a7dfcb666" class="i method">AddBlobClient</a>(<span class="s">$&quot;</span>{<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>}<span class="s">/</span>{<a href="#2cb520c6178e46d4" class="i field">EventHubName</a>}<span class="s">/</span>{<a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>}<span class="s">/checkpoint/1</span><span class="s">&quot;</span>, <span id="r68 rd" class="r68 r">_</span> =&gt; { });
+ 
+            <a href="/Azure.Messaging.EventHubs.Processor/A.html#7ef60f6955871bd6" class="k">var</a> <span id="r69 rd" class="r69 r">target</span> = <b>new</b> <a href="/Azure.Messaging.EventHubs.Processor/A.html#cf9794561a1e6eee" class="t constructor">BlobCheckpointStoreInternal</a>(<span class="r67 r">mockBlobContainerClient</span>);
+ 
+            <b>var</b> <span id="r70 rd" class="r70 r">mockLog</span> = <b>new</b> <span class="t constructor">Mock</span>&lt;<a href="/Azure.Messaging.EventHubs.Processor/A.html#2eca79e5321d3821" class="t t">BlobEventStoreEventSource</a>&gt;();
+            <span class="r69 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#217e6f044f2dc3a0" class="i property">Logger</a> = <span class="r70 r">mockLog</span>.<span class="i property">Object</span>;
+ 
+            <b>await</b> <span class="r69 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#a5d8e2a8aa93e3e6" class="i method">UpdateCheckpointAsync</a>(<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>, 0, 0, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>);
+            <span class="r70 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r71 rd" class="r71 r">log</span> =&gt; <span class="r71 r">log</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#7018c7378716f669" class="i method">UpdateCheckpointStart</a>(<a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>, <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>));
+            <span class="r70 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r72 rd" class="r72 r">log</span> =&gt; <span class="r72 r">log</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#f5e276a4190cf124" class="i method">UpdateCheckpointComplete</a>(<a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>, <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Verifies basic functionality of UpdateCheckpointAsync and ensures the appropriate logs are written</span>
+        <span class="c">///</span><span class="c">   when exceptions occur.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="t constructor">Test</span>]
+        <b>public void</b> <a id="a311d51f46cee911" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">UpdateCheckpointLogsErrorsWhenTheBlobExists</a>()
+        {
+            <a href="@0@mscorlib/A.html#f66c12b035eeb443" class="k">var</a> <span id="r73 rd" class="r73 r">expectedException</span> = <b>new</b> <a href="@0@mscorlib/A.html#f6bcc926af5b80ad" class="t constructor">DllNotFoundException</a>(<span class="s">&quot;BOOM!&quot;</span>);
+            <b>var</b> <span id="r74 rd" class="r74 r">mockLog</span> = <b>new</b> <span class="t constructor">Mock</span>&lt;<a href="/Azure.Messaging.EventHubs.Processor/A.html#2eca79e5321d3821" class="t t">BlobEventStoreEventSource</a>&gt;();
+ 
+            <a href="#6e1a6e20400c23c0" class="k">var</a> <span id="r75 rd" class="r75 r">mockContainerClient</span> = <b>new</b> <a href="#e185d96622d97ae1" class="t constructor">MockBlobContainerClient</a>().<a href="#8e95598a7dfcb666" class="i method">AddBlobClient</a>(<span class="s">$&quot;</span>{<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>}<span class="s">/</span>{<a href="#2cb520c6178e46d4" class="i field">EventHubName</a>}<span class="s">/</span>{<a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>}<span class="s">/checkpoint/1</span><span class="s">&quot;</span>, <span id="r76 rd" class="r76 r">client</span> =&gt;
+            {
+                <span class="r76 r">client</span>.<a href="#073dc00e23e9f03b" class="i field">BlobClientSetMetadataException</a> = <span class="r73 r">expectedException</span>;
+                <span class="r76 r">client</span>.<a href="#21c5c6b73f94b4c3" class="i field">UploadBlobException</a> = <b>new</b> <a href="@0@mscorlib/A.html#df2d82d91ca29e40" class="t constructor">Exception</a>(<span class="s">&quot;Upload should not be called&quot;</span>);
+            });
+ 
+            <a href="/Azure.Messaging.EventHubs.Processor/A.html#7ef60f6955871bd6" class="k">var</a> <span id="r77 rd" class="r77 r">target</span> = <b>new</b> <a href="/Azure.Messaging.EventHubs.Processor/A.html#cf9794561a1e6eee" class="t constructor">BlobCheckpointStoreInternal</a>(<span class="r75 r">mockContainerClient</span>);
+            <span class="r77 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#217e6f044f2dc3a0" class="i property">Logger</a> = <span class="r74 r">mockLog</span>.<span class="i property">Object</span>;
+ 
+            <span class="t t">Assert</span>.<span class="i method">That</span>(<b>async</b> () =&gt; <b>await</b> <span class="r77 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#a5d8e2a8aa93e3e6" class="i method">UpdateCheckpointAsync</a>(<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>, 123, 456, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>), <span class="t t">Throws</span>.<span class="i property">Exception</span>.<span class="i method">EqualTo</span>(<span class="r73 r">expectedException</span>));
+            <span class="r74 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r78 rd" class="r78 r">log</span> =&gt; <span class="r78 r">log</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#03e627fcac99fc00" class="i method">UpdateCheckpointError</a>(<a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>, <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <span class="r73 r">expectedException</span>.<a href="@0@mscorlib/A.html#23854dd720498168" class="i property">Message</a>));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Verifies basic functionality of UpdateCheckpointAsync and ensures the appropriate logs are written</span>
+        <span class="c">///</span><span class="c">   when exceptions occur.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="t constructor">Test</span>]
+        <b>public void</b> <a id="6ad80b9c445671bc" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">UpdateCheckpointLogsErrorsWhenTheBlobDoesNotExist</a>()
+        {
+            <a href="@0@mscorlib/A.html#f66c12b035eeb443" class="k">var</a> <span id="r79 rd" class="r79 r">expectedException</span> = <b>new</b> <a href="@0@mscorlib/A.html#f6bcc926af5b80ad" class="t constructor">DllNotFoundException</a>(<span class="s">&quot;BOOM!&quot;</span>);
+            <b>var</b> <span id="r80 rd" class="r80 r">mockLog</span> = <b>new</b> <span class="t constructor">Mock</span>&lt;<a href="/Azure.Messaging.EventHubs.Processor/A.html#2eca79e5321d3821" class="t t">BlobEventStoreEventSource</a>&gt;();
+ 
+            <a href="#6e1a6e20400c23c0" class="k">var</a> <span id="r81 rd" class="r81 r">mockContainerClient</span> = <b>new</b> <a href="#e185d96622d97ae1" class="t constructor">MockBlobContainerClient</a>().<a href="#8e95598a7dfcb666" class="i method">AddBlobClient</a>(<span class="s">$&quot;</span>{<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>}<span class="s">/</span>{<a href="#2cb520c6178e46d4" class="i field">EventHubName</a>}<span class="s">/</span>{<a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>}<span class="s">/checkpoint/1</span><span class="s">&quot;</span>, <span id="r82 rd" class="r82 r">client</span> =&gt;
+            {
+                <span class="r82 r">client</span>.<a href="#21c5c6b73f94b4c3" class="i field">UploadBlobException</a> = <span class="r79 r">expectedException</span>;
+            });
+ 
+            <a href="/Azure.Messaging.EventHubs.Processor/A.html#7ef60f6955871bd6" class="k">var</a> <span id="r83 rd" class="r83 r">target</span> = <b>new</b> <a href="/Azure.Messaging.EventHubs.Processor/A.html#cf9794561a1e6eee" class="t constructor">BlobCheckpointStoreInternal</a>(<span class="r81 r">mockContainerClient</span>);
+            <span class="r83 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#217e6f044f2dc3a0" class="i property">Logger</a> = <span class="r80 r">mockLog</span>.<span class="i property">Object</span>;
+ 
+            <span class="t t">Assert</span>.<span class="i method">That</span>(<b>async</b> () =&gt; <b>await</b> <span class="r83 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#a5d8e2a8aa93e3e6" class="i method">UpdateCheckpointAsync</a>(<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>, 4, 6, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>), <span class="t t">Throws</span>.<span class="i property">Exception</span>.<span class="i method">EqualTo</span>(<span class="r79 r">expectedException</span>));
+            <span class="r80 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r84 rd" class="r84 r">log</span> =&gt; <span class="r84 r">log</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#03e627fcac99fc00" class="i method">UpdateCheckpointError</a>(<a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>, <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <span class="r79 r">expectedException</span>.<a href="@0@mscorlib/A.html#23854dd720498168" class="i property">Message</a>));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Verifies basic functionality of UpdateCheckpointAsync and ensures the appropriate events are emitted on failure.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="t constructor">Test</span>]
+        <b>public void</b> <a id="03edc270e9a15895" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">UpdateCheckpointForMissingContainerLogsCheckpointUpdateError</a>()
+        {
+            <a href="/Azure.Core/A.html#253c51f73f5cd67d" class="k">var</a> <span id="r85 rd" class="r85 r">ex</span> = <b>new</b> <a href="/Azure.Core/A.html#970e6fbff6f240c8" class="t constructor">RequestFailedException</a>(404, <a href="/Azure.Storage.Blobs/A.html#e0d947616d6aba70" class="t t">BlobErrorCode</a>.<a href="/Azure.Storage.Blobs/A.html#9beccd1bbcece43b" class="i property">ContainerNotFound</a>.<a href="/Azure.Storage.Blobs/A.html#956fff1c6f30e077" class="i method">ToString</a>(), <a href="/Azure.Storage.Blobs/A.html#e0d947616d6aba70" class="t t">BlobErrorCode</a>.<a href="/Azure.Storage.Blobs/A.html#9beccd1bbcece43b" class="i property">ContainerNotFound</a>.<a href="/Azure.Storage.Blobs/A.html#956fff1c6f30e077" class="i method">ToString</a>(), <b>null</b>);
+            <a href="#6e1a6e20400c23c0" class="k">var</a> <span id="r86 rd" class="r86 r">mockBlobContainerClient</span> = <b>new</b> <a href="#e185d96622d97ae1" class="t constructor">MockBlobContainerClient</a>().<a href="#8e95598a7dfcb666" class="i method">AddBlobClient</a>(<span class="s">$&quot;</span>{<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>}<span class="s">/</span>{<a href="#2cb520c6178e46d4" class="i field">EventHubName</a>}<span class="s">/</span>{<a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>}<span class="s">/checkpoint/1</span><span class="s">&quot;</span>, <span id="r87 rd" class="r87 r">client</span> =&gt; <span class="r87 r">client</span>.<a href="#21c5c6b73f94b4c3" class="i field">UploadBlobException</a> = <span class="r85 r">ex</span>);
+            <a href="/Azure.Messaging.EventHubs.Processor/A.html#7ef60f6955871bd6" class="k">var</a> <span id="r88 rd" class="r88 r">target</span> = <b>new</b> <a href="/Azure.Messaging.EventHubs.Processor/A.html#cf9794561a1e6eee" class="t constructor">BlobCheckpointStoreInternal</a>(<span class="r86 r">mockBlobContainerClient</span>);
+ 
+            <b>var</b> <span id="r89 rd" class="r89 r">mockLog</span> = <b>new</b> <span class="t constructor">Mock</span>&lt;<a href="/Azure.Messaging.EventHubs.Processor/A.html#2eca79e5321d3821" class="t t">BlobEventStoreEventSource</a>&gt;();
+            <span class="r88 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#217e6f044f2dc3a0" class="i property">Logger</a> = <span class="r89 r">mockLog</span>.<span class="i property">Object</span>;
+ 
+            <span class="t t">Assert</span>.<span class="i method">That</span>(<b>async</b> () =&gt; <b>await</b> <span class="r88 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#a5d8e2a8aa93e3e6" class="i method">UpdateCheckpointAsync</a>(<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>, 999, <b>null</b>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>), <span class="t t">Throws</span>.<span class="i method">InstanceOf</span>&lt;<a href="/Azure.Core/A.html#253c51f73f5cd67d" class="t t">RequestFailedException</a>&gt;());
+            <span class="r89 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r90 rd" class="r90 r">m</span> =&gt; <span class="r90 r">m</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#03e627fcac99fc00" class="i method">UpdateCheckpointError</a>(<a href="#49446eb6aa5ce6fe" class="i field">PartitionId</a>, <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <span class="r85 r">ex</span>.<a href="@0@mscorlib/A.html#5fba0e16215b42a3" class="i property">Message</a>));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Verifies basic functionality of GetCheckpointAsync and ensures the appropriate events are emitted on success.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="t constructor">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="4b258feb1d4e12c7" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetCheckpointLogsStartAndComplete</a>()
+        {
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r91 rd" class="r91 r">blobList</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="/Azure.Storage.Blobs/A.html#8029f8268c3df23c" class="t t">BlobItem</a>&gt;
+            {
+                <a href="/Azure.Storage.Blobs/A.html#8630adc9e460bffc" class="t t">BlobsModelFactory</a>.<a href="/Azure.Storage.Blobs/A.html#861c17d184e9b33c" class="i method">BlobItem</a>(<span class="s">$&quot;</span>{<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>}<span class="s">/</span>{<a href="#2cb520c6178e46d4" class="i field">EventHubName</a>}<span class="s">/</span>{<a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>}<span class="s">/checkpoint/0</span><span class="s">&quot;</span>,
+                                           <b>false</b>,
+                                           <a href="/Azure.Storage.Blobs/A.html#8630adc9e460bffc" class="t t">BlobsModelFactory</a>.<a href="/Azure.Storage.Blobs/A.html#5789dab366ddcced" class="i method">BlobItemProperties</a>(<b>true</b>, <span class="r1 r">lastModified</span>: <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a>.<a href="@0@mscorlib/A.html#b0d5e4c9a8d4ddac" class="i property">UtcNow</a>, <span class="r2 r">eTag</span>: <b>new</b> <a href="/Azure.Core/A.html#83878a5758faf623" class="t constructor">ETag</a>(<a href="#25e79e924b74e975" class="i field">MatchingEtag</a>)),
+                                           <span class="s">&quot;snapshot&quot;</span>,
+                                           <b>new</b> <a href="@0@mscorlib/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt;
+                                           {
+                                               {<a href="/Azure.Messaging.EventHubs.Processor/A.html#b5b4d37ef3f2055b" class="t t">BlobMetadataKey</a>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#5aa65d0ff55e03c9" class="i field">OwnerIdentifier</a>, <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#a6547a472def7796" class="i method">ToString</a>()},
+                                               {<a href="/Azure.Messaging.EventHubs.Processor/A.html#b5b4d37ef3f2055b" class="t t">BlobMetadataKey</a>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#a7b963baf124433f" class="i field">Offset</a>, <span class="s">&quot;0&quot;</span>}
+                                           })
+            };
+ 
+            <a href="/Azure.Messaging.EventHubs.Processor/A.html#7ef60f6955871bd6" class="k">var</a> <span id="r92 rd" class="r92 r">target</span> = <b>new</b> <a href="/Azure.Messaging.EventHubs.Processor/A.html#cf9794561a1e6eee" class="t constructor">BlobCheckpointStoreInternal</a>(<b>new</b> <a href="#e185d96622d97ae1" class="t constructor">MockBlobContainerClient</a>() { <a href="#2635471dbbafa7bd" class="i field">Blobs</a> = <span class="r91 r">blobList</span> });
+ 
+            <b>var</b> <span id="r93 rd" class="r93 r">mockLog</span> = <b>new</b> <span class="t constructor">Mock</span>&lt;<a href="/Azure.Messaging.EventHubs.Processor/A.html#2eca79e5321d3821" class="t t">BlobEventStoreEventSource</a>&gt;();
+            <span class="r92 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#217e6f044f2dc3a0" class="i property">Logger</a> = <span class="r93 r">mockLog</span>.<span class="i property">Object</span>;
+ 
+            <b>await</b> <span class="r92 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#735fcd1c7dce9b78" class="i method">GetCheckpointAsync</a>(<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <span class="s">&quot;0&quot;</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>);
+ 
+            <span class="r93 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r94 rd" class="r94 r">m</span> =&gt; <span class="r94 r">m</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#bd07b10da71e4608" class="i method">GetCheckpointStart</a>(<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <span class="s">&quot;0&quot;</span>));
+            <span class="r93 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r95 rd" class="r95 r">m</span> =&gt; <span class="r95 r">m</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#162ba6ae5b2b9b3f" class="i method">GetCheckpointComplete</a>(<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <span class="s">&quot;0&quot;</span>));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Verifies basic functionality of GetCheckpointAsync and ensures the appropriate events are emitted when errors occur.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="t constructor">Test</span>]
+        <b>public void</b> <a id="063a5b41520b30ad" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetCheckpointLogsErrors</a>()
+        {
+            <a href="@0@mscorlib/A.html#f66c12b035eeb443" class="k">var</a> <span id="r96 rd" class="r96 r">expectedException</span> = <b>new</b> <a href="@0@mscorlib/A.html#f6bcc926af5b80ad" class="t constructor">DllNotFoundException</a>(<span class="s">&quot;BOOM!&quot;</span>);
+            <a href="#6e1a6e20400c23c0" class="k">var</a> <span id="r97 rd" class="r97 r">mockContainerClient</span> = <b>new</b> <a href="#e185d96622d97ae1" class="t constructor">MockBlobContainerClient</a>() { <a href="#1e9e58594bc7e403" class="i field">GetBlobsAsyncException</a> = <span class="r96 r">expectedException</span> };
+            <a href="/Azure.Messaging.EventHubs.Processor/A.html#7ef60f6955871bd6" class="k">var</a> <span id="r98 rd" class="r98 r">target</span> = <b>new</b> <a href="/Azure.Messaging.EventHubs.Processor/A.html#cf9794561a1e6eee" class="t constructor">BlobCheckpointStoreInternal</a>(<span class="r97 r">mockContainerClient</span>);
+ 
+            <span class="r97 r">mockContainerClient</span>.<a href="#8e95598a7dfcb666" class="i method">AddBlobClient</a>(<span class="s">$&quot;</span>{<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>}<span class="s">/</span>{<a href="#2cb520c6178e46d4" class="i field">EventHubName</a>}<span class="s">/</span>{<a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>}<span class="s">/checkpoint/0</span><span class="s">&quot;</span>, <span id="r99 rd" class="r99 r">client</span> =&gt;
+            {
+                <span class="r99 r">client</span>.<a href="#360b689a45b45ffc" class="i field">GetPropertiesException</a> = <span class="r96 r">expectedException</span>;
+            });
+ 
+            <b>var</b> <span id="r100 rd" class="r100 r">mockLog</span> = <b>new</b> <span class="t constructor">Mock</span>&lt;<a href="/Azure.Messaging.EventHubs.Processor/A.html#2eca79e5321d3821" class="t t">BlobEventStoreEventSource</a>&gt;();
+            <span class="r98 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#217e6f044f2dc3a0" class="i property">Logger</a> = <span class="r100 r">mockLog</span>.<span class="i property">Object</span>;
+ 
+            <span class="t t">Assert</span>.<span class="i method">That</span>(<b>async</b> () =&gt; <b>await</b> <span class="r98 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#735fcd1c7dce9b78" class="i method">GetCheckpointAsync</a>(<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <span class="s">&quot;0&quot;</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>), <span class="t t">Throws</span>.<span class="i property">Exception</span>.<span class="i method">EqualTo</span>(<span class="r96 r">expectedException</span>));
+            <span class="r100 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r101 rd" class="r101 r">m</span> =&gt; <span class="r101 r">m</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#903f8b0776c57bb3" class="i method">GetCheckpointError</a>(<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <span class="s">&quot;0&quot;</span>, <span class="r96 r">expectedException</span>.<a href="@0@mscorlib/A.html#23854dd720498168" class="i property">Message</a>));
+        }
+ 
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c">   Verifies basic functionality of GetCheckpointAsync and ensures the appropriate events are emitted on success.</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
+        <span class="c">///</span>
+        [<span class="t constructor">Test</span>]
+        <b>public async</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a> <a id="5751aab16a241002" href="../R/../../0000000000.html" target="n" data-glyph="72,1" class="i method">GetCheckpointLogsInvalidCheckpoint</a>()
+        {
+            <a href="@0@mscorlib/A.html#cf7f4095e4de7646" class="k">var</a> <span id="r102 rd" class="r102 r">blobList</span> = <b>new</b> <a href="@0@mscorlib/A.html#9e5352b2b304ceba" class="t constructor">List</a>&lt;<a href="/Azure.Storage.Blobs/A.html#8029f8268c3df23c" class="t t">BlobItem</a>&gt;
+            {
+                <a href="/Azure.Storage.Blobs/A.html#8630adc9e460bffc" class="t t">BlobsModelFactory</a>.<a href="/Azure.Storage.Blobs/A.html#861c17d184e9b33c" class="i method">BlobItem</a>(<span class="s">$&quot;</span>{<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>}<span class="s">/</span>{<a href="#2cb520c6178e46d4" class="i field">EventHubName</a>}<span class="s">/</span>{<a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>}<span class="s">/checkpoint/0</span><span class="s">&quot;</span>,
+                                           <b>false</b>,
+                                           <a href="/Azure.Storage.Blobs/A.html#8630adc9e460bffc" class="t t">BlobsModelFactory</a>.<a href="/Azure.Storage.Blobs/A.html#5789dab366ddcced" class="i method">BlobItemProperties</a>(<b>true</b>, <span class="r1 r">lastModified</span>: <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a>.<a href="@0@mscorlib/A.html#b0d5e4c9a8d4ddac" class="i property">UtcNow</a>, <span class="r2 r">eTag</span>: <b>new</b> <a href="/Azure.Core/A.html#83878a5758faf623" class="t constructor">ETag</a>(<a href="#25e79e924b74e975" class="i field">MatchingEtag</a>)),
+                                           <span class="s">&quot;snapshot&quot;</span>,
+                                           <b>new</b> <a href="@0@mscorlib/A.html#bf6849e410b43c4c" class="t constructor">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; {{<a href="/Azure.Messaging.EventHubs.Processor/A.html#b5b4d37ef3f2055b" class="t t">BlobMetadataKey</a>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#5aa65d0ff55e03c9" class="i field">OwnerIdentifier</a>, <a href="@0@mscorlib/A.html#b622ef5f6b76c10a" class="t t">Guid</a>.<a href="@0@mscorlib/A.html#b7fae6994c22c22e" class="i method">NewGuid</a>().<a href="@0@mscorlib/A.html#a6547a472def7796" class="i method">ToString</a>()}})
+            };
+            <a href="/Azure.Messaging.EventHubs.Processor/A.html#7ef60f6955871bd6" class="k">var</a> <span id="r103 rd" class="r103 r">target</span> = <b>new</b> <a href="/Azure.Messaging.EventHubs.Processor/A.html#cf9794561a1e6eee" class="t constructor">BlobCheckpointStoreInternal</a>(<b>new</b> <a href="#e185d96622d97ae1" class="t constructor">MockBlobContainerClient</a>() { <a href="#2635471dbbafa7bd" class="i field">Blobs</a> = <span class="r102 r">blobList</span> });
+ 
+            <b>var</b> <span id="r104 rd" class="r104 r">mockLog</span> = <b>new</b> <span class="t constructor">Mock</span>&lt;<a href="/Azure.Messaging.EventHubs.Processor/A.html#2eca79e5321d3821" class="t t">BlobEventStoreEventSource</a>&gt;();
+            <span class="r103 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#217e6f044f2dc3a0" class="i property">Logger</a> = <span class="r104 r">mockLog</span>.<span class="i property">Object</span>;
+ 
+            <b>await</b> <span class="r103 r">target</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#735fcd1c7dce9b78" class="i method">GetCheckpointAsync</a>(<a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>, <span class="s">&quot;0&quot;</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a>.<a href="@0@mscorlib/A.html#ec32c41597007382" class="i property">None</a>);
+            <span class="r104 r">mockLog</span>.<span class="i method">Verify</span>(<span id="r105 rd" class="r105 r">m</span> =&gt; <span class="r105 r">m</span>.<a href="/Azure.Messaging.EventHubs.Processor/A.html#e7e1bf6a549d9a37" class="i method">InvalidCheckpointFound</a>(<span class="s">&quot;0&quot;</span>, <a href="#57a5b73a06d4dac7" class="i field">FullyQualifiedNamespace</a>, <a href="#2cb520c6178e46d4" class="i field">EventHubName</a>, <a href="#15b8f515cb4ee395" class="i field">ConsumerGroup</a>));
+        }
+ 
+        <b>private class</b> <a id="6e1a6e20400c23c0" href="../R/6e1a6e20400c23c0.html" target="n" data-glyph="4,1" class="t t">MockBlobContainerClient</a> : <a href="/Azure.Storage.Blobs/A.html#6bb2c165ee95c7d4" class="t t">BlobContainerClient</a>
+        {
+            <b>public override</b> <a href="@0@System/A.html#991565dd25f47c90" class="t t">Uri</a> <a id="13b1c18539c91547" href="../R/13b1c18539c91547.html" target="n" data-glyph="102,2" class="i property">Uri</a> { <b>get</b>; }
+            <b>public override string</b> <a id="d5c0d6f75a9e82b0" href="../R/d5c0d6f75a9e82b0.html" target="n" data-glyph="102,2" class="i property">AccountName</a> { <b>get</b>; }
+            <b>public override string</b> <a id="be3ac6bb658236da" href="../R/be3ac6bb658236da.html" target="n" data-glyph="102,2" class="i property">Name</a> { <b>get</b>; }
+            <b>internal</b> <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<a href="/Azure.Storage.Blobs/A.html#8029f8268c3df23c" class="t t">BlobItem</a>&gt; <a id="2635471dbbafa7bd" href="../R/2635471dbbafa7bd.html" target="n" data-glyph="44,2" class="i field">Blobs</a>;
+            <b>internal</b> <a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <a id="1e9e58594bc7e403" href="../R/1e9e58594bc7e403.html" target="n" data-glyph="44,2" class="i field">GetBlobsAsyncException</a>;
+            <b>internal</b> <a href="@0@mscorlib/A.html#d3599058f8d79be0" class="t t">Dictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="#b850753463714167" class="t t">MockBlobClient</a>&gt; <a id="fd020b00900d5c76" href="../R/fd020b00900d5c76.html" target="n" data-glyph="44,2" class="i field">BlobClients</a> = <b>new</b>();
+ 
+            <b>public</b> <a id="e185d96622d97ae1" href="../R/e185d96622d97ae1.html" target="n" data-glyph="72,2" class="t constructor">MockBlobContainerClient</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r106 rd" class="r106 r">accountName</span> = <span class="s">&quot;blobAccount&quot;</span>,
+                                           <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r107 rd" class="r107 r">containerName</span> = <span class="s">&quot;container&quot;</span>,
+                                           <a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <span id="r9 rd" class="r9 r">getBlobsAsyncException</span> = <b>null</b>)
+            {
+                <a href="#1e9e58594bc7e403" class="i field">GetBlobsAsyncException</a> = <span class="r9 r">getBlobsAsyncException</span>;
+                <a href="#2635471dbbafa7bd" class="i field">Blobs</a> = <a href="@0@System.Core/A.html#577032c8811e20d3" class="t t">Enumerable</a>.<a href="@0@System.Core/A.html#4d026772cf3399f5" class="i method">Empty</a>&lt;<a href="/Azure.Storage.Blobs/A.html#8029f8268c3df23c" class="t t">BlobItem</a>&gt;();
+                <a href="#d5c0d6f75a9e82b0" class="i property">AccountName</a> = <span class="r106 r">accountName</span>;
+                <a href="#be3ac6bb658236da" class="i property">Name</a> = <span class="r107 r">containerName</span>;
+                <a href="#13b1c18539c91547" class="i property">Uri</a> = <b>new</b> <a href="@0@System/A.html#9e1bb2fef0d1159b" class="t constructor">Uri</a>(<span class="s">&quot;https://foo&quot;</span>);
+            }
+            <b>public override</b> <a href="/Azure.Core/A.html#ce6e47443d11533b" class="t t">AsyncPageable</a>&lt;<a href="/Azure.Storage.Blobs/A.html#8029f8268c3df23c" class="t t">BlobItem</a>&gt; <a id="5f80904925eadbf2" href="../R/5f80904925eadbf2.html" target="n" data-glyph="72,2" class="i method">GetBlobsAsync</a>(<a href="/Azure.Storage.Blobs/A.html#b71186e764357179" class="t t">BlobTraits</a> <span id="r108 rd" class="r108 r">traits</span> = <a href="/Azure.Storage.Blobs/A.html#b71186e764357179" class="t t">BlobTraits</a>.<a href="/Azure.Storage.Blobs/A.html#ccff07251c6c45fc" class="i field">None</a>, <a href="/Azure.Storage.Blobs/A.html#2966c1fecbb18292" class="t t">BlobStates</a> <span id="r109 rd" class="r109 r">states</span> = <a href="/Azure.Storage.Blobs/A.html#2966c1fecbb18292" class="t t">BlobStates</a>.<a href="/Azure.Storage.Blobs/A.html#69d45fa5e0ec7a79" class="i field">None</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r110 rd" class="r110 r">prefix</span> = <b>null</b>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r111 rd" class="r111 r">cancellationToken</span> = <b>default</b>)
+            {
+                <b>if</b> (<a href="#1e9e58594bc7e403" class="i field">GetBlobsAsyncException</a> != <b>null</b>)
+                {
+                    <b>throw</b> <a href="#1e9e58594bc7e403" class="i field">GetBlobsAsyncException</a>;
+                }
+ 
+                <b>return</b> <b>new</b> <a href="#b86ab46445ec0f20" class="t constructor">MockAsyncPageable</a>&lt;<a href="/Azure.Storage.Blobs/A.html#8029f8268c3df23c" class="t t">BlobItem</a>&gt;(<a href="#2635471dbbafa7bd" class="i field">Blobs</a>.<a href="@0@System.Core/A.html#e73922753675387a" class="i method">Where</a>(<span id="r112 rd" class="r112 r">b</span> =&gt; <span class="r110 r">prefix</span> == <b>null</b> || <span class="r112 r">b</span>.<a href="/Azure.Storage.Blobs/A.html#1c486ee7e34147b4" class="i property">Name</a>.<a href="@0@mscorlib/A.html#1c787ba07a7b11ab" class="i method">StartsWith</a>(<span class="r110 r">prefix</span>, <a href="@0@mscorlib/A.html#702797def97ecb7c" class="t t">StringComparison</a>.<a href="@0@mscorlib/A.html#87891a6d28c64c9b" class="i field">Ordinal</a>)));
+            }
+ 
+            <b>public override</b> <a href="/Azure.Storage.Blobs/A.html#f0665d15d63242b1" class="t t">BlobClient</a> <a id="48105ef9099c3abb" href="../R/48105ef9099c3abb.html" target="n" data-glyph="72,2" class="i method">GetBlobClient</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r113 rd" class="r113 r">blobName</span>)
+            {
+                <b>if</b> (<a href="#fd020b00900d5c76" class="i field">BlobClients</a>.<a href="@0@mscorlib/A.html#2e5bc6d8c0f21e67" class="i method">TryGetValue</a>(<span class="r113 r">blobName</span>, <b>out</b> <a href="#b850753463714167" class="k">var</a> <span id="r114 rd" class="r114 r">client</span>))
+                {
+                    <b>return</b> <span class="r114 r">client</span>;
+                }
+ 
+                <a href="/Azure.Storage.Blobs/A.html#8029f8268c3df23c" class="k">var</a> <span id="r115 rd" class="r115 r">blob</span> = <a href="#2635471dbbafa7bd" class="i field">Blobs</a>.<a href="@0@System.Core/A.html#d7f21cb3c785f289" class="i method">SingleOrDefault</a>(<span id="r116 rd" class="r116 r">c</span> =&gt; <span class="r116 r">c</span>.<a href="/Azure.Storage.Blobs/A.html#1c486ee7e34147b4" class="i property">Name</a> == <span class="r113 r">blobName</span>);
+                <b>if</b> (<span class="r115 r">blob</span> != <b>null</b>)
+                {
+                    <b>return</b> <b>new</b> <a href="#dd8ec39892488de5" class="t constructor">MockBlobClient</a>(<span class="r113 r">blobName</span>)
+                    {
+                        <a href="#bcf917c6ad8a16ca" class="i field">Properties</a> = <a href="/Azure.Storage.Blobs/A.html#8630adc9e460bffc" class="t t">BlobsModelFactory</a>.<a href="/Azure.Storage.Blobs/A.html#4bce48808d71286e" class="i method">BlobProperties</a>(<span class="r117 r">metadata</span>: <span class="r115 r">blob</span>.<a href="/Azure.Storage.Blobs/A.html#0cb332e8cea7613f" class="i property">Metadata</a>)
+                    };
+                }
+ 
+                <b>return</b> <b>new</b> <a href="#dd8ec39892488de5" class="t constructor">MockBlobClient</a>(<span class="r113 r">blobName</span>);
+            }
+ 
+            <b>internal</b> <a href="#6e1a6e20400c23c0" class="t t">MockBlobContainerClient</a> <a id="8e95598a7dfcb666" href="../R/8e95598a7dfcb666.html" target="n" data-glyph="74,2" class="i method">AddBlobClient</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r118 rd" class="r118 r">name</span>, <a href="@0@mscorlib/A.html#486d58da4553e12d" class="t t">Action</a>&lt;<a href="#b850753463714167" class="t t">MockBlobClient</a>&gt; <span id="r119 rd" class="r119 r">configure</span>)
+            {
+                <a href="#b850753463714167" class="k">var</a> <span id="r120 rd" class="r120 r">client</span> = <b>new</b> <a href="#dd8ec39892488de5" class="t constructor">MockBlobClient</a>(<span class="r118 r">name</span>);
+                <span class="r119 r">configure</span>(<span class="r120 r">client</span>);
+                <a href="#fd020b00900d5c76" class="i field">BlobClients</a><a href="@0@mscorlib/A.html#49962975508e2d83">[</a><span class="r118 r">name</span>] = <span class="r120 r">client</span>;
+                <b>return</b> <a href="#6e1a6e20400c23c0" class="k">this</a>;
+            }
+        }
+ 
+        <b>private class</b> <a id="b850753463714167" href="../R/b850753463714167.html" target="n" data-glyph="4,1" class="t t">MockBlobClient</a> : <a href="/Azure.Storage.Blobs/A.html#f0665d15d63242b1" class="t t">BlobClient</a>
+        {
+            <b>public override string</b> <a id="7f6ca9e05fced114" href="../R/7f6ca9e05fced114.html" target="n" data-glyph="102,2" class="i property">Name</a> { <b>get</b>; }
+ 
+            <b>internal</b> <a href="/Azure.Storage.Blobs/A.html#6cdb754d8a522d97" class="t t">BlobInfo</a> <a id="74d5ae13e24d1f5d" href="../R/74d5ae13e24d1f5d.html" target="n" data-glyph="44,2" class="i field">BlobInfo</a>;
+            <b>internal</b> <a href="/Azure.Storage.Blobs/A.html#5eac1727e6cdaafb" class="t t">BlobProperties</a> <a id="bcf917c6ad8a16ca" href="../R/bcf917c6ad8a16ca.html" target="n" data-glyph="44,2" class="i field">Properties</a>;
+            <b>internal</b> <a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <a id="21c5c6b73f94b4c3" href="../R/21c5c6b73f94b4c3.html" target="n" data-glyph="44,2" class="i field">UploadBlobException</a>;
+            <b>internal</b> <a href="@0@mscorlib/A.html#f092fb2b893a0162" class="t t">Exception</a> <a id="073dc00e23e9f03b" href="../R/073dc00e23e9f03b.html" target="n" data-glyph="44,2" class="i field">BlobClientSetMetadataException</a>;
+            <b>internal</b> <a href="@0@mscorlib/A.html#f66c12b035eeb443" class="t t">DllNotFoundException</a> <a id="360b689a45b45ffc" href="../R/360b689a45b45ffc.html" target="n" data-glyph="44,2" class="i field">GetPropertiesException</a>;
+            <b>public</b> <a id="dd8ec39892488de5" href="../R/dd8ec39892488de5.html" target="n" data-glyph="72,2" class="t constructor">MockBlobClient</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r121 rd" class="r121 r">blobName</span>)
+            {
+                <a href="#7f6ca9e05fced114" class="i property">Name</a> = <span class="r121 r">blobName</span>;
+            }
+ 
+            <b>public override</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;<a href="/Azure.Storage.Blobs/A.html#6cdb754d8a522d97" class="t t">BlobInfo</a>&gt;&gt; <a id="0699a9c8a5d81946" href="../R/0699a9c8a5d81946.html" target="n" data-glyph="72,2" class="i method">SetMetadataAsync</a>(<a href="@0@mscorlib/A.html#20343df0c96b629b" class="t t">IDictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <span id="r122 rd" class="r122 r">metadata</span>, <a href="/Azure.Storage.Blobs/A.html#340adb54d55c6c34" class="t t">BlobRequestConditions</a> <span id="r123 rd" class="r123 r">conditions</span> = <b>null</b>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r124 rd" class="r124 r">cancellationToken</span> = <b>default</b>)
+            {
+                <b>if</b> (<a href="#073dc00e23e9f03b" class="i field">BlobClientSetMetadataException</a> != <b>null</b>)
+                {
+                    <b>throw</b> <a href="#073dc00e23e9f03b" class="i field">BlobClientSetMetadataException</a>;
+                }
+ 
+                <b>if</b> (<a href="#74d5ae13e24d1f5d" class="i field">BlobInfo</a> == <b>null</b>)
+                {
+                    <b>throw</b> <b>new</b> <a href="/Azure.Core/A.html#970e6fbff6f240c8" class="t constructor">RequestFailedException</a>(404, <a href="/Azure.Storage.Blobs/A.html#e0d947616d6aba70" class="t t">BlobErrorCode</a>.<a href="/Azure.Storage.Blobs/A.html#d09680c97545ffc1" class="i property">BlobNotFound</a>.<a href="/Azure.Storage.Blobs/A.html#956fff1c6f30e077" class="i method">ToString</a>(), <a href="/Azure.Storage.Blobs/A.html#e0d947616d6aba70" class="t t">BlobErrorCode</a>.<a href="/Azure.Storage.Blobs/A.html#d09680c97545ffc1" class="i property">BlobNotFound</a>.<a href="/Azure.Storage.Blobs/A.html#956fff1c6f30e077" class="i method">ToString</a>(), <b>default</b>);
+                }
+ 
+                <b>if</b> ((<span class="r123 r">conditions</span> == <b>null</b>) || (<a href="#74d5ae13e24d1f5d" class="i field">BlobInfo</a>.<a href="/Azure.Storage.Blobs/A.html#f22c6583e9d9cac2" class="i property">ETag</a>.<a href="/Azure.Core/A.html#6912691b387d6996" class="i method">Equals</a>(<span class="s">$@&quot;</span>&quot;&quot;{<span class="r123 r">conditions</span>.<a href="/Azure.Core/A.html#c0640f9cb69488b5" class="i property">IfMatch</a>}&quot;&quot;<span class="s">&quot;</span>)))
+                {
+                    <b>return</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#11a386e7d7cae64a" class="i method">FromResult</a>(<a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a>.<a href="/Azure.Core/A.html#ff41acd78201fc1c" class="i method">FromValue</a>(<a href="#74d5ae13e24d1f5d" class="i field">BlobInfo</a>, <span class="t t">Mock</span>.<span class="i method">Of</span>&lt;<a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a>&gt;()));
+                }
+ 
+                <b>throw</b> <b>new</b> <a href="/Azure.Core/A.html#970e6fbff6f240c8" class="t constructor">RequestFailedException</a>(412, <a href="/Azure.Storage.Blobs/A.html#e0d947616d6aba70" class="t t">BlobErrorCode</a>.<a href="/Azure.Storage.Blobs/A.html#e12b0b7714ae7485" class="i property">ConditionNotMet</a>.<a href="/Azure.Storage.Blobs/A.html#956fff1c6f30e077" class="i method">ToString</a>(), <a href="/Azure.Storage.Blobs/A.html#e0d947616d6aba70" class="t t">BlobErrorCode</a>.<a href="/Azure.Storage.Blobs/A.html#e12b0b7714ae7485" class="i property">ConditionNotMet</a>.<a href="/Azure.Storage.Blobs/A.html#956fff1c6f30e077" class="i method">ToString</a>(), <b>default</b>);
+            }
+ 
+            <b>public override</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;<a href="/Azure.Storage.Blobs/A.html#66a553618c3f7c72" class="t t">BlobContentInfo</a>&gt;&gt; <a id="5156b1328dfc5183" href="../R/5156b1328dfc5183.html" target="n" data-glyph="72,2" class="i method">UploadAsync</a>(<a href="@0@mscorlib/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r125 rd" class="r125 r">content</span>, <a href="/Azure.Storage.Blobs/A.html#84ca02c0580ec46f" class="t t">BlobHttpHeaders</a> <span id="r126 rd" class="r126 r">httpHeaders</span> = <b>null</b>, <a href="@0@mscorlib/A.html#20343df0c96b629b" class="t t">IDictionary</a>&lt;<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>&gt; <span id="r127 rd" class="r127 r">metadata</span> = <b>null</b>, <a href="/Azure.Storage.Blobs/A.html#340adb54d55c6c34" class="t t">BlobRequestConditions</a> <span id="r128 rd" class="r128 r">conditions</span> = <b>null</b>, <a href="@0@mscorlib/A.html#766adb700a2972f5" class="t t">IProgress</a>&lt;<b>long</b>&gt; <span id="r129 rd" class="r129 r">progressHandler</span> = <b>null</b>, <a href="/Azure.Storage.Blobs/A.html#fba68f8727fd7278" class="t t">AccessTier</a>? <span id="r130 rd" class="r130 r">accessTier</span> = <b>null</b>, <a href="/Azure.Storage.Common/A.html#5906346a5aaad27d" class="t t">StorageTransferOptions</a> <span id="r131 rd" class="r131 r">transferOptions</span> = <b>default</b>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r132 rd" class="r132 r">cancellationToken</span> = <b>default</b>)
+            {
+                <b>if</b> (<a href="#21c5c6b73f94b4c3" class="i field">UploadBlobException</a> != <b>null</b>)
+                {
+                    <b>throw</b> <a href="#21c5c6b73f94b4c3" class="i field">UploadBlobException</a>;
+                }
+ 
+                <b>if</b> (<a href="#74d5ae13e24d1f5d" class="i field">BlobInfo</a> != <b>null</b>)
+                {
+                    <b>throw</b> <b>new</b> <a href="/Azure.Core/A.html#970e6fbff6f240c8" class="t constructor">RequestFailedException</a>(409, <a href="/Azure.Storage.Blobs/A.html#e0d947616d6aba70" class="t t">BlobErrorCode</a>.<a href="/Azure.Storage.Blobs/A.html#0068e6d513fd6fda" class="i property">BlobAlreadyExists</a>.<a href="/Azure.Storage.Blobs/A.html#956fff1c6f30e077" class="i method">ToString</a>(), <a href="/Azure.Storage.Blobs/A.html#e0d947616d6aba70" class="t t">BlobErrorCode</a>.<a href="/Azure.Storage.Blobs/A.html#0068e6d513fd6fda" class="i property">BlobAlreadyExists</a>.<a href="/Azure.Storage.Blobs/A.html#956fff1c6f30e077" class="i method">ToString</a>(), <b>default</b>);
+                }
+ 
+                <b>return</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#11a386e7d7cae64a" class="i method">FromResult</a>(
+                    <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a>.<a href="/Azure.Core/A.html#ff41acd78201fc1c" class="i method">FromValue</a>(
+                        <a href="/Azure.Storage.Blobs/A.html#8630adc9e460bffc" class="t t">BlobsModelFactory</a>.<a href="/Azure.Storage.Blobs/A.html#c312a02e3c12cade" class="i method">BlobContentInfo</a>(<b>new</b> <a href="/Azure.Core/A.html#83878a5758faf623" class="t constructor">ETag</a>(<span class="s">&quot;etag&quot;</span>), <a href="@0@mscorlib/A.html#df6b1eba7461813b" class="t t">DateTime</a>.<a href="@0@mscorlib/A.html#b0d5e4c9a8d4ddac" class="i property">UtcNow</a>, <b>new</b> <b>byte</b>[] { }, <a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a>.<a href="@0@mscorlib/A.html#c9f70a27facb27cf" class="i field">Empty</a>, 0L),
+                        <span class="t t">Mock</span>.<span class="i method">Of</span>&lt;<a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a>&gt;()));
+            }
+ 
+            <b>public override</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a>&gt; <a id="47b890e8ed79fbf2" href="../R/47b890e8ed79fbf2.html" target="n" data-glyph="72,2" class="i method">DownloadToAsync</a>(<a href="@0@mscorlib/A.html#f956b0c07e86df64" class="t t">Stream</a> <span id="r133 rd" class="r133 r">destination</span>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r134 rd" class="r134 r">cancellationToken</span>) =&gt; <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#11a386e7d7cae64a" class="i method">FromResult</a>(<span class="t t">Mock</span>.<span class="i method">Of</span>&lt;<a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a>&gt;());
+ 
+            <b>public override</b> <a href="@0@mscorlib/A.html#5ca7b77f3df89fc6" class="t t">Task</a>&lt;<a href="/Azure.Core/A.html#f0acdd38dd24ccb7" class="t t">Response</a>&lt;<a href="/Azure.Storage.Blobs/A.html#5eac1727e6cdaafb" class="t t">BlobProperties</a>&gt;&gt; <a id="2ccc9e8bb465af31" href="../R/2ccc9e8bb465af31.html" target="n" data-glyph="72,2" class="i method">GetPropertiesAsync</a>(<a href="/Azure.Storage.Blobs/A.html#340adb54d55c6c34" class="t t">BlobRequestConditions</a> <span id="r135 rd" class="r135 r">conditions</span> = <b>null</b>, <a href="@0@mscorlib/A.html#36b17ded8b1a228c" class="t t">CancellationToken</a> <span id="r136 rd" class="r136 r">cancellationToken</span> = <b>default</b>)
+            {
+                <b>if</b> (<a href="#360b689a45b45ffc" class="i field">GetPropertiesException</a> != <b>null</b>)
+                {
+                    <b>throw</b> <a href="#360b689a45b45ffc" class="i field">GetPropertiesException</a>;
+                }
+ 
+                <b>if</b> (<a href="#bcf917c6ad8a16ca" class="i field">Properties</a> == <b>null</b>)
+                {
+                    <b>throw</b> <b>new</b> <a href="/Azure.Core/A.html#970e6fbff6f240c8" class="t constructor">RequestFailedException</a>(404, <a href="/Azure.Storage.Blobs/A.html#e0d947616d6aba70" class="t t">BlobErrorCode</a>.<a href="/Azure.Storage.Blobs/A.html#d09680c97545ffc1" class="i property">BlobNotFound</a>.<a href="/Azure.Storage.Blobs/A.html#956fff1c6f30e077" class="i method">ToString</a>(), <a href="/Azure.Storage.Blobs/A.html#e0d947616d6aba70" class="t t">BlobErrorCode</a>.<a href="/Azure.Storage.Blobs/A.html#d09680c97545ffc1" class="i property">BlobNotFound</a>.<a href="/Azure.Storage.Blobs/A.html#956fff1c6f30e077" class="i method">ToString</a>(), <b>default</b>);
+                }
+ 
+                <b>return</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#11a386e7d7cae64a" class="i method">FromResult</a>(<a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a>.<a href="/Azure.Core/A.html#ff41acd78201fc1c" class="i method">FromValue</a>(<a href="#bcf917c6ad8a16ca" class="i field">Properties</a>, <span class="t t">Mock</span>.<span class="i method">Of</span>&lt;<a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a>&gt;()));
+            }
+        }
+ 
+        <b>private class</b> <a id="d6eb59fe2ea53238" href="../R/d6eb59fe2ea53238.html" target="n" data-glyph="4,1" class="t t">MockAsyncPageable</a>&lt;<span id="r137 rd t" class="r137 r t">T</span>&gt; : <a href="/Azure.Core/A.html#ce6e47443d11533b" class="t t">AsyncPageable</a>&lt;<span class="r137 r t">T</span>&gt;
+        {
+            <b>private readonly</b> <a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<span class="r137 r t">T</span>&gt; <a id="9b4baaf9a2fa8c3c" href="../R/9b4baaf9a2fa8c3c.html" target="n" data-glyph="46,2" class="i field">Items</a>;
+ 
+            <b>internal</b> <a id="b86ab46445ec0f20" href="../R/b86ab46445ec0f20.html" target="n" data-glyph="74,2" class="t constructor">MockAsyncPageable</a>(<a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<span class="r137 r t">T</span>&gt; <span id="r138 rd" class="r138 r">items</span>)
+            {
+                <a href="#9b4baaf9a2fa8c3c" class="i field">Items</a> = <span class="r138 r">items</span>;
+            }
+            <b>public override</b> <span class="t t">IAsyncEnumerable</span>&lt;<a href="/Azure.Core/A.html#b864610eef8c9004" class="t t">Page</a>&lt;<span class="r137 r t">T</span>&gt;&gt; <a id="ba99cc0885ed4157" href="../R/ba99cc0885ed4157.html" target="n" data-glyph="72,2" class="i method">AsPages</a>(<a href="@0@mscorlib/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r139 rd" class="r139 r">continuationToken</span> = <b>null</b>, <b>int</b>? <span id="r140 rd" class="r140 r">pageSizeHint</span> = <b>null</b>)
+            {
+                <b>return</b> <a href="#4308eafa34ca088a" class="i method">CratePageResponse</a>(<a href="#9b4baaf9a2fa8c3c" class="i field">Items</a>);
+            }
+ 
+            <b>internal async</b> <span class="t t">IAsyncEnumerable</span>&lt;<a href="/Azure.Core/A.html#b864610eef8c9004" class="t t">Page</a>&lt;<span class="r141 r t">P</span>&gt;&gt; <a id="4308eafa34ca088a" href="../R/4308eafa34ca088a.html" target="n" data-glyph="74,2" class="i method">CratePageResponse</a>&lt;<span id="r141 rd t" class="r141 r t">P</span>&gt;(<a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<span class="r141 r t">P</span>&gt; <span id="r142 rd" class="r142 r">value</span>)
+            {
+                <b>await</b> <a href="@0@mscorlib/A.html#045a746eb48cbaa9" class="t t">Task</a>.<a href="@0@mscorlib/A.html#34b191a243434f6a" class="i method">Delay</a>(0);
+                <b>yield</b> <b>return</b> <b>new</b> <a href="#92e4ae3ba3dd0f75" class="t constructor">MockPage</a>&lt;<span class="r141 r t">P</span>&gt;(<span class="r142 r">value</span>);
+            }
+        }
+ 
+        <b>private class</b> <a id="4a363372873b3d76" href="../R/4a363372873b3d76.html" target="n" data-glyph="4,1" class="t t">MockPage</a>&lt;<span id="r143 rd t" class="r143 r t">T</span>&gt; : <a href="/Azure.Core/A.html#b864610eef8c9004" class="t t">Page</a>&lt;<span class="r143 r t">T</span>&gt;
+        {
+            <b>private readonly</b> <a href="@0@mscorlib/A.html#b040fb780bdd59f4" class="t t">IReadOnlyList</a>&lt;<span class="r143 r t">T</span>&gt; <a id="3d4fb2a25389f229" href="../R/3d4fb2a25389f229.html" target="n" data-glyph="46,2" class="i field">InnerValues</a>;
+            <b>public override</b> <a href="@0@mscorlib/A.html#b040fb780bdd59f4" class="t t">IReadOnlyList</a>&lt;<span class="r143 r t">T</span>&gt; <a id="a24dc633bc9df8b6" href="../R/a24dc633bc9df8b6.html" target="n" data-glyph="102,2" class="i property">Values</a> =&gt; <a href="#3d4fb2a25389f229" class="i field">InnerValues</a>;
+ 
+            <b>public override string</b> <a id="6e341ee1d2f7f454" href="../R/6e341ee1d2f7f454.html" target="n" data-glyph="102,2" class="i property">ContinuationToken</a> =&gt; <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#085d4139ffb78d13" class="t constructor">NotImplementedException</a>();
+ 
+            <b>public override</b> <a href="/Azure.Core/A.html#ad97b1910f5ca3eb" class="t t">Response</a> <a id="474692b4ed446f41" href="../R/474692b4ed446f41.html" target="n" data-glyph="72,2" class="i method">GetRawResponse</a>() =&gt; <b>throw</b> <b>new</b> <a href="@0@mscorlib/A.html#085d4139ffb78d13" class="t constructor">NotImplementedException</a>();
+ 
+            <b>public</b> <a id="92e4ae3ba3dd0f75" href="../R/92e4ae3ba3dd0f75.html" target="n" data-glyph="72,2" class="t constructor">MockPage</a>(<a href="@0@mscorlib/A.html#3acf01620172c7f0" class="t t">IEnumerable</a>&lt;<span class="r143 r t">T</span>&gt; <span id="r144 rd" class="r144 r">items</span>)
+            {
+                <a href="#3d4fb2a25389f229" class="i field">InnerValues</a> = <span class="r144 r">items</span>.<a href="@0@System.Core/A.html#e276d6892241255b" class="i method">ToList</a>().<a href="@0@mscorlib/A.html#2b710ab0bc8866ad" class="i method">AsReadOnly</a>();
+            }
+        }
+    }
+}
+</pre></td></tr></table></div></body></html>

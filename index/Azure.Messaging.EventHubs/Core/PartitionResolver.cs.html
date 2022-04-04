@@ -1,6 +1,6 @@
 ﻿<!DOCTYPE html>
 <html><head><title>PartitionResolver.cs</title><link rel="stylesheet" href="../../styles.css"><script src="../../scripts.js"></script></head>
-<body class="cB" onload="i(242);"><div class="dH">
+<body class="cB" onload="i(265);"><div class="dH">
 <table style="width: 100%">
 <tr><td>File: <a id="filePath" class="blueLink" href="/#Azure.Messaging.EventHubs/Core/PartitionResolver.cs" target="_top">Core\PartitionResolver.cs</a><br/></td><td><a class="blueLink" href="https://github.com/Azure/azure-sdk-for-net/tree/main/sdk/eventhub/Azure.Messaging.EventHubs/src/Core/PartitionResolver.cs" target="_blank">View on GitHub</a></td></tr>
 <tr><td>Project: <a id="projectPath" class="blueLink" href="/#Azure.Messaging.EventHubs" target="_top">Azure.Messaging.EventHubs.csproj</a> (Azure.Messaging.EventHubs)</td><td></td></tr>
@@ -11,7 +11,9 @@
 <span class="c">// Licensed under the MIT License.</span>
  
 <b>using</b> <span class="i n">System</span>;
-<b>using</b> <span class="i n">System</span>.<span class="i n">Diagnostics</span>.<span class="i n">CodeAnalysis</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Buffers</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Buffers</span>.<span class="i n">Binary</span>;
+<b>using</b> <span class="i n">System</span>.<span class="i n">Runtime</span>.<span class="i n">CompilerServices</span>;
 <b>using</b> <span class="i n">System</span>.<span class="i n">Text</span>;
 <b>using</b> <span class="i n">System</span>.<span class="i n">Threading</span>;
  
@@ -102,6 +104,7 @@
         <span class="c">///</span><span class="c">   consideration.</span>
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
         <span class="c">///</span>
+        [<a href="SkipLocalsInitAttribute.cs.html#e28828cec4af94a9" class="t constructor">SkipLocalsInit</a>]
         <b>private static short</b> <a id="c6f4723edd7ad929" href="../R/c6f4723edd7ad929.html" target="n" data-glyph="76,1" class="i method">GenerateHashCode</a>(<a href="@1@netstandard/A.html#8281103e6f23cb5c" class="k">string</a> <span id="r6 rd" class="r6 r">partitionKey</span>)
         {
             <b>if</b> (<span class="r6 r">partitionKey</span> == <b>null</b>)
@@ -109,19 +112,39 @@
                 <b>return</b> 0;
             }
  
-            <a href="#3ea64420e221fa00" class="i method">ComputeHash</a>(<a href="@1@netstandard/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@1@netstandard/A.html#a10eb90a3d884500" class="i property">UTF8</a>.<a href="@1@netstandard/A.html#83f2d2c6f22db1a9" class="i method">GetBytes</a>(<span class="r6 r">partitionKey</span>), <span class="r7 r">seed1</span>: 0, <span class="r8 r">seed2</span>: 0, <b>out uint</b> <span id="r9 rd" class="r9 r">hash1</span>, <b>out uint</b> <span id="r10 rd" class="r10 r">hash2</span>);
-            <b>return</b> (<b>short</b>)(<span class="r9 r">hash1</span> ^ <span class="r10 r">hash2</span>);
+            <b>const int</b> <span id="r7 rd" class="r7 r">MaxStackLimit</span> = 256;
+ 
+            <b>byte</b>[] <span id="r8 rd" class="r8 r">sharedBuffer</span> = <b>null</b>;
+ 
+            <b>var</b> <span id="r9 rd" class="r9 r">partitionKeySpan</span> = <span class="r6 r">partitionKey</span>.<span class="i method">AsSpan</span>();
+            <a href="@1@netstandard/A.html#3b6090c501893c25" class="k">var</a> <span id="r10 rd" class="r10 r">encoding</span> = <a href="@1@netstandard/A.html#3b6090c501893c25" class="t t">Encoding</a>.<a href="@1@netstandard/A.html#a10eb90a3d884500" class="i property">UTF8</a>;
+            <a href="@1@netstandard/A.html#225942ed7b7a3252" class="k">var</a> <span id="r11 rd" class="r11 r">partitionKeyByteLength</span> = <span class="r10 r">encoding</span>.<a href="@1@netstandard/A.html#f076a56f5c1f5ace" class="i method">GetMaxByteCount</a>(<span class="r6 r">partitionKey</span>.<a href="@1@netstandard/A.html#e13f5829ef28aa07" class="i property">Length</a>);
+ 
+            <b>var</b> <span id="r12 rd" class="r12 r">hashBuffer</span> = <span class="r11 r">partitionKeyByteLength</span> &lt;= <span class="r7 r">MaxStackLimit</span> ?
+                <b>stackalloc byte</b>[<span class="r7 r">MaxStackLimit</span>] :
+                <span class="r8 r">sharedBuffer</span> = <span class="t t">ArrayPool</span>&lt;<b>byte</b>&gt;.<span class="i property">Shared</span>.<span class="i method">Rent</span>(<span class="r11 r">partitionKeyByteLength</span>);
+ 
+            <a href="@1@netstandard/A.html#225942ed7b7a3252" class="k">var</a> <span id="r13 rd" class="r13 r">written</span> = <span class="r10 r">encoding</span>.<a href="EncodingExtensions.cs.html#b4965ec1614e83e3" class="i method">GetBytes</a>(<span class="r9 r">partitionKeySpan</span>, <span class="r12 r">hashBuffer</span>);
+ 
+            <a href="#00c2f82a578e3ea6" class="i method">ComputeHash</a>(<span class="r12 r">hashBuffer</span>.<span class="i method">Slice</span>(0, <span class="r13 r">written</span>), <span class="r14 r">seed1</span>: 0, <span class="r15 r">seed2</span>: 0, <b>out uint</b> <span id="r16 rd" class="r16 r">hash1</span>, <b>out uint</b> <span id="r17 rd" class="r17 r">hash2</span>);
+ 
+            <b>if</b> (<span class="r8 r">sharedBuffer</span> != <b>null</b>)
+            {
+                <span class="t t">ArrayPool</span>&lt;<b>byte</b>&gt;.<span class="i property">Shared</span>.<span class="i method">Return</span>(<span class="r8 r">sharedBuffer</span>);
+            }
+ 
+            <b>return</b> (<b>short</b>)(<span class="r16 r">hash1</span> ^ <span class="r17 r">hash2</span>);
         }
  
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">summary</span><span class="c">&gt;</span>
         <span class="c">///</span><span class="c">   Computes a hash value using Jenkins&#39; lookup3 algorithm.</span>
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">summary</span><span class="c">&gt;</span>
         <span class="c">///</span>
-        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r11 r">data</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The data to base the hash on.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
-        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r7 r">seed1</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A seed value for the first hash.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
-        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r8 r">seed2</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A seed value for the second hash.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
-        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r12 r">hash1</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The first computed hash for the </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r11 r">data</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
-        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r13 r">hash2</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The second computed hash for the </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r11 r">data</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r18 r">data</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The data to base the hash on.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r14 r">seed1</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A seed value for the first hash.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r15 r">seed2</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">A seed value for the second hash.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r19 r">hash1</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The first computed hash for the </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r18 r">data</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
+        <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">param</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r20 r">hash2</span><span class="c">&quot;</span><span class="c">&gt;</span><span class="c">The second computed hash for the </span><span class="c">&lt;</span><span class="c">paramref</span> <span class="c">name</span><span class="c">=</span><span class="c">&quot;</span><span class="r18 r">data</span><span class="c">&quot;</span> <span class="c">/&gt;</span><span class="c">.</span><span class="c">&lt;/</span><span class="c">param</span><span class="c">&gt;</span>
         <span class="c">///</span>
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;</span><span class="c">remarks</span><span class="c">&gt;</span>
         <span class="c">///</span><span class="c">   This implementation is a direct port of the Event Hubs service code; it is intended to match</span>
@@ -129,122 +152,122 @@
         <span class="c">///</span><span class="c">   consideration.</span>
         <span class="c">///</span><span class="c"> </span><span class="c">&lt;/</span><span class="c">remarks</span><span class="c">&gt;</span>
         <span class="c">///</span>
-        <b>private static void</b> <a id="3ea64420e221fa00" href="../R/3ea64420e221fa00.html" target="n" data-glyph="76,1" class="i method">ComputeHash</a>(<b>byte</b>[] <span id="r11 rd" class="r11 r">data</span>,
-                                        <b>uint</b> <span id="r7 rd" class="r7 r">seed1</span>,
-                                        <b>uint</b> <span id="r8 rd" class="r8 r">seed2</span>,
-                                        <b>out uint</b> <span id="r12 rd" class="r12 r">hash1</span>,
-                                        <b>out uint</b> <span id="r13 rd" class="r13 r">hash2</span>)
+        <b>private static void</b> <a id="00c2f82a578e3ea6" href="../R/00c2f82a578e3ea6.html" target="n" data-glyph="76,1" class="i method">ComputeHash</a>(<span class="t t">ReadOnlySpan</span>&lt;<b>byte</b>&gt; <span id="r18 rd" class="r18 r">data</span>,
+                                        <b>uint</b> <span id="r14 rd" class="r14 r">seed1</span>,
+                                        <b>uint</b> <span id="r15 rd" class="r15 r">seed2</span>,
+                                        <b>out uint</b> <span id="r19 rd" class="r19 r">hash1</span>,
+                                        <b>out uint</b> <span id="r20 rd" class="r20 r">hash2</span>)
         {
-            <b>uint</b> <span id="r14 rd" class="r14 r">a</span>, <span id="r15 rd" class="r15 r">b</span>, <span id="r16 rd" class="r16 r">c</span>;
+            <b>uint</b> <span id="r21 rd" class="r21 r">a</span>, <span id="r22 rd" class="r22 r">b</span>, <span id="r23 rd" class="r23 r">c</span>;
  
-            <span class="r14 r">a</span> = <span class="r15 r">b</span> = <span class="r16 r">c</span> = (<b>uint</b>)(0xdeadbeef + <span class="r11 r">data</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a> + <span class="r7 r">seed1</span>);
-            <span class="r16 r">c</span> += <span class="r8 r">seed2</span>;
+            <span class="r21 r">a</span> = <span class="r22 r">b</span> = <span class="r23 r">c</span> = (<b>uint</b>)(0xdeadbeef + <span class="r18 r">data</span>.<span class="i property">Length</span> + <span class="r14 r">seed1</span>);
+            <span class="r23 r">c</span> += <span class="r15 r">seed2</span>;
  
-            <b>int</b> <span id="r17 rd" class="r17 r">index</span> = 0, <span id="r18 rd" class="r18 r">size</span> = <span class="r11 r">data</span>.<a href="@1@netstandard/A.html#42e9b7616956cf94" class="i property">Length</a>;
-            <b>while</b> (<span class="r18 r">size</span> &gt; 12)
+            <b>int</b> <span id="r24 rd" class="r24 r">index</span> = 0, <span id="r25 rd" class="r25 r">size</span> = <span class="r18 r">data</span>.<span class="i property">Length</span>;
+            <b>while</b> (<span class="r25 r">size</span> &gt; 12)
             {
-                <span class="r14 r">a</span> += <a href="@1@netstandard/A.html#8640d8adfffb155b" class="t t">BitConverter</a>.<a href="@1@netstandard/A.html#a0aeac570afc4d49" class="i method">ToUInt32</a>(<span class="r11 r">data</span>, <span class="r17 r">index</span>);
-                <span class="r15 r">b</span> += <a href="@1@netstandard/A.html#8640d8adfffb155b" class="t t">BitConverter</a>.<a href="@1@netstandard/A.html#a0aeac570afc4d49" class="i method">ToUInt32</a>(<span class="r11 r">data</span>, <span class="r17 r">index</span> + 4);
-                <span class="r16 r">c</span> += <a href="@1@netstandard/A.html#8640d8adfffb155b" class="t t">BitConverter</a>.<a href="@1@netstandard/A.html#a0aeac570afc4d49" class="i method">ToUInt32</a>(<span class="r11 r">data</span>, <span class="r17 r">index</span> + 8);
+                <span class="r21 r">a</span> += <span class="t t">BinaryPrimitives</span>.<span class="i method">ReadUInt32LittleEndian</span>(<span class="r18 r">data</span>.<span class="i method">Slice</span>(<span class="r24 r">index</span>));
+                <span class="r22 r">b</span> += <span class="t t">BinaryPrimitives</span>.<span class="i method">ReadUInt32LittleEndian</span>(<span class="r18 r">data</span>.<span class="i method">Slice</span>(<span class="r24 r">index</span> + 4));
+                <span class="r23 r">c</span> += <span class="t t">BinaryPrimitives</span>.<span class="i method">ReadUInt32LittleEndian</span>(<span class="r18 r">data</span>.<span class="i method">Slice</span>(<span class="r24 r">index</span> + 8));
  
-                <span class="r14 r">a</span> -= <span class="r16 r">c</span>;
-                <span class="r14 r">a</span> ^= (<span class="r16 r">c</span> &lt;&lt; 4) | (<span class="r16 r">c</span> &gt;&gt; 28);
-                <span class="r16 r">c</span> += <span class="r15 r">b</span>;
+                <span class="r21 r">a</span> -= <span class="r23 r">c</span>;
+                <span class="r21 r">a</span> ^= (<span class="r23 r">c</span> &lt;&lt; 4) | (<span class="r23 r">c</span> &gt;&gt; 28);
+                <span class="r23 r">c</span> += <span class="r22 r">b</span>;
  
-                <span class="r15 r">b</span> -= <span class="r14 r">a</span>;
-                <span class="r15 r">b</span> ^= (<span class="r14 r">a</span> &lt;&lt; 6) | (<span class="r14 r">a</span> &gt;&gt; 26);
-                <span class="r14 r">a</span> += <span class="r16 r">c</span>;
+                <span class="r22 r">b</span> -= <span class="r21 r">a</span>;
+                <span class="r22 r">b</span> ^= (<span class="r21 r">a</span> &lt;&lt; 6) | (<span class="r21 r">a</span> &gt;&gt; 26);
+                <span class="r21 r">a</span> += <span class="r23 r">c</span>;
  
-                <span class="r16 r">c</span> -= <span class="r15 r">b</span>;
-                <span class="r16 r">c</span> ^= (<span class="r15 r">b</span> &lt;&lt; 8) | (<span class="r15 r">b</span> &gt;&gt; 24);
-                <span class="r15 r">b</span> += <span class="r14 r">a</span>;
+                <span class="r23 r">c</span> -= <span class="r22 r">b</span>;
+                <span class="r23 r">c</span> ^= (<span class="r22 r">b</span> &lt;&lt; 8) | (<span class="r22 r">b</span> &gt;&gt; 24);
+                <span class="r22 r">b</span> += <span class="r21 r">a</span>;
  
-                <span class="r14 r">a</span> -= <span class="r16 r">c</span>;
-                <span class="r14 r">a</span> ^= (<span class="r16 r">c</span> &lt;&lt; 16) | (<span class="r16 r">c</span> &gt;&gt; 16);
-                <span class="r16 r">c</span> += <span class="r15 r">b</span>;
+                <span class="r21 r">a</span> -= <span class="r23 r">c</span>;
+                <span class="r21 r">a</span> ^= (<span class="r23 r">c</span> &lt;&lt; 16) | (<span class="r23 r">c</span> &gt;&gt; 16);
+                <span class="r23 r">c</span> += <span class="r22 r">b</span>;
  
-                <span class="r15 r">b</span> -= <span class="r14 r">a</span>;
-                <span class="r15 r">b</span> ^= (<span class="r14 r">a</span> &lt;&lt; 19) | (<span class="r14 r">a</span> &gt;&gt; 13);
-                <span class="r14 r">a</span> += <span class="r16 r">c</span>;
+                <span class="r22 r">b</span> -= <span class="r21 r">a</span>;
+                <span class="r22 r">b</span> ^= (<span class="r21 r">a</span> &lt;&lt; 19) | (<span class="r21 r">a</span> &gt;&gt; 13);
+                <span class="r21 r">a</span> += <span class="r23 r">c</span>;
  
-                <span class="r16 r">c</span> -= <span class="r15 r">b</span>;
-                <span class="r16 r">c</span> ^= (<span class="r15 r">b</span> &lt;&lt; 4) | (<span class="r15 r">b</span> &gt;&gt; 28);
-                <span class="r15 r">b</span> += <span class="r14 r">a</span>;
+                <span class="r23 r">c</span> -= <span class="r22 r">b</span>;
+                <span class="r23 r">c</span> ^= (<span class="r22 r">b</span> &lt;&lt; 4) | (<span class="r22 r">b</span> &gt;&gt; 28);
+                <span class="r22 r">b</span> += <span class="r21 r">a</span>;
  
-                <span class="r17 r">index</span> += 12;
-                <span class="r18 r">size</span> -= 12;
+                <span class="r24 r">index</span> += 12;
+                <span class="r25 r">size</span> -= 12;
             }
  
-            <b>switch</b> (<span class="r18 r">size</span>)
+            <b>switch</b> (<span class="r25 r">size</span>)
             {
                 <b>case</b> 12:
-                    <span class="r14 r">a</span> += <a href="@1@netstandard/A.html#8640d8adfffb155b" class="t t">BitConverter</a>.<a href="@1@netstandard/A.html#a0aeac570afc4d49" class="i method">ToUInt32</a>(<span class="r11 r">data</span>, <span class="r17 r">index</span>);
-                    <span class="r15 r">b</span> += <a href="@1@netstandard/A.html#8640d8adfffb155b" class="t t">BitConverter</a>.<a href="@1@netstandard/A.html#a0aeac570afc4d49" class="i method">ToUInt32</a>(<span class="r11 r">data</span>, <span class="r17 r">index</span> + 4);
-                    <span class="r16 r">c</span> += <a href="@1@netstandard/A.html#8640d8adfffb155b" class="t t">BitConverter</a>.<a href="@1@netstandard/A.html#a0aeac570afc4d49" class="i method">ToUInt32</a>(<span class="r11 r">data</span>, <span class="r17 r">index</span> + 8);
+                    <span class="r21 r">a</span> += <span class="t t">BinaryPrimitives</span>.<span class="i method">ReadUInt32LittleEndian</span>(<span class="r18 r">data</span>.<span class="i method">Slice</span>(<span class="r24 r">index</span>));
+                    <span class="r22 r">b</span> += <span class="t t">BinaryPrimitives</span>.<span class="i method">ReadUInt32LittleEndian</span>(<span class="r18 r">data</span>.<span class="i method">Slice</span>(<span class="r24 r">index</span> + 4));
+                    <span class="r23 r">c</span> += <span class="t t">BinaryPrimitives</span>.<span class="i method">ReadUInt32LittleEndian</span>(<span class="r18 r">data</span>.<span class="i method">Slice</span>(<span class="r24 r">index</span> + 8));
                     <b>break</b>;
                 <b>case</b> 11:
-                    <span class="r16 r">c</span> += ((<b>uint</b>)<span class="r11 r">data</span>[<span class="r17 r">index</span> + 10]) &lt;&lt; 16;
+                    <span class="r23 r">c</span> += ((<b>uint</b>)<span class="r18 r">data</span>[<span class="r24 r">index</span> + 10]) &lt;&lt; 16;
                     <b>goto</b> <b>case</b> 10;
                 <b>case</b> 10:
-                    <span class="r16 r">c</span> += ((<b>uint</b>)<span class="r11 r">data</span>[<span class="r17 r">index</span> + 9]) &lt;&lt; 8;
+                    <span class="r23 r">c</span> += ((<b>uint</b>)<span class="r18 r">data</span>[<span class="r24 r">index</span> + 9]) &lt;&lt; 8;
                     <b>goto</b> <b>case</b> 9;
                 <b>case</b> 9:
-                    <span class="r16 r">c</span> += (<b>uint</b>)<span class="r11 r">data</span>[<span class="r17 r">index</span> + 8];
+                    <span class="r23 r">c</span> += (<b>uint</b>)<span class="r18 r">data</span>[<span class="r24 r">index</span> + 8];
                     <b>goto</b> <b>case</b> 8;
                 <b>case</b> 8:
-                    <span class="r15 r">b</span> += <a href="@1@netstandard/A.html#8640d8adfffb155b" class="t t">BitConverter</a>.<a href="@1@netstandard/A.html#a0aeac570afc4d49" class="i method">ToUInt32</a>(<span class="r11 r">data</span>, <span class="r17 r">index</span> + 4);
-                    <span class="r14 r">a</span> += <a href="@1@netstandard/A.html#8640d8adfffb155b" class="t t">BitConverter</a>.<a href="@1@netstandard/A.html#a0aeac570afc4d49" class="i method">ToUInt32</a>(<span class="r11 r">data</span>, <span class="r17 r">index</span>);
+                    <span class="r22 r">b</span> += <span class="t t">BinaryPrimitives</span>.<span class="i method">ReadUInt32LittleEndian</span>(<span class="r18 r">data</span>.<span class="i method">Slice</span>(<span class="r24 r">index</span> + 4));
+                    <span class="r21 r">a</span> += <span class="t t">BinaryPrimitives</span>.<span class="i method">ReadUInt32LittleEndian</span>(<span class="r18 r">data</span>.<span class="i method">Slice</span>(<span class="r24 r">index</span>));
                     <b>break</b>;
                 <b>case</b> 7:
-                    <span class="r15 r">b</span> += ((<b>uint</b>)<span class="r11 r">data</span>[<span class="r17 r">index</span> + 6]) &lt;&lt; 16;
+                    <span class="r22 r">b</span> += ((<b>uint</b>)<span class="r18 r">data</span>[<span class="r24 r">index</span> + 6]) &lt;&lt; 16;
                     <b>goto</b> <b>case</b> 6;
                 <b>case</b> 6:
-                    <span class="r15 r">b</span> += ((<b>uint</b>)<span class="r11 r">data</span>[<span class="r17 r">index</span> + 5]) &lt;&lt; 8;
+                    <span class="r22 r">b</span> += ((<b>uint</b>)<span class="r18 r">data</span>[<span class="r24 r">index</span> + 5]) &lt;&lt; 8;
                     <b>goto</b> <b>case</b> 5;
                 <b>case</b> 5:
-                    <span class="r15 r">b</span> += (<b>uint</b>)<span class="r11 r">data</span>[<span class="r17 r">index</span> + 4];
+                    <span class="r22 r">b</span> += (<b>uint</b>)<span class="r18 r">data</span>[<span class="r24 r">index</span> + 4];
                     <b>goto</b> <b>case</b> 4;
                 <b>case</b> 4:
-                    <span class="r14 r">a</span> += <a href="@1@netstandard/A.html#8640d8adfffb155b" class="t t">BitConverter</a>.<a href="@1@netstandard/A.html#a0aeac570afc4d49" class="i method">ToUInt32</a>(<span class="r11 r">data</span>, <span class="r17 r">index</span>);
+                    <span class="r21 r">a</span> += <span class="t t">BinaryPrimitives</span>.<span class="i method">ReadUInt32LittleEndian</span>(<span class="r18 r">data</span>.<span class="i method">Slice</span>(<span class="r24 r">index</span>));
                     <b>break</b>;
                 <b>case</b> 3:
-                    <span class="r14 r">a</span> += ((<b>uint</b>)<span class="r11 r">data</span>[<span class="r17 r">index</span> + 2]) &lt;&lt; 16;
+                    <span class="r21 r">a</span> += ((<b>uint</b>)<span class="r18 r">data</span>[<span class="r24 r">index</span> + 2]) &lt;&lt; 16;
                     <b>goto</b> <b>case</b> 2;
                 <b>case</b> 2:
-                    <span class="r14 r">a</span> += ((<b>uint</b>)<span class="r11 r">data</span>[<span class="r17 r">index</span> + 1]) &lt;&lt; 8;
+                    <span class="r21 r">a</span> += ((<b>uint</b>)<span class="r18 r">data</span>[<span class="r24 r">index</span> + 1]) &lt;&lt; 8;
                     <b>goto</b> <b>case</b> 1;
                 <b>case</b> 1:
-                    <span class="r14 r">a</span> += (<b>uint</b>)<span class="r11 r">data</span>[<span class="r17 r">index</span>];
+                    <span class="r21 r">a</span> += (<b>uint</b>)<span class="r18 r">data</span>[<span class="r24 r">index</span>];
                     <b>break</b>;
                 <b>case</b> 0:
-                    <span class="r12 r">hash1</span> = <span class="r16 r">c</span>;
-                    <span class="r13 r">hash2</span> = <span class="r15 r">b</span>;
+                    <span class="r19 r">hash1</span> = <span class="r23 r">c</span>;
+                    <span class="r20 r">hash2</span> = <span class="r22 r">b</span>;
                     <b>return</b>;
             }
  
-            <span class="r16 r">c</span> ^= <span class="r15 r">b</span>;
-            <span class="r16 r">c</span> -= (<span class="r15 r">b</span> &lt;&lt; 14) | (<span class="r15 r">b</span> &gt;&gt; 18);
+            <span class="r23 r">c</span> ^= <span class="r22 r">b</span>;
+            <span class="r23 r">c</span> -= (<span class="r22 r">b</span> &lt;&lt; 14) | (<span class="r22 r">b</span> &gt;&gt; 18);
  
-            <span class="r14 r">a</span> ^= <span class="r16 r">c</span>;
-            <span class="r14 r">a</span> -= (<span class="r16 r">c</span> &lt;&lt; 11) | (<span class="r16 r">c</span> &gt;&gt; 21);
+            <span class="r21 r">a</span> ^= <span class="r23 r">c</span>;
+            <span class="r21 r">a</span> -= (<span class="r23 r">c</span> &lt;&lt; 11) | (<span class="r23 r">c</span> &gt;&gt; 21);
  
-            <span class="r15 r">b</span> ^= <span class="r14 r">a</span>;
-            <span class="r15 r">b</span> -= (<span class="r14 r">a</span> &lt;&lt; 25) | (<span class="r14 r">a</span> &gt;&gt; 7);
+            <span class="r22 r">b</span> ^= <span class="r21 r">a</span>;
+            <span class="r22 r">b</span> -= (<span class="r21 r">a</span> &lt;&lt; 25) | (<span class="r21 r">a</span> &gt;&gt; 7);
  
-            <span class="r16 r">c</span> ^= <span class="r15 r">b</span>;
-            <span class="r16 r">c</span> -= (<span class="r15 r">b</span> &lt;&lt; 16) | (<span class="r15 r">b</span> &gt;&gt; 16);
+            <span class="r23 r">c</span> ^= <span class="r22 r">b</span>;
+            <span class="r23 r">c</span> -= (<span class="r22 r">b</span> &lt;&lt; 16) | (<span class="r22 r">b</span> &gt;&gt; 16);
  
-            <span class="r14 r">a</span> ^= <span class="r16 r">c</span>;
-            <span class="r14 r">a</span> -= (<span class="r16 r">c</span> &lt;&lt; 4) | (<span class="r16 r">c</span> &gt;&gt; 28);
+            <span class="r21 r">a</span> ^= <span class="r23 r">c</span>;
+            <span class="r21 r">a</span> -= (<span class="r23 r">c</span> &lt;&lt; 4) | (<span class="r23 r">c</span> &gt;&gt; 28);
  
-            <span class="r15 r">b</span> ^= <span class="r14 r">a</span>;
-            <span class="r15 r">b</span> -= (<span class="r14 r">a</span> &lt;&lt; 14) | (<span class="r14 r">a</span> &gt;&gt; 18);
+            <span class="r22 r">b</span> ^= <span class="r21 r">a</span>;
+            <span class="r22 r">b</span> -= (<span class="r21 r">a</span> &lt;&lt; 14) | (<span class="r21 r">a</span> &gt;&gt; 18);
  
-            <span class="r16 r">c</span> ^= <span class="r15 r">b</span>;
-            <span class="r16 r">c</span> -= (<span class="r15 r">b</span> &lt;&lt; 24) | (<span class="r15 r">b</span> &gt;&gt; 8);
+            <span class="r23 r">c</span> ^= <span class="r22 r">b</span>;
+            <span class="r23 r">c</span> -= (<span class="r22 r">b</span> &lt;&lt; 24) | (<span class="r22 r">b</span> &gt;&gt; 8);
  
-            <span class="r12 r">hash1</span> = <span class="r16 r">c</span>;
-            <span class="r13 r">hash2</span> = <span class="r15 r">b</span>;
+            <span class="r19 r">hash1</span> = <span class="r23 r">c</span>;
+            <span class="r20 r">hash2</span> = <span class="r22 r">b</span>;
         }
     }
 }
